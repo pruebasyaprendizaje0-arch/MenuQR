@@ -23,6 +23,11 @@ export default async function LandingPage() {
     },
   });
 
+  const whatsappSupportSetting = await prisma.systemSetting.findUnique({
+    where: { key: "whatsapp_support" }
+  });
+  const whatsappSupport = whatsappSupportSetting?.value || "";
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans">
       {/* Background decoration */}
@@ -121,6 +126,20 @@ export default async function LandingPage() {
         <p>© 2026 MenuQR Pro. Todos los derechos reservados.</p>
         <p>Diseño oscuro premium y ultra rápido.</p>
       </footer>
+      {/* Floating WhatsApp Button */}
+      {whatsappSupport && (
+        <a
+          href={`https://wa.me/${whatsappSupport.replace(/\D/g, "")}?text=Hola,%20quisiera%20saber%20más%20información%20sobre%20MenuQR%20Pro`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#20ba5a] text-white p-4 rounded-full shadow-2xl transition-all duration-300 transform hover:scale-110 flex items-center justify-center hover:shadow-[#25D366]/20 hover:shadow-lg"
+          title="Contactar por WhatsApp"
+        >
+          <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
+            <path d="M17.472 14.382c-.022-.08-.124-.22-.326-.321-.202-.1-.197-.59-.197-.59s-.11-.223-.254-.3c-.144-.08-.854-.423-1.002-.493-.148-.07-.256-.104-.369.066-.113.17-.435.547-.533.66-.098.112-.197.126-.399.025-.202-.1-.854-.315-1.627-.887-.6-.52-1.005-1.164-1.123-1.365-.118-.2-.013-.309.088-.408.09-.09.202-.236.302-.354.1-.118.134-.2.202-.336.068-.135.034-.254-.017-.354-.05-.1-.435-.989-.595-1.378-.158-.387-.33-.33-.48-.33h-.414c-.16 0-.417.06-.635.293-.22.23-1.02.997-1.02 2.43 0 1.433 1.05 2.816 1.196 3.01.147.195 2.063 3.109 4.996 4.316.697.288 1.242.46 1.666.59.7.22 1.34.19 1.84.116.56-.083 1.72-.702 1.96-1.38.24-.678.24-1.258.17-1.38zM12.01 20c-1.62 0-3.1-.42-4.4-1.2l-.3-.2-3.2.9.9-3.1-.2-.3c-.8-1.4-1.3-3-1.3-4.7 0-4.9 4-9 9-9s9 4.1 9 9-4 9-9 9zM21 11.5C21 6.3 16.7 2 11.5 2S2 6.3 2 11.5c0 1.8.5 3.5 1.4 5L2 22l5.7-1.5c1.4.8 3 1.3 4.8 1.3 5.2 0 9.5-4.3 9.5-9.5z" />
+          </svg>
+        </a>
+      )}
     </div>
   );
 }

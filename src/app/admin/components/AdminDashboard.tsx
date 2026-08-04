@@ -29,6 +29,7 @@ import {
   EyeOff
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
+import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
 
 type Dish = {
   id: string;
@@ -74,6 +75,36 @@ type Restaurant = {
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [activeTab, setActiveTab] = useState<"restaurant" | "categories" | "dishes" | "qr">("restaurant");
   const [copied, setCopied] = useState(false);
+
+  // Ubicación estructurada: Provincia | Cantón | Parroquia | Sector
+  let initialProv = "";
+  let initialCant = "";
+  let initialParroquia = "";
+  let initialSector = "";
+
+  if (restaurant.locality) {
+    const parts = restaurant.locality.split(" | ");
+    if (parts.length >= 2) {
+      initialProv = parts[0] || "";
+      initialCant = parts[1] || "";
+      initialParroquia = parts[2] || "";
+      initialSector = parts[3] || "";
+    } else {
+      const oldParts = restaurant.locality.split(", ");
+      if (oldParts.length === 2) {
+        initialProv = oldParts[1] || "";
+        initialCant = oldParts[0] || "";
+        initialParroquia = oldParts[0] || "";
+      } else {
+        initialParroquia = restaurant.locality;
+      }
+    }
+  }
+
+  const [province, setProvince] = useState(initialProv);
+  const [canton, setCanton] = useState(initialCant);
+  const [parroquia, setParroquia] = useState(initialParroquia);
+  const [sector, setSector] = useState(initialSector);
   
   const downloadQR = () => {
     const canvas = document.getElementById("qr-canvas") as HTMLCanvasElement;
@@ -250,6 +281,8 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
             
             <form 
               action={async (formData) => {
+                const combinedLocality = [province, canton, parroquia, sector].map(s => s.trim()).filter(Boolean).join(" | ");
+                formData.set("locality", combinedLocality);
                 await updateRestaurantAction(restaurant.id, formData);
                 alert("Restaurante actualizado correctamente.");
               }}
@@ -330,30 +363,89 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Localidad / Ciudad / Provincia</label>
-                  <input
-                    type="text"
-                    name="locality"
-                    list="localidades-sug"
-                    defaultValue={restaurant.locality || ""}
-                    placeholder="Escribe o selecciona tu localidad..."
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Provincia (Ecuador)</label>
+                  <select
+                    value={province}
+                    onChange={(e) => {
+                      setProvince(e.target.value);
+                      setCanton("");
+                    }}
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <datalist id="localidades-sug">
-                    <option value="Salinas, Santa Elena" />
-                    <option value="La Libertad, Santa Elena" />
-                    <option value="Santa Elena (Centro), Santa Elena" />
-                    <option value="Montañita, Santa Elena" />
-                    <option value="Olón, Santa Elena" />
-                    <option value="Manglaralto, Santa Elena" />
-                    <option value="Ballenita, Santa Elena" />
-                    <option value="Ayangue, Santa Elena" />
-                    <option value="Manta, Manabí" />
-                    <option value="Portoviejo, Manabí" />
-                    <option value="Guayaquil, Guayas" />
-                    <option value="Quito, Pichincha" />
-                    <option value="Cuenca, Azuay" />
-                  </datalist>
+                  >
+                    <option value="">Seleccione Provincia...</option>
+                    {Object.keys(ecuadorData).map((prov) => (
+                      <option key={prov} value={prov}>{prov}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Cantón / Ciudad</label>
+                  <select
+                    value={canton}
+                    onChange={(e) => {
+                      setCanton(e.target.value);
+                      setParroquia("");
+                    }}
+                    disabled={!province}
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="">Seleccione Cantón...</option>
+                    {(province ? ecuadorData[province] || [] : []).map((cant) => (
+                      <option key={cant} value={cant}>{cant}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Parroquia / Localidad</label>
+                  {canton && parishData[canton] ? (
+                    <select
+                      value={parroquia}
+                      onChange={(e) => {
+                        setParroquia(e.target.value);
+                        setSector("");
+                      }}
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    >
+                      <option value="">Seleccione Parroquia...</option>
+                      {parishData[canton].map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={parroquia}
+                      onChange={(e) => {
+                        setParroquia(e.target.value);
+                        setSector("");
+                      }}
+                      placeholder="ej: Tarqui, Salinas, Olón"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Sector / Barrio / Comuna</label>
+                  {parroquia && communeData[parroquia] ? (
+                    <select
+                      value={sector}
+                      onChange={(e) => setSector(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    >
+                      <option value="">Seleccione Comuna / Sector...</option>
+                      {communeData[parroquia].map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={sector}
+                      onChange={(e) => setSector(e.target.value)}
+                      placeholder="ej: Urdesa, Barbasquillo, Chipipe"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">Horario de Atención</label>

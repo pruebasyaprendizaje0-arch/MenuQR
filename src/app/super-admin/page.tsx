@@ -51,10 +51,16 @@ export default async function SuperAdminPage() {
     updatedAt: r.updatedAt.toISOString(),
   }));
 
+  const whatsappSupportSetting = await prisma.systemSetting.findUnique({
+    where: { key: "whatsapp_support" }
+  });
+  const whatsappSupport = whatsappSupportSetting?.value || "";
+
   return (
     <SuperAdminDashboard 
       restaurants={serializedRestaurants} 
       metrics={metrics} 
+      whatsappSupport={whatsappSupport}
     />
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -11,7 +12,8 @@ import {
   QrCode, 
   DollarSign,
   MapPin,
-  MessageSquare
+  MessageSquare,
+  LogOut
 } from "lucide-react";
 
 type Dish = {
@@ -227,20 +229,30 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
             </div>
           </div>
 
-          <button 
-            onClick={() => setIsCartOpen(true)}
-            className="relative p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-200 hover:text-white transition-all duration-200"
-          >
-            <ShoppingCart className="h-5 w-5" />
-            {cartCount > 0 && (
-              <span 
-                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white animate-pulse"
-                style={{ backgroundColor: restaurant.themeColor }}
-              >
-                {cartCount}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <Link 
+              href="/"
+              className="p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-all duration-200"
+              title="Volver a MenuQR Pro"
+            >
+              <LogOut className="h-5 w-5" />
+            </Link>
+
+            <button 
+              onClick={() => setIsCartOpen(true)}
+              className="relative p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-200 hover:text-white transition-all duration-200"
+            >
+              <ShoppingCart className="h-5 w-5" />
+              {cartCount > 0 && (
+                <span 
+                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full text-[10px] font-bold flex items-center justify-center text-white animate-pulse"
+                  style={{ backgroundColor: restaurant.themeColor }}
+                >
+                  {cartCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Navigation Tabs */}

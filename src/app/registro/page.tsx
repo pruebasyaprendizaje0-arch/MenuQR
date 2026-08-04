@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { registerUserAction } from "@/lib/actions";
-import { KeyRound, UtensilsCrossed, Mail, User, Building } from "lucide-react";
+import { KeyRound, UtensilsCrossed, Mail, User, Building, MapPin } from "lucide-react";
 import Link from "next/link";
+import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -21,6 +23,10 @@ function SubmitButton() {
 
 export default function RegisterPage() {
   const [state, formAction] = useFormState(registerUserAction, null);
+  const [province, setProvince] = useState("");
+  const [canton, setCanton] = useState("");
+  const [parroquia, setParroquia] = useState("");
+  const [sector, setSector] = useState("");
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
@@ -99,6 +105,132 @@ export default function RegisterPage() {
                   placeholder="ej: Bella Italia Manta"
                   className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none sm:text-sm transition-all duration-200"
                 />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="province" className="block text-sm font-medium text-slate-300">
+                Provincia de tu Restaurante
+              </label>
+              <div className="mt-1 relative rounded-md shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <MapPin className="h-4 w-4 text-slate-500" />
+                </div>
+                <select
+                  id="province"
+                  name="province"
+                  value={province}
+                  onChange={(e) => {
+                    setProvince(e.target.value);
+                    setCanton("");
+                  }}
+                  required
+                  className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none sm:text-sm transition-all duration-200 cursor-pointer appearance-none"
+                >
+                  <option value="">Seleccione provincia...</option>
+                  {Object.keys(ecuadorData).map((prov) => (
+                    <option key={prov} value={prov}>{prov}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="canton" className="block text-sm font-medium text-slate-300">
+                Cantón / Ciudad
+              </label>
+              <div className="mt-1 relative rounded-md shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <MapPin className="h-4 w-4 text-slate-500" />
+                </div>
+                <select
+                  id="canton"
+                  name="canton"
+                  value={canton}
+                  onChange={(e) => {
+                    setCanton(e.target.value);
+                    setParroquia("");
+                  }}
+                  disabled={!province}
+                  required
+                  className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none sm:text-sm transition-all duration-200 cursor-pointer appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <option value="">Seleccione cantón...</option>
+                  {(province ? ecuadorData[province] || [] : []).map((cant) => (
+                    <option key={cant} value={cant}>{cant}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="parroquia" className="block text-sm font-medium text-slate-300">
+                Parroquia / Localidad
+              </label>
+              <div className="mt-1 relative rounded-md shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <MapPin className="h-4 w-4 text-slate-500" />
+                </div>
+                {canton && parishData[canton] ? (
+                  <select
+                    id="parroquia"
+                    name="parroquia"
+                    value={parroquia}
+                    onChange={(e) => setParroquia(e.target.value)}
+                    required
+                    className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none sm:text-sm transition-all duration-200 cursor-pointer appearance-none"
+                  >
+                    <option value="">Seleccione parroquia...</option>
+                    {parishData[canton].map((p) => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="parroquia"
+                    name="parroquia"
+                    type="text"
+                    required
+                    value={parroquia}
+                    onChange={(e) => setParroquia(e.target.value)}
+                    placeholder="ej: Tarqui, Salinas, Olón"
+                    className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none sm:text-sm transition-all duration-200"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="sector" className="block text-sm font-medium text-slate-300">
+                Sector / Barrio / Comuna (Opcional)
+              </label>
+              <div className="mt-1 relative rounded-md shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <MapPin className="h-4 w-4 text-slate-500" />
+                </div>
+                {parroquia && communeData[parroquia] ? (
+                  <select
+                    id="sector"
+                    name="sector"
+                    value={sector}
+                    onChange={(e) => setSector(e.target.value)}
+                    className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none sm:text-sm transition-all duration-200 cursor-pointer appearance-none"
+                  >
+                    <option value="">Seleccione Comuna / Sector...</option>
+                    {communeData[parroquia].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id="sector"
+                    name="sector"
+                    type="text"
+                    value={sector}
+                    onChange={(e) => setSector(e.target.value)}
+                    placeholder="ej: Urdesa, Barbasquillo, Chipipe"
+                    className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none sm:text-sm transition-all duration-200"
+                  />
+                )}
               </div>
             </div>
 

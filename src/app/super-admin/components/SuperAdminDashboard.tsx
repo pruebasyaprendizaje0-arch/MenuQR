@@ -7,7 +7,8 @@ import {
   deleteRestaurantAction,
   impersonateUserAction,
   changeUserPlanAction,
-  resetUserPasswordAction
+  resetUserPasswordAction,
+  updateSystemSettingAction
 } from "@/lib/actions";
 import { 
   Building, 
@@ -50,12 +51,15 @@ type Metrics = {
 
 export function SuperAdminDashboard({ 
   restaurants, 
-  metrics 
+  metrics,
+  whatsappSupport
 }: { 
   restaurants: Restaurant[]; 
   metrics: Metrics; 
+  whatsappSupport: string;
 }) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [waSupport, setWaSupport] = useState(whatsappSupport);
 
   const filteredRestaurants = restaurants.filter(
     (r) =>
@@ -112,6 +116,40 @@ export function SuperAdminDashboard({
       {/* Main Container */}
       <main className="max-w-7xl mx-auto p-6 md:p-8 space-y-8">
         
+        {/* Global Settings Panel */}
+        <div className="bg-slate-900/40 border border-slate-850/80 p-6 rounded-2xl backdrop-blur-md space-y-4">
+          <div>
+            <h2 className="text-base font-extrabold text-white">Configuración Global de la Plataforma</h2>
+            <p className="text-xs text-slate-400">Edita parámetros del sistema que se reflejarán públicamente en la landing page.</p>
+          </div>
+          <form 
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await updateSystemSettingAction("whatsapp_support", waSupport);
+              alert("Configuración de WhatsApp de soporte actualizada con éxito.");
+            }}
+            className="flex flex-col sm:flex-row gap-4 items-end max-w-xl"
+          >
+            <div className="flex-1 space-y-1.5 w-full">
+              <label className="text-xs font-semibold text-slate-350 block">WhatsApp de Soporte Comercial (Código de país + número, sin &quot;+&quot;)</label>
+              <input
+                type="text"
+                name="whatsapp_support"
+                value={waSupport}
+                onChange={(e) => setWaSupport(e.target.value)}
+                placeholder="ej: 593999999999"
+                className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-red-500"
+              />
+            </div>
+            <button
+              type="submit"
+              className="px-5 py-2.5 w-full sm:w-auto rounded-xl text-xs font-bold text-white bg-gradient-to-r from-red-650 to-amber-600 hover:from-red-500 hover:to-amber-500 transition duration-200"
+            >
+              Guardar Configuración
+            </button>
+          </form>
+        </div>
+
         {/* Metrics Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="bg-slate-900/40 border border-slate-850 p-6 rounded-2xl backdrop-blur-md flex items-center gap-4">
