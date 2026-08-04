@@ -51,10 +51,15 @@ export default async function SuperAdminPage() {
     updatedAt: r.updatedAt.toISOString(),
   }));
 
-  const whatsappSupportSetting = await prisma.systemSetting.findUnique({
-    where: { key: "whatsapp_support" }
-  });
-  const whatsappSupport = whatsappSupportSetting?.value || "";
+  let whatsappSupport = "";
+  try {
+    const whatsappSupportSetting = await prisma.systemSetting.findUnique({
+      where: { key: "whatsapp_support" }
+    });
+    whatsappSupport = whatsappSupportSetting?.value || "";
+  } catch (error) {
+    console.warn("WARNING: SystemSetting table is missing or not migrated yet.", error);
+  }
 
   return (
     <SuperAdminDashboard 

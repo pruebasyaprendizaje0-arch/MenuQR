@@ -23,10 +23,15 @@ export default async function LandingPage() {
     },
   });
 
-  const whatsappSupportSetting = await prisma.systemSetting.findUnique({
-    where: { key: "whatsapp_support" }
-  });
-  const whatsappSupport = whatsappSupportSetting?.value || "";
+  let whatsappSupport = "";
+  try {
+    const whatsappSupportSetting = await prisma.systemSetting.findUnique({
+      where: { key: "whatsapp_support" }
+    });
+    whatsappSupport = whatsappSupportSetting?.value || "";
+  } catch (error) {
+    console.warn("WARNING: SystemSetting table is missing or not migrated yet.", error);
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans">
