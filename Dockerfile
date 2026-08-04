@@ -11,6 +11,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN mkdir -p public
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/menuqr_pro?schema=public"
@@ -33,6 +34,8 @@ ENV DATABASE_URL="postgresql://postgres:postgres@localhost:5432/menuqr_pro?schem
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
+
+RUN mkdir -p public
 
 # Copy essential files
 COPY --from=builder /app/public ./public
