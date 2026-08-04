@@ -42,6 +42,14 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
     return { error: "Por favor complete todos los campos." };
   }
 
+  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com";
+  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971*";
+
+  if (email.toLowerCase().trim() === superAdminEmail.toLowerCase().trim() && password === superAdminPassword) {
+    await setSuperAdminSession();
+    redirect("/super-admin");
+  }
+
   const user = await prisma.user.findUnique({
     where: { email: email.toLowerCase().trim() },
   });
@@ -59,9 +67,13 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
   const restaurantName = formData.get("restaurantName") as string;
+  const province = formData.get("province") as string;
+  const canton = formData.get("canton") as string;
+  const parroquia = formData.get("parroquia") as string;
+  const sector = (formData.get("sector") as string) || "";
 
-  if (!name || !email || !password || !restaurantName) {
-    return { error: "Por favor complete todos los campos." };
+  if (!name || !email || !password || !restaurantName || !province || !canton || !parroquia) {
+    return { error: "Por favor complete todos los campos requeridos de ubicación." };
   }
 
   const cleanEmail = email.toLowerCase().trim();
@@ -121,6 +133,7 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
           slug: cleanSlug,
           whatsapp: "",
           themeColor: "#ef4444",
+          locality: `${province.trim()} | ${canton.trim()} | ${parroquia.trim()} | ${sector.trim()}`,
           plan: "FREE",
           trialEndsAt,
         }
@@ -134,7 +147,7 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
 
 export async function logoutUserAction() {
   await clearUserSession();
-  redirect("/login");
+  redirect("/");
 }
 
 // Restaurant Action
@@ -379,7 +392,7 @@ export async function superAdminLoginAction(prevState: unknown, formData: FormDa
 
 export async function superAdminLogoutAction() {
   await clearSuperAdminSession();
-  redirect("/super-admin");
+  redirect("/");
 }
 
 export async function extendTrialAction(restaurantId: string, days: number) {
@@ -441,6 +454,17 @@ export async function resetUserPasswordAction(userId: string, newPassword: strin
     data: { password: hashedPassword }
   });
 
+  return { success: true };
+}
+
+export async function updateSystemSettingAction(key: string, value: string) {
+  await prisma.systemSetting.upsert({
+    where: { key },
+    update: { value },
+    create: { key, value }
+  });
+  revalidatePath("/");
+  revalidatePath("/super-admin");
   return { success: true };
 }
 
