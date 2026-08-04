@@ -1,0 +1,78 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+model User {
+  id          String       @id @default(uuid())
+  email       String       @unique
+  password    String       // bcrypt hash
+  name        String
+  restaurants Restaurant[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Restaurant {
+  id             String     @id @default(uuid())
+  userId         String
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  slug           String     @unique
+  whatsapp       String
+  themeColor     String     @default("#ef4444") // Red/orange default
+  logoUrl        String?
+  qrCobroUrl     String?    // QR image for payments like Deuna
+  instagram      String?
+  facebook       String?
+  tiktok         String?
+  address        String?
+  description    String?
+  locality       String?
+  schedule       String?
+  specialty      String?
+  services       String?
+  contactNumbers String?
+  ubicameUrl     String?
+  plan           Plan       @default(FREE)
+  trialEndsAt    DateTime   @default(now())
+  categories     Category[]
+  dishes         Dish[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model Category {
+  id           String     @id @default(uuid())
+  name         String
+  order        Int        @default(0)
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  dishes       Dish[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Dish {
+  id           String     @id @default(uuid())
+  name         String
+  description  String?
+  price        Float
+  imageUrl     String?
+  isAvailable  Boolean    @default(true)
+  categoryId   String
+  category     Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}

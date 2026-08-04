@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: menuqr-pro-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: menuqr_pro
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: menuqr-pro-app
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/menuqr_pro?schema=public
+      - NODE_ENV=production
+      - SUPER_ADMIN_PASSWORD=superadmin123
+      - JWT_SECRET=menuqr-pro-super-secret-key-12345
+    volumes:
+      # Persist uploaded food/logo images
+      - uploads-data:/app/public/uploads
+
+volumes:
+  pg-data:
+  uploads-data:
