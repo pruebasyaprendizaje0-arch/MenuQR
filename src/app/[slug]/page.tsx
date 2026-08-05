@@ -105,6 +105,14 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
     whatsappNumber: restaurant.whatsapp,
     paymentQrUrl: restaurant.qrCobroUrl,
     trialEndsAt: restaurant.trialEndsAt.toISOString(),
+    // Provide safe defaults for new fields that may not exist in older DB versions
+    tablesConfig: (restaurant as any).tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
+    ivaPercent: (restaurant as any).ivaPercent ?? 15,
+    servicePercent: (restaurant as any).servicePercent ?? 10,
+    ivaOnTable: (restaurant as any).ivaOnTable ?? true,
+    ivaOnTakeout: (restaurant as any).ivaOnTakeout ?? true,
+    serviceOnTable: (restaurant as any).serviceOnTable ?? true,
+    serviceOnTakeout: (restaurant as any).serviceOnTakeout ?? false,
     categories: restaurant.categories.map((c) => ({
       ...c,
       dishes: c.dishes.map((d) => ({

@@ -58,6 +58,14 @@ export default async function AdminPage() {
     whatsappNumber: restaurant.whatsapp,
     paymentQrUrl: restaurant.qrCobroUrl,
     trialEndsAt: restaurant.trialEndsAt.toISOString(),
+    // Safe defaults for new fields — guards against un-migrated production DB
+    tablesConfig: (restaurant as any).tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
+    ivaPercent: (restaurant as any).ivaPercent ?? 15,
+    servicePercent: (restaurant as any).servicePercent ?? 10,
+    ivaOnTable: (restaurant as any).ivaOnTable ?? true,
+    ivaOnTakeout: (restaurant as any).ivaOnTakeout ?? true,
+    serviceOnTable: (restaurant as any).serviceOnTable ?? true,
+    serviceOnTakeout: (restaurant as any).serviceOnTakeout ?? false,
     categories: restaurant.categories.map(c => ({
       ...c,
       dishes: c.dishes.map(d => ({
@@ -66,7 +74,7 @@ export default async function AdminPage() {
         imageUrl: d.imageUrl || null
       }))
     })),
-    orders: restaurant.orders.map(o => ({
+    orders: (restaurant.orders ?? []).map(o => ({
       ...o,
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),
