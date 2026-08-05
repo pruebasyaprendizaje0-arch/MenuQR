@@ -44,9 +44,17 @@ model Restaurant {
   contactNumbers String?
   ubicameUrl     String?
   plan           Plan       @default(FREE)
+  tablesConfig   String     @default("1,2,3,4,5,6,7,8,9,10")
+  ivaPercent     Float      @default(15.0)
+  servicePercent Float      @default(10.0)
+  ivaOnTable     Boolean    @default(true)
+  ivaOnTakeout   Boolean    @default(true)
+  serviceOnTable Boolean    @default(true)
+  serviceOnTakeout Boolean   @default(false)
   trialEndsAt    DateTime   @default(now())
   categories     Category[]
   dishes         Dish[]
+  orders         Order[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 }
@@ -83,4 +91,30 @@ model SystemSetting {
   value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  restaurantId   String
+  restaurant     Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  tableName      String      // mesa
+  status         String      @default("PENDING") // PENDING, PREPARING, COMPLETED, CANCELLED
+  subtotal       Float
+  iva            Float
+  serviceCharge  Float
+  tip            Float
+  total          Float
+  paymentMethod  String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  items          OrderItem[]
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dishName  String
+  price     Float
+  quantity  Int
 }

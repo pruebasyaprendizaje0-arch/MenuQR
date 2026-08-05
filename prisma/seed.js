@@ -50,10 +50,18 @@ async function main() {
   });
 
   // Create categories
+  const combos = await prisma.category.create({
+    data: {
+      name: "Combos",
+      order: 1,
+      restaurantId: restaurant.id,
+    },
+  });
+
   const pizzas = await prisma.category.create({
     data: {
       name: "Pizzas",
-      order: 1,
+      order: 2,
       restaurantId: restaurant.id,
     },
   });
@@ -61,7 +69,7 @@ async function main() {
   const pastas = await prisma.category.create({
     data: {
       name: "Pastas",
-      order: 2,
+      order: 3,
       restaurantId: restaurant.id,
     },
   });
@@ -69,7 +77,7 @@ async function main() {
   const bebidas = await prisma.category.create({
     data: {
       name: "Bebidas",
-      order: 3,
+      order: 4,
       restaurantId: restaurant.id,
     },
   });
@@ -77,6 +85,33 @@ async function main() {
   // Create dishes
   await prisma.dish.createMany({
     data: [
+      {
+        name: "Combo Pareja 🍕🍝",
+        description: "1 Pizza Margherita grande + 1 Fettuccine Alfredo clásico + 2 Coca Colas heladas. Ideal para compartir.",
+        price: 26.5,
+        imageUrl: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
+        isAvailable: true,
+        categoryId: combos.id,
+        restaurantId: restaurant.id,
+      },
+      {
+        name: "Combo Familiar 👨‍👩‍👧‍👦",
+        description: "2 Pizzas Pepperoni grandes + 1 Lasagna de Carne grande + 1 Botella de Agua Mineral. ¡El favorito de los domingos!",
+        price: 39.99,
+        imageUrl: "https://images.unsplash.com/photo-1534308983496-4fabb1a015ee?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
+        isAvailable: true,
+        categoryId: combos.id,
+        restaurantId: restaurant.id,
+      },
+      {
+        name: "Combo Individual 🍕🥤",
+        description: "1 Pizza Margherita personal + 1 Bebida a elección (Coca Cola o Agua). Almuerzo rápido y delicioso.",
+        price: 13.5,
+        imageUrl: "https://images.unsplash.com/photo-1593560708920-61dd98c46a4e?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3",
+        isAvailable: true,
+        categoryId: combos.id,
+        restaurantId: restaurant.id,
+      },
       {
         name: "Pizza Margherita",
         description: "Salsa de tomate, mozzarella premium, albahaca fresca y aceite de oliva.",

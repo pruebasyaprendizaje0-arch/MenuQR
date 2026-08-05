@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   logoutUserAction, 
   updateRestaurantAction, 
@@ -10,7 +10,10 @@ import {
   createDishAction,
   updateDishAction,
   deleteDishAction,
-  toggleDishAvailabilityAction
+  toggleDishAvailabilityAction,
+  updateOrderStatusAction,
+  updateRestaurantTablesAction,
+  updateRestaurantChargesConfigAction
 } from "@/lib/actions";
 import { 
   Store, 
@@ -26,7 +29,14 @@ import {
   Check,
   AlertCircle,
   Eye,
-  EyeOff
+  EyeOff,
+  LineChart,
+  ShoppingBag,
+  TrendingUp,
+  Users,
+  CheckCircle2,
+  XCircle,
+  DollarSign
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
@@ -46,6 +56,30 @@ type Category = {
   name: string;
   order: number;
   dishes: Dish[];
+};
+
+type OrderItem = {
+  id: string;
+  orderId: string;
+  dishName: string;
+  price: number;
+  quantity: number;
+};
+
+type Order = {
+  id: string;
+  restaurantId: string;
+  tableName: string;
+  status: "PENDING" | "PREPARING" | "COMPLETED" | "CANCELLED";
+  subtotal: number;
+  iva: number;
+  serviceCharge: number;
+  tip: number;
+  total: number;
+  paymentMethod: string;
+  createdAt: string;
+  updatedAt: string;
+  items: OrderItem[];
 };
 
 type Restaurant = {
@@ -69,12 +103,105 @@ type Restaurant = {
   services: string | null;
   contactNumbers: string | null;
   ubicameUrl: string | null;
+  tablesConfig: string;
+  ivaPercent: number;
+  servicePercent: number;
+  ivaOnTable: boolean;
+  ivaOnTakeout: boolean;
+  serviceOnTable: boolean;
+  serviceOnTakeout: boolean;
   categories: Category[];
+  orders: Order[];
 };
 
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
-  const [activeTab, setActiveTab] = useState<"restaurant" | "categories" | "dishes" | "qr">("restaurant");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "qr">("metrics");
   const [copied, setCopied] = useState(false);
+  const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
+  const [savingTables, setSavingTables] = useState(false);
+  const [tablesMessage, setTablesMessage] = useState("");
+
+  const [ivaPercent, setIvaPercent] = useState(restaurant.ivaPercent);
+  const [servicePercent, setServicePercent] = useState(restaurant.servicePercent);
+  const [ivaOnTable, setIvaOnTable] = useState(restaurant.ivaOnTable);
+  const [ivaOnTakeout, setIvaOnTakeout] = useState(restaurant.ivaOnTakeout);
+  const [serviceOnTable, setServiceOnTable] = useState(restaurant.serviceOnTable);
+  const [serviceOnTakeout, setServiceOnTakeout] = useState(restaurant.serviceOnTakeout);
+  const [savingCharges, setSavingCharges] = useState(false);
+  const [chargesMessage, setChargesMessage] = useState("");
+
+  const [logoBase64, setLogoBase64] = useState<string>("");
+  const [dishBase64s, setDishBase64s] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Convert logo
+    if (restaurant.logoUrl) {
+      const img = new Image();
+      if (restaurant.logoUrl.startsWith("http")) {
+        img.crossOrigin = "anonymous";
+      }
+      img.src = restaurant.logoUrl;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          try {
+            const dataUrl = canvas.toDataURL("image/png");
+            setLogoBase64(dataUrl);
+          } catch (e) {
+            console.warn("Failed to convert logo to base64, canvas tainted:", e);
+          }
+        }
+      };
+    }
+
+    // Convert first 3 dishes with images (dishes live inside categories)
+    const allDishes = (restaurant.categories || []).flatMap(c => c.dishes || []);
+    const items = allDishes.filter(d => d.imageUrl).slice(0, 3);
+    const loadedBase64s: string[] = [];
+    let loadedCount = 0;
+
+    if (items.length === 0) {
+      setDishBase64s([]);
+      return;
+    }
+
+    items.forEach((item, index) => {
+      const img = new Image();
+      const src = item.imageUrl as string;
+      if (src.startsWith("http")) {
+        img.crossOrigin = "anonymous";
+      }
+      img.src = src;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          try {
+            loadedBase64s[index] = canvas.toDataURL("image/png");
+          } catch (e) {
+            console.warn("Failed to convert dish image to base64:", e);
+          }
+        }
+        loadedCount++;
+        if (loadedCount === items.length) {
+          setDishBase64s(loadedBase64s.filter(Boolean));
+        }
+      };
+      img.onerror = () => {
+        loadedCount++;
+        if (loadedCount === items.length) {
+          setDishBase64s(loadedBase64s.filter(Boolean));
+        }
+      };
+    });
+  }, [restaurant.logoUrl, restaurant.categories]);
 
   // Ubicación estructurada: Provincia | Cantón | Parroquia | Sector
   let initialProv = "";
@@ -107,15 +234,125 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [sector, setSector] = useState(initialSector);
   
   const downloadQR = () => {
-    const canvas = document.getElementById("qr-canvas") as HTMLCanvasElement;
-    if (canvas) {
-      const pngUrl = canvas.toDataURL("image/png");
-      const downloadLink = document.createElement("a");
-      downloadLink.href = pngUrl;
-      downloadLink.download = `QR-${restaurant.slug}.png`;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
+    const qrCanvas = document.getElementById("qr-canvas") as HTMLCanvasElement;
+    if (!qrCanvas) return;
+
+    // Create a new canvas to draw the print poster
+    const posterCanvas = document.createElement("canvas");
+    posterCanvas.width = 400;
+    posterCanvas.height = 620;
+    const ctx = posterCanvas.getContext("2d");
+    if (!ctx) return;
+
+    // 1. Draw solid background
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, 400, 620);
+
+    const drawContent = () => {
+      try {
+        // Draw the 3 dish images at the top
+        if (dishBase64s.length > 0) {
+          const thumbSize = 64;
+          const gap = 12;
+          const totalWidth = (dishBase64s.length * thumbSize) + ((dishBase64s.length - 1) * gap);
+          let startX = (400 - totalWidth) / 2;
+          
+          dishBase64s.forEach((base64, idx) => {
+            const img = new Image();
+            img.src = base64;
+            ctx.save();
+            ctx.beginPath();
+            // Rounded corners clip
+            ctx.roundRect(startX + idx * (thumbSize + gap), 30, thumbSize, thumbSize, 14);
+            ctx.clip();
+            ctx.drawImage(img, startX + idx * (thumbSize + gap), 30, thumbSize, thumbSize);
+            ctx.restore();
+
+            // Draw a subtle border around the thumbnail
+            ctx.strokeStyle = "#e2e8f0"; // border-slate-200
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(startX + idx * (thumbSize + gap), 30, thumbSize, thumbSize, 14);
+            ctx.stroke();
+          });
+        }
+
+        // 3. Draw Title: "Escanea para ver el menú de" + restaurant.name
+        ctx.fillStyle = "#0f172a"; // slate-900
+        ctx.textAlign = "center";
+        
+        // Title line 1
+        ctx.font = "bold 15px sans-serif";
+        ctx.fillText("Escanea para ver el menú de", 200, 135);
+
+        // Title line 2 (Restaurant Name)
+        ctx.font = "black 22px sans-serif";
+        ctx.fillStyle = restaurant.themeColor;
+        ctx.fillText(restaurant.name, 200, 168);
+
+        // 4. Draw the QR code canvas in the center
+        ctx.drawImage(qrCanvas, 75, 210, 250, 250);
+
+        // 5. Draw a footer/instruction
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillStyle = "#64748b"; // slate-500
+        ctx.fillText("¡Muchas gracias por su preferencia!", 200, 510);
+
+        ctx.font = "normal 10px sans-serif";
+        ctx.fillStyle = "#94a3b8"; // slate-400
+        ctx.fillText("Creado con MenuQR Pro", 200, 540);
+
+        // Trigger download
+        const pngUrl = posterCanvas.toDataURL("image/png");
+        const downloadLink = document.createElement("a");
+        downloadLink.href = pngUrl;
+        downloadLink.download = `QR-${restaurant.slug}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      } catch (err) {
+        console.error("Canvas tainted, falling back to simple QR download:", err);
+        // Fallback: download the plain QR canvas if poster drawing failed due to taint
+        try {
+          const plainCanvas = document.createElement("canvas");
+          plainCanvas.width = qrCanvas.width;
+          plainCanvas.height = qrCanvas.height;
+          const pCtx = plainCanvas.getContext("2d");
+          if (pCtx) {
+            pCtx.drawImage(qrCanvas, 0, 0);
+            const plainUrl = plainCanvas.toDataURL("image/png");
+            const downloadLink = document.createElement("a");
+            downloadLink.href = plainUrl;
+            downloadLink.download = `QR-${restaurant.slug}.png`;
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+            document.body.removeChild(downloadLink);
+          }
+        } catch (fallbackErr) {
+          console.error("Plain QR download failed:", fallbackErr);
+        }
+      }
+    };
+
+    if (logoBase64) {
+      const logoImg = new Image();
+      logoImg.src = logoBase64;
+      logoImg.onload = () => {
+        try {
+          ctx.save();
+          ctx.globalAlpha = 0.08;
+          ctx.drawImage(logoImg, -50, -50, 500, 720);
+          ctx.restore();
+        } catch (e) {
+          console.warn("Could not draw watermark background logo:", e);
+        }
+        drawContent();
+      };
+      logoImg.onerror = () => {
+        drawContent();
+      };
+    } else {
+      drawContent();
     }
   };
   
@@ -147,6 +384,50 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
     await toggleDishAvailabilityAction(dishId, !currentStatus);
   };
 
+  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
+    const res = await updateOrderStatusAction(orderId, newStatus);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      window.location.reload();
+    }
+  };
+
+  const handleSaveTables = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingTables(true);
+    setTablesMessage("");
+    const res = await updateRestaurantTablesAction(restaurant.id, tablesConfig);
+    setSavingTables(false);
+    if (res.error) {
+      setTablesMessage(`Error: ${res.error}`);
+    } else {
+      setTablesMessage("Configuración de mesas guardada correctamente.");
+      setTimeout(() => setTablesMessage(""), 3000);
+    }
+  };
+
+  const handleSaveCharges = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingCharges(true);
+    setChargesMessage("");
+    const res = await updateRestaurantChargesConfigAction(restaurant.id, {
+      ivaPercent,
+      servicePercent,
+      ivaOnTable,
+      ivaOnTakeout,
+      serviceOnTable,
+      serviceOnTakeout,
+    });
+    setSavingCharges(false);
+    if (res.error) {
+      setChargesMessage(`Error: ${res.error}`);
+    } else {
+      setChargesMessage("Configuración de recargos guardada correctamente.");
+      setTimeout(() => setChargesMessage(""), 3000);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
       {/* Sidebar */}
@@ -169,6 +450,17 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
 
           {/* Navigation */}
           <nav className="p-4 space-y-1">
+            <button
+              onClick={() => setActiveTab("metrics")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "metrics" 
+                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <LineChart className="h-4 w-4" />
+              Métricas y Pedidos
+            </button>
             <button
               onClick={() => setActiveTab("restaurant")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -239,8 +531,10 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 p-6 md:p-10 max-w-5xl overflow-y-auto space-y-6">
+      {/* Main Layout Container (Content + Persistent Sidebar) */}
+      <div className="flex-1 flex flex-col lg:flex-row min-w-0 overflow-y-auto lg:overflow-visible">
+        {/* Main Content Area */}
+        <main className="flex-1 p-6 md:p-10 max-w-4xl overflow-y-auto space-y-6">
         {/* Trial Period Banner */}
         {(() => {
           const trialEnds = new Date(restaurant.trialEndsAt);
@@ -267,6 +561,246 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               }`}>
                 {isExpired ? "Inactivo" : `${daysRemaining} días`}
               </span>
+            </div>
+          );
+        })()}
+
+        {/* Métricas y Pedidos Tab */}
+        {activeTab === "metrics" && (() => {
+          const orders = restaurant.orders || [];
+          const nonCancelled = orders.filter(o => o.status !== "CANCELLED");
+          
+          const today = new Date().toDateString();
+          const todayOrders = nonCancelled.filter(o => new Date(o.createdAt).toDateString() === today);
+          const todayBilling = todayOrders.reduce((sum, o) => sum + o.total, 0);
+
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+          const weekOrders = nonCancelled.filter(o => new Date(o.createdAt) >= sevenDaysAgo);
+          const weekBilling = weekOrders.reduce((sum, o) => sum + o.total, 0);
+
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          const monthOrders = nonCancelled.filter(o => new Date(o.createdAt) >= thirtyDaysAgo);
+          const monthBilling = monthOrders.reduce((sum, o) => sum + o.total, 0);
+
+          // Most sold dish
+          const itemsMap: { [key: string]: number } = {};
+          nonCancelled.forEach(o => {
+            o.items.forEach(it => {
+              itemsMap[it.dishName] = (itemsMap[it.dishName] || 0) + it.quantity;
+            });
+          });
+          let topDishName = "Ninguno";
+          let topDishQty = 0;
+          Object.entries(itemsMap).forEach(([name, qty]) => {
+            if (qty > topDishQty) {
+              topDishQty = qty;
+              topDishName = name;
+            }
+          });
+
+          // Most selling table
+          const tablesMap: { [key: string]: number } = {};
+          nonCancelled.forEach(o => {
+            tablesMap[o.tableName] = (tablesMap[o.tableName] || 0) + o.total;
+          });
+          let topTableName = "Ninguna";
+          let topTableTotal = 0;
+          Object.entries(tablesMap).forEach(([name, tot]) => {
+            if (tot > topTableTotal) {
+              topTableTotal = tot;
+              topTableName = name;
+            }
+          });
+
+          const pendingOrders = orders.filter(o => o.status === "PENDING" || o.status === "PREPARING");
+
+          return (
+            <div className="space-y-8 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
+              {/* Metrics Header */}
+              <div>
+                <h2 className="text-2xl font-bold text-white">Dashboard de Métricas</h2>
+                <p className="text-slate-400 text-sm">Resumen de facturación, platos estrella y mesas de mayor consumo.</p>
+              </div>
+
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold">Facturación Diaria</span>
+                  <p className="text-2xl font-black text-white mt-1">${todayBilling.toFixed(2)}</p>
+                  <span className="text-[10px] text-slate-500 block mt-1">{todayOrders.length} pedidos hoy</span>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold">Facturación Semanal</span>
+                  <p className="text-2xl font-black text-white mt-1">${weekBilling.toFixed(2)}</p>
+                  <span className="text-[10px] text-slate-500 block mt-1">Últimos 7 días</span>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold">Facturación Mensual</span>
+                  <p className="text-2xl font-black text-white mt-1">${monthBilling.toFixed(2)}</p>
+                  <span className="text-[10px] text-slate-500 block mt-1">Últimos 30 días</span>
+                </div>
+              </div>
+
+              {/* Best Performers Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex items-center gap-4">
+                  <div className="h-10 w-10 bg-amber-500/10 text-amber-500 rounded-xl flex items-center justify-center shrink-0">
+                    <TrendingUp className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold block">Plato Más Vendido</span>
+                    <span className="text-sm font-bold text-white">{topDishName}</span>
+                    {topDishQty > 0 && <span className="text-[10px] text-slate-500 block mt-0.5">{topDishQty} unidades vendidas</span>}
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex items-center gap-4">
+                  <div className="h-10 w-10 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center shrink-0">
+                    <Users className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold block">Mesa que Más Vende</span>
+                    <span className="text-sm font-bold text-white">
+                      {topTableName !== "Ninguna" && topTableName !== "Llevar" ? `Mesa #${topTableName}` : topTableName === "Llevar" ? "Para llevar" : "Ninguna"}
+                    </span>
+                    {topTableTotal > 0 && <span className="text-[10px] text-slate-500 block mt-0.5">${topTableTotal.toFixed(2)} facturados</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Table Management Form */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <Users className="h-5 w-5 text-red-500" />
+                    Configuración de Mesas del Local
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">Define las mesas disponibles de tu local separadas por comas (ej. 1, 2, VIP-1, Terraza-A).</p>
+                </div>
+                <form onSubmit={handleSaveTables} className="flex gap-4 items-end">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={tablesConfig}
+                      onChange={(e) => setTablesConfig(e.target.value)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
+                      placeholder="ej. 1, 2, 3, VIP-1, Terraza-A"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={savingTables}
+                    className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 shrink-0 bg-red-600 hover:bg-red-500"
+                  >
+                    {savingTables ? "Guardando..." : "Guardar Mesas"}
+                  </button>
+                </form>
+                {tablesMessage && (
+                  <p className={`text-xs ${tablesMessage.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
+                    {tablesMessage}
+                  </p>
+                )}
+              </div>
+
+              {/* Charge Surcharge Configuration Form */}
+              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <DollarSign className="h-5 w-5 text-red-500" />
+                    Configuración de IVA y 10% de Servicio (Recargos)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Controla qué cargos extras se aplican y bajo qué modalidad de pedido (Para llevar / Mesa).
+                  </p>
+                </div>
+                <form onSubmit={handleSaveCharges} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Tasa de IVA (%)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={ivaPercent}
+                        onChange={(e) => setIvaPercent(parseFloat(e.target.value) || 0)}
+                        required
+                        className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Tasa de Servicio (%)</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={servicePercent}
+                        onChange={(e) => setServicePercent(parseFloat(e.target.value) || 0)}
+                        required
+                        className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Checkbox matrix */}
+                  <div className="border-t border-slate-800/80 pt-4 space-y-3">
+                    <span className="text-xs font-bold text-slate-350 block">Reglas de Aplicación:</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={ivaOnTable}
+                          onChange={(e) => setIvaOnTable(e.target.checked)}
+                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        Aplica IVA en pedidos en Mesa
+                      </label>
+                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={ivaOnTakeout}
+                          onChange={(e) => setIvaOnTakeout(e.target.checked)}
+                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        Aplica IVA en pedidos Para Llevar
+                      </label>
+                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={serviceOnTable}
+                          onChange={(e) => setServiceOnTable(e.target.checked)}
+                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        Aplica Servicio en pedidos en Mesa
+                      </label>
+                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={serviceOnTakeout}
+                          onChange={(e) => setServiceOnTakeout(e.target.checked)}
+                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        Aplica Servicio en pedidos Para Llevar
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      type="submit"
+                      disabled={savingCharges}
+                      className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 bg-red-600 hover:bg-red-500"
+                    >
+                      {savingCharges ? "Guardando..." : "Guardar Recargos"}
+                    </button>
+                    {chargesMessage && (
+                      <p className={`text-xs ${chargesMessage.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
+                        {chargesMessage}
+                      </p>
+                    )}
+                  </div>
+                </form>
+              </div>
             </div>
           );
         })()}
@@ -338,6 +872,30 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       className="w-full bg-slate-950/60 border border-slate-850 block px-4 py-3 rounded-xl text-slate-400 focus:outline-none cursor-not-allowed"
                     />
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Porcentaje de IVA (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    name="ivaPercent"
+                    defaultValue={restaurant.ivaPercent}
+                    required
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Configura a 0 si los precios ya incluyen IVA o no aplica.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Porcentaje de Servicio (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    name="servicePercent"
+                    defaultValue={restaurant.servicePercent}
+                    required
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Estándar de restaurante (ej: 10%). Pon 0 para desactivar.</p>
                 </div>
               </div>
 
@@ -1014,21 +1572,59 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
               {/* QR display card */}
-              <div className="md:col-span-1 bg-white p-6 rounded-3xl flex flex-col items-center justify-center shadow-2xl relative overflow-hidden group">
-                <div className="bg-white p-2 rounded-2xl border border-slate-200">
+              <div className="md:col-span-1 bg-white p-6 rounded-[2rem] flex flex-col items-center justify-center shadow-2xl relative overflow-hidden group border border-slate-100">
+                {restaurant.logoUrl && (
+                  <img 
+                    src={restaurant.logoUrl} 
+                    alt="" 
+                    className="absolute inset-0 w-full h-full object-cover filter blur-xl opacity-10 pointer-events-none scale-110"
+                  />
+                )}
+
+                {/* Dish thumbnails row */}
+                {dishBase64s.length > 0 && (
+                  <div className="flex gap-2 mb-4 z-10">
+                    {dishBase64s.map((src, idx) => (
+                      <div
+                        key={idx}
+                        className="h-14 w-14 rounded-2xl overflow-hidden border-2 border-slate-100 shadow-md shrink-0"
+                        style={{ boxShadow: `0 4px 12px -2px ${restaurant.themeColor}40` }}
+                      >
+                        <img src={src} alt="" className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Title */}
+                <div className="text-center mb-4 z-10">
+                  <span className="text-[9px] uppercase tracking-widest font-extrabold text-slate-400 block mb-0.5">Menú Digital</span>
+                  <h4 className="text-[11px] font-semibold text-slate-500">Escanea para ver el menú de</h4>
+                  <p className="text-base font-black mt-0.5" style={{ color: restaurant.themeColor }}>{restaurant.name}</p>
+                </div>
+
+                <div className="bg-white p-1.5 rounded-2xl border border-slate-200 z-10 shadow-sm">
                   <QRCodeCanvas
                     id="qr-canvas"
                     value={publicUrl}
-                    size={256}
+                    size={180}
                     level={"H"}
                     includeMargin={true}
+                    imageSettings={logoBase64 ? {
+                      src: logoBase64,
+                      x: undefined,
+                      y: undefined,
+                      height: 36,
+                      width: 36,
+                      excavate: true,
+                    } : undefined}
                   />
                 </div>
                 <button
                   onClick={downloadQR}
-                  className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold text-white bg-slate-900 hover:bg-slate-850 transition-all text-center"
+                  className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-xs font-black uppercase text-white bg-slate-900 hover:bg-slate-850 transition-all text-center z-10 shadow-md"
                 >
-                  Descargar QR para imprimir
+                  Descargar para imprimir
                 </button>
               </div>
 
@@ -1073,6 +1669,104 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
           </div>
         )}
       </main>
+
+      {/* Column: Persistent Pedidos en Curso */}
+      <aside className="w-full lg:w-96 bg-slate-900/30 border-t lg:border-t-0 lg:border-l border-slate-800 p-6 space-y-6 shrink-0 lg:max-h-screen lg:overflow-y-auto lg:sticky lg:top-0" style={{ fontFamily: 'var(--font-outfit)' }}>
+        {(() => {
+          const orders = restaurant.orders || [];
+          const pendingOrders = orders.filter(o => o.status === "PENDING" || o.status === "PREPARING");
+
+          return (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <ShoppingBag className="h-5 w-5 text-red-500" />
+                  Pedidos en Curso ({pendingOrders.length})
+                </h3>
+                <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400 bg-slate-950 px-2.5 py-1 rounded-full">
+                  Cocina
+                </span>
+              </div>
+
+              {pendingOrders.length === 0 ? (
+                <div className="py-10 text-center text-slate-500 text-sm italic border border-slate-800/60 rounded-2xl bg-slate-950/30">
+                  No hay pedidos activos.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {pendingOrders.map((order) => (
+                    <div 
+                      key={order.id} 
+                      className="bg-slate-950 border border-slate-850 p-4 rounded-2xl space-y-4 flex flex-col justify-between"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="text-[10px] font-extrabold text-slate-400 uppercase bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800">
+                              {order.tableName === "Llevar" ? "🛍️ Llevar" : `🪑 Mesa #${order.tableName}`}
+                            </span>
+                            <p className="text-[9px] text-slate-500 mt-1">{new Date(order.createdAt).toLocaleTimeString()}</p>
+                          </div>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                            order.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" : "bg-blue-500/10 text-blue-500"
+                          }`}>
+                            {order.status === "PENDING" ? "Pendiente" : "En Cocina"}
+                          </span>
+                        </div>
+
+                        {/* Items List */}
+                        <div className="border-t border-b border-slate-900 py-2 space-y-1 max-h-36 overflow-y-auto">
+                          {order.items.map((it) => (
+                            <div key={it.id} className="flex justify-between text-xs text-slate-350">
+                              <span>{it.quantity}x {it.dishName}</span>
+                              <span className="text-slate-450">${(it.price * it.quantity).toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        {/* Totals */}
+                        <div className="flex justify-between text-xs font-bold text-slate-350">
+                          <span>Total:</span>
+                          <span className="text-white font-extrabold">${order.total.toFixed(2)}</span>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2">
+                          {order.status === "PENDING" && (
+                            <button
+                              onClick={() => handleUpdateStatus(order.id, "PREPARING")}
+                              className="flex-1 py-2 rounded-xl text-[10px] font-black uppercase text-slate-950 bg-yellow-500 hover:bg-yellow-400 transition"
+                            >
+                              Preparar
+                            </button>
+                          )}
+                          {order.status === "PREPARING" && (
+                            <button
+                              onClick={() => handleUpdateStatus(order.id, "COMPLETED")}
+                              className="flex-1 py-2 rounded-xl text-[10px] font-black uppercase text-white bg-green-600 hover:bg-green-500 transition"
+                            >
+                              Entregar
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleUpdateStatus(order.id, "CANCELLED")}
+                            className="px-2.5 py-2 rounded-xl text-[10px] font-black uppercase text-red-400 bg-red-950/20 border border-red-900/30 hover:bg-red-900/25 transition shrink-0"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </aside>
     </div>
+  </div>
   );
 }

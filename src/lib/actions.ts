@@ -185,6 +185,16 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
     paymentQrUrl = uploadedPaymentQr;
   }
 
+  const ivaPercentInput = formData.get("ivaPercent") as string;
+  const servicePercentInput = formData.get("servicePercent") as string;
+  const ivaPercent = ivaPercentInput ? parseFloat(ivaPercentInput) : 15.0;
+  const servicePercent = servicePercentInput ? parseFloat(servicePercentInput) : 10.0;
+
+  const ivaOnTable = formData.get("ivaOnTable") === "true";
+  const ivaOnTakeout = formData.get("ivaOnTakeout") === "true";
+  const serviceOnTable = formData.get("serviceOnTable") === "true";
+  const serviceOnTakeout = formData.get("serviceOnTakeout") === "true";
+
   await prisma.restaurant.update({
     where: { id: restaurantId },
     data: {
@@ -205,6 +215,12 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       services: services || null,
       contactNumbers: contactNumbers || null,
       ubicameUrl: ubicameUrl || null,
+      ivaPercent,
+      servicePercent,
+      ivaOnTable,
+      ivaOnTakeout,
+      serviceOnTable,
+      serviceOnTakeout,
     },
   });
 
@@ -467,4 +483,120 @@ export async function updateSystemSettingAction(key: string, value: string) {
   revalidatePath("/super-admin");
   return { success: true };
 }
+
+export async function createOrderAction(data: {
+  restaurantId: string;
+  tableName: string;
+  subtotal: number;
+  iva: number;
+  serviceCharge: number;
+  tip: number;
+  total: number;
+  paymentMethod: string;
+  items: { dishName: string; price: number; quantity: number }[];
+}) {
+  try {
+    const order = await prisma.order.create({
+      data: {
+        restaurantId: data.restaurantId,
+        tableName: data.tableName,
+        subtotal: data.subtotal,
+        iva: data.iva,
+        serviceCharge: data.serviceCharge,
+        tip: data.tip,
+        total: data.total,
+        paymentMethod: data.paymentMethod,
+        items: {
+          create: data.items.map((item) => ({
+            dishName: item.dishName,
+            price: item.price,
+            quantity: item.quantity,
+          })),
+        },
+      },
+    });
+
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: data.restaurantId },
+      select: { slug: true }
+    });
+
+    if (restaurant) {
+      revalidatePath(`/admin`);
+      revalidatePath(`/${restaurant.slug}`);
+    }
+
+    return { success: true, orderId: order.id };
+  } catch (error) {
+    console.error("Error creating order:", error);
+    return { error: "No se pudo guardar el pedido." };
+  }
+}
+
+export async function updateOrderStatusAction(orderId: string, status: string) {
+  try {
+    const order = await prisma.order.update({
+      where: { id: orderId },
+      data: { status },
+      include: { restaurant: { select: { slug: true } } }
+    });
+
+    revalidatePath(`/admin`);
+    revalidatePath(`/${order.restaurant.slug}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating order status:", error);
+    return { error: "No se pudo actualizar el estado del pedido." };
+  }
+}
+
+export async function updateRestaurantTablesAction(restaurantId: string, tablesConfig: string) {
+  try {
+    const restaurant = await prisma.restaurant.update({
+      where: { id: restaurantId },
+      data: { tablesConfig }
+    });
+
+    revalidatePath(`/admin`);
+    revalidatePath(`/${restaurant.slug}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating tables config:", error);
+    return { error: "No se pudo actualizar la configuración de mesas." };
+  }
+}
+
+export async function updateRestaurantChargesConfigAction(
+  restaurantId: string,
+  data: {
+    ivaPercent: number;
+    servicePercent: number;
+    ivaOnTable: boolean;
+    ivaOnTakeout: boolean;
+    serviceOnTable: boolean;
+    serviceOnTakeout: boolean;
+  }
+) {
+  try {
+    const restaurant = await prisma.restaurant.update({
+      where: { id: restaurantId },
+      data: {
+        ivaPercent: data.ivaPercent,
+        servicePercent: data.servicePercent,
+        ivaOnTable: data.ivaOnTable,
+        ivaOnTakeout: data.ivaOnTakeout,
+        serviceOnTable: data.serviceOnTable,
+        serviceOnTakeout: data.serviceOnTakeout,
+      }
+    });
+
+    revalidatePath(`/admin`);
+    revalidatePath(`/${restaurant.slug}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating charges config:", error);
+    return { error: "No se pudo actualizar la configuración de recargos." };
+  }
+}
+
 

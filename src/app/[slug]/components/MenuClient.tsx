@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { createOrderAction } from "@/lib/actions";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -13,7 +14,13 @@ import {
   DollarSign,
   MapPin,
   MessageSquare,
-  LogOut
+  LogOut,
+  Sparkles,
+  Clock,
+  Phone,
+  Globe,
+  Store,
+  BookOpen
 } from "lucide-react";
 
 type Dish = {
@@ -50,7 +57,9 @@ type Restaurant = {
   specialty: string | null;
   services: string | null;
   contactNumbers: string | null;
-  ubicameUrl: string | null;
+  tablesConfig: string;
+  ivaPercent: number;
+  servicePercent: number;
   categories: Category[];
 };
 
@@ -66,7 +75,21 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "qr">("cash");
+  const [tipPercentage, setTipPercentage] = useState<number>(0);
   const categoryRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+
+  const [selectedTable, setSelectedTable] = useState<string>("");
+  const [isTableModalOpen, setIsTableModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const mesa = params.get("mesa") || params.get("table");
+      if (mesa) {
+        setSelectedTable(mesa);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (restaurant.categories.length > 0) {
@@ -147,8 +170,42 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotal = cart.reduce((sum, item) => sum + item.dish.price * item.quantity, 0);
 
-  const handleSendOrder = (selectedMethod: "cash" | "qr") => {
+  const handleSendOrder = async (selectedMethod: "cash" | "qr") => {
     if (cart.length === 0) return;
+
+    const isTableOrder = !!selectedTable;
+    const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
+    const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
+
+    const subtotal = cartTotal;
+    const iva = applyIva ? subtotal * (restaurant.ivaPercent / 100) : 0;
+    const serviceCharge = applyService ? subtotal * (restaurant.servicePercent / 100) : 0;
+    const tip = subtotal * (tipPercentage / 100);
+    const total = subtotal + iva + serviceCharge + tip;
+
+    // Save order in database first
+    const itemsData = cart.map((item) => ({
+      dishName: item.dish.name,
+      price: item.dish.price,
+      quantity: item.quantity,
+    }));
+
+    const result = await createOrderAction({
+      restaurantId: restaurant.id,
+      tableName: selectedTable || "Llevar",
+      subtotal,
+      iva,
+      serviceCharge,
+      tip,
+      total,
+      paymentMethod: selectedMethod,
+      items: itemsData,
+    });
+
+    if (result.error) {
+      alert(result.error);
+      return;
+    }
 
     let message = `¡Hola! Me gustaría hacer un pedido en *${restaurant.name}*:\n\n`;
     message += `*Detalle del Pedido:*\n`;
@@ -159,6 +216,16 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     });
 
     message += `-----------------------------------\n`;
+    if (selectedTable) {
+      message += `*Mesa:* #${selectedTable}\n`;
+    } else {
+      message += `*Mesa:* Para llevar / Llevar a casa\n`;
+    }
+    message += `*Subtotal:* $${subtotal.toFixed(2)}\n`;
+    message += `*IVA (${restaurant.ivaPercent}%):* $${iva.toFixed(2)}\n`;
+    message += `*Servicio (${restaurant.servicePercent}%):* $${serviceCharge.toFixed(2)}\n`;
+    message += `*Propina:* $${tip.toFixed(2)}\n`;
+    message += `*Total a Pagar:* $${total.toFixed(2)}\n`;
     message += `*Método de Pago:* ${selectedMethod === "qr" ? "QR de Cobro (Deuna / Transferencia)" : "Efectivo / Contra entrega en local"}\n`;
 
     if (selectedMethod === "qr" && restaurant.paymentQrUrl) {
@@ -168,7 +235,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       message += `*QR de Cobro:* ${qrFullUrl}\n`;
     }
 
-    message += `*Total a Pagar:* $${cartTotal.toFixed(2)}\n\n`;
+    message += `\n_Pedido registrado con ID: ${result.orderId}_\n`;
     message += `_Enviado desde MenuQR Pro_`;
 
     let formattedPhone = restaurant.whatsappNumber.replace(/\D/g, "");
@@ -184,6 +251,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodedMessage}`;
     window.open(whatsappUrl, "_blank");
     
+    // Clear cart and close checkout
+    setCart([]);
     setIsCheckoutOpen(false);
   };
 
@@ -193,6 +262,13 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       <style jsx global>{`
         :root {
           --theme-accent: ${restaurant.themeColor};
+        }
+        @keyframes shimmer {
+          0% { transform: translateX(-150%) skewX(-25deg); }
+          100% { transform: translateX(250%) skewX(-25deg); }
+        }
+        .animate-shimmer {
+          animation: shimmer 2.5s infinite;
         }
       `}</style>
 
@@ -256,29 +332,39 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="max-w-3xl mx-auto px-4 pb-3 flex border-b border-slate-900/40 gap-4 text-xs font-bold">
-          <button
-            onClick={() => setCurrentTab("profile")}
-            className={`pb-1 transition ${
-              currentTab === "profile" 
-                ? "text-white border-b-2" 
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-            style={{ borderBottomColor: currentTab === "profile" ? restaurant.themeColor : "transparent" }}
-          >
-            Perfil Comercial
-          </button>
-          <button
-            onClick={() => setCurrentTab("menu")}
-            className={`pb-1 transition ${
-              currentTab === "menu" 
-                ? "text-white border-b-2" 
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-            style={{ borderBottomColor: currentTab === "menu" ? restaurant.themeColor : "transparent" }}
-          >
-            Menú Digital
-          </button>
+        <div className="max-w-3xl mx-auto px-4 pb-4 pt-1 flex justify-center" style={{ fontFamily: 'var(--font-outfit)' }}>
+          <div className="flex p-1 bg-slate-900/60 backdrop-blur-md border border-white/5 rounded-2xl w-full sm:w-[380px] gap-1 relative z-10">
+            <button
+              onClick={() => setCurrentTab("profile")}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black tracking-wide uppercase transition-all duration-300 ${
+                currentTab === "profile" 
+                  ? "text-white shadow-lg" 
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+              style={{ 
+                backgroundColor: currentTab === "profile" ? restaurant.themeColor : "transparent",
+                boxShadow: currentTab === "profile" ? `0 4px 15px -3px ${restaurant.themeColor}55` : undefined
+              }}
+            >
+              <Store className="h-4 w-4" />
+              <span>Perfil Comercial</span>
+            </button>
+            <button
+              onClick={() => setCurrentTab("menu")}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black tracking-wide uppercase transition-all duration-300 ${
+                currentTab === "menu" 
+                  ? "text-white shadow-lg" 
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+              style={{ 
+                backgroundColor: currentTab === "menu" ? restaurant.themeColor : "transparent",
+                boxShadow: currentTab === "menu" ? `0 4px 15px -3px ${restaurant.themeColor}55` : undefined
+              }}
+            >
+              <BookOpen className="h-4 w-4" />
+              <span>Menú Digital</span>
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Categories Navigation */}
@@ -309,58 +395,85 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       {/* Main Menu Feed */}
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-6 relative z-10 space-y-12">
         {currentTab === "profile" ? (
-          <div className="space-y-8 animate-fade-in">
+          <div className="space-y-8 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
             {/* Cover Banner Card */}
-            <div className="relative h-48 rounded-3xl overflow-hidden bg-slate-900 border border-slate-900/60 shadow-xl">
-              <div 
-                className="absolute inset-0 bg-gradient-to-tr opacity-40"
-                style={{ backgroundColor: restaurant.themeColor }}
-              ></div>
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent"></div>
+            <div className="relative h-56 rounded-[2rem] overflow-hidden bg-slate-900/60 border border-white/5 shadow-2xl backdrop-blur-md">
+              {restaurant.logoUrl ? (
+                <img 
+                  src={restaurant.logoUrl} 
+                  alt="" 
+                  className="absolute inset-0 w-full h-full object-cover filter blur-2xl opacity-25 scale-110" 
+                />
+              ) : (
+                <div 
+                  className="absolute inset-0 bg-gradient-to-tr opacity-30"
+                  style={{ backgroundColor: restaurant.themeColor }}
+                ></div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent"></div>
               
-              <div className="absolute bottom-6 left-6 right-6 flex items-end gap-4">
-                {restaurant.logoUrl ? (
-                  <img 
-                    src={restaurant.logoUrl} 
-                    alt={restaurant.name} 
-                    className="h-20 w-20 rounded-2xl object-cover border-2 border-slate-950 shadow-2xl"
-                  />
-                ) : (
-                  <div 
-                    className="h-20 w-20 rounded-2xl flex items-center justify-center font-black text-white text-2xl border-2 border-slate-950 shadow-2xl"
-                    style={{ backgroundColor: restaurant.themeColor }}
-                  >
-                    {restaurant.name.charAt(0)}
-                  </div>
-                )}
+              <div className="absolute bottom-6 left-6 right-6 sm:bottom-8 sm:left-8 sm:right-8 flex items-center gap-5">
+                <div className="relative group shrink-0">
+                  <div className="absolute -inset-1 bg-gradient-to-tr rounded-3xl opacity-75 blur-md group-hover:opacity-100 transition duration-300"
+                       style={{ backgroundImage: `linear-gradient(to top right, ${restaurant.themeColor}, #ffffff)` }}></div>
+                  {restaurant.logoUrl ? (
+                    <img 
+                      src={restaurant.logoUrl} 
+                      alt={restaurant.name} 
+                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl object-cover border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div 
+                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl flex items-center justify-center font-black text-white text-2xl border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover:scale-105"
+                      style={{ backgroundColor: restaurant.themeColor }}
+                    >
+                      {restaurant.name.charAt(0)}
+                    </div>
+                  )}
+                </div>
                 <div className="mb-1">
-                  <h2 className="text-2xl font-black text-white leading-tight">{restaurant.name}</h2>
-                  <p className="text-xs text-slate-400 font-medium">Categorías premium y pedidos automáticos</p>
+                  <h2 className="text-2xl sm:text-4xl font-extrabold text-white leading-tight tracking-tight">{restaurant.name}</h2>
+                  <p className="text-xs sm:text-sm text-slate-400/90 font-medium tracking-wide mt-1">Categorías premium y pedidos automáticos</p>
                 </div>
               </div>
             </div>
 
             {/* Description & About Us */}
             {restaurant.description && (
-              <div className="bg-slate-900/40 border border-slate-900/60 rounded-3xl p-6 backdrop-blur-md space-y-2">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Sobre Nosotros</h3>
-                <p className="text-slate-300 text-sm leading-relaxed">{restaurant.description}</p>
+              <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-8 backdrop-blur-md space-y-3 relative overflow-hidden">
+                <div className="absolute top-0 right-0 h-24 w-24 bg-gradient-to-bl from-white/5 to-transparent rounded-bl-full pointer-events-none"></div>
+                <h3 className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-slate-500">Sobre Nosotros</h3>
+                <p className="text-slate-350 text-base leading-relaxed font-serif italic" style={{ fontFamily: 'var(--font-playfair)' }}>
+                  "{restaurant.description}"
+                </p>
               </div>
             )}
 
             {/* Quick Specs (Especialidad y Horario) */}
             {(restaurant.specialty || restaurant.schedule) && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {restaurant.specialty && (
-                  <div className="bg-slate-900/40 border border-slate-900/60 p-5 rounded-2xl backdrop-blur-md">
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Especialidad de la Casa</span>
-                    <p className="text-sm text-slate-200 font-bold mt-1">{restaurant.specialty}</p>
+                  <div className="bg-slate-900/40 border border-white/5 p-6 rounded-[2rem] backdrop-blur-md flex items-start gap-4 transition-all duration-300 hover:border-white/10 hover:bg-slate-900/50">
+                    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
+                         style={{ backgroundColor: `${restaurant.themeColor}15`, color: restaurant.themeColor }}>
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Especialidad de la Casa</span>
+                      <p className="text-sm text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.specialty}</p>
+                    </div>
                   </div>
                 )}
                 {restaurant.schedule && (
-                  <div className="bg-slate-900/40 border border-slate-900/60 p-5 rounded-2xl backdrop-blur-md">
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Horario de Atención</span>
-                    <p className="text-sm text-slate-200 font-bold mt-1">{restaurant.schedule}</p>
+                  <div className="bg-slate-900/40 border border-white/5 p-6 rounded-[2rem] backdrop-blur-md flex items-start gap-4 transition-all duration-300 hover:border-white/10 hover:bg-slate-900/50">
+                    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
+                         style={{ backgroundColor: `${restaurant.themeColor}15`, color: restaurant.themeColor }}>
+                      <Clock className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Horario de Atención</span>
+                      <p className="text-sm text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.schedule}</p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -369,46 +482,46 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
             {/* CTA Button "Ver Menú" */}
             <button
               onClick={() => setCurrentTab("menu")}
-              className="w-full flex items-center justify-center gap-3 py-4.5 rounded-2xl text-sm font-black text-white transition-all transform hover:scale-[1.01] active:scale-[0.99] duration-200 shadow-xl"
+              className="w-full flex items-center justify-center gap-3 py-5 rounded-2xl text-base font-black text-white transition-all transform hover:scale-[1.01] hover:brightness-110 active:scale-[0.99] duration-300 shadow-xl relative overflow-hidden group"
               style={{ 
                 backgroundColor: restaurant.themeColor,
-                boxShadow: `0 10px 25px -5px ${restaurant.themeColor}33`
+                boxShadow: `0 15px 30px -5px ${restaurant.themeColor}44`
               }}
             >
-              <Utensils className="h-5 w-5" />
-              Ver Menú Digital QR
+              <div className="absolute inset-0 w-1/2 h-full bg-white/10 skew-x-[-25deg] -translate-x-full group-hover:animate-shimmer"></div>
+              <Utensils className="h-5.5 w-5.5 transition-transform group-hover:rotate-12 duration-300" />
+              <span className="tracking-wide">Ver Menú Digital</span>
             </button>
 
             {/* Contact Information Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {restaurant.whatsappNumber && (
                 <a
                   href={`https://wa.me/${restaurant.whatsappNumber.replace(/\D/g, "")}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="bg-slate-900/30 border border-slate-900/60 p-5 rounded-2xl flex items-center gap-4 hover:bg-slate-900/50 transition duration-200"
+                  className="bg-slate-900/30 border border-white/5 p-6 rounded-[2rem] flex items-center gap-5 hover:bg-slate-900/50 hover:border-white/10 transition-all duration-300 hover:scale-[1.02]"
                 >
-                  <div className="h-10 w-10 bg-green-500/10 text-green-400 rounded-xl flex items-center justify-center shrink-0">
-                    <MessageSquare className="h-5 w-5" />
+                  <div className="h-12 w-12 bg-green-500/10 text-green-400 rounded-2xl flex items-center justify-center shrink-0">
+                    <MessageSquare className="h-5.5 w-5.5" />
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">WhatsApp</span>
-                    <p className="text-xs text-slate-200 font-semibold mt-0.5">Enviar mensaje directo</p>
+                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">WhatsApp</span>
+                    <p className="text-xs text-slate-200 font-bold mt-1">Enviar mensaje directo</p>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Hacer consultas en línea</span>
                   </div>
                 </a>
               )}
 
               {restaurant.address && (
-                <div className="bg-slate-900/30 border border-slate-900/60 p-5 rounded-2xl flex items-center gap-4">
-                  <div className="h-10 w-10 bg-red-500/10 text-red-400 rounded-xl flex items-center justify-center shrink-0">
-                    <MapPin className="h-5 w-5" />
+                <div className="bg-slate-900/30 border border-white/5 p-6 rounded-[2rem] flex items-center gap-5 transition-all duration-300 hover:scale-[1.02]">
+                  <div className="h-12 w-12 bg-red-500/10 text-red-400 rounded-2xl flex items-center justify-center shrink-0">
+                    <MapPin className="h-5.5 w-5.5" />
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Dirección</span>
-                    <p className="text-xs text-slate-200 font-semibold mt-0.5 leading-relaxed">
-                      {restaurant.address}
-                      {restaurant.locality && <span className="block text-[10px] text-slate-400 mt-1">{restaurant.locality}</span>}
-                    </p>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Dirección</span>
+                    <p className="text-xs text-slate-200 font-bold mt-1 leading-relaxed truncate">{restaurant.address}</p>
+                    {restaurant.locality && <span className="block text-[10px] text-slate-400 mt-0.5">{restaurant.locality}</span>}
                   </div>
                 </div>
               )}
@@ -416,15 +529,15 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
             {/* Services & Facilities */}
             {restaurant.services && (
-              <div className="bg-slate-900/40 border border-slate-900/60 rounded-3xl p-6 backdrop-blur-md space-y-3">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Servicios y Facilidades</span>
-                <div className="flex flex-wrap gap-2">
+              <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-8 backdrop-blur-md space-y-4">
+                <span className="text-xs font-extrabold text-slate-500 uppercase tracking-[0.2em] block">Servicios y Facilidades</span>
+                <div className="flex flex-wrap gap-2.5">
                   {restaurant.services.split(",").map((service, idx) => (
                     <span 
                       key={idx} 
-                      className="px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-950 border border-slate-800 text-slate-350"
+                      className="px-4 py-2 rounded-full text-xs font-semibold bg-slate-950/80 border border-white/5 text-slate-350 hover:border-white/10 hover:text-white transition duration-200 flex items-center gap-1.5"
                     >
-                      ✓ {service.trim()}
+                      <span style={{ color: restaurant.themeColor }}>✓</span> {service.trim()}
                     </span>
                   ))}
                 </div>
@@ -433,17 +546,17 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
             {/* Contact Numbers */}
             {restaurant.contactNumbers && (
-              <div className="bg-slate-900/40 border border-slate-900/60 rounded-3xl p-6 backdrop-blur-md space-y-3">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Otros Números de Contacto</span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-8 backdrop-blur-md space-y-4">
+                <span className="text-xs font-extrabold text-slate-500 uppercase tracking-[0.2em] block">Otros Números de Contacto</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {restaurant.contactNumbers.split(",").map((phone, idx) => (
                     <a
                       key={idx}
                       href={`tel:${phone.replace(/\s+/g, "")}`}
-                      className="flex items-center gap-3 px-4 py-3 rounded-xl bg-slate-950 border border-slate-850 hover:bg-slate-900 text-xs font-bold text-slate-300 hover:text-white transition duration-200"
+                      className="flex items-center gap-3.5 px-5 py-4 rounded-2xl bg-slate-950/80 border border-white/5 hover:border-white/10 hover:bg-slate-900 text-sm font-bold text-slate-300 hover:text-white transition-all duration-300 hover:scale-[1.01]"
                     >
-                      <svg className="h-4 w-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
-                      {phone.trim()}
+                      <Phone className="h-4.5 w-4.5 text-slate-400 shrink-0" />
+                      <span>{phone.trim()}</span>
                     </a>
                   ))}
                 </div>
@@ -452,17 +565,17 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
             {/* Social Networks Section */}
             {(restaurant.instagram || restaurant.facebook || restaurant.tiktok || restaurant.ubicameUrl) && (
-              <div className="bg-slate-900/20 border border-slate-900/50 rounded-3xl p-6 flex flex-col items-center gap-4">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Enlaces y Redes Sociales</span>
+              <div className="bg-slate-900/20 border border-white/5 rounded-[2rem] p-8 flex flex-col items-center gap-5 backdrop-blur-md">
+                <span className="text-xs font-extrabold text-slate-500 uppercase tracking-[0.2em]">Enlaces y Redes Sociales</span>
                 <div className="flex gap-4 flex-wrap justify-center">
                   {restaurant.instagram && (
                     <a
                       href={restaurant.instagram.startsWith("http") ? restaurant.instagram : `https://instagram.com/${restaurant.instagram.replace("@", "")}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white hover:border-pink-500/50 hover:shadow-[0_0_15px_rgba(236,72,153,0.3)] transition-all duration-300"
+                      className="h-13 w-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-pink-500/50 hover:bg-gradient-to-tr hover:from-yellow-600/10 hover:via-pink-600/10 hover:to-purple-600/10 hover:shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all duration-300"
                     >
-                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+                      <svg className="h-5.5 w-5.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
                     </a>
                   )}
                   {restaurant.facebook && (
@@ -470,9 +583,9 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                       href={restaurant.facebook.startsWith("http") ? restaurant.facebook : `https://facebook.com/${restaurant.facebook}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white hover:border-blue-500/50 hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-300"
+                      className="h-13 w-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-blue-500/50 hover:bg-blue-500/5 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] transition-all duration-300"
                     >
-                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                      <svg className="h-5.5 w-5.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
                     </a>
                   )}
                   {restaurant.tiktok && (
@@ -480,9 +593,9 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                       href={restaurant.tiktok.startsWith("http") ? restaurant.tiktok : `https://tiktok.com/${restaurant.tiktok}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white hover:border-slate-100/50 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] transition-all duration-300"
+                      className="h-13 w-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-slate-100/50 hover:bg-white/5 hover:shadow-[0_0_20px_rgba(255,255,255,0.2)] transition-all duration-300"
                     >
-                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
+                      <svg className="h-5.5 w-5.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
                     </a>
                   )}
                   {restaurant.ubicameUrl && (
@@ -490,10 +603,10 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                       href={restaurant.ubicameUrl.startsWith("http") ? restaurant.ubicameUrl : `https://${restaurant.ubicameUrl}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="px-4 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center gap-2 text-slate-400 hover:text-white hover:border-red-500/55 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)] transition-all duration-300 text-xs font-black"
+                      className="px-5 h-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center gap-2.5 text-slate-400 hover:text-white hover:border-red-500/55 hover:bg-red-500/5 hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] transition-all duration-300 text-xs font-black"
                     >
-                      <svg className="h-4.5 w-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                      Ubicame.info
+                      <Globe className="h-4.5 w-4.5 text-slate-400 shrink-0" />
+                      <span>Ubicame.info</span>
                     </a>
                   )}
                 </div>
@@ -506,69 +619,224 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
             <p className="text-sm">Este restaurante aún no tiene categorías ni platos disponibles.</p>
           </div>
         ) : (
-          restaurant.categories.map((cat) => (
-            <div 
-              key={cat.id}
-              ref={(el) => { categoryRefs.current[cat.id] = el; }}
-              className="scroll-mt-32 space-y-4"
-            >
-              <h2 className="text-lg font-bold text-white tracking-wide border-l-4 pl-3 flex items-center justify-between"
-                  style={{ borderColor: restaurant.themeColor }}>
-                {cat.name}
-                <span className="text-[10px] text-slate-500 font-normal uppercase tracking-widest">{cat.dishes.length} Opciones</span>
-              </h2>
-
-              <div className="grid grid-cols-1 gap-4">
-                {cat.dishes.map((dish) => (
-                  <div 
-                    key={dish.id}
-                    className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-3xl p-4 flex gap-4 transition-all duration-300 relative group overflow-hidden ${
-                      dish.isAvailable ? "hover:border-slate-800" : "opacity-50"
-                    }`}
-                  >
-                    {/* Item Image */}
-                    <div className="h-24 w-24 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
-                      {dish.imageUrl ? (
-                        <img 
-                          src={dish.imageUrl} 
-                          alt={dish.name} 
-                          className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      ) : (
-                        <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
-                          <Utensils className="h-8 w-8" />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Item Details */}
-                    <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
-                      <div>
-                        <h3 className="font-extrabold text-white text-sm group-hover:text-red-400 transition-colors truncate">{dish.name}</h3>
-                        <p className="text-slate-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{dish.description || "Nuestra receta clásica seleccionada."}</p>
-                      </div>
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-sm font-black text-white" style={{ color: restaurant.themeColor }}>${dish.price.toFixed(2)}</span>
-                        <div className="flex justify-end pt-2">
-                          {dish.isAvailable ? (
-                            <button
-                              onClick={() => addToCart(dish)}
-                              className="inline-flex items-center gap-1 text-[11px] font-bold px-3 py-1.5 rounded-full text-white shadow-lg transition-transform active:scale-95 duration-200"
-                              style={{ backgroundColor: restaurant.themeColor }}
-                            >
-                              <Plus className="h-3 w-3" /> Agregar
-                            </button>
-                          ) : (
-                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">Agotado</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+          <div className="space-y-10">
+            {/* Table Selector Banner */}
+            <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-6 backdrop-blur-md flex items-center justify-between gap-4" style={{ fontFamily: 'var(--font-outfit)' }}>
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center shrink-0" style={{ backgroundColor: `${restaurant.themeColor}15`, color: restaurant.themeColor }}>
+                  <Utensils className="h-5 w-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Tu Ubicación / Mesa</span>
+                  <p className="text-sm text-slate-200 font-bold mt-0.5">
+                    {selectedTable ? `Mesa #${selectedTable}` : "Para llevar / Llevar a casa"}
+                  </p>
+                </div>
               </div>
+              <button 
+                onClick={() => setIsTableModalOpen(true)}
+                className="px-4 py-2 rounded-xl text-xs font-black text-white hover:brightness-110 transition active:scale-95 duration-200"
+                style={{ backgroundColor: restaurant.themeColor }}
+              >
+                Cambiar
+              </button>
             </div>
-          ))
+
+            {/* Popular Dishes Slider */}
+            {(() => {
+              const allDishes = restaurant.categories.flatMap(cat => cat.dishes);
+              const popularDishes = allDishes.filter(dish => 
+                ["Pizza Margherita", "Pizza Pepperoni", "Lasagna de Carne", "Fettuccine Alfredo"].includes(dish.name)
+              ).slice(0, 4);
+              const fallbackPopularDishes = popularDishes.length > 0 ? popularDishes : allDishes.slice(0, 3);
+              
+              if (fallbackPopularDishes.length === 0) return null;
+              
+              return (
+                <div className="space-y-4" style={{ fontFamily: 'var(--font-outfit)' }}>
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-extrabold text-white tracking-wide flex items-center gap-1.5">
+                      <span>Más Populares</span>
+                      <span className="text-amber-500 animate-pulse">🔥</span>
+                    </h2>
+                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.15em]">Los favoritos</span>
+                  </div>
+                  
+                  <div className="flex gap-4 overflow-x-auto scrollbar-none pb-4">
+                    {fallbackPopularDishes.map((dish) => (
+                      <div 
+                        key={dish.id}
+                        className="w-48 shrink-0 bg-slate-900/40 border border-white/5 rounded-3xl p-3 flex flex-col gap-2 relative group overflow-hidden transition duration-300 hover:border-white/10"
+                      >
+                        <div className="h-32 w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
+                          {dish.imageUrl ? (
+                            <img 
+                              src={dish.imageUrl} 
+                              alt={dish.name} 
+                              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                              <Utensils className="h-8 w-8" />
+                            </div>
+                          )}
+                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-950/80 text-amber-400 border border-amber-500/30 flex items-center gap-0.5 backdrop-blur-sm">
+                            <Sparkles className="h-2.5 w-2.5" /> Popular
+                          </div>
+                        </div>
+                        <div className="flex-1 flex flex-col justify-between min-w-0">
+                          <div>
+                            <h3 className="font-extrabold text-white text-xs truncate group-hover:text-red-400 transition-colors">{dish.name}</h3>
+                            <p className="text-[10px] text-slate-450 mt-1 line-clamp-1 leading-normal">{dish.description || "Receta clásica."}</p>
+                          </div>
+                          <div className="flex items-center justify-between pt-2">
+                            <span className="text-xs font-black text-white" style={{ color: restaurant.themeColor }}>
+                              ${dish.price.toFixed(2)}
+                            </span>
+                            {dish.isAvailable ? (
+                              <button
+                                onClick={() => addToCart(dish)}
+                                className="p-1.5 rounded-xl text-white shadow-lg transition transform active:scale-90 duration-200"
+                                style={{ backgroundColor: restaurant.themeColor }}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </button>
+                            ) : (
+                              <span className="text-[9px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2 py-1 rounded-full">Agotado</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Categorías y Platos */}
+            {restaurant.categories.map((cat) => {
+              const isComboCategory = cat.name.toLowerCase().includes("combo");
+              
+              return (
+                <div 
+                  key={cat.id}
+                  ref={(el) => { categoryRefs.current[cat.id] = el; }}
+                  className="scroll-mt-32 space-y-4"
+                >
+                  <h2 className="text-lg font-bold text-white tracking-wide border-l-4 pl-3 flex items-center justify-between"
+                      style={{ borderColor: restaurant.themeColor }}>
+                    {cat.name}
+                    <span className="text-[10px] text-slate-500 font-normal uppercase tracking-widest">{cat.dishes.length} Opciones</span>
+                  </h2>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {cat.dishes.map((dish) => {
+                      if (isComboCategory) {
+                        return (
+                          <div 
+                            key={dish.id}
+                            className={`relative group overflow-hidden bg-gradient-to-br from-slate-900/80 to-slate-950/85 backdrop-blur-md rounded-[2rem] p-5 flex gap-5 transition-all duration-300 border ${
+                              dish.isAvailable 
+                                ? "border-amber-500/20 hover:border-amber-500/40 hover:shadow-[0_0_20px_rgba(245,158,11,0.08)]" 
+                                : "opacity-50 border-slate-900"
+                            }`}
+                          >
+                            <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-bl-full pointer-events-none"></div>
+                            
+                            <div className="h-28 w-28 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
+                              {dish.imageUrl ? (
+                                <img 
+                                  src={dish.imageUrl} 
+                                  alt={dish.name} 
+                                  className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                              ) : (
+                                <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                                  <Utensils className="h-10 w-10" />
+                                </div>
+                              )}
+                              <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-500 text-slate-950 flex items-center gap-0.5">
+                                ★ Combo Ahorro
+                              </div>
+                            </div>
+
+                            <div className="flex-1 flex flex-col justify-between py-0.5 min-w-0">
+                              <div>
+                                <h3 className="font-extrabold text-white text-base group-hover:text-amber-400 transition-colors truncate">{dish.name}</h3>
+                                <p className="text-slate-400 text-xs mt-1.5 leading-relaxed line-clamp-3">{dish.description || "Pack especial seleccionado."}</p>
+                              </div>
+                              <div className="flex items-center justify-between pt-2">
+                                <span className="text-base font-black text-amber-400">${dish.price.toFixed(2)}</span>
+                                <div>
+                                  {dish.isAvailable ? (
+                                    <button
+                                      onClick={() => addToCart(dish)}
+                                      className="inline-flex items-center gap-1 text-[11px] font-black px-4 py-2 rounded-xl text-white shadow-lg transition transform active:scale-95 duration-200"
+                                      style={{ backgroundColor: restaurant.themeColor }}
+                                    >
+                                      <Plus className="h-3.5 w-3.5" /> Agregar Combo
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">Agotado</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div 
+                          key={dish.id}
+                          className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-3xl p-4 flex gap-4 transition-all duration-300 relative group overflow-hidden ${
+                            dish.isAvailable ? "hover:border-slate-800" : "opacity-50"
+                          }`}
+                        >
+                          <div className="h-24 w-24 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
+                            {dish.imageUrl ? (
+                              <img 
+                                src={dish.imageUrl} 
+                                alt={dish.name} 
+                                className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                            ) : (
+                              <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                                <Utensils className="h-8 w-8" />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
+                            <div>
+                              <h3 className="font-extrabold text-white text-sm group-hover:text-red-400 transition-colors truncate">{dish.name}</h3>
+                              <p className="text-slate-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{dish.description || "Nuestra receta clásica seleccionada."}</p>
+                            </div>
+                            <div className="flex items-center justify-between pt-1">
+                              <span className="text-sm font-black text-white" style={{ color: restaurant.themeColor }}>${dish.price.toFixed(2)}</span>
+                              <div className="flex justify-end pt-2">
+                                {dish.isAvailable ? (
+                                  <button
+                                    onClick={() => addToCart(dish)}
+                                    className="inline-flex items-center gap-1 text-[11px] font-bold px-3 py-1.5 rounded-full text-white shadow-lg transition-transform active:scale-95 duration-200"
+                                    style={{ backgroundColor: restaurant.themeColor }}
+                                  >
+                                    <Plus className="h-3 w-3" /> Agregar
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">Agotado</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </main>
 
@@ -783,20 +1051,136 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               </div>
             )}
 
-            {/* Order Confirmation */}
-            <div className="bg-slate-950/40 border border-slate-900 p-4 rounded-2xl flex justify-between items-center gap-4">
-              <div>
-                <span className="text-xs text-slate-400">Total Pedido</span>
-                <p className="text-base font-extrabold text-white">${cartTotal.toFixed(2)}</p>
+            {/* Propina Selector */}
+            <div className="space-y-2" style={{ fontFamily: 'var(--font-outfit)' }}>
+              <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Añadir Propina para el Personal</span>
+              <div className="grid grid-cols-4 gap-2">
+                {[0, 5, 10, 15].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => setTipPercentage(pct)}
+                    className={`py-2 rounded-xl text-xs font-black border transition duration-200 ${
+                      tipPercentage === pct
+                        ? "text-white border-transparent"
+                        : "text-slate-400 bg-slate-950/40 border-slate-800 hover:text-white"
+                    }`}
+                    style={{ backgroundColor: tipPercentage === pct ? restaurant.themeColor : undefined }}
+                  >
+                    {pct === 0 ? "Ninguna" : `${pct}%`}
+                  </button>
+                ))}
               </div>
-              <button
-                onClick={() => handleSendOrder(paymentMethod)}
-                className="flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold text-white shadow-lg transition-transform active:scale-95 duration-200"
-                style={{ backgroundColor: restaurant.themeColor }}
+            </div>
+
+            {/* Invoice Breakdown */}
+            {(() => {
+              const isTableOrder = !!selectedTable;
+              const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
+              const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
+
+              const subtotal = cartTotal;
+              const iva = applyIva ? subtotal * (restaurant.ivaPercent / 100) : 0;
+              const serviceCharge = applyService ? subtotal * (restaurant.servicePercent / 100) : 0;
+              const tip = subtotal * (tipPercentage / 100);
+              const total = subtotal + iva + serviceCharge + tip;
+
+              return (
+                <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-2.5 text-xs" style={{ fontFamily: 'var(--font-outfit)' }}>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Subtotal:</span>
+                    <span className="font-bold text-slate-350">${subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>IVA ({restaurant.ivaPercent}%):</span>
+                    <span className="font-bold text-slate-350">${iva.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Servicio ({restaurant.servicePercent}%):</span>
+                    <span className="font-bold text-slate-350">${serviceCharge.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Propina ({tipPercentage}%):</span>
+                    <span className="font-bold text-slate-350">${tip.toFixed(2)}</span>
+                  </div>
+                  <div className="border-t border-slate-800 pt-2.5 flex justify-between text-sm font-black text-white">
+                    <span>Total a Pagar:</span>
+                    <span style={{ color: restaurant.themeColor }}>
+                      ${total.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Confirm button */}
+            <button
+              onClick={() => handleSendOrder(paymentMethod)}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200"
+              style={{ backgroundColor: restaurant.themeColor }}
+            >
+              <Send className="h-4 w-4" />
+              Confirmar y Enviar Pedido
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Table Selection Modal */}
+      {isTableModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
+          <div className="bg-slate-900 border border-white/5 rounded-[2rem] p-6 max-w-sm w-full space-y-6 shadow-2xl relative">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-black text-white">Selecciona tu Mesa</h3>
+              <button 
+                onClick={() => setIsTableModalOpen(false)}
+                className="text-slate-400 hover:text-white transition"
               >
-                <Send className="h-4 w-4" />
-                Confirmar y WhatsApp
+                ✕
               </button>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Elige tu número de mesa para llevar tu pedido directamente a tu lugar. Si vas a pedir para llevar, selecciona "Llevar".
+            </p>
+            
+            <div className="grid grid-cols-4 gap-2.5 max-h-56 overflow-y-auto pr-1">
+              <button
+                onClick={() => {
+                  setSelectedTable("");
+                  setIsTableModalOpen(false);
+                }}
+                className={`col-span-4 py-3 rounded-xl text-xs font-black tracking-wide uppercase border transition duration-200 ${
+                  selectedTable === "" 
+                    ? "text-white border-transparent" 
+                    : "text-slate-400 bg-slate-950/60 border-white/5 hover:text-white"
+                }`}
+                style={{ backgroundColor: selectedTable === "" ? restaurant.themeColor : undefined }}
+              >
+                🛍️ Para Llevar
+              </button>
+              {(() => {
+                const tablesList = restaurant.tablesConfig 
+                  ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)
+                  : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+                
+                return tablesList.map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => {
+                      setSelectedTable(num);
+                      setIsTableModalOpen(false);
+                    }}
+                    className={`py-3 rounded-xl text-sm font-black border transition duration-200 ${
+                      selectedTable === num 
+                        ? "text-white border-transparent" 
+                        : "text-slate-350 bg-slate-950/60 border-white/5 hover:text-white"
+                    }`}
+                    style={{ backgroundColor: selectedTable === num ? restaurant.themeColor : undefined }}
+                  >
+                    {num}
+                  </button>
+                ));
+              })()}
             </div>
           </div>
         </div>

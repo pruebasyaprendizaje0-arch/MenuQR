@@ -24,6 +24,12 @@ export default async function AdminPage() {
           },
         },
       },
+      orders: {
+        orderBy: { createdAt: "desc" },
+        include: {
+          items: true
+        }
+      }
     },
   });
 
@@ -59,6 +65,12 @@ export default async function AdminPage() {
         description: d.description || null,
         imageUrl: d.imageUrl || null
       }))
+    })),
+    orders: restaurant.orders.map(o => ({
+      ...o,
+      createdAt: o.createdAt.toISOString(),
+      updatedAt: o.updatedAt.toISOString(),
+      items: o.items
     }))
   };
 
