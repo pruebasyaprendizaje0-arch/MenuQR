@@ -90,7 +90,6 @@ type Restaurant = {
   paymentQrUrl: string | null;
   whatsappNumber: string;
   themeColor: string;
-  password: string;
   trialEndsAt: string | Date;
   instagram: string | null;
   facebook: string | null;
@@ -1129,19 +1128,6 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                     name="paymentQrUrl"
                     defaultValue={restaurant.paymentQrUrl || ""}
                     placeholder="https://..."
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                </div>
-              </div>
-
-              <div className="border-t border-slate-800/80 pt-6">
-                <div className="max-w-md">
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Contraseña del Panel Admin</label>
-                  <input
-                    type="password"
-                    name="password"
-                    defaultValue={restaurant.password}
-                    required
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   />
                 </div>

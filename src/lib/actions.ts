@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/db";
-import { setUserSession, clearUserSession, setSuperAdminSession, clearSuperAdminSession } from "@/lib/auth";
+import { setUserSession, clearUserSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -152,6 +152,7 @@ export async function logoutUserAction() {
 
 // Restaurant Action
 export async function updateRestaurantAction(restaurantId: string, formData: FormData) {
+  await refreshUserSession();
   const name = formData.get("name") as string;
   const slug = formData.get("slug") as string;
   const whatsappNumber = formData.get("whatsappNumber") as string;
@@ -231,6 +232,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
 
 // Category Actions
 export async function createCategoryAction(restaurantId: string, formData: FormData) {
+  await refreshUserSession();
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
 
@@ -249,6 +251,7 @@ export async function createCategoryAction(restaurantId: string, formData: FormD
 }
 
 export async function updateCategoryAction(categoryId: string, formData: FormData) {
+  await refreshUserSession();
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
 
@@ -267,6 +270,7 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
 }
 
 export async function deleteCategoryAction(categoryId: string) {
+  await refreshUserSession();
   const deleted = await prisma.category.delete({
     where: { id: categoryId },
     include: { restaurant: true },
@@ -279,6 +283,7 @@ export async function deleteCategoryAction(categoryId: string) {
 
 // Dish Actions
 export async function createDishAction(categoryId: string, formData: FormData) {
+  await refreshUserSession();
   const name = formData.get("name") as string;
   const description = formData.get("description") as string;
   const price = parseFloat(formData.get("price") as string || "0");
@@ -317,6 +322,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
 }
 
 export async function updateDishAction(dishId: string, formData: FormData) {
+  await refreshUserSession();
   const name = formData.get("name") as string;
   const description = formData.get("description") as string;
   const price = parseFloat(formData.get("price") as string || "0");
@@ -352,6 +358,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
 }
 
 export async function deleteDishAction(dishId: string) {
+  await refreshUserSession();
   const deleted = await prisma.dish.delete({
     where: { id: dishId },
     include: {
@@ -368,6 +375,7 @@ export async function deleteDishAction(dishId: string) {
 
 export async function toggleDishAvailabilityAction(dishId: string, isAvailable: boolean) {
   try {
+    await refreshUserSession();
     const updated = await prisma.dish.update({
       where: { id: dishId },
       data: { isAvailable },
@@ -535,6 +543,7 @@ export async function createOrderAction(data: {
 
 export async function updateOrderStatusAction(orderId: string, status: string) {
   try {
+    await refreshUserSession();
     const order = await prisma.order.update({
       where: { id: orderId },
       data: { status },
@@ -552,6 +561,7 @@ export async function updateOrderStatusAction(orderId: string, status: string) {
 
 export async function updateRestaurantTablesAction(restaurantId: string, tablesConfig: string) {
   try {
+    await refreshUserSession();
     const restaurant = await prisma.restaurant.update({
       where: { id: restaurantId },
       data: { tablesConfig }
@@ -578,6 +588,7 @@ export async function updateRestaurantChargesConfigAction(
   }
 ) {
   try {
+    await refreshUserSession();
     const restaurant = await prisma.restaurant.update({
       where: { id: restaurantId },
       data: {

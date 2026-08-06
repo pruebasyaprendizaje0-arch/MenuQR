@@ -20,7 +20,9 @@ import {
   Phone,
   Globe,
   Store,
-  BookOpen
+  BookOpen,
+  Share2,
+  Check
 } from "lucide-react";
 
 type Dish = {
@@ -57,9 +59,14 @@ type Restaurant = {
   specialty: string | null;
   services: string | null;
   contactNumbers: string | null;
+  ubicameUrl: string | null;
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
+  ivaOnTable: boolean;
+  ivaOnTakeout: boolean;
+  serviceOnTable: boolean;
+  serviceOnTakeout: boolean;
   categories: Category[];
 };
 
@@ -80,6 +87,35 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
   const [selectedTable, setSelectedTable] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  const profileUrl =
+    typeof window !== "undefined" ? `${window.location.origin}/${restaurant.slug}` : `/${restaurant.slug}`;
+
+  const handleShare = async () => {
+    const shareData = {
+      title: restaurant.name,
+      text: `Mira el menú digital de ${restaurant.name}`,
+      url: profileUrl,
+    };
+
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch {
+        // User cancelled or sharing unavailable — fall back to copy link
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(profileUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    } catch {
+      alert("No se pudo copiar el enlace.");
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -491,6 +527,25 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               <div className="absolute inset-0 w-1/2 h-full bg-white/10 skew-x-[-25deg] -translate-x-full group-hover:animate-shimmer"></div>
               <Utensils className="h-5.5 w-5.5 transition-transform group-hover:rotate-12 duration-300" />
               <span className="tracking-wide">Ver Menú Digital</span>
+            </button>
+
+            {/* Share Button */}
+            <button
+              onClick={handleShare}
+              className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl text-sm font-black text-white transition-all transform hover:scale-[1.01] hover:bg-slate-800 active:scale-[0.99] duration-300 border border-white/10 bg-slate-900/40 backdrop-blur-md shadow-lg relative overflow-hidden group"
+              title="Compartir este perfil"
+            >
+              {shareCopied ? (
+                <>
+                  <Check className="h-5 w-5 text-green-400" />
+                  <span className="tracking-wide text-green-400">¡Enlace copiado!</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="h-5 w-5 transition-transform group-hover:rotate-12 duration-300" style={{ color: restaurant.themeColor }} />
+                  <span className="tracking-wide">Compartir Perfil</span>
+                </>
+              )}
             </button>
 
             {/* Contact Information Cards */}

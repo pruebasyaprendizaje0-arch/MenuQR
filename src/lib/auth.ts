@@ -26,6 +26,24 @@ export async function clearUserSession() {
   cookieStore.delete("session_token");
 }
 
+// Re-issue the session cookie from the current valid token.
+// Only callable inside Server Actions / Route Handlers (never in Server Component render).
+export async function refreshUserSession() {
+  const cookieStore = cookies();
+  const token = cookieStore.get("session_token")?.value;
+  if (!token) return;
+  const payload = verifyToken(token);
+  if (!payload) return;
+  const freshToken = signToken({ userId: payload.userId, email: payload.email });
+  cookieStore.set("session_token", freshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+    path: "/",
+  });
+}
+
 // Super Admin Session
 export async function getSuperAdminSession() {
   const cookieStore = cookies();
