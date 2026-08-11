@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { createOrderAction } from "@/lib/actions";
+import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction } from "@/lib/actions";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -22,7 +22,10 @@ import {
   Store,
   BookOpen,
   Share2,
-  Check
+  Check,
+  Camera,
+  Upload,
+  Loader2
 } from "lucide-react";
 
 type Dish = {
@@ -46,6 +49,8 @@ type Restaurant = {
   slug: string;
   name: string;
   logoUrl: string | null;
+  coverUrl: string | null;
+  isOwner?: boolean;
   paymentQrUrl: string | null;
   whatsappNumber: string;
   themeColor: string;
@@ -88,6 +93,55 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const [selectedTable, setSelectedTable] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+
+  // States for Logo and Cover upload
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [logoModalOpen, setLogoModalOpen] = useState(false);
+  const [coverModalOpen, setCoverModalOpen] = useState(false);
+
+  // Find the first dish that has an imageUrl to use as a beautiful cover background!
+  const firstDishWithImage = restaurant.categories
+    .flatMap((c) => c.dishes)
+    .find((d) => d.imageUrl);
+
+  const coverBg = restaurant.coverUrl || firstDishWithImage?.imageUrl || restaurant.logoUrl;
+
+  const handleLogoUpload = async (file: File) => {
+    setUploadingLogo(true);
+    const formData = new FormData();
+    formData.append("logoFile", file);
+    try {
+      const res = await updateLogoDirectAction(restaurant.id, formData);
+      if (res.error) {
+        alert(res.error);
+      } else {
+        window.location.reload();
+      }
+    } catch (e) {
+      alert("Error al subir el logo.");
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const handleCoverUpload = async (file: File) => {
+    setUploadingCover(true);
+    const formData = new FormData();
+    formData.append("coverFile", file);
+    try {
+      const res = await updateCoverDirectAction(restaurant.id, formData);
+      if (res.error) {
+        alert(res.error);
+      } else {
+        window.location.reload();
+      }
+    } catch (e) {
+      alert("Error al subir la portada.");
+    } finally {
+      setUploadingCover(false);
+    }
+  };
 
   const profileUrl =
     typeof window !== "undefined" ? `${window.location.origin}/${restaurant.slug}` : `/${restaurant.slug}`;
@@ -433,12 +487,14 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
         {currentTab === "profile" ? (
           <div className="space-y-8 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
             {/* Cover Banner Card */}
-            <div className="relative h-56 rounded-[2rem] overflow-hidden bg-slate-900/60 border border-white/5 shadow-2xl backdrop-blur-md">
-              {restaurant.logoUrl ? (
+            <div className="relative h-56 rounded-[2rem] overflow-hidden bg-slate-900/60 border border-white/5 shadow-2xl backdrop-blur-md group/cover">
+              {coverBg ? (
                 <img 
-                  src={restaurant.logoUrl} 
+                  src={coverBg} 
                   alt="" 
-                  className="absolute inset-0 w-full h-full object-cover filter blur-2xl opacity-25 scale-110" 
+                  className={`absolute inset-0 w-full h-full object-cover transition-all duration-300 ${
+                    coverBg === restaurant.logoUrl ? "filter blur-2xl opacity-25 scale-110" : "opacity-45"
+                  }`} 
                 />
               ) : (
                 <div 
@@ -448,23 +504,55 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               )}
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent"></div>
               
+              {/* Owner Controls for Cover */}
+              {restaurant.isOwner && (
+                <button 
+                  onClick={() => setCoverModalOpen(true)}
+                  className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 bg-black/60 hover:bg-black/80 border border-white/10 rounded-xl text-[10px] sm:text-xs font-bold text-white transition-all backdrop-blur-sm cursor-pointer shadow-lg"
+                >
+                  {uploadingCover ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Camera className="h-3.5 w-3.5 text-amber-500" />
+                  )}
+                  <span>Cambiar Fondo</span>
+                </button>
+              )}
+
               <div className="absolute bottom-6 left-6 right-6 sm:bottom-8 sm:left-8 sm:right-8 flex items-center gap-5">
-                <div className="relative group shrink-0">
-                  <div className="absolute -inset-1 bg-gradient-to-tr rounded-3xl opacity-75 blur-md group-hover:opacity-100 transition duration-300"
+                <div className="relative group/logo shrink-0">
+                  <div className="absolute -inset-1 bg-gradient-to-tr rounded-3xl opacity-75 blur-md group-hover/logo:opacity-100 transition duration-300"
                        style={{ backgroundImage: `linear-gradient(to top right, ${restaurant.themeColor}, #ffffff)` }}></div>
                   {restaurant.logoUrl ? (
                     <img 
                       src={restaurant.logoUrl} 
                       alt={restaurant.name} 
-                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl object-cover border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover:scale-105"
+                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl object-cover border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover/logo:scale-105"
                     />
                   ) : (
                     <div 
-                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl flex items-center justify-center font-black text-white text-2xl border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover:scale-105"
+                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl flex items-center justify-center font-black text-white text-2xl border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover/logo:scale-105"
                       style={{ backgroundColor: restaurant.themeColor }}
                     >
                       {restaurant.name.charAt(0)}
                     </div>
+                  )}
+
+                  {/* Owner Controls for Logo */}
+                  {restaurant.isOwner && (
+                    <button 
+                      onClick={() => setLogoModalOpen(true)}
+                      className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-3xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-200 z-20 cursor-pointer text-white"
+                    >
+                      {uploadingLogo ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <>
+                          <Camera className="h-5 w-5 text-amber-500" />
+                          <span className="text-[9px] font-bold mt-1">Editar</span>
+                        </>
+                      )}
+                    </button>
                   )}
                 </div>
                 <div className="mb-1">
@@ -1237,6 +1325,118 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                 ));
               })()}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Logo Upload Modal */}
+      {logoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 max-w-sm w-full space-y-5 shadow-2xl">
+            <div className="text-center space-y-1.5">
+              <h3 className="text-lg font-bold text-white">Actualizar Logo</h3>
+              <p className="text-xs text-slate-400">Selecciona cómo deseas subir el logo de tu restaurante.</p>
+            </div>
+            
+            <div className="flex flex-col gap-3">
+              {/* Gallery Button */}
+              <label className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-slate-800 hover:bg-slate-750 text-white rounded-2xl cursor-pointer font-bold text-sm transition-all border border-white/5 active:scale-95">
+                <Upload className="h-4.5 w-4.5 text-amber-500" />
+                Elegir de Galería
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleLogoUpload(e.target.files[0]);
+                      setLogoModalOpen(false);
+                    }
+                  }}
+                />
+              </label>
+              
+              {/* Camera Button */}
+              <label className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-2xl cursor-pointer font-bold text-sm transition-all shadow-lg active:scale-95">
+                <Camera className="h-4.5 w-4.5" />
+                Tomar Foto con Celular
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  capture="environment" 
+                  className="hidden" 
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleLogoUpload(e.target.files[0]);
+                      setLogoModalOpen(false);
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            
+            <button 
+              onClick={() => setLogoModalOpen(false)}
+              className="w-full text-center text-xs text-slate-500 hover:text-slate-400 font-bold py-2"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Cover Upload Modal */}
+      {coverModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 max-w-sm w-full space-y-5 shadow-2xl">
+            <div className="text-center space-y-1.5">
+              <h3 className="text-lg font-bold text-white">Actualizar Fondo de Portada</h3>
+              <p className="text-xs text-slate-400">Selecciona cómo deseas subir el fondo de portada.</p>
+            </div>
+            
+            <div className="flex flex-col gap-3">
+              {/* Gallery Button */}
+              <label className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-slate-800 hover:bg-slate-750 text-white rounded-2xl cursor-pointer font-bold text-sm transition-all border border-white/5 active:scale-95">
+                <Upload className="h-4.5 w-4.5 text-amber-500" />
+                Elegir de Galería
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  className="hidden" 
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleCoverUpload(e.target.files[0]);
+                      setCoverModalOpen(false);
+                    }
+                  }}
+                />
+              </label>
+              
+              {/* Camera Button */}
+              <label className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-2xl cursor-pointer font-bold text-sm transition-all shadow-lg active:scale-95">
+                <Camera className="h-4.5 w-4.5" />
+                Tomar Foto con Celular
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  capture="environment" 
+                  className="hidden" 
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      handleCoverUpload(e.target.files[0]);
+                      setCoverModalOpen(false);
+                    }
+                  }}
+                />
+              </label>
+            </div>
+            
+            <button 
+              onClick={() => setCoverModalOpen(false)}
+              className="w-full text-center text-xs text-slate-500 hover:text-slate-400 font-bold py-2"
+            >
+              Cancelar
+            </button>
           </div>
         </div>
       )}

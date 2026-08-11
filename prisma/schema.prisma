@@ -31,6 +31,7 @@ model Restaurant {
   whatsapp       String
   themeColor     String     @default("#ef4444") // Red/orange default
   logoUrl        String?
+  coverUrl       String?    // Background cover image URL
   qrCobroUrl     String?    // QR image for payments like Deuna
   instagram      String?
   facebook       String?

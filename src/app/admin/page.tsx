@@ -57,6 +57,7 @@ export default async function AdminPage() {
     logoUrl: restaurant.logoUrl,
     whatsappNumber: restaurant.whatsapp,
     paymentQrUrl: restaurant.qrCobroUrl,
+    coverUrl: (restaurant as any).coverUrl ?? null,
     trialEndsAt: restaurant.trialEndsAt.toISOString(),
     // Safe defaults for new fields — guards against un-migrated production DB
     tablesConfig: (restaurant as any).tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",

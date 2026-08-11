@@ -170,12 +170,20 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const contactNumbers = formData.get("contactNumbers") as string;
   const ubicameUrl = formData.get("ubicameUrl") as string;
 
-  const logoFile = formData.get("logoFile") as File | null;
+  const logoFile = (formData.get("logoFile") as File | null) || (formData.get("logoFileCamera") as File | null);
   let logoUrl = formData.get("logoUrl") as string;
 
   const uploadedLogo = await saveUploadedFile(logoFile);
   if (uploadedLogo) {
     logoUrl = uploadedLogo;
+  }
+
+  const coverFile = (formData.get("coverFile") as File | null) || (formData.get("coverFileCamera") as File | null);
+  let coverUrl = formData.get("coverUrl") as string;
+
+  const uploadedCover = await saveUploadedFile(coverFile);
+  if (uploadedCover) {
+    coverUrl = uploadedCover;
   }
 
   const paymentQrFile = formData.get("paymentQrFile") as File | null;
@@ -204,6 +212,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       whatsapp: whatsappNumber,
       themeColor,
       logoUrl: logoUrl || null,
+      coverUrl: coverUrl || null,
       qrCobroUrl: paymentQrUrl || null,
       instagram: instagram || null,
       facebook: facebook || null,
@@ -228,6 +237,44 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   revalidatePath("/admin");
   revalidatePath(`/${slug}`);
   return { success: true };
+}
+
+export async function updateLogoDirectAction(restaurantId: string, formData: FormData) {
+  await refreshUserSession();
+  const logoFile = formData.get("logoFile") as File | null;
+  const uploadedLogo = await saveUploadedFile(logoFile);
+  
+  if (!uploadedLogo) {
+    return { error: "No se pudo guardar el archivo de logo." };
+  }
+
+  const updated = await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: { logoUrl: uploadedLogo },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath(`/${updated.slug}`);
+  return { success: true, logoUrl: uploadedLogo };
+}
+
+export async function updateCoverDirectAction(restaurantId: string, formData: FormData) {
+  await refreshUserSession();
+  const coverFile = formData.get("coverFile") as File | null;
+  const uploadedCover = await saveUploadedFile(coverFile);
+
+  if (!uploadedCover) {
+    return { error: "No se pudo guardar el archivo de portada." };
+  }
+
+  const updated = await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: { coverUrl: uploadedCover },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath(`/${updated.slug}`);
+  return { success: true, coverUrl: uploadedCover };
 }
 
 // Category Actions

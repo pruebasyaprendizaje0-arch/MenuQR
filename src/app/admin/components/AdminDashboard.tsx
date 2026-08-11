@@ -36,7 +36,9 @@ import {
   Users,
   CheckCircle2,
   XCircle,
-  DollarSign
+  DollarSign,
+  Camera,
+  Upload
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
@@ -87,6 +89,7 @@ type Restaurant = {
   slug: string;
   name: string;
   logoUrl: string | null;
+  coverUrl: string | null;
   paymentQrUrl: string | null;
   whatsappNumber: string;
   themeColor: string;
@@ -1089,28 +1092,111 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 </div>
               </div>
 
-              <div className="border-t border-slate-800/80 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Imagen de Logo (Subir archivo)</label>
-                  <input
-                    type="file"
-                    name="logoFile"
-                    accept="image/*"
-                    className="w-full text-sm text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-850 file:text-white hover:file:bg-slate-800 cursor-pointer"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">O pegar URL de logo existente</label>
-                  <input
-                    type="text"
-                    name="logoUrl"
-                    defaultValue={restaurant.logoUrl || ""}
-                    placeholder="https://..."
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
+              {/* Logo Section */}
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <h4 className="text-sm font-bold text-white">Imagen de Logo</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="block text-xs font-semibold text-slate-400">Subir Logo (Selecciona una opción)</label>
+                    <div className="flex flex-wrap gap-3">
+                      {/* Gallery Button */}
+                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl cursor-pointer font-bold text-xs transition-all border border-white/5 active:scale-95">
+                        <Upload className="h-4 w-4 text-amber-500" />
+                        Elegir de Galería
+                        <input 
+                          type="file" 
+                          name="logoFile" 
+                          accept="image/*" 
+                          className="hidden" 
+                        />
+                      </label>
+                      
+                      {/* Camera Button */}
+                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-xl cursor-pointer font-bold text-xs transition-all shadow-lg active:scale-95">
+                        <Camera className="h-4 w-4" />
+                        Tomar Foto (Cámara)
+                        <input 
+                          type="file" 
+                          name="logoFileCamera" 
+                          accept="image/*" 
+                          capture="environment" 
+                          className="hidden" 
+                        />
+                      </label>
+                    </div>
+                    {restaurant.logoUrl && (
+                      <div className="flex items-center gap-2 mt-2 bg-slate-900/50 p-2.5 rounded-xl border border-white/5 max-w-xs">
+                        <img src={restaurant.logoUrl} alt="Logo actual" className="h-10 w-10 rounded-lg object-cover border border-slate-700" />
+                        <span className="text-[10px] text-slate-400 font-medium truncate">Logo actual cargado</span>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-2">O pegar URL de logo existente</label>
+                    <input
+                      type="text"
+                      name="logoUrl"
+                      defaultValue={restaurant.logoUrl || ""}
+                      placeholder="https://..."
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
                 </div>
               </div>
 
+              {/* Cover Banner Section */}
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <h4 className="text-sm font-bold text-white">Fondo de Portada</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="block text-xs font-semibold text-slate-400">Subir Fondo de Portada (Selecciona una opción)</label>
+                    <div className="flex flex-wrap gap-3">
+                      {/* Gallery Button */}
+                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-755 text-white rounded-xl cursor-pointer font-bold text-xs transition-all border border-white/5 active:scale-95">
+                        <Upload className="h-4 w-4 text-amber-500" />
+                        Elegir de Galería
+                        <input 
+                          type="file" 
+                          name="coverFile" 
+                          accept="image/*" 
+                          className="hidden" 
+                        />
+                      </label>
+                      
+                      {/* Camera Button */}
+                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-xl cursor-pointer font-bold text-xs transition-all shadow-lg active:scale-95">
+                        <Camera className="h-4 w-4" />
+                        Tomar Foto (Cámara)
+                        <input 
+                          type="file" 
+                          name="coverFileCamera" 
+                          accept="image/*" 
+                          capture="environment" 
+                          className="hidden" 
+                        />
+                      </label>
+                    </div>
+                    {restaurant.coverUrl && (
+                      <div className="flex items-center gap-2 mt-2 bg-slate-900/50 p-2.5 rounded-xl border border-white/5 max-w-xs">
+                        <img src={restaurant.coverUrl} alt="Portada actual" className="h-10 w-16 rounded-lg object-cover border border-slate-700" />
+                        <span className="text-[10px] text-slate-400 font-medium truncate">Portada actual cargada</span>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-2">O pegar URL de portada existente</label>
+                    <input
+                      type="text"
+                      name="coverUrl"
+                      defaultValue={restaurant.coverUrl || ""}
+                      placeholder="https://..."
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment QR Section */}
               <div className="border-t border-slate-800/80 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">QR de Cobro - Deuna / Transferencia (Subir archivo)</label>

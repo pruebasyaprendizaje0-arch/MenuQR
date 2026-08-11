@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { MenuClient } from "./components/MenuClient";
 import { UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -83,12 +84,18 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       );
     }
 
+    const session = await getUserSession();
+    const isSuperAdmin = await getSuperAdminSession();
+    const isOwner = (session && session.userId === restaurant.userId) || isSuperAdmin;
+
     // Build serialised restaurant with safe defaults for fields that may not yet exist in production DB
     const r = restaurant as any;
     const serializedRestaurant = {
       ...restaurant,
       whatsappNumber: r.whatsapp ?? "",
       paymentQrUrl: r.qrCobroUrl ?? null,
+      coverUrl: r.coverUrl ?? null,
+      isOwner: !!isOwner,
       trialEndsAt: restaurant.trialEndsAt.toISOString(),
       tablesConfig: r.tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
       ivaPercent: r.ivaPercent ?? 15,
