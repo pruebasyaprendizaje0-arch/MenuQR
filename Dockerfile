@@ -50,4 +50,4 @@ USER nextjs
 EXPOSE 3000
 
 # Start server
-CMD ["sh", "-c", "npx prisma migrate deploy || echo 'WARNING: Migrations failed' && npm run start"]
+CMD ["sh", "-c", "npx prisma db push && npm run start"]
