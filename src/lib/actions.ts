@@ -170,7 +170,10 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const contactNumbers = formData.get("contactNumbers") as string;
   const ubicameUrl = formData.get("ubicameUrl") as string;
 
-  const logoFile = (formData.get("logoFile") as File | null) || (formData.get("logoFileCamera") as File | null);
+  let logoFile = formData.get("logoFile") as File | null;
+  if (!logoFile || logoFile.size === 0) {
+    logoFile = formData.get("logoFileCamera") as File | null;
+  }
   let logoUrl = formData.get("logoUrl") as string;
 
   const uploadedLogo = await saveUploadedFile(logoFile);
@@ -178,7 +181,10 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
     logoUrl = uploadedLogo;
   }
 
-  const coverFile = (formData.get("coverFile") as File | null) || (formData.get("coverFileCamera") as File | null);
+  let coverFile = formData.get("coverFile") as File | null;
+  if (!coverFile || coverFile.size === 0) {
+    coverFile = formData.get("coverFileCamera") as File | null;
+  }
   let coverUrl = formData.get("coverUrl") as string;
 
   const uploadedCover = await saveUploadedFile(coverFile);
