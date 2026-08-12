@@ -45,8 +45,6 @@ COPY --from=builder /app/.next ./.next
 # Ensure public/uploads exists and has correct permissions
 RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma
 
-USER nextjs
-
 EXPOSE 3000
 
 # Start server
