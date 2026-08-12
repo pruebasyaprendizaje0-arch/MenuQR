@@ -105,7 +105,10 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     .flatMap((c) => c.dishes)
     .find((d) => d.imageUrl);
 
-  const coverBg = restaurant.coverUrl || firstDishWithImage?.imageUrl || restaurant.logoUrl;
+  const logoClean = restaurant.logoUrl && restaurant.logoUrl.trim() !== "" ? restaurant.logoUrl : null;
+  const coverClean = restaurant.coverUrl && restaurant.coverUrl.trim() !== "" ? restaurant.coverUrl : null;
+
+  const coverBg = coverClean || firstDishWithImage?.imageUrl || logoClean;
 
   const handleLogoUpload = async (file: File) => {
     setUploadingLogo(true);
@@ -375,9 +378,9 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       <header className="sticky top-0 z-30 bg-slate-950/70 backdrop-blur-xl border-b border-slate-900/80 transition-all duration-300">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {restaurant.logoUrl ? (
+            {logoClean ? (
               <img 
-                src={restaurant.logoUrl} 
+                src={logoClean} 
                 alt={restaurant.name} 
                 className="h-12 w-12 rounded-2xl object-cover border border-slate-800"
               />
@@ -493,7 +496,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                   src={coverBg} 
                   alt="" 
                   className={`absolute inset-0 w-full h-full object-cover transition-all duration-300 ${
-                    coverBg === restaurant.logoUrl ? "filter blur-2xl opacity-25 scale-110" : "opacity-45"
+                    coverBg === logoClean ? "filter blur-2xl opacity-25 scale-110" : "opacity-45"
                   }`} 
                 />
               ) : (
@@ -523,9 +526,9 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                 <div className="relative group/logo shrink-0">
                   <div className="absolute -inset-1 bg-gradient-to-tr rounded-3xl opacity-75 blur-md group-hover/logo:opacity-100 transition duration-300"
                        style={{ backgroundImage: `linear-gradient(to top right, ${restaurant.themeColor}, #ffffff)` }}></div>
-                  {restaurant.logoUrl ? (
+                  {logoClean ? (
                     <img 
-                      src={restaurant.logoUrl} 
+                      src={logoClean} 
                       alt={restaurant.name} 
                       className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl object-cover border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover/logo:scale-105"
                     />
