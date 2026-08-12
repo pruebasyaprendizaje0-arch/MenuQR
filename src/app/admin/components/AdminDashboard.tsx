@@ -825,6 +825,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 await updateRestaurantAction(restaurant.id, formData);
                 alert("Restaurante actualizado correctamente.");
               }}
+              encType="multipart/form-data"
               className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 space-y-6 backdrop-blur-md"
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
