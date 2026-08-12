@@ -132,6 +132,9 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [savingCharges, setSavingCharges] = useState(false);
   const [chargesMessage, setChargesMessage] = useState("");
 
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+
   const [logoBase64, setLogoBase64] = useState<string>("");
   const [dishBase64s, setDishBase64s] = useState<string[]>([]);
 
@@ -1108,6 +1111,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                           name="logoFile" 
                           accept="image/*" 
                           className="hidden" 
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              setLogoPreview(URL.createObjectURL(e.target.files[0]));
+                            }
+                          }}
                         />
                       </label>
                       
@@ -1121,13 +1129,24 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                           accept="image/*" 
                           capture="environment" 
                           className="hidden" 
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              setLogoPreview(URL.createObjectURL(e.target.files[0]));
+                            }
+                          }}
                         />
                       </label>
                     </div>
-                    {restaurant.logoUrl && (
+                    {(logoPreview || (restaurant.logoUrl && restaurant.logoUrl.trim() !== "")) && (
                       <div className="flex items-center gap-2 mt-2 bg-slate-900/50 p-2.5 rounded-xl border border-white/5 max-w-xs">
-                        <img src={restaurant.logoUrl} alt="Logo actual" className="h-10 w-10 rounded-lg object-cover border border-slate-700" />
-                        <span className="text-[10px] text-slate-400 font-medium truncate">Logo actual cargado</span>
+                        <img 
+                          src={logoPreview || restaurant.logoUrl || ""} 
+                          alt="Logo Previsualización" 
+                          className="h-10 w-10 rounded-lg object-cover border border-slate-700" 
+                        />
+                        <span className="text-[10px] text-slate-400 font-medium truncate">
+                          {logoPreview ? "Previsualización local" : "Logo actual cargado"}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -1160,6 +1179,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                           name="coverFile" 
                           accept="image/*" 
                           className="hidden" 
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              setCoverPreview(URL.createObjectURL(e.target.files[0]));
+                            }
+                          }}
                         />
                       </label>
                       
@@ -1173,13 +1197,24 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                           accept="image/*" 
                           capture="environment" 
                           className="hidden" 
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) {
+                              setCoverPreview(URL.createObjectURL(e.target.files[0]));
+                            }
+                          }}
                         />
                       </label>
                     </div>
-                    {restaurant.coverUrl && (
+                    {(coverPreview || (restaurant.coverUrl && restaurant.coverUrl.trim() !== "")) && (
                       <div className="flex items-center gap-2 mt-2 bg-slate-900/50 p-2.5 rounded-xl border border-white/5 max-w-xs">
-                        <img src={restaurant.coverUrl} alt="Portada actual" className="h-10 w-16 rounded-lg object-cover border border-slate-700" />
-                        <span className="text-[10px] text-slate-400 font-medium truncate">Portada actual cargada</span>
+                        <img 
+                          src={coverPreview || restaurant.coverUrl || ""} 
+                          alt="Portada Previsualización" 
+                          className="h-10 w-16 rounded-lg object-cover border border-slate-700" 
+                        />
+                        <span className="text-[10px] text-slate-400 font-medium truncate">
+                          {coverPreview ? "Previsualización local" : "Portada actual cargada"}
+                        </span>
                       </div>
                     )}
                   </div>
