@@ -541,19 +541,17 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                     </div>
                   )}
 
-                  {/* Owner Controls for Logo */}
+                  {/* Owner Controls for Logo (Touch-friendly floating button) */}
                   {restaurant.isOwner && (
                     <button 
                       onClick={() => setLogoModalOpen(true)}
-                      className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 rounded-3xl opacity-0 group-hover/logo:opacity-100 transition-opacity duration-200 z-20 cursor-pointer text-white"
+                      className="absolute -bottom-1 -right-1 h-7 w-7 flex items-center justify-center bg-black/80 hover:bg-black border border-white/10 rounded-full z-20 cursor-pointer text-white shadow-lg transition-transform active:scale-90"
+                      title="Cambiar Logo"
                     >
                       {uploadingLogo ? (
-                        <Loader2 className="h-5 w-5 animate-spin" />
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <>
-                          <Camera className="h-5 w-5 text-amber-500" />
-                          <span className="text-[9px] font-bold mt-1">Editar</span>
-                        </>
+                        <Camera className="h-3.5 w-3.5 text-amber-500" />
                       )}
                     </button>
                   )}
