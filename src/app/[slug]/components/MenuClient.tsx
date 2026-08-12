@@ -556,8 +556,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                   )}
                 </div>
                 <div className="mb-1">
-                  <h2 className="text-2xl sm:text-4xl font-extrabold text-white leading-tight tracking-tight">{restaurant.name}</h2>
-                  <p className="text-xs sm:text-sm text-slate-400/90 font-medium tracking-wide mt-1">Categorías premium y pedidos automáticos</p>
+                  <h2 className="text-3xl sm:text-5xl font-extrabold text-white leading-tight tracking-tight">{restaurant.name}</h2>
+                  <p className="text-sm sm:text-base text-slate-400/90 font-medium tracking-wide mt-1">Categorías premium y pedidos automáticos</p>
                 </div>
               </div>
             </div>
@@ -566,8 +566,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
             {restaurant.description && (
               <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-8 backdrop-blur-md space-y-3 relative overflow-hidden">
                 <div className="absolute top-0 right-0 h-24 w-24 bg-gradient-to-bl from-white/5 to-transparent rounded-bl-full pointer-events-none"></div>
-                <h3 className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-slate-500">Sobre Nosotros</h3>
-                <p className="text-slate-350 text-base leading-relaxed font-serif italic" style={{ fontFamily: 'var(--font-playfair)' }}>
+                <h3 className="text-xs font-extrabold uppercase tracking-[0.25em] text-slate-500">Sobre Nosotros</h3>
+                <p className="text-slate-350 text-lg leading-relaxed font-serif italic" style={{ fontFamily: 'var(--font-playfair)' }}>
                   "{restaurant.description}"
                 </p>
               </div>
@@ -583,8 +583,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                       <Sparkles className="h-5 w-5" />
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Especialidad de la Casa</span>
-                      <p className="text-sm text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.specialty}</p>
+                      <span className="text-xs text-slate-500 font-extrabold uppercase tracking-[0.2em]">Especialidad de la Casa</span>
+                      <p className="text-base text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.specialty}</p>
                     </div>
                   </div>
                 )}
@@ -595,8 +595,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                       <Clock className="h-5 w-5" />
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Horario de Atención</span>
-                      <p className="text-sm text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.schedule}</p>
+                      <span className="text-xs text-slate-500 font-extrabold uppercase tracking-[0.2em]">Horario de Atención</span>
+                      <p className="text-base text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.schedule}</p>
                     </div>
                   </div>
                 )}
