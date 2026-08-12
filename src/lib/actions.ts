@@ -218,6 +218,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       whatsapp: whatsappNumber,
       themeColor,
       logoUrl: logoUrl || null,
+      // @ts-ignore
       coverUrl: coverUrl || null,
       qrCobroUrl: paymentQrUrl || null,
       instagram: instagram || null,
@@ -275,7 +276,10 @@ export async function updateCoverDirectAction(restaurantId: string, formData: Fo
 
   const updated = await prisma.restaurant.update({
     where: { id: restaurantId },
-    data: { coverUrl: uploadedCover },
+    data: { 
+      // @ts-ignore
+      coverUrl: uploadedCover 
+    },
   });
 
   revalidatePath("/admin");
