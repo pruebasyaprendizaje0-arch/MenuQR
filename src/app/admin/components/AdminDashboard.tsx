@@ -439,22 +439,46 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
       <aside className="w-full md:w-64 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col justify-between shrink-0">
         <div>
           {/* Header */}
-          <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-            {restaurant.logoUrl ? (
-              <img src={restaurant.logoUrl} alt={restaurant.name} className="h-10 w-10 rounded-xl object-cover border border-slate-700" />
-            ) : (
-              <div className="h-10 w-10 bg-gradient-to-tr from-red-600 to-amber-500 rounded-xl flex items-center justify-center font-bold text-white">
-                {restaurant.name.charAt(0)}
+          <div className="p-4 md:p-6 border-b border-slate-800 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {restaurant.logoUrl ? (
+                <img src={restaurant.logoUrl} alt={restaurant.name} className="h-10 w-10 rounded-xl object-cover border border-slate-700" />
+              ) : (
+                <div className="h-10 w-10 bg-gradient-to-tr from-red-600 to-amber-500 rounded-xl flex items-center justify-center font-bold text-white">
+                  {restaurant.name.charAt(0)}
+                </div>
+              )}
+              <div>
+                <h1 className="font-bold text-sm tracking-tight text-white line-clamp-1">{restaurant.name}</h1>
+                <p className="text-xs text-slate-400">Panel Admin</p>
               </div>
-            )}
-            <div>
-              <h1 className="font-bold text-sm tracking-tight text-white line-clamp-1">{restaurant.name}</h1>
-              <p className="text-xs text-slate-400">Panel Admin</p>
+            </div>
+
+            {/* Mobile compact header actions */}
+            <div className="flex items-center gap-2 md:hidden">
+              <a
+                href={`/${restaurant.slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-white transition-all"
+                title="Ver Menú Público"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </a>
+              <form action={logoutUserAction}>
+                <button
+                  type="submit"
+                  className="p-2 bg-red-950/40 text-red-400 hover:bg-red-900/30 border border-red-900/40 rounded-xl transition-all"
+                  title="Cerrar Sesión"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </form>
             </div>
           </div>
 
           {/* Navigation */}
-          <nav className="p-4 space-y-1">
+          <nav className="hidden md:block p-4 space-y-1">
             <button
               onClick={() => setActiveTab("metrics")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -514,7 +538,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
         </div>
 
         {/* Footer actions */}
-        <div className="p-4 border-t border-slate-800">
+        <div className="hidden md:block p-4 border-t border-slate-800">
           <a
             href={`/${restaurant.slug}`}
             target="_blank"
@@ -537,9 +561,9 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
       </aside>
 
       {/* Main Layout Container (Content + Persistent Sidebar) */}
-      <div className="flex-1 flex flex-col lg:flex-row min-w-0 overflow-y-auto lg:overflow-visible">
+      <div className="flex-1 flex flex-col lg:flex-row min-w-0 overflow-y-auto lg:overflow-visible pb-28 md:pb-0">
         {/* Main Content Area */}
-        <main className="flex-1 p-6 md:p-10 max-w-4xl overflow-y-auto space-y-6">
+        <main className="flex-1 p-6 pb-28 md:p-10 max-w-4xl overflow-y-auto space-y-6">
         {/* Trial Period Banner */}
         {(() => {
           const trialEnds = new Date(restaurant.trialEndsAt);
@@ -1779,7 +1803,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
       </main>
 
       {/* Column: Persistent Pedidos en Curso */}
-      <aside className="w-full lg:w-96 bg-slate-900/30 border-t lg:border-t-0 lg:border-l border-slate-800 p-6 space-y-6 shrink-0 lg:max-h-screen lg:overflow-y-auto lg:sticky lg:top-0" style={{ fontFamily: 'var(--font-outfit)' }}>
+      <aside className="w-full lg:w-96 bg-slate-900/30 border-t lg:border-t-0 lg:border-l border-slate-800 p-6 pb-28 lg:pb-6 space-y-6 shrink-0 lg:max-h-screen lg:overflow-y-auto lg:sticky lg:top-0" style={{ fontFamily: 'var(--font-outfit)' }}>
         {(() => {
           const orders = restaurant.orders || [];
           const pendingOrders = orders.filter(o => o.status === "PENDING" || o.status === "PREPARING");
@@ -1874,6 +1898,61 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
           );
         })()}
       </aside>
+    </div>
+
+    {/* Floating Bottom Navigation Bar for Admin on Mobile */}
+    <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent">
+      <div className="max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center justify-around shadow-2xl">
+        {/* Metrics Tab */}
+        <button
+          onClick={() => setActiveTab("metrics")}
+          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+          style={{ color: activeTab === "metrics" ? restaurant.themeColor : "#94a3b8" }}
+        >
+          <LineChart className="h-5 w-5" />
+          <span className="text-[9px] font-bold uppercase tracking-wider">Métricas</span>
+        </button>
+
+        {/* Restaurant Tab */}
+        <button
+          onClick={() => setActiveTab("restaurant")}
+          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+          style={{ color: activeTab === "restaurant" ? restaurant.themeColor : "#94a3b8" }}
+        >
+          <Store className="h-5 w-5" />
+          <span className="text-[9px] font-bold uppercase tracking-wider">Negocio</span>
+        </button>
+
+        {/* Categories Tab */}
+        <button
+          onClick={() => setActiveTab("categories")}
+          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+          style={{ color: activeTab === "categories" ? restaurant.themeColor : "#94a3b8" }}
+        >
+          <FolderHeart className="h-5 w-5" />
+          <span className="text-[9px] font-bold uppercase tracking-wider">Categorías</span>
+        </button>
+
+        {/* Dishes Tab */}
+        <button
+          onClick={() => setActiveTab("dishes")}
+          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+          style={{ color: activeTab === "dishes" ? restaurant.themeColor : "#94a3b8" }}
+        >
+          <Soup className="h-5 w-5" />
+          <span className="text-[9px] font-bold uppercase tracking-wider">Platos</span>
+        </button>
+
+        {/* QR Tab */}
+        <button
+          onClick={() => setActiveTab("qr")}
+          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+          style={{ color: activeTab === "qr" ? restaurant.themeColor : "#94a3b8" }}
+        >
+          <QrCode className="h-5 w-5" />
+          <span className="text-[9px] font-bold uppercase tracking-wider">QR</span>
+        </button>
+      </div>
     </div>
   </div>
   );

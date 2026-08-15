@@ -425,7 +425,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="max-w-3xl mx-auto px-4 pb-4 pt-1 flex justify-center" style={{ fontFamily: 'var(--font-outfit)' }}>
+        <div className="max-w-3xl mx-auto px-4 pb-4 pt-1 hidden sm:flex justify-center" style={{ fontFamily: 'var(--font-outfit)' }}>
           <div className="flex p-1 bg-slate-900/60 backdrop-blur-md border border-white/5 rounded-2xl w-full sm:w-[380px] gap-1 relative z-10">
             <button
               onClick={() => setCurrentTab("profile")}
@@ -486,7 +486,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       </header>
 
       {/* Main Menu Feed */}
-      <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-6 relative z-10 space-y-12">
+      <main className="flex-1 max-w-3xl w-full mx-auto px-4 pt-6 pb-32 relative z-10 space-y-12">
         {currentTab === "profile" ? (
           <div className="space-y-8 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
             {/* Cover Banner Card */}
@@ -986,7 +986,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
       {/* Floating Cart Button (Visible if cart has items) */}
       {cartCount > 0 && (
-        <div className="fixed bottom-6 left-0 right-0 z-40 px-4 max-w-md mx-auto animate-bounce-subtle">
+        <div className="fixed bottom-24 sm:bottom-6 left-0 right-0 z-40 px-4 max-w-md mx-auto animate-bounce-subtle">
           <button 
             onClick={() => setIsCartOpen(true)}
             className="w-full flex items-center justify-between p-4 rounded-2xl shadow-2xl text-white font-bold transition-all transform hover:scale-[1.02] active:scale-[0.98] duration-200"
@@ -1441,6 +1441,62 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
           </div>
         </div>
       )}
+
+      {/* Floating Bottom Navigation Bar for Mobile */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 sm:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent">
+        <div className="max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center justify-around shadow-2xl">
+          {/* Profile Tab */}
+          <button
+            onClick={() => setCurrentTab("profile")}
+            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition duration-200"
+            style={{ color: currentTab === "profile" ? restaurant.themeColor : "#94a3b8" }}
+          >
+            <Store className="h-5 w-5" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">Inicio</span>
+          </button>
+
+          {/* Menu Tab */}
+          <button
+            onClick={() => setCurrentTab("menu")}
+            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition duration-200"
+            style={{ color: currentTab === "menu" ? restaurant.themeColor : "#94a3b8" }}
+          >
+            <BookOpen className="h-5 w-5" />
+            <span className="text-[10px] font-bold uppercase tracking-wider">Menú</span>
+          </button>
+
+          {/* Table Selector */}
+          <button
+            onClick={() => setIsTableModalOpen(true)}
+            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition duration-200"
+            style={{ color: selectedTable ? "#fbbf24" : "#94a3b8" }}
+          >
+            <Utensils className="h-5 w-5" />
+            <span className="text-[10px] font-bold uppercase tracking-wider truncate max-w-[65px]">
+              {selectedTable ? `#${selectedTable}` : "Mesa"}
+            </span>
+          </button>
+
+          {/* Cart / Order Trigger */}
+          <button
+            onClick={() => setIsCartOpen(true)}
+            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-slate-400 hover:text-slate-200 relative transition duration-200"
+          >
+            <div className="relative">
+              <ShoppingCart className="h-5 w-5" />
+              {cartCount > 0 && (
+                <span 
+                  className="absolute -top-1.5 -right-1.5 h-4.5 w-4.5 rounded-full text-[9px] font-bold flex items-center justify-center text-white"
+                  style={{ backgroundColor: restaurant.themeColor }}
+                >
+                  {cartCount}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider">Pedido</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
