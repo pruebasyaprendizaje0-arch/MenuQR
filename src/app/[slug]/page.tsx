@@ -100,6 +100,7 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       tablesConfig: r.tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
       ivaPercent: r.ivaPercent ?? 15,
       servicePercent: r.servicePercent ?? 10,
+      deliveryCost: r.deliveryCost ?? 0.0,
       ivaOnTable: r.ivaOnTable ?? true,
       ivaOnTakeout: r.ivaOnTakeout ?? true,
       serviceOnTable: r.serviceOnTable ?? true,

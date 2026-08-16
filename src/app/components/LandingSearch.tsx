@@ -117,12 +117,19 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
     return matchesSearch && matchesProvince && matchesCanton && matchesParroquia && matchesSector && matchesSpecialty;
   });
 
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (filtered.length > 0) {
+      window.location.href = `/${filtered[0].slug}`;
+    }
+  };
+
   return (
     <div className="w-full space-y-8">
       {/* Search Input Bar */}
-      <div className="max-w-xl mx-auto w-full relative group">
+      <form onSubmit={handleSearchSubmit} className="max-w-xl mx-auto w-full relative group">
         {/* Glow backdrop effect */}
-        <div className="absolute -inset-0.5 bg-gradient-to-r from-red-650 to-amber-500 rounded-3xl blur opacity-25 group-focus-within:opacity-50 transition duration-300"></div>
+        <div className="absolute -inset-0.5 bg-gradient-to-r from-red-600 to-amber-500 rounded-3xl blur opacity-25 group-focus-within:opacity-50 transition duration-300"></div>
         
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -137,6 +144,7 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
           />
           {searchTerm && (
             <button
+              type="button"
               onClick={() => setSearchTerm("")}
               className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-500 hover:text-white transition-colors"
               title="Limpiar búsqueda"
@@ -147,10 +155,10 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
             </button>
           )}
         </div>
-      </div>
+      </form>
 
       {/* Filtros de Ubicación Avanzados */}
-      <div className="bg-slate-900/40 border border-slate-850/80 rounded-3xl p-6 backdrop-blur-md max-w-4xl mx-auto space-y-4 shadow-xl">
+      <div className="bg-transparent border border-white/5 rounded-3xl p-6 backdrop-blur-md max-w-4xl mx-auto space-y-4 shadow-xl">
         <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 text-center mb-2 flex items-center justify-center gap-2">
           <MapPin className="h-4 w-4 text-red-500 animate-bounce" />
           Filtrar por Ubicación Geográfica (Ecuador)
@@ -245,7 +253,7 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
                 className={`px-4 py-2 rounded-2xl text-xs font-bold border transition duration-200 ${
                   selectedSpecialty === spec 
                     ? "bg-gradient-to-r from-amber-650 to-orange-600 border-transparent text-white shadow-lg"
-                    : "bg-slate-900/50 border-slate-850 text-slate-400 hover:text-white hover:border-slate-700"
+                    : "bg-transparent border-white/5 text-slate-400 hover:text-white hover:border-white/10"
                 }`}
               >
                 {spec}
@@ -273,7 +281,7 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
               <a
                 key={res.id}
                 href={`/${res.slug}`}
-                className="group bg-slate-900/40 border border-slate-850 hover:border-slate-700 rounded-3xl p-5 flex flex-col justify-between hover:bg-slate-900/60 hover:shadow-[0_10px_30px_rgba(239,68,68,0.05)] transition-all duration-300 transform hover:scale-[1.01]"
+                className="group bg-transparent border border-white/5 hover:border-white/20 rounded-3xl p-5 flex flex-col justify-between hover:bg-white/5 hover:shadow-[0_10px_30px_rgba(239,68,68,0.05)] transition-all duration-300 transform hover:scale-[1.01]"
               >
                 <div className="space-y-4">
                   <div className="flex items-center gap-4">

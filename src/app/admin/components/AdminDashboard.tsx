@@ -72,6 +72,8 @@ type Order = {
   id: string;
   restaurantId: string;
   tableName: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
   status: "PENDING" | "PREPARING" | "COMPLETED" | "CANCELLED";
   subtotal: number;
   iva: number;
@@ -108,6 +110,7 @@ type Restaurant = {
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
+  deliveryCost: number;
   ivaOnTable: boolean;
   ivaOnTakeout: boolean;
   serviceOnTable: boolean;
@@ -117,7 +120,7 @@ type Restaurant = {
 };
 
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "qr">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "qr" | "orders">("metrics");
   const [copied, setCopied] = useState(false);
   const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
   const [savingTables, setSavingTables] = useState(false);
@@ -125,6 +128,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
 
   const [ivaPercent, setIvaPercent] = useState(restaurant.ivaPercent);
   const [servicePercent, setServicePercent] = useState(restaurant.servicePercent);
+  const [deliveryCost, setDeliveryCost] = useState(restaurant.deliveryCost);
   const [ivaOnTable, setIvaOnTable] = useState(restaurant.ivaOnTable);
   const [ivaOnTakeout, setIvaOnTakeout] = useState(restaurant.ivaOnTakeout);
   const [serviceOnTable, setServiceOnTable] = useState(restaurant.serviceOnTable);
@@ -419,6 +423,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
     const res = await updateRestaurantChargesConfigAction(restaurant.id, {
       ivaPercent,
       servicePercent,
+      deliveryCost,
       ivaOnTable,
       ivaOnTakeout,
       serviceOnTable,
@@ -533,6 +538,17 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
             >
               <QrCode className="h-4 w-4" />
               Código QR
+            </button>
+            <button
+              onClick={() => setActiveTab("orders")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "orders" 
+                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <ShoppingBag className="h-4 w-4" />
+              Historial de Pedidos
             </button>
           </nav>
         </div>
@@ -692,7 +708,13 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   <div>
                     <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold block">Mesa que Más Vende</span>
                     <span className="text-sm font-bold text-white">
-                      {topTableName !== "Ninguna" && topTableName !== "Llevar" ? `Mesa #${topTableName}` : topTableName === "Llevar" ? "Para llevar" : "Ninguna"}
+                      {topTableName !== "Ninguna" && topTableName !== "Llevar" && topTableName !== "Domicilio" 
+                        ? `Mesa #${topTableName}` 
+                        : topTableName === "Llevar" 
+                          ? "Para llevar" 
+                          : topTableName === "Domicilio" 
+                            ? "Domicilio" 
+                            : "Ninguna"}
                     </span>
                     {topTableTotal > 0 && <span className="text-[10px] text-slate-500 block mt-0.5">${topTableTotal.toFixed(2)} facturados</span>}
                   </div>
@@ -746,7 +768,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   </p>
                 </div>
                 <form onSubmit={handleSaveCharges} className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-semibold text-slate-400 mb-1.5">Tasa de IVA (%)</label>
                       <input
@@ -765,6 +787,17 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                         step="0.1"
                         value={servicePercent}
                         onChange={(e) => setServicePercent(parseFloat(e.target.value) || 0)}
+                        required
+                        className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Envío a Domicilio ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={deliveryCost}
+                        onChange={(e) => setDeliveryCost(parseFloat(e.target.value) || 0)}
                         required
                         className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
                       />
@@ -926,6 +959,18 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   />
                   <p className="text-xs text-slate-500 mt-1">Estándar de restaurante (ej: 10%). Pon 0 para desactivar.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Costo de Envío a Domicilio ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    name="deliveryCost"
+                    defaultValue={restaurant.deliveryCost}
+                    required
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Costo de envío a domicilio. Pon 0 para desactivar.</p>
                 </div>
               </div>
 
@@ -1800,6 +1845,116 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
             </div>
           </div>
         )}
+        {activeTab === "orders" && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Historial de Pedidos</h2>
+                <p className="text-slate-400 text-sm">Visualiza el historial completo de pedidos de las últimas 24 horas.</p>
+              </div>
+              <span className="px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-[11px] font-black uppercase text-red-400 tracking-wider">
+                Autolimpieza: 24 Horas
+              </span>
+            </div>
+
+            <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 space-y-4 backdrop-blur-md">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider">
+                      <th className="pb-3 pt-1 pl-2">Pedido / Mesa</th>
+                      <th className="pb-3 pt-1">Cliente</th>
+                      <th className="pb-3 pt-1">Método de Pago</th>
+                      <th className="pb-3 pt-1">Fecha / Hora</th>
+                      <th className="pb-3 pt-1">Estado</th>
+                      <th className="pb-3 pt-1 text-right pr-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-xs">
+                    {(() => {
+                      const allOrders = restaurant.orders || [];
+                      if (allOrders.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-slate-500 italic">
+                              No hay pedidos registrados en las últimas 24 horas.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return allOrders.map((order) => (
+                        <tr key={order.id} className="text-slate-300 hover:bg-slate-800/20 transition-all">
+                          <td className="py-3.5 pl-2 font-semibold">
+                            {order.tableName === "Llevar" 
+                              ? "🛍_ Para Llevar" 
+                              : order.tableName === "Domicilio" 
+                                ? "🛵 Domicilio" 
+                                : `🪑 Mesa #${order.tableName}`}
+                          </td>
+                          <td className="py-3.5">
+                            {order.customerName ? (
+                              <div className="space-y-0.5">
+                                <p className="font-bold text-white">{order.customerName}</p>
+                                {order.customerPhone && (
+                                  <a 
+                                    href={`https://wa.me/${order.customerPhone.replace(/\D/g, "")}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-red-400 hover:underline text-[10px] block"
+                                  >
+                                    {order.customerPhone}
+                                  </a>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 italic">N/A</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 uppercase font-medium text-[10px]">
+                            {order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
+                          </td>
+                          <td className="py-3.5 text-slate-400">
+                            {new Date(order.createdAt).toLocaleString()}
+                          </td>
+                          <td className="py-3.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                              order.status === "PENDING" 
+                                ? "bg-yellow-500/10 text-yellow-500" 
+                                : order.status === "PREPARING" 
+                                  ? "bg-blue-500/10 text-blue-500" 
+                                  : order.status === "COMPLETED" 
+                                    ? "bg-green-500/10 text-green-500" 
+                                    : "bg-red-500/10 text-red-500"
+                            }`}>
+                              {order.status === "PENDING" && "Pendiente"}
+                              {order.status === "PREPARING" && "En Cocina"}
+                              {order.status === "COMPLETED" && "Completado"}
+                              {order.status === "CANCELLED" && "Cancelado"}
+                            </span>
+                          </td>
+                          <td className="py-3.5 text-right font-extrabold text-white pr-2">
+                            ${order.total.toFixed(2)}
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-slate-400 text-xs flex items-start gap-2.5 leading-relaxed">
+                <span className="text-amber-500 font-extrabold text-sm leading-none">⚠️</span>
+                <div>
+                  <span className="font-bold text-slate-300">Nota sobre la persistencia:</span>
+                  <p className="mt-0.5">
+                    Para mantener el rendimiento óptimo de la base de datos y la privacidad del cliente, el historial se limpia de manera automática. Todos los pedidos con más de 24 horas de antigüedad son eliminados permanentemente.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Column: Persistent Pedidos en Curso */}
@@ -1835,7 +1990,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                         <div className="flex justify-between items-start">
                           <div>
                             <span className="text-[10px] font-extrabold text-slate-400 uppercase bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800">
-                              {order.tableName === "Llevar" ? "🛍️ Llevar" : `🪑 Mesa #${order.tableName}`}
+                              {order.tableName === "Llevar" 
+                                ? "🛍️ Llevar" 
+                                : order.tableName === "Domicilio" 
+                                  ? "🛵 Domicilio" 
+                                  : `🪑 Mesa #${order.tableName}`}
                             </span>
                             <p className="text-[9px] text-slate-500 mt-1">{new Date(order.createdAt).toLocaleTimeString()}</p>
                           </div>
@@ -1845,6 +2004,26 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                             {order.status === "PENDING" ? "Pendiente" : "En Cocina"}
                           </span>
                         </div>
+
+                        {/* Customer info if delivery */}
+                        {(order.customerName || order.customerPhone) && (
+                          <div className="text-[11px] text-slate-400 bg-slate-900/50 p-2.5 rounded-xl space-y-1 border border-slate-800/40">
+                            {order.customerName && <p><strong>Cliente:</strong> {order.customerName}</p>}
+                            {order.customerPhone && (
+                              <p>
+                                <strong>WhatsApp:</strong>{" "}
+                                <a 
+                                  href={`https://wa.me/${order.customerPhone.replace(/\D/g, "")}`} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-red-400 hover:underline"
+                                >
+                                  {order.customerPhone}
+                                </a>
+                              </p>
+                            )}
+                          </div>
+                        )}
 
                         {/* Items List */}
                         <div className="border-t border-b border-slate-900 py-2 space-y-1 max-h-36 overflow-y-auto">
@@ -1951,6 +2130,16 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
         >
           <QrCode className="h-5 w-5" />
           <span className="text-[9px] font-bold uppercase tracking-wider">QR</span>
+        </button>
+
+        {/* Orders Tab */}
+        <button
+          onClick={() => setActiveTab("orders")}
+          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+          style={{ color: activeTab === "orders" ? restaurant.themeColor : "#94a3b8" }}
+        >
+          <ShoppingBag className="h-5 w-5" />
+          <span className="text-[9px] font-bold uppercase tracking-wider">Historial</span>
         </button>
       </div>
     </div>

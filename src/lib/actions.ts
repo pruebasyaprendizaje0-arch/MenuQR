@@ -202,8 +202,10 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
 
   const ivaPercentInput = formData.get("ivaPercent") as string;
   const servicePercentInput = formData.get("servicePercent") as string;
+  const deliveryCostInput = formData.get("deliveryCost") as string;
   const ivaPercent = ivaPercentInput ? parseFloat(ivaPercentInput) : 15.0;
   const servicePercent = servicePercentInput ? parseFloat(servicePercentInput) : 10.0;
+  const deliveryCost = deliveryCostInput ? parseFloat(deliveryCostInput) : 0.0;
 
   const ivaOnTable = formData.get("ivaOnTable") === "true";
   const ivaOnTakeout = formData.get("ivaOnTakeout") === "true";
@@ -234,6 +236,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       ubicameUrl: ubicameUrl || null,
       ivaPercent,
       servicePercent,
+      deliveryCost,
       ivaOnTable,
       ivaOnTakeout,
       serviceOnTable,
@@ -552,10 +555,13 @@ export async function updateSystemSettingAction(key: string, value: string) {
 export async function createOrderAction(data: {
   restaurantId: string;
   tableName: string;
+  customerName?: string;
+  customerPhone?: string;
   subtotal: number;
   iva: number;
   serviceCharge: number;
   tip: number;
+  deliveryCost: number;
   total: number;
   paymentMethod: string;
   items: { dishName: string; price: number; quantity: number }[];
@@ -565,10 +571,13 @@ export async function createOrderAction(data: {
       data: {
         restaurantId: data.restaurantId,
         tableName: data.tableName,
+        customerName: data.customerName || null,
+        customerPhone: data.customerPhone || null,
         subtotal: data.subtotal,
         iva: data.iva,
         serviceCharge: data.serviceCharge,
         tip: data.tip,
+        deliveryCost: data.deliveryCost,
         total: data.total,
         paymentMethod: data.paymentMethod,
         items: {
@@ -638,6 +647,7 @@ export async function updateRestaurantChargesConfigAction(
   data: {
     ivaPercent: number;
     servicePercent: number;
+    deliveryCost: number;
     ivaOnTable: boolean;
     ivaOnTakeout: boolean;
     serviceOnTable: boolean;
@@ -651,6 +661,7 @@ export async function updateRestaurantChargesConfigAction(
       data: {
         ivaPercent: data.ivaPercent,
         servicePercent: data.servicePercent,
+        deliveryCost: data.deliveryCost,
         ivaOnTable: data.ivaOnTable,
         ivaOnTakeout: data.ivaOnTakeout,
         serviceOnTable: data.serviceOnTable,

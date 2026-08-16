@@ -12,6 +12,20 @@ export default async function AdminPage() {
     redirect("/login");
   }
 
+  // Automatically delete orders older than 24 hours
+  try {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.order.deleteMany({
+      where: {
+        createdAt: {
+          lt: twentyFourHoursAgo,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Error cleaning up old orders:", err);
+  }
+
   // Find user's restaurant
   const restaurant = await prisma.restaurant.findFirst({
     where: { userId: session.userId },
@@ -63,6 +77,7 @@ export default async function AdminPage() {
     tablesConfig: (restaurant as any).tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
     ivaPercent: (restaurant as any).ivaPercent ?? 15,
     servicePercent: (restaurant as any).servicePercent ?? 10,
+    deliveryCost: (restaurant as any).deliveryCost ?? 0.0,
     ivaOnTable: (restaurant as any).ivaOnTable ?? true,
     ivaOnTakeout: (restaurant as any).ivaOnTakeout ?? true,
     serviceOnTable: (restaurant as any).serviceOnTable ?? true,

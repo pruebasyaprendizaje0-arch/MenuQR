@@ -48,6 +48,7 @@ model Restaurant {
   tablesConfig   String     @default("1,2,3,4,5,6,7,8,9,10")
   ivaPercent     Float      @default(15.0)
   servicePercent Float      @default(10.0)
+  deliveryCost   Float      @default(0.0)
   ivaOnTable     Boolean    @default(true)
   ivaOnTakeout   Boolean    @default(true)
   serviceOnTable Boolean    @default(true)
@@ -99,11 +100,14 @@ model Order {
   restaurantId   String
   restaurant     Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   tableName      String      // mesa
+  customerName   String?
+  customerPhone  String?
   status         String      @default("PENDING") // PENDING, PREPARING, COMPLETED, CANCELLED
   subtotal       Float
   iva            Float
   serviceCharge  Float
   tip            Float
+  deliveryCost   Float       @default(0.0)
   total          Float
   paymentMethod  String
   createdAt      DateTime    @default(now())

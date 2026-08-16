@@ -68,6 +68,7 @@ type Restaurant = {
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
+  deliveryCost: number;
   ivaOnTable: boolean;
   ivaOnTakeout: boolean;
   serviceOnTable: boolean;
@@ -91,6 +92,9 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const categoryRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   const [selectedTable, setSelectedTable] = useState<string>("");
+  const [deliveryAddress, setDeliveryAddress] = useState<string>("");
+  const [customerName, setCustomerName] = useState<string>("");
+  const [customerPhone, setCustomerPhone] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
@@ -266,7 +270,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const handleSendOrder = async (selectedMethod: "cash" | "qr") => {
     if (cart.length === 0) return;
 
-    const isTableOrder = !!selectedTable;
+    const isTableOrder = selectedTable !== "" && selectedTable !== "Domicilio";
+    const isDeliveryOrder = selectedTable === "Domicilio";
     const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
     const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
 
@@ -274,7 +279,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     const iva = applyIva ? subtotal * (restaurant.ivaPercent / 100) : 0;
     const serviceCharge = applyService ? subtotal * (restaurant.servicePercent / 100) : 0;
     const tip = subtotal * (tipPercentage / 100);
-    const total = subtotal + iva + serviceCharge + tip;
+    const deliveryCost = isDeliveryOrder ? restaurant.deliveryCost : 0;
+    const total = subtotal + iva + serviceCharge + tip + deliveryCost;
 
     // Save order in database first
     const itemsData = cart.map((item) => ({
@@ -286,10 +292,13 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     const result = await createOrderAction({
       restaurantId: restaurant.id,
       tableName: selectedTable || "Llevar",
+      customerName: isDeliveryOrder ? customerName : undefined,
+      customerPhone: isDeliveryOrder ? customerPhone : undefined,
       subtotal,
       iva,
       serviceCharge,
       tip,
+      deliveryCost,
       total,
       paymentMethod: selectedMethod,
       items: itemsData,
@@ -309,7 +318,16 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     });
 
     message += `-----------------------------------\n`;
-    if (selectedTable) {
+    if (selectedTable === "Domicilio") {
+      message += `*Método de Entrega:* Envío a Domicilio 🛵\n`;
+      if (customerName.trim()) {
+        message += `*Cliente:* ${customerName.trim()}\n`;
+      }
+      if (customerPhone.trim()) {
+        message += `*WhatsApp Cliente:* ${customerPhone.trim()}\n`;
+      }
+      message += `*Dirección de Envío:* ${deliveryAddress}\n`;
+    } else if (selectedTable) {
       message += `*Mesa:* #${selectedTable}\n`;
     } else {
       message += `*Mesa:* Para llevar / Llevar a casa\n`;
@@ -317,6 +335,9 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     message += `*Subtotal:* $${subtotal.toFixed(2)}\n`;
     message += `*IVA (${restaurant.ivaPercent}%):* $${iva.toFixed(2)}\n`;
     message += `*Servicio (${restaurant.servicePercent}%):* $${serviceCharge.toFixed(2)}\n`;
+    if (selectedTable === "Domicilio" && deliveryCost > 0) {
+      message += `*Costo de Envío:* $${deliveryCost.toFixed(2)}\n`;
+    }
     message += `*Propina:* $${tip.toFixed(2)}\n`;
     message += `*Total a Pagar:* $${total.toFixed(2)}\n`;
     message += `*Método de Pago:* ${selectedMethod === "qr" ? "QR de Cobro (Deuna / Transferencia)" : "Efectivo / Contra entrega en local"}\n`;
@@ -773,7 +794,11 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                 <div>
                   <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Tu Ubicación / Mesa</span>
                   <p className="text-sm text-slate-200 font-bold mt-0.5">
-                    {selectedTable ? `Mesa #${selectedTable}` : "Para llevar / Llevar a casa"}
+                    {selectedTable === "Domicilio" 
+                      ? "Envío a Domicilio 🛵" 
+                      : selectedTable 
+                        ? `Mesa #${selectedTable}` 
+                        : "Para llevar / Llevar a casa"}
                   </p>
                 </div>
               </div>
@@ -1195,6 +1220,46 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               </div>
             )}
 
+            {selectedTable === "Domicilio" && (
+              <div className="space-y-3" style={{ fontFamily: 'var(--font-outfit)' }}>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu Nombre</span>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej. Juan Pérez"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu WhatsApp</span>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="Ej. 0991234567"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Dirección de Envío</span>
+                  <textarea
+                    required
+                    placeholder="Escribe tu dirección exacta, ciudad y referencias para la entrega..."
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                    className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+                    rows={2}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Propina Selector */}
             <div className="space-y-2" style={{ fontFamily: 'var(--font-outfit)' }}>
               <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Añadir Propina para el Personal</span>
@@ -1219,7 +1284,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
             {/* Invoice Breakdown */}
             {(() => {
-              const isTableOrder = !!selectedTable;
+              const isTableOrder = selectedTable !== "" && selectedTable !== "Domicilio";
+              const isDelivery = selectedTable === "Domicilio";
               const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
               const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
 
@@ -1227,7 +1293,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               const iva = applyIva ? subtotal * (restaurant.ivaPercent / 100) : 0;
               const serviceCharge = applyService ? subtotal * (restaurant.servicePercent / 100) : 0;
               const tip = subtotal * (tipPercentage / 100);
-              const total = subtotal + iva + serviceCharge + tip;
+              const deliveryCost = isDelivery ? restaurant.deliveryCost : 0;
+              const total = subtotal + iva + serviceCharge + tip + deliveryCost;
 
               return (
                 <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-2.5 text-xs" style={{ fontFamily: 'var(--font-outfit)' }}>
@@ -1243,6 +1310,12 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                     <span>Servicio ({restaurant.servicePercent}%):</span>
                     <span className="font-bold text-slate-350">${serviceCharge.toFixed(2)}</span>
                   </div>
+                  {isDelivery && restaurant.deliveryCost > 0 && (
+                    <div className="flex justify-between text-slate-400">
+                      <span>Costo de Envío:</span>
+                      <span className="font-bold text-slate-350">${restaurant.deliveryCost.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-slate-400">
                     <span>Propina ({tipPercentage}%):</span>
                     <span className="font-bold text-slate-350">${tip.toFixed(2)}</span>
@@ -1301,6 +1374,20 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                 style={{ backgroundColor: selectedTable === "" ? restaurant.themeColor : undefined }}
               >
                 🛍️ Para Llevar
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedTable("Domicilio");
+                  setIsTableModalOpen(false);
+                }}
+                className={`col-span-4 py-3 rounded-xl text-xs font-black tracking-wide uppercase border transition duration-200 ${
+                  selectedTable === "Domicilio" 
+                    ? "text-white border-transparent" 
+                    : "text-slate-400 bg-slate-950/60 border-white/5 hover:text-white"
+                }`}
+                style={{ backgroundColor: selectedTable === "Domicilio" ? restaurant.themeColor : undefined }}
+              >
+                🛵 Envío a Domicilio (${restaurant.deliveryCost.toFixed(2)})
               </button>
               {(() => {
                 const tablesList = restaurant.tablesConfig 
@@ -1473,7 +1560,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
           >
             <Utensils className="h-5 w-5" />
             <span className="text-[10px] font-bold uppercase tracking-wider truncate max-w-[65px]">
-              {selectedTable ? `#${selectedTable}` : "Mesa"}
+              {selectedTable === "Domicilio" ? "Domicilio" : selectedTable ? `#${selectedTable}` : "Mesa"}
             </span>
           </button>
 
