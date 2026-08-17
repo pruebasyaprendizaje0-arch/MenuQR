@@ -169,6 +169,13 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const services = formData.get("services") as string;
   const contactNumbers = formData.get("contactNumbers") as string;
   const ubicameUrl = formData.get("ubicameUrl") as string;
+  
+  const bankName = formData.get("bankName") as string;
+  const bankAccountType = formData.get("bankAccountType") as string;
+  const bankAccountNumber = formData.get("bankAccountNumber") as string;
+  const bankAccountName = formData.get("bankAccountName") as string;
+  const bankAccountDocument = formData.get("bankAccountDocument") as string;
+  const bankAccountEmail = formData.get("bankAccountEmail") as string;
 
   let logoFile = formData.get("logoFile") as File | null;
   if (!logoFile || logoFile.size === 0) {
@@ -211,6 +218,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const ivaOnTakeout = formData.get("ivaOnTakeout") === "true";
   const serviceOnTable = formData.get("serviceOnTable") === "true";
   const serviceOnTakeout = formData.get("serviceOnTakeout") === "true";
+  const deliveryEnabled = formData.get("deliveryEnabled") === "true" || formData.get("deliveryEnabled") === "on";
 
   await prisma.restaurant.update({
     where: { id: restaurantId },
@@ -234,9 +242,16 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       services: services || null,
       contactNumbers: contactNumbers || null,
       ubicameUrl: ubicameUrl || null,
+      bankName: bankName || null,
+      bankAccountType: bankAccountType || null,
+      bankAccountNumber: bankAccountNumber || null,
+      bankAccountName: bankAccountName || null,
+      bankAccountDocument: bankAccountDocument || null,
+      bankAccountEmail: bankAccountEmail || null,
       ivaPercent,
       servicePercent,
       deliveryCost,
+      deliveryEnabled,
       ivaOnTable,
       ivaOnTakeout,
       serviceOnTable,
@@ -648,6 +663,7 @@ export async function updateRestaurantChargesConfigAction(
     ivaPercent: number;
     servicePercent: number;
     deliveryCost: number;
+    deliveryEnabled: boolean;
     ivaOnTable: boolean;
     ivaOnTakeout: boolean;
     serviceOnTable: boolean;
@@ -662,6 +678,7 @@ export async function updateRestaurantChargesConfigAction(
         ivaPercent: data.ivaPercent,
         servicePercent: data.servicePercent,
         deliveryCost: data.deliveryCost,
+        deliveryEnabled: data.deliveryEnabled,
         ivaOnTable: data.ivaOnTable,
         ivaOnTakeout: data.ivaOnTakeout,
         serviceOnTable: data.serviceOnTable,

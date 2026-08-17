@@ -69,6 +69,13 @@ type Restaurant = {
   ivaPercent: number;
   servicePercent: number;
   deliveryCost: number;
+  deliveryEnabled: boolean;
+  bankName: string | null;
+  bankAccountType: string | null;
+  bankAccountNumber: string | null;
+  bankAccountName: string | null;
+  bankAccountDocument: string | null;
+  bankAccountEmail: string | null;
   ivaOnTable: boolean;
   ivaOnTakeout: boolean;
   serviceOnTable: boolean;
@@ -1185,10 +1192,10 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
             {paymentMethod === "qr" && (
               <div className="bg-slate-950/80 border border-slate-850 p-4 rounded-2xl text-center space-y-3">
                 <span className="text-[10px] uppercase tracking-wider font-extrabold text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full">
-                  Pago Móvil Seguro (Ecuador)
+                  Pago Móvil o Transferencia Bancaria
                 </span>
                 
-                {restaurant.paymentQrUrl ? (
+                {restaurant.paymentQrUrl && (
                   <div className="space-y-3 pt-2">
                     <p className="text-xs text-slate-400 leading-relaxed">
                       Escanea este código con tu app de <strong>Deuna</strong> o banca móvil preferida para pagar:
@@ -1200,15 +1207,65 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                         className="w-full h-auto aspect-square object-contain"
                       />
                     </div>
-                    <p className="text-[10px] text-slate-500 italic mt-2 leading-relaxed">
-                      Recuerda tomar una captura de pantalla del comprobante de transferencia o pago y adjuntarla en el chat de WhatsApp.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="py-6 text-slate-500 text-xs italic leading-relaxed">
-                    El restaurante no ha subido una imagen de su QR de cobro Deuna. Puedes coordinar los datos de transferencia al enviar el pedido por WhatsApp.
                   </div>
                 )}
+
+                {/* Bank account details if configured */}
+                {(restaurant.bankName || restaurant.bankAccountNumber) && (
+                  <div className="border-t border-slate-850/80 pt-3 mt-3 text-left space-y-2 text-xs">
+                    <p className="font-extrabold text-slate-300 border-b border-slate-900 pb-1 mb-2 text-center uppercase tracking-wider text-[10px]">
+                      Datos para Transferencia Bancaria
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px] text-slate-350">
+                      {restaurant.bankName && (
+                        <>
+                          <span className="font-bold text-slate-400">Banco:</span>
+                          <span className="text-right font-medium text-white">{restaurant.bankName}</span>
+                        </>
+                      )}
+                      {restaurant.bankAccountType && (
+                        <>
+                          <span className="font-bold text-slate-400">Tipo:</span>
+                          <span className="text-right font-medium text-white">{restaurant.bankAccountType}</span>
+                        </>
+                      )}
+                      {restaurant.bankAccountNumber && (
+                        <>
+                          <span className="font-bold text-slate-400">Nro. Cuenta:</span>
+                          <span className="text-right font-bold text-amber-400 select-all">{restaurant.bankAccountNumber}</span>
+                        </>
+                      )}
+                      {restaurant.bankAccountName && (
+                        <>
+                          <span className="font-bold text-slate-400">Beneficiario:</span>
+                          <span className="text-right font-medium text-white line-clamp-1">{restaurant.bankAccountName}</span>
+                        </>
+                      )}
+                      {restaurant.bankAccountDocument && (
+                        <>
+                          <span className="font-bold text-slate-400">CI / RUC:</span>
+                          <span className="text-right font-medium text-white select-all">{restaurant.bankAccountDocument}</span>
+                        </>
+                      )}
+                      {restaurant.bankAccountEmail && (
+                        <>
+                          <span className="font-bold text-slate-400">Correo:</span>
+                          <span className="text-right font-medium text-white select-all line-clamp-1">{restaurant.bankAccountEmail}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {!restaurant.paymentQrUrl && !restaurant.bankName && !restaurant.bankAccountNumber && (
+                  <div className="py-6 text-slate-500 text-xs italic leading-relaxed">
+                    El restaurante no ha configurado datos de transferencia ni QR de cobro. Puedes coordinar los detalles al enviar el pedido por WhatsApp.
+                  </div>
+                )}
+
+                <p className="text-[10px] text-slate-500 italic mt-2 leading-relaxed">
+                  Recuerda tomar una captura de pantalla del comprobante de transferencia o pago y adjuntarla en el chat de WhatsApp al enviar tu orden.
+                </p>
               </div>
             )}
 
@@ -1375,20 +1432,22 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               >
                 🛍️ Para Llevar
               </button>
-              <button
-                onClick={() => {
-                  setSelectedTable("Domicilio");
-                  setIsTableModalOpen(false);
-                }}
-                className={`col-span-4 py-3 rounded-xl text-xs font-black tracking-wide uppercase border transition duration-200 ${
-                  selectedTable === "Domicilio" 
-                    ? "text-white border-transparent" 
-                    : "text-slate-400 bg-slate-950/60 border-white/5 hover:text-white"
-                }`}
-                style={{ backgroundColor: selectedTable === "Domicilio" ? restaurant.themeColor : undefined }}
-              >
-                🛵 Envío a Domicilio (${restaurant.deliveryCost.toFixed(2)})
-              </button>
+              {restaurant.deliveryEnabled && (
+                <button
+                  onClick={() => {
+                    setSelectedTable("Domicilio");
+                    setIsTableModalOpen(false);
+                  }}
+                  className={`col-span-4 py-3 rounded-xl text-xs font-black tracking-wide uppercase border transition duration-200 ${
+                    selectedTable === "Domicilio" 
+                      ? "text-white border-transparent" 
+                      : "text-slate-400 bg-slate-950/60 border-white/5 hover:text-white"
+                  }`}
+                  style={{ backgroundColor: selectedTable === "Domicilio" ? restaurant.themeColor : undefined }}
+                >
+                  🛵 Envío a Domicilio (${restaurant.deliveryCost.toFixed(2)})
+                </button>
+              )}
               {(() => {
                 const tablesList = restaurant.tablesConfig 
                   ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)

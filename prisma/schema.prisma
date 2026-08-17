@@ -49,6 +49,13 @@ model Restaurant {
   ivaPercent     Float      @default(15.0)
   servicePercent Float      @default(10.0)
   deliveryCost   Float      @default(0.0)
+  deliveryEnabled Boolean   @default(true)
+  bankName        String?
+  bankAccountType String?
+  bankAccountNumber String?
+  bankAccountName String?
+  bankAccountDocument String?
+  bankAccountEmail String?
   ivaOnTable     Boolean    @default(true)
   ivaOnTakeout   Boolean    @default(true)
   serviceOnTable Boolean    @default(true)

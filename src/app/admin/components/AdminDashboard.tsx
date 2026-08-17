@@ -111,6 +111,13 @@ type Restaurant = {
   ivaPercent: number;
   servicePercent: number;
   deliveryCost: number;
+  deliveryEnabled: boolean;
+  bankName: string | null;
+  bankAccountType: string | null;
+  bankAccountNumber: string | null;
+  bankAccountName: string | null;
+  bankAccountDocument: string | null;
+  bankAccountEmail: string | null;
   ivaOnTable: boolean;
   ivaOnTakeout: boolean;
   serviceOnTable: boolean;
@@ -129,6 +136,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [ivaPercent, setIvaPercent] = useState(restaurant.ivaPercent);
   const [servicePercent, setServicePercent] = useState(restaurant.servicePercent);
   const [deliveryCost, setDeliveryCost] = useState(restaurant.deliveryCost);
+  const [deliveryEnabled, setDeliveryEnabled] = useState(restaurant.deliveryEnabled);
   const [ivaOnTable, setIvaOnTable] = useState(restaurant.ivaOnTable);
   const [ivaOnTakeout, setIvaOnTakeout] = useState(restaurant.ivaOnTakeout);
   const [serviceOnTable, setServiceOnTable] = useState(restaurant.serviceOnTable);
@@ -424,6 +432,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
       ivaPercent,
       servicePercent,
       deliveryCost,
+      deliveryEnabled,
       ivaOnTable,
       ivaOnTakeout,
       serviceOnTable,
@@ -808,6 +817,15 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   <div className="border-t border-slate-800/80 pt-4 space-y-3">
                     <span className="text-xs font-bold text-slate-350 block">Reglas de Aplicación:</span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none col-span-1 sm:col-span-2 border-b border-slate-800/50 pb-2 mb-1">
+                        <input
+                          type="checkbox"
+                          checked={deliveryEnabled}
+                          onChange={(e) => setDeliveryEnabled(e.target.checked)}
+                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        <span className="font-bold text-white">Activar Envío a Domicilio</span>
+                      </label>
                       <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
                         <input
                           type="checkbox"
@@ -971,6 +989,17 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   />
                   <p className="text-xs text-slate-500 mt-1">Costo de envío a domicilio. Pon 0 para desactivar.</p>
+                </div>
+                <div className="flex flex-col justify-end pb-3">
+                  <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      name="deliveryEnabled"
+                      defaultChecked={restaurant.deliveryEnabled}
+                      className="h-5 w-5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
+                    />
+                    <span className="text-sm font-medium text-slate-300">Ofrecer Envío a Domicilio</span>
+                  </label>
                 </div>
               </div>
 
@@ -1321,6 +1350,78 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                     placeholder="https://..."
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   />
+                </div>
+              </div>
+ 
+              {/* Bank Details Section */}
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <div>
+                  <h3 className="text-md font-bold text-white">Datos Bancarios para Recibir Transferencias</h3>
+                  <p className="text-xs text-slate-400">Completa esta información para que tus clientes puedan transferir directamente a tu cuenta bancaria al finalizar sus pedidos.</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Banco</label>
+                    <input
+                      type="text"
+                      name="bankName"
+                      defaultValue={restaurant.bankName || ""}
+                      placeholder="Ej. Banco Pichincha, Guayaquil..."
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Tipo de Cuenta</label>
+                    <select
+                      name="bankAccountType"
+                      defaultValue={restaurant.bankAccountType || ""}
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    >
+                      <option value="">Selecciona tipo...</option>
+                      <option value="Ahorros">Ahorros</option>
+                      <option value="Corriente">Corriente</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Número de Cuenta</label>
+                    <input
+                      type="text"
+                      name="bankAccountNumber"
+                      defaultValue={restaurant.bankAccountNumber || ""}
+                      placeholder="Ej. 2200123456"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Nombre del Beneficiario</label>
+                    <input
+                      type="text"
+                      name="bankAccountName"
+                      defaultValue={restaurant.bankAccountName || ""}
+                      placeholder="Ej. Juan Pérez"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Cédula / RUC</label>
+                    <input
+                      type="text"
+                      name="bankAccountDocument"
+                      defaultValue={restaurant.bankAccountDocument || ""}
+                      placeholder="Ej. 1712345678"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Correo Electrónico</label>
+                    <input
+                      type="email"
+                      name="bankAccountEmail"
+                      defaultValue={restaurant.bankAccountEmail || ""}
+                      placeholder="Ej. mi-correo@banco.com"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
                 </div>
               </div>
 
