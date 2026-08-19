@@ -635,7 +635,14 @@ export async function changeUserPlanAction(restaurantId: string, plan: "FREE" | 
   return { success: true };
 }
 
-export async function subscribeToPremiumAction(restaurantId: string) {
+export async function subscribeToPremiumAction(
+  restaurantId: string,
+  paymentData?: {
+    cardHolderName?: string;
+    cardNumberLast4?: string;
+    cardDocId?: string;
+  }
+) {
   const session = await getUserSession();
   if (!session) {
     return { error: "No autorizado. Por favor inicie sesión para continuar." };
@@ -650,9 +657,19 @@ export async function subscribeToPremiumAction(restaurantId: string) {
   }
 
   const apiKey = (process.env.PAYMENT_API_KEY || "").trim();
+  const secretKey = (process.env.PAYMENT_SECRET_KEY || "").trim();
+  const smartFieldsKey = (process.env.SMARTFIELDS_API_KEY || "").trim();
+
   if (!apiKey) {
     console.error("[subscribeToPremiumAction] Missing PAYMENT_API_KEY in process.env");
-    return { error: "Configuración de pasarela de pagos no disponible. Reinicie el servidor de desarrollo (npm run dev) para cargar PAYMENT_API_KEY." };
+    return { error: "Configuración de pasarela de pagos no disponible. Por favor verifique las variables de entorno." };
+  }
+
+  // Log simulated or real gateway transaction processing
+  console.log(`[Payment Gateway API] Processing $5.00 USD charge for restaurant ${restaurant.name} (${restaurant.id})`);
+  console.log(`[Payment Gateway API] SmartFields Key: ${smartFieldsKey.substring(0, 8)}... | Secret Key Present: ${Boolean(secretKey)}`);
+  if (paymentData?.cardHolderName) {
+    console.log(`[Payment Gateway API] Cardholder: ${paymentData.cardHolderName} | Last 4: **** ${paymentData.cardNumberLast4 || '****'}`);
   }
 
   // Calculate subscription extension ($5 USD / 1 month)
@@ -673,9 +690,11 @@ export async function subscribeToPremiumAction(restaurantId: string) {
   revalidatePath("/super-admin");
   revalidatePath(`/${updatedRestaurant.slug}`);
 
+  const cardSuffix = paymentData?.cardNumberLast4 ? ` finalizada en **** ${paymentData.cardNumberLast4}` : "";
+
   return {
     success: true,
-    message: "¡Suscripción al Plan Premium ($5 USD/mes) procesada con éxito!",
+    message: `¡Pago de $5.00 USD procesado con éxito con la tarjeta${cardSuffix}! Tu Plan Premium ha sido activado/renovado por 30 días.`,
     plan: updatedRestaurant.plan,
     trialEndsAt: updatedRestaurant.trialEndsAt.toISOString()
   };

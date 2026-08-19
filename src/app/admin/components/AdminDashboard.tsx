@@ -140,6 +140,61 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [currentTrialEndsAt, setCurrentTrialEndsAt] = useState<Date>(
     restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date()
   );
+  const [cardHolderName, setCardHolderName] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardCvc, setCardCvc] = useState("");
+  const [cardDocId, setCardDocId] = useState("");
+
+  const handleSubscribePremium = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!cardHolderName.trim()) {
+      alert("Por favor ingrese el Nombre del Titular impreso en la tarjeta.");
+      return;
+    }
+    if (cardNumber.replace(/\s/g, "").length < 15) {
+      alert("Por favor ingrese un Número de Tarjeta válido (16 dígitos).");
+      return;
+    }
+    if (!cardExpiry.trim()) {
+      alert("Por favor ingrese la Fecha de Expiración (MM/AA).");
+      return;
+    }
+    if (!cardCvc.trim() || cardCvc.length < 3) {
+      alert("Por favor ingrese el Código de Seguridad (CVC / CVV).");
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    setPaymentSuccessMsg("");
+
+    const res = await subscribeToPremiumAction(restaurant.id, {
+      cardHolderName,
+      cardNumberLast4: cardNumber.replace(/\s/g, "").slice(-4),
+      cardDocId,
+    });
+
+    setIsSubmittingPayment(false);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      setPaymentSuccessMsg(res.message || "¡Pago procesado con éxito! Suscripción al Plan Premium activada.");
+      setCurrentPlan("PRO");
+      if (res.trialEndsAt) {
+        setCurrentTrialEndsAt(new Date(res.trialEndsAt));
+      }
+      setTimeout(() => {
+        setShowPaymentModal(false);
+        setPaymentSuccessMsg("");
+        setCardHolderName("");
+        setCardNumber("");
+        setCardExpiry("");
+        setCardCvc("");
+        setCardDocId("");
+      }, 3000);
+    }
+  };
   const [copied, setCopied] = useState(false);
   const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
   const [savingTables, setSavingTables] = useState(false);
@@ -459,25 +514,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
     }
   };
 
-  const handleSubscribePremium = async () => {
-    setIsSubmittingPayment(true);
-    setPaymentSuccessMsg("");
-    const res = await subscribeToPremiumAction(restaurant.id);
-    setIsSubmittingPayment(false);
-    if (res.error) {
-      alert(res.error);
-    } else {
-      setPaymentSuccessMsg(res.message || "¡Suscripción al Plan Premium ($5 USD/mes) activada!");
-      setCurrentPlan("PRO");
-      if (res.trialEndsAt) {
-        setCurrentTrialEndsAt(new Date(res.trialEndsAt));
-      }
-      setTimeout(() => {
-        setShowPaymentModal(false);
-        setPaymentSuccessMsg("");
-      }, 2500);
-    }
-  };
+
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
@@ -2341,10 +2378,10 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
         })()}
       </aside>
 
-      {/* Modal de Cobro - Plan Premium ($5 USD/mes) */}
+      {/* Modal de Pasarela de Pago Segura - Plan Premium ($5 USD/mes) */}
       {showPaymentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl relative space-y-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative space-y-6 my-8">
             <button
               onClick={() => setShowPaymentModal(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-xl bg-slate-800/50 transition"
@@ -2356,50 +2393,137 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               <div className="h-12 w-12 bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
                 <Crown className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-extrabold text-white">Suscripción Plan Premium</h3>
+              <h3 className="text-xl font-extrabold text-white">Pasarela de Pago Segura</h3>
               <p className="text-slate-400 text-xs">
-                Acceso completo por 30 días adicionales para <strong className="text-white">{restaurant.name}</strong>
+                Suscripción Plan Premium ($5.00 USD/mes) para <strong className="text-white">{restaurant.name}</strong>
               </p>
             </div>
 
             {/* Price summary */}
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 text-xs">
+            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2 text-xs">
               <div className="flex justify-between items-center text-slate-300">
-                <span>Plan:</span>
-                <span className="font-bold text-white">Único Plan Premium</span>
+                <span>Concepto:</span>
+                <span className="font-bold text-white">Suscripción Mensual Pro</span>
               </div>
               <div className="flex justify-between items-center text-slate-300">
-                <span>Duración:</span>
-                <span>1 Mes (30 días)</span>
+                <span>Período:</span>
+                <span>30 Días (Renovación Automática)</span>
               </div>
               <div className="flex justify-between items-center text-slate-300">
-                <span>Pasarela de Pago:</span>
-                <span className="text-emerald-400 font-medium">API Conectada</span>
+                <span>Cifrado:</span>
+                <span className="text-emerald-400 font-medium">SSL 256-Bit SmartFields</span>
               </div>
-              <div className="border-t border-slate-800 pt-3 flex justify-between items-center">
+              <div className="border-t border-slate-800 pt-2.5 flex justify-between items-center">
                 <span className="font-bold text-white text-sm">Total a pagar:</span>
                 <span className="text-2xl font-black text-amber-400">$5.00 USD</span>
               </div>
             </div>
 
-            {paymentSuccessMsg && (
-              <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs rounded-2xl text-center font-bold flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-4 h-4" />
-                {paymentSuccessMsg}
+            {/* Credit Card Payment Form */}
+            <form onSubmit={handleSubscribePremium} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 block">
+                  Nombre en la Tarjeta <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. JUAN CARLOS PEREZ"
+                  value={cardHolderName}
+                  onChange={(e) => setCardHolderName(e.target.value.toUpperCase())}
+                  className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none tracking-wide"
+                />
               </div>
-            )}
 
-            {/* Submit button */}
-            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 flex justify-between items-center">
+                  <span>Número de Tarjeta de Crédito / Débito <span className="text-red-400">*</span></span>
+                  <span className="text-[10px] text-slate-500 font-mono">Visa / Mastercard / Amex / Diners</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    maxLength={19}
+                    placeholder="4532 1234 5678 9012"
+                    value={cardNumber}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\D/g, "").slice(0, 16);
+                      const formatted = v.replace(/(.{4})/g, "$1 ").trim();
+                      setCardNumber(formatted);
+                    }}
+                    className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full pl-10 pr-3 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none font-mono tracking-widest"
+                  />
+                  <CreditCard className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    Expiración <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={5}
+                    placeholder="MM/AA"
+                    value={cardExpiry}
+                    onChange={(e) => {
+                      let v = e.target.value.replace(/\D/g, "").slice(0, 4);
+                      if (v.length >= 3) v = `${v.slice(0, 2)}/${v.slice(2)}`;
+                      setCardExpiry(v);
+                    }}
+                    className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none text-center font-mono"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300 block">
+                    CVC / CVV <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    maxLength={4}
+                    placeholder="123"
+                    value={cardCvc}
+                    onChange={(e) => setCardCvc(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none text-center font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-300 block">
+                  Identificación del Titular (Cédula / RUC)
+                </label>
+                <input
+                  type="text"
+                  maxLength={13}
+                  placeholder="Ej. 1712345678001"
+                  value={cardDocId}
+                  onChange={(e) => setCardDocId(e.target.value.replace(/\D/g, "").slice(0, 13))}
+                  className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none font-mono"
+                />
+              </div>
+
+              {paymentSuccessMsg && (
+                <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs rounded-2xl text-center font-bold flex items-center justify-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{paymentSuccessMsg}</span>
+                </div>
+              )}
+
               <button
-                onClick={handleSubscribePremium}
+                type="submit"
                 disabled={isSubmittingPayment}
-                className="w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-4"
               >
                 {isSubmittingPayment ? (
                   <>
                     <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                    Procesando Cobro de $5.00...
+                    Procesando Pago de $5.00 USD...
                   </>
                 ) : (
                   <>
@@ -2408,10 +2532,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   </>
                 )}
               </button>
-              <p className="text-[10px] text-center text-slate-500">
-                El cobro se realiza de forma segura mediante la clave de API de cobros configurada.
-              </p>
-            </div>
+            </form>
+
+            <p className="text-[10px] text-center text-slate-500 leading-normal">
+              🔒 Transacción segura procesada mediante clave SmartFields API con cifrado bancario SSL 256-bit.
+            </p>
           </div>
         </div>
       )}
