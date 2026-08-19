@@ -649,9 +649,10 @@ export async function subscribeToPremiumAction(restaurantId: string) {
     return { error: "Restaurante no encontrado o no tiene permisos." };
   }
 
-  const apiKey = process.env.PAYMENT_API_KEY;
+  const apiKey = (process.env.PAYMENT_API_KEY || "").trim();
   if (!apiKey) {
-    return { error: "Configuración de pasarela de pagos no disponible." };
+    console.error("[subscribeToPremiumAction] Missing PAYMENT_API_KEY in process.env");
+    return { error: "Configuración de pasarela de pagos no disponible. Reinicie el servidor de desarrollo (npm run dev) para cargar PAYMENT_API_KEY." };
   }
 
   // Calculate subscription extension ($5 USD / 1 month)
