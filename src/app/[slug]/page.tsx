@@ -6,10 +6,63 @@ import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
+import type { Metadata } from "next";
+
 interface PageProps {
   params: {
     slug: string;
   };
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const slug = params.slug.toLowerCase().trim();
+  try {
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { slug },
+      select: {
+        name: true,
+        specialty: true,
+        locality: true,
+        description: true,
+        logoUrl: true,
+        coverUrl: true,
+      },
+    });
+
+    if (!restaurant) {
+      return {
+        title: "Menú no encontrado | MenuQR Pro",
+      };
+    }
+
+    const title = `Menú Digital de ${restaurant.name} ${restaurant.locality ? `(${restaurant.locality})` : "en Ecuador"}`;
+    const description = restaurant.description || `Escanea el código QR y consulta la carta digital completa de ${restaurant.name}. Especialidad: ${restaurant.specialty || "Gastronomía"}. Haz tu pedido directo a WhatsApp.`;
+
+    return {
+      title,
+      description,
+      openGraph: {
+        title: `${restaurant.name} | Menú Digital QR`,
+        description,
+        images: [
+          {
+            url: restaurant.logoUrl || restaurant.coverUrl || "/icon.png",
+            alt: `Logo de ${restaurant.name}`,
+          },
+        ],
+      },
+      twitter: {
+        card: "summary_large_image",
+        title: `${restaurant.name} | Menú Digital QR`,
+        description,
+        images: [restaurant.logoUrl || restaurant.coverUrl || "/icon.png"],
+      },
+    };
+  } catch (err) {
+    return {
+      title: "Menú Digital QR | MenuQR Pro",
+    };
+  }
 }
 
 export default async function RestaurantMenuPage({ params }: PageProps) {
@@ -123,7 +176,31 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       })),
     };
 
-    return <MenuClient restaurant={serializedRestaurant} />;
+    const restaurantSchema = {
+      "@context": "https://schema.org",
+      "@type": "Restaurant",
+      "name": restaurant.name,
+      "image": restaurant.logoUrl || restaurant.coverUrl || undefined,
+      "description": restaurant.description || `Menú digital de ${restaurant.name}`,
+      "servesCuisine": restaurant.specialty || "Gastronomía",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": restaurant.locality || "Ecuador",
+        "addressCountry": "EC",
+      },
+      "telephone": restaurant.whatsapp || undefined,
+      "url": `${process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com"}/${restaurant.slug}`,
+    };
+
+    return (
+      <>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantSchema) }}
+        />
+        <MenuClient restaurant={serializedRestaurant} />
+      </>
+    );
 
   } catch (err) {
     // Print the real error to server stdout — visible in Coolify logs

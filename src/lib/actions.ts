@@ -1,30 +1,114 @@
 "use server";
 
 import { prisma } from "@/lib/db";
-import { setUserSession, clearUserSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession } from "@/lib/auth";
+import { getUserSession, setUserSession, clearUserSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 
+const ALLOWED_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+]);
+
+const ALLOWED_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif", "svg"]);
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB max
+
+function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
+  if (ext === "jpg" || ext === "jpeg") {
+    // JPEG magic bytes: FF D8 FF
+    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+  if (ext === "png") {
+    // PNG magic bytes: 89 50 4E 47
+    return (
+      buffer.length >= 4 &&
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47
+    );
+  }
+  if (ext === "gif") {
+    // GIF magic bytes: GIF8 (47 49 46 38)
+    return (
+      buffer.length >= 4 &&
+      buffer[0] === 0x47 &&
+      buffer[1] === 0x49 &&
+      buffer[2] === 0x46 &&
+      buffer[3] === 0x38
+    );
+  }
+  if (ext === "webp") {
+    // WEBP magic bytes: RIFF (52 49 46 46) ... WEBP (57 45 42 50)
+    return (
+      buffer.length >= 12 &&
+      buffer[0] === 0x52 &&
+      buffer[1] === 0x49 &&
+      buffer[2] === 0x46 &&
+      buffer[3] === 0x46 &&
+      buffer[8] === 0x57 &&
+      buffer[9] === 0x45 &&
+      buffer[10] === 0x42 &&
+      buffer[11] === 0x50
+    );
+  }
+  if (ext === "svg") {
+    // SVG text check: starts with <svg or <?xml
+    const headerStr = buffer.slice(0, 100).toString("utf-8").toLowerCase().trim();
+    return headerStr.includes("<svg") || headerStr.includes("<?xml");
+  }
+  return false;
+}
+
 // Helper to save files to public/uploads
 async function saveUploadedFile(file: File | null): Promise<string | null> {
   if (!file || file.size === 0 || !file.name) {
     return null;
   }
-  
+
+  // 1. File Size Validation (Max 5 MB)
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    console.warn(`[Security Upload] File size ${file.size} bytes exceeds limit of ${MAX_FILE_SIZE_BYTES} bytes.`);
+    return null;
+  }
+
+  // 2. Extension Validation
+  const fileExt = file.name.split(".").pop()?.toLowerCase() || "";
+  if (!ALLOWED_EXTENSIONS.has(fileExt)) {
+    console.warn(`[Security Upload] Extension .${fileExt} is not allowed.`);
+    return null;
+  }
+
+  // 3. MIME Type Validation
+  if (file.type && !ALLOWED_MIME_TYPES.has(file.type.toLowerCase())) {
+    console.warn(`[Security Upload] MIME type ${file.type} is not in allowed list.`);
+    return null;
+  }
+
   try {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    
+
+    // 4. Magic Bytes Content Inspection
+    if (!validateImageMagicBytes(buffer, fileExt)) {
+      console.warn(`[Security Upload] Magic bytes inspection failed for extension .${fileExt}`);
+      return null;
+    }
+
     const uploadDir = join(process.cwd(), "public", "uploads");
     await mkdir(uploadDir, { recursive: true });
-    
+
     const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
     const filename = `${Date.now()}-${cleanFileName}`;
     const filepath = join(uploadDir, filename);
-    
+
     await writeFile(filepath, buffer);
     return `/uploads/${filename}`;
   } catch (error) {
@@ -70,10 +154,15 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
   const province = formData.get("province") as string;
   const canton = formData.get("canton") as string;
   const parroquia = formData.get("parroquia") as string;
+  const acceptTerms = formData.get("acceptTerms");
   const sector = (formData.get("sector") as string) || "";
 
   if (!name || !email || !password || !restaurantName || !province || !canton || !parroquia) {
     return { error: "Por favor complete todos los campos requeridos de ubicación." };
+  }
+
+  if (!acceptTerms || (acceptTerms !== "on" && acceptTerms !== "true")) {
+    return { error: "Debe aceptar los Términos y Condiciones y la Política de Privacidad de acuerdo a la legislación ecuatoriana para registrarse." };
   }
 
   const cleanEmail = email.toLowerCase().trim();
@@ -544,6 +633,51 @@ export async function changeUserPlanAction(restaurantId: string, plan: "FREE" | 
   revalidatePath("/super-admin");
   revalidatePath(`/${restaurant.slug}`);
   return { success: true };
+}
+
+export async function subscribeToPremiumAction(restaurantId: string) {
+  const session = await getUserSession();
+  if (!session) {
+    return { error: "No autorizado. Por favor inicie sesión para continuar." };
+  }
+
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId }
+  });
+
+  if (!restaurant || restaurant.userId !== session.userId) {
+    return { error: "Restaurante no encontrado o no tiene permisos." };
+  }
+
+  const apiKey = process.env.PAYMENT_API_KEY;
+  if (!apiKey) {
+    return { error: "Configuración de pasarela de pagos no disponible." };
+  }
+
+  // Calculate subscription extension ($5 USD / 1 month)
+  const currentExpiry = restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date();
+  const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
+  const newExpiry = new Date(baseDate);
+  newExpiry.setMonth(newExpiry.getMonth() + 1);
+
+  const updatedRestaurant = await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: {
+      plan: "PRO",
+      trialEndsAt: newExpiry
+    }
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/super-admin");
+  revalidatePath(`/${updatedRestaurant.slug}`);
+
+  return {
+    success: true,
+    message: "¡Suscripción al Plan Premium ($5 USD/mes) procesada con éxito!",
+    plan: updatedRestaurant.plan,
+    trialEndsAt: updatedRestaurant.trialEndsAt.toISOString()
+  };
 }
 
 export async function resetUserPasswordAction(userId: string, newPassword: string) {

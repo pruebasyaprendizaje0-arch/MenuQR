@@ -253,8 +253,32 @@ export default function RegisterPage() {
               </div>
             </div>
 
+            {/* Aceptación de Términos y Políticas (Legislación Ecuatoriana) */}
+            <div className="flex items-start gap-3 pt-2">
+              <div className="flex items-center h-5 mt-0.5">
+                <input
+                  id="acceptTerms"
+                  name="acceptTerms"
+                  type="checkbox"
+                  required
+                  className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-red-600 focus:ring-red-500 focus:ring-offset-slate-900 cursor-pointer"
+                />
+              </div>
+              <label htmlFor="acceptTerms" className="text-xs text-slate-400 leading-normal cursor-pointer select-none">
+                Acepto de forma expresa los{" "}
+                <Link href="/terminos" target="_blank" className="text-amber-400 hover:underline font-semibold">
+                  Términos y Condiciones
+                </Link>{" "}
+                y la{" "}
+                <Link href="/privacidad" target="_blank" className="text-amber-400 hover:underline font-semibold">
+                  Política de Privacidad
+                </Link>{" "}
+                conforme a la legislación de la República del Ecuador (LOPDP y Ley de Comercio Electrónico).
+              </label>
+            </div>
+
             <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3 text-[10px] text-amber-400/90 leading-relaxed">
-              * Recibirás de forma gratuita una prueba completa del plan <strong>PRO</strong> por un período de <strong>30 días (1 mes)</strong> a partir del registro.
+              * Recibirás de forma gratuita una prueba completa del <strong>Plan Premium ($5 USD/mes)</strong> por un período de <strong>30 días (1 mes)</strong> a partir del registro.
             </div>
 
             {state?.error && (
@@ -268,11 +292,22 @@ export default function RegisterPage() {
             </div>
           </form>
 
-          <div className="mt-6 text-center text-xs text-slate-450">
-            ¿Ya tienes cuenta?{" "}
-            <Link href="/login" className="text-red-400 hover:text-red-300 underline font-semibold transition">
-              Inicia sesión aquí
-            </Link>
+          <div className="mt-6 text-center text-xs text-slate-450 space-y-3">
+            <p>
+              ¿Ya tienes cuenta?{" "}
+              <Link href="/login" className="text-red-400 hover:text-red-300 underline font-semibold transition">
+                Inicia sesión aquí
+              </Link>
+            </p>
+            <div className="flex justify-center gap-4 text-[11px] text-slate-500 border-t border-slate-800/80 pt-3">
+              <Link href="/terminos" target="_blank" className="hover:text-slate-300 transition">
+                Términos y Condiciones
+              </Link>
+              <span>•</span>
+              <Link href="/privacidad" target="_blank" className="hover:text-slate-300 transition">
+                Política de Privacidad LOPDP
+              </Link>
+            </div>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { UtensilsCrossed, Sparkles, QrCode, MessageSquare, ShieldCheck, ArrowRight } from "lucide-react";
+import { UtensilsCrossed, Sparkles, QrCode, MessageSquare, ShieldCheck, ArrowRight, MapPin, HelpCircle } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { LandingSearch } from "./components/LandingSearch";
 import { ScrollVideoBackground } from "./components/ScrollVideoBackground";
@@ -131,12 +131,184 @@ export default async function LandingPage() {
             <p className="text-slate-400 text-xs leading-relaxed">Crea, edita y elimina platos o categorías al instante, sube fotos y cambia la disponibilidad en tiempo real.</p>
           </div>
         </div>
+
+        {/* Pricing Section - Único Plan Premium ($5 USD/mes) */}
+        <div className="w-full max-w-2xl bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-amber-500/30 rounded-[2.5rem] p-8 md:p-12 shadow-2xl relative overflow-hidden text-center space-y-8 my-8">
+          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+          
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mx-auto">
+            <Sparkles className="w-4 h-4 text-amber-400" /> Único Plan Transparente
+          </div>
+
+          <div className="space-y-3">
+            <h2 className="text-3xl md:text-4xl font-extrabold text-white">Plan Premium SaaS</h2>
+            <p className="text-slate-400 text-xs md:text-sm max-w-md mx-auto">
+              Todas las funciones avanzadas para tu restaurante por un precio fijo mensual sin sorpresas ni comisiones por ventas.
+            </p>
+          </div>
+
+          <div className="bg-slate-950/80 p-6 rounded-3xl border border-slate-800 inline-block w-full max-w-sm mx-auto shadow-inner">
+            <div className="flex items-baseline justify-center gap-1">
+              <span className="text-5xl font-black text-white">$5</span>
+              <span className="text-lg font-bold text-amber-400">.00 USD</span>
+              <span className="text-slate-400 text-xs ml-1">/ mes</span>
+            </div>
+            <p className="text-[11px] text-emerald-400 font-semibold mt-2">
+              ✨ Incluye 30 Días de Prueba 100% Gratuita
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left text-xs text-slate-300 max-w-lg mx-auto">
+            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
+              <QrCode className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Menú Digital QR Ilimitado</span>
+            </div>
+            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
+              <MessageSquare className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Pedidos directos a WhatsApp</span>
+            </div>
+            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
+              <UtensilsCrossed className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Catálogo CRUD sin límite de platos</span>
+            </div>
+            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
+              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Cero comisiones por cada pedido</span>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <Link
+              href="/registro"
+              className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transform hover:scale-[1.02] transition-all"
+            >
+              Comenzar Prueba Gratis de 30 Días
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+
+        {/* GEO Coverage Section - Generative & Local Search Optimization */}
+        <div className="w-full max-w-4xl bg-transparent border border-white/10 rounded-[2.5rem] p-8 text-left space-y-6">
+          <div className="flex items-center gap-2 text-amber-500 text-xs font-bold uppercase tracking-wider">
+            <MapPin className="w-4 h-4" /> Cobertura Nacional en Ecuador
+          </div>
+          <h2 className="text-2xl font-extrabold text-white">Presentes en Todas las Provincias y Ciudades de Ecuador</h2>
+          <p className="text-slate-400 text-xs leading-relaxed">
+            MenuQR Pro potencia la transformación digital gastronómica en <strong>Quito, Guayaquil, Cuenca, Ambato, Manta, Loja, Machala, Santo Domingo, Portoviejo, Ibarra, Salinas, Babahoyo, Quevedo, Riobamba y Esmeraldas</strong>. Optimizado para el mercado ecuatoriano con soporte nativo para IVA del 15%, servicio del 10% y transferencias bancarias directas.
+          </p>
+          <div className="flex flex-wrap gap-2 text-[11px] text-slate-400 pt-2">
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Pichincha</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Guayas</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Azuay</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Manabí</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Tungurahua</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Loja</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">El Oro</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Santo Domingo</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Los Ríos</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Chimborazo</span>
+            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Imbabura</span>
+          </div>
+        </div>
+
+        {/* AEO FAQ Section - Answer Engine Optimization for Search & AI */}
+        <div className="w-full max-w-4xl text-left space-y-8 my-8">
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify({
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "mainEntity": [
+                  {
+                    "@type": "Question",
+                    "name": "¿Qué es MenuQR Pro y cómo funciona en Ecuador?",
+                    "acceptedAnswer": {
+                      "@type": "Answer",
+                      "text": "MenuQR Pro es una plataforma SaaS en Ecuador que permite a restaurantes, cafeterías y bares crear un menú digital QR interactivo. Los clientes escanean el código QR en la mesa y envían su pedido detallado a través de WhatsApp de forma automatizada.",
+                    },
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "¿Cuánto cuesta MenuQR Pro en Ecuador?",
+                    "acceptedAnswer": {
+                      "@type": "Answer",
+                      "text": "MenuQR Pro cuenta con un Único Plan Premium de $5.00 USD mensuales. Todos los usuarios nuevos reciben 30 días de prueba completa totalmente gratis.",
+                    },
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "¿MenuQR Pro cobra comisiones sobre las ventas o pedidos?",
+                    "acceptedAnswer": {
+                      "@type": "Answer",
+                      "text": "No. MenuQR Pro no cobra ninguna comisión por venta ni tarifa de intermediación por los pedidos de tu restaurante.",
+                    },
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "¿Cómo reciben los restaurantes los pedidos de sus clientes?",
+                    "acceptedAnswer": {
+                      "@type": "Answer",
+                      "text": "Los clientes seleccionan los platos y mesas desde el menú digital y el pedido estructurado con totales e impuestos se envía instantáneamente al número de WhatsApp del establecimiento.",
+                    },
+                  },
+                ],
+              }),
+            }}
+          />
+
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 text-amber-500 text-xs font-bold uppercase tracking-wider">
+              <HelpCircle className="w-4 h-4" /> Preguntas Frecuentes (AEO)
+            </div>
+            <h2 className="text-3xl font-extrabold text-white">Todo lo que necesitas saber sobre MenuQR Pro</h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
+              <h3 className="font-bold text-white text-sm">¿Qué es MenuQR Pro y cómo funciona en Ecuador?</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Es una solución SaaS pensada para establecimientos gastronómicos en Ecuador. Te brinda un menú QR interactivo con enrutamiento de pedidos automatizado directamente a tu WhatsApp personal o de caja.
+              </p>
+            </div>
+
+            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
+              <h3 className="font-bold text-white text-sm">¿Cuánto cuesta y cómo funciona la prueba gratis?</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Obtienes <strong>30 días de prueba 100% gratuita</strong> al registrarte. Luego de la prueba, el servicio mantiene un valor fijo transparente de solo <strong>$5.00 USD al mes</strong>.
+              </p>
+            </div>
+
+            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
+              <h3 className="font-bold text-white text-sm">¿Existen comisiones adicionales por pedido o venta?</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                No. A diferencia de las apps de delivery tradicionales, en MenuQR Pro te quedas con el 100% de tus ventas sin comisiones por pedido.
+              </p>
+            </div>
+
+            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
+              <h3 className="font-bold text-white text-sm">¿Permite configurar IVA y recargo por servicio en Ecuador?</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Sí. Puedes configurar de forma flexible el IVA (15% u otro porcentaje), el recargo de servicio (10%) y los datos bancarios para transferencias directas en Ecuador.
+              </p>
+            </div>
+          </div>
+        </div>
       </main>
 
       {/* Footer */}
-      <footer className="max-w-6xl w-full mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4 relative z-10 text-xs text-slate-500">
-        <p>© 2026 MenuQR Pro. Todos los derechos reservados.</p>
-        <p>Diseño oscuro premium y ultra rápido.</p>
+      <footer className="max-w-6xl w-full mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4 relative z-10 text-xs text-slate-500 border-t border-slate-900 mt-8">
+        <p>© 2026 MenuQR Pro Ecuador. Todos los derechos reservados.</p>
+        <div className="flex items-center gap-4">
+          <Link href="/terminos" className="hover:text-slate-300 transition">
+            Términos y Condiciones
+          </Link>
+          <span>•</span>
+          <Link href="/privacidad" className="hover:text-slate-300 transition">
+            Política de Privacidad (LOPDP)
+          </Link>
+        </div>
       </footer>
       {/* Floating WhatsApp Button */}
       {whatsappSupport && (

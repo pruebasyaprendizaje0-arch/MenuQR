@@ -282,10 +282,10 @@ export function SuperAdminDashboard({
                                 await changeUserPlanAction(res.id, e.target.value as "FREE" | "PRO");
                                 alert(`Plan de "${res.name}" cambiado a ${e.target.value} con éxito.`);
                               }}
-                              className="bg-slate-950 border border-slate-800 text-xs rounded-xl px-3 py-1.5 text-slate-200 focus:outline-none focus:border-red-500 font-semibold cursor-pointer"
+                              className="bg-slate-950 border border-slate-800 text-xs rounded-xl px-3 py-1.5 text-slate-200 focus:outline-none focus:border-amber-500 font-semibold cursor-pointer"
                             >
-                              <option value="FREE">FREE</option>
-                              <option value="PRO">PRO</option>
+                              <option value="FREE">FREE (Prueba)</option>
+                              <option value="PRO">PRO ($5/mes)</option>
                             </select>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">

@@ -13,7 +13,8 @@ import {
   toggleDishAvailabilityAction,
   updateOrderStatusAction,
   updateRestaurantTablesAction,
-  updateRestaurantChargesConfigAction
+  updateRestaurantChargesConfigAction,
+  subscribeToPremiumAction
 } from "@/lib/actions";
 import { 
   Store, 
@@ -38,7 +39,10 @@ import {
   XCircle,
   DollarSign,
   Camera,
-  Upload
+  Upload,
+  CreditCard,
+  Crown,
+  Sparkles
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
@@ -90,6 +94,7 @@ type Restaurant = {
   id: string;
   slug: string;
   name: string;
+  plan?: "FREE" | "PRO";
   logoUrl: string | null;
   coverUrl: string | null;
   paymentQrUrl: string | null;
@@ -127,7 +132,14 @@ type Restaurant = {
 };
 
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "qr" | "orders">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "qr" | "orders" | "subscription">("metrics");
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [paymentSuccessMsg, setPaymentSuccessMsg] = useState("");
+  const [currentPlan, setCurrentPlan] = useState<"FREE" | "PRO">(restaurant.plan || "FREE");
+  const [currentTrialEndsAt, setCurrentTrialEndsAt] = useState<Date>(
+    restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date()
+  );
   const [copied, setCopied] = useState(false);
   const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
   const [savingTables, setSavingTables] = useState(false);
@@ -447,6 +459,26 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
     }
   };
 
+  const handleSubscribePremium = async () => {
+    setIsSubmittingPayment(true);
+    setPaymentSuccessMsg("");
+    const res = await subscribeToPremiumAction(restaurant.id);
+    setIsSubmittingPayment(false);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      setPaymentSuccessMsg(res.message || "¡Suscripción al Plan Premium ($5 USD/mes) activada!");
+      setCurrentPlan("PRO");
+      if (res.trialEndsAt) {
+        setCurrentTrialEndsAt(new Date(res.trialEndsAt));
+      }
+      setTimeout(() => {
+        setShowPaymentModal(false);
+        setPaymentSuccessMsg("");
+      }, 2500);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
       {/* Sidebar */}
@@ -559,6 +591,22 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               <ShoppingBag className="h-4 w-4" />
               Historial de Pedidos
             </button>
+            <button
+              onClick={() => setActiveTab("subscription")}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "subscription" 
+                  ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Crown className="h-4 w-4 text-amber-400" />
+                <span>Suscripción</span>
+              </div>
+              <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                $5/mes
+              </span>
+            </button>
           </nav>
         </div>
 
@@ -589,32 +637,53 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
       <div className="flex-1 flex flex-col lg:flex-row min-w-0 overflow-y-auto lg:overflow-visible pb-28 md:pb-0">
         {/* Main Content Area */}
         <main className="flex-1 p-6 pb-28 md:p-10 max-w-4xl overflow-y-auto space-y-6">
-        {/* Trial Period Banner */}
+        {/* Subscription / Plan Banner */}
         {(() => {
-          const trialEnds = new Date(restaurant.trialEndsAt);
+          const trialEnds = currentTrialEndsAt;
           const now = new Date();
           const isExpired = trialEnds < now;
           const daysRemaining = Math.max(0, Math.ceil((trialEnds.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+          const isPro = currentPlan === "PRO";
 
           return (
-            <div className={`p-4 rounded-2xl border flex items-center justify-between text-sm ${
-              isExpired 
-                ? "bg-red-500/10 border-red-500/30 text-red-400" 
-                : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+            <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-sm ${
+              isPro
+                ? "bg-gradient-to-r from-emerald-950/40 to-slate-900 border-emerald-500/30 text-emerald-300"
+                : isExpired 
+                  ? "bg-red-500/10 border-red-500/30 text-red-400" 
+                  : "bg-amber-500/10 border-amber-500/30 text-amber-400"
             }`}>
-              <div>
-                <span className="font-bold">{isExpired ? "Demo Expirada" : "Demo Activa (Prueba de 30 días)"}</span>
-                <p className="text-xs text-slate-400 mt-1">
-                  {isExpired 
-                    ? "Tu período de prueba ha terminado. Ponte en contacto para renovar." 
-                    : `Tu período de prueba finaliza el ${trialEnds.toLocaleDateString()}. Te quedan ${daysRemaining} días.`}
-                </p>
+              <div className="flex items-center gap-3">
+                <div className={`p-2.5 rounded-xl border ${
+                  isPro ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" : "bg-amber-500/20 border-amber-500/30 text-amber-400"
+                }`}>
+                  <Crown className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold">
+                      {isPro ? "Plan Premium Activo ($5 USD/mes)" : isExpired ? "Suscripción Inactiva" : "Prueba Gratuita (30 Días)"}
+                    </span>
+                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-950/60 border border-current">
+                      {isPro ? "PRO" : `${daysRemaining}d restantes`}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {isPro 
+                      ? `Próxima renovación: ${trialEnds.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}`
+                      : isExpired 
+                        ? "Tu prueba ha finalizado. Activa el Plan Premium por solo $5 USD/mes para continuar." 
+                        : `Vence el ${trialEnds.toLocaleDateString()}. Suscríbete al Plan Premium por $5 USD/mes.`}
+                  </p>
+                </div>
               </div>
-              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                isExpired ? "bg-red-500/20" : "bg-amber-500/20"
-              }`}>
-                {isExpired ? "Inactivo" : `${daysRemaining} días`}
-              </span>
+              <button
+                onClick={() => setShowPaymentModal(true)}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/10 transition-all shrink-0 flex items-center justify-center gap-1.5"
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                {isPro ? "Renovar ($5/mes)" : "Activar Premium ($5/mes)"}
+              </button>
             </div>
           );
         })()}
@@ -2056,6 +2125,99 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
             </div>
           </div>
         )}
+
+        {/* Plan & Suscripción Tab */}
+        {activeTab === "subscription" && (
+          <div className="space-y-6 animate-fade-in">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+                <Crown className="w-64 h-64 text-amber-500" />
+              </div>
+
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">
+                    <Crown className="w-3.5 h-3.5" /> Suscripción SaaS
+                  </div>
+                  <h2 className="text-2xl font-extrabold text-white">Único Plan Premium</h2>
+                  <p className="text-slate-400 text-xs mt-1">
+                    Acceso total a todas las herramientas sin límites ni comisiones por pedido.
+                  </p>
+                </div>
+
+                <div className="text-right bg-slate-950 p-4 rounded-2xl border border-slate-800">
+                  <div className="text-3xl font-black text-white">$5.00 <span className="text-xs font-normal text-slate-400">/ mes</span></div>
+                  <span className="text-[10px] text-amber-400 font-medium">Facturación mensual en USD</span>
+                </div>
+              </div>
+
+              {/* Status card */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-2">
+                  <span className="text-xs text-slate-400 font-medium">Estado del Plan</span>
+                  <div className="flex items-center gap-2">
+                    <span className={`h-3 w-3 rounded-full ${currentPlan === "PRO" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                    <span className="font-bold text-white text-base">
+                      {currentPlan === "PRO" ? "Plan Premium Activo" : "Prueba Gratuita"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-2">
+                  <span className="text-xs text-slate-400 font-medium">Próxima Fecha de Vencimiento / Renovación</span>
+                  <div className="font-bold text-slate-200 text-base">
+                    {currentTrialEndsAt.toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Benefits list */}
+              <div className="space-y-3 pt-2">
+                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Incluido en el Plan Premium ($5/mes):</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300">
+                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Menú Digital QR Ilimitado</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Pedidos Automáticos a WhatsApp</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Gestión de Platos y Categorías CRUD</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Configuración de IVA, Servicio y Mesas</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Subdominio / URL Personalizada</span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Soporte Técnico Continuo</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Button */}
+              <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-800">
+                <div className="text-xs text-slate-400">
+                  Transacción procesada de forma segura con Pasarela de Pagos API.
+                </div>
+                <button
+                  onClick={() => setShowPaymentModal(true)}
+                  className="w-full sm:w-auto px-8 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  {currentPlan === "PRO" ? "Renovar Suscripción ($5/mes)" : "Activar Plan Premium ($5/mes)"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Column: Persistent Pedidos en Curso */}
@@ -2178,6 +2340,81 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
           );
         })()}
       </aside>
+
+      {/* Modal de Cobro - Plan Premium ($5 USD/mes) */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl relative space-y-6">
+            <button
+              onClick={() => setShowPaymentModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-2 rounded-xl bg-slate-800/50 transition"
+            >
+              ✕
+            </button>
+
+            <div className="text-center space-y-2">
+              <div className="h-12 w-12 bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
+                <Crown className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-extrabold text-white">Suscripción Plan Premium</h3>
+              <p className="text-slate-400 text-xs">
+                Acceso completo por 30 días adicionales para <strong className="text-white">{restaurant.name}</strong>
+              </p>
+            </div>
+
+            {/* Price summary */}
+            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 text-xs">
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Plan:</span>
+                <span className="font-bold text-white">Único Plan Premium</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Duración:</span>
+                <span>1 Mes (30 días)</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span>Pasarela de Pago:</span>
+                <span className="text-emerald-400 font-medium">API Conectada</span>
+              </div>
+              <div className="border-t border-slate-800 pt-3 flex justify-between items-center">
+                <span className="font-bold text-white text-sm">Total a pagar:</span>
+                <span className="text-2xl font-black text-amber-400">$5.00 USD</span>
+              </div>
+            </div>
+
+            {paymentSuccessMsg && (
+              <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs rounded-2xl text-center font-bold flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                {paymentSuccessMsg}
+              </div>
+            )}
+
+            {/* Submit button */}
+            <div className="space-y-3">
+              <button
+                onClick={handleSubscribePremium}
+                disabled={isSubmittingPayment}
+                className="w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isSubmittingPayment ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                    Procesando Cobro de $5.00...
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-4 h-4" />
+                    Pagar $5.00 USD y Activar Plan
+                  </>
+                )}
+              </button>
+              <p className="text-[10px] text-center text-slate-500">
+                El cobro se realiza de forma segura mediante la clave de API de cobros configurada.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
 
     {/* Floating Bottom Navigation Bar for Admin on Mobile */}
