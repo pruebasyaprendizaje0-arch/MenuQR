@@ -43,6 +43,7 @@ export default async function SuperAdminPage() {
   // Serialize dates to prevent Next.js boundaries errors
   const serializedRestaurants = restaurants.map(r => ({
     ...r,
+    userName: r.user.name,
     email: r.user.email,
     whatsappNumber: r.whatsapp,
     qrCobroUrl: r.qrCobroUrl,

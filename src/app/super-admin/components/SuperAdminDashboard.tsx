@@ -8,7 +8,9 @@ import {
   impersonateUserAction,
   changeUserPlanAction,
   resetUserPasswordAction,
-  updateSystemSettingAction
+  updateSystemSettingAction,
+  superAdminCreateRestaurantAction,
+  superAdminUpdateRestaurantAction
 } from "@/lib/actions";
 import { 
   Building, 
@@ -22,20 +24,43 @@ import {
   LogOut, 
   ExternalLink,
   Store,
-  Utensils
+  Utensils,
+  Pencil,
+  X,
+  User,
+  MapPin,
+  Globe,
+  CreditCard,
+  Check
 } from "lucide-react";
+import { ecuadorData, parishData } from "@/lib/ecuador";
 
 type Restaurant = {
   id: string;
   userId: string;
   slug: string;
   name: string;
+  userName?: string;
   email: string;
   logoUrl: string | null;
   whatsappNumber: string;
+  locality?: string | null;
+  address?: string | null;
+  description?: string | null;
+  schedule?: string | null;
+  specialty?: string | null;
   trialEndsAt: string;
   createdAt: string;
   plan: "FREE" | "PRO";
+  bankName?: string | null;
+  bankAccountType?: string | null;
+  bankAccountNumber?: string | null;
+  bankAccountName?: string | null;
+  bankAccountDocument?: string | null;
+  bankAccountEmail?: string | null;
+  instagram?: string | null;
+  facebook?: string | null;
+  tiktok?: string | null;
   _count: {
     categories: number;
   };
@@ -61,11 +86,59 @@ export function SuperAdminDashboard({
   const [searchTerm, setSearchTerm] = useState("");
   const [waSupport, setWaSupport] = useState(whatsappSupport);
 
+  // Modals state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingRestaurant, setEditingRestaurant] = useState<Restaurant | null>(null);
+
+  // Create Form State
+  const [createData, setCreateData] = useState({
+    userName: "",
+    email: "",
+    password: "",
+    restaurantName: "",
+    whatsapp: "",
+    province: "",
+    canton: "",
+    parroquia: "",
+    sector: "",
+    plan: "FREE" as "FREE" | "PRO"
+  });
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  // Edit Form State
+  const [editData, setEditData] = useState({
+    userName: "",
+    email: "",
+    restaurantName: "",
+    slug: "",
+    whatsapp: "",
+    locality: "",
+    address: "",
+    description: "",
+    schedule: "",
+    specialty: "",
+    plan: "FREE" as "FREE" | "PRO",
+    bankName: "",
+    bankAccountType: "",
+    bankAccountNumber: "",
+    bankAccountName: "",
+    bankAccountDocument: "",
+    bankAccountEmail: "",
+    instagram: "",
+    facebook: "",
+    tiktok: ""
+  });
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState("");
+
   const filteredRestaurants = restaurants.filter(
     (r) =>
       r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.slug.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.email.toLowerCase().includes(searchTerm.toLowerCase())
+      r.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (r.userName && r.userName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const handleExtendTrial = async (id: string, days: number, name: string) => {
@@ -78,7 +151,7 @@ export function SuperAdminDashboard({
   };
 
   const handleDeleteRestaurant = async (id: string, name: string) => {
-    if (confirm(`¿Estás seguro de eliminar permanentemente el restaurante "${name}"? Esta acción borrará todas sus categorías, platos y fotos asociadas.`)) {
+    if (confirm(`¿Estás seguro de eliminar permanentemente el restaurante "${name}"? Esta acción borrará todas sus categorías, platos y cuenta de usuario si no tiene otros negocios.`)) {
       const res = await deleteRestaurantAction(id);
       if (res?.success) {
         alert("Restaurante eliminado correctamente.");
@@ -86,8 +159,86 @@ export function SuperAdminDashboard({
     }
   };
 
+  // Open Edit Modal
+  const handleOpenEdit = (res: Restaurant) => {
+    setEditingRestaurant(res);
+    setEditData({
+      userName: res.userName || "",
+      email: res.email || "",
+      restaurantName: res.name || "",
+      slug: res.slug || "",
+      whatsapp: res.whatsappNumber || "",
+      locality: res.locality || "",
+      address: res.address || "",
+      description: res.description || "",
+      schedule: res.schedule || "",
+      specialty: res.specialty || "",
+      plan: res.plan || "FREE",
+      bankName: res.bankName || "",
+      bankAccountType: res.bankAccountType || "",
+      bankAccountNumber: res.bankAccountNumber || "",
+      bankAccountName: res.bankAccountName || "",
+      bankAccountDocument: res.bankAccountDocument || "",
+      bankAccountEmail: res.bankAccountEmail || "",
+      instagram: res.instagram || "",
+      facebook: res.facebook || "",
+      tiktok: res.tiktok || ""
+    });
+    setEditError("");
+    setIsEditModalOpen(true);
+  };
+
+  // Submit Create Form
+  const handleCreateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateLoading(true);
+    setCreateError("");
+
+    const res = await superAdminCreateRestaurantAction(createData);
+    setCreateLoading(false);
+
+    if (res?.error) {
+      setCreateError(res.error);
+    } else {
+      alert("¡Nuevo negocio creado con éxito!");
+      setIsCreateModalOpen(false);
+      setCreateData({
+        userName: "",
+        email: "",
+        password: "",
+        restaurantName: "",
+        whatsapp: "",
+        province: "",
+        canton: "",
+        parroquia: "",
+        sector: "",
+        plan: "FREE"
+      });
+    }
+  };
+
+  // Submit Edit Form
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRestaurant) return;
+
+    setEditLoading(true);
+    setEditError("");
+
+    const res = await superAdminUpdateRestaurantAction(editingRestaurant.id, editData);
+    setEditLoading(false);
+
+    if (res?.error) {
+      setEditError(res.error);
+    } else {
+      alert("¡Información del negocio guardada con éxito!");
+      setIsEditModalOpen(false);
+      setEditingRestaurant(null);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans relative">
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -97,7 +248,7 @@ export function SuperAdminDashboard({
             </div>
             <div>
               <h1 className="font-extrabold text-white text-base tracking-tight">Super Admin Console</h1>
-              <p className="text-xs text-slate-400">Control de Licencias y Métricas Globales</p>
+              <p className="text-xs text-slate-400">Gestión Global de Negocios y Licencias</p>
             </div>
           </div>
 
@@ -197,16 +348,25 @@ export function SuperAdminDashboard({
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-              <h2 className="text-xl font-bold text-white">Directorio de Clientes</h2>
-              <p className="text-xs text-slate-400 mt-1">Gestiona las licencias y vigencia de las cuentas del sistema.</p>
+              <h2 className="text-xl font-bold text-white">Directorio de Clientes y Negocios</h2>
+              <p className="text-xs text-slate-400 mt-1">Crea, edita, guarda cambios o gestiona accesos y licencias de los negocios.</p>
             </div>
-            <input
-              type="text"
-              placeholder="Buscar por nombre, slug, email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-xl text-sm text-white focus:outline-none focus:border-red-500 w-full md:max-w-xs transition"
-            />
+            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+              <input
+                type="text"
+                placeholder="Buscar por nombre, slug, email..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-xl text-sm text-white focus:outline-none focus:border-red-500 w-full sm:w-64 transition"
+              />
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 shadow-lg shadow-red-600/20 transition duration-200 shrink-0"
+              >
+                <Plus className="h-4 w-4" />
+                Crear Nuevo Negocio
+              </button>
+            </div>
           </div>
 
           <div className="bg-slate-900/40 border border-slate-800/80 rounded-3xl overflow-hidden shadow-2xl">
@@ -214,19 +374,19 @@ export function SuperAdminDashboard({
               <table className="min-w-full divide-y divide-slate-800">
                 <thead className="bg-slate-900/60">
                   <tr>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Restaurante</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Contacto</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Restaurante / Negocio</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Contacto & Ubicación</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Registro</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Plan</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Estado Licencia</th>
-                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Vigencia / Acciones</th>
+                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Acciones & Edición</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
                   {filteredRestaurants.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-500">
-                        No se encontraron restaurantes registrados.
+                      <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
+                        No se encontraron restaurantes o negocios registrados.
                       </td>
                     </tr>
                   ) : (
@@ -249,7 +409,7 @@ export function SuperAdminDashboard({
                               <div>
                                 <div className="text-sm font-semibold text-white flex items-center gap-1">
                                   {res.name}
-                                  <a href={`/${res.slug}`} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition">
+                                  <a href={`/${res.slug}`} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition" title="Ver Menú Público">
                                     <ExternalLink className="h-3 w-3" />
                                   </a>
                                 </div>
@@ -260,6 +420,10 @@ export function SuperAdminDashboard({
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="space-y-1">
                               <div className="text-xs text-slate-300 flex items-center gap-1.5">
+                                <User className="h-3.5 w-3.5 text-slate-500" />
+                                {res.userName || "Sin nombre registrado"}
+                              </div>
+                              <div className="text-xs text-slate-300 flex items-center gap-1.5">
                                 <Mail className="h-3.5 w-3.5 text-slate-500" />
                                 {res.email}
                               </div>
@@ -267,6 +431,12 @@ export function SuperAdminDashboard({
                                 <Smartphone className="h-3.5 w-3.5 text-slate-500" />
                                 {res.whatsappNumber}
                               </div>
+                              {res.locality && (
+                                <div className="text-[11px] text-amber-400/90 flex items-center gap-1 mt-0.5">
+                                  <MapPin className="h-3 w-3 text-amber-500" />
+                                  {res.locality}
+                                </div>
+                              )}
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-400">
@@ -306,18 +476,27 @@ export function SuperAdminDashboard({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-xs space-x-2">
                             <button
+                              onClick={() => handleOpenEdit(res)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-amber-400 bg-amber-950/20 border border-amber-900/30 hover:bg-amber-950/40 font-bold transition"
+                              title="Editar y Guardar Información del Negocio"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Editar
+                            </button>
+                            <button
                               onClick={async () => {
-                                if (confirm(`¿Deseas simular el acceso como el usuario administrador de "${res.name}"? Esto te redirigirá automáticamente a su panel.`)) {
+                                if (confirm(`¿Deseas simular el acceso como el usuario administrador de "${res.name}"? Esto te redirigirá a su panel en Modo Asistencia.`)) {
                                   await impersonateUserAction(res.userId);
                                 }
                               }}
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-blue-400 bg-blue-950/20 border border-blue-900/30 hover:bg-blue-950/40 font-bold transition"
+                              title="Asistir en Edición como el Cliente"
                             >
                               Acceso
                             </button>
                             <button
                               onClick={async () => {
-                                const pass = prompt(`Ingresa la nueva contraseña para el administrador de "${res.name}":`);
+                                const pass = prompt(`Ingresa la nueva contraseña para el usuario de "${res.name}":`);
                                 if (pass) {
                                   const r = await resetUserPasswordAction(res.userId, pass);
                                   if (r?.success) {
@@ -334,20 +513,14 @@ export function SuperAdminDashboard({
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-slate-200 bg-slate-800 hover:bg-slate-750 font-bold border border-slate-700 transition"
                             >
                               <Plus className="h-3.5 w-3.5" />
-                              +30 Días
-                            </button>
-                            <button
-                              onClick={() => handleExtendTrial(res.id, 365, res.name)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-amber-400 bg-amber-950/20 border border-amber-900/30 hover:bg-amber-950/40 font-bold transition"
-                            >
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                              Acceso Anual
+                              +30D
                             </button>
                             <button
                               onClick={() => handleDeleteRestaurant(res.id, res.name)}
                               className="inline-flex p-2 text-red-500/80 hover:text-red-400 bg-red-950/20 hover:bg-red-950/40 rounded-lg border border-red-900/20 transition-all"
+                              title="Borrar Negocio Permanentemente"
                             >
-                              <Trash2 className="h-4.5 w-4.5" />
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           </td>
                         </tr>
@@ -360,6 +533,470 @@ export function SuperAdminDashboard({
           </div>
         </div>
       </main>
+
+      {/* CREATE MODAL */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-red-600/10 border border-red-500/30 rounded-xl flex items-center justify-center text-red-500">
+                  <Plus className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Crear Nuevo Negocio</h3>
+                  <p className="text-xs text-slate-400">Registra un cliente o negocio directamente en la plataforma</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsCreateModalOpen(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-lg transition"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
+              {createError && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-xl">
+                  {createError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">Nombre del Dueño/Administrador *</label>
+                  <input
+                    type="text"
+                    required
+                    value={createData.userName}
+                    onChange={(e) => setCreateData({ ...createData, userName: e.target.value })}
+                    placeholder="ej: Juan Pérez"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">Correo Electrónico *</label>
+                  <input
+                    type="email"
+                    required
+                    value={createData.email}
+                    onChange={(e) => setCreateData({ ...createData, email: e.target.value })}
+                    placeholder="contacto@restaurante.com"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">Contraseña Inicial *</label>
+                  <input
+                    type="password"
+                    required
+                    value={createData.password}
+                    onChange={(e) => setCreateData({ ...createData, password: e.target.value })}
+                    placeholder="Mínimo 6 caracteres"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">Nombre del Negocio/Restaurante *</label>
+                  <input
+                    type="text"
+                    required
+                    value={createData.restaurantName}
+                    onChange={(e) => setCreateData({ ...createData, restaurantName: e.target.value })}
+                    placeholder="ej: Asadero El Gaucho"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">WhatsApp de Pedidos *</label>
+                  <input
+                    type="text"
+                    required
+                    value={createData.whatsapp}
+                    onChange={(e) => setCreateData({ ...createData, whatsapp: e.target.value })}
+                    placeholder="ej: 0999999999"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-300 mb-1">Plan Inicial</label>
+                  <select
+                    value={createData.plan}
+                    onChange={(e) => setCreateData({ ...createData, plan: e.target.value as "FREE" | "PRO" })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
+                  >
+                    <option value="FREE">FREE (Demo 30 días)</option>
+                    <option value="PRO">PRO ($5/mes)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Location Selectors */}
+              <div className="border-t border-slate-800 pt-3 mt-3">
+                <span className="block font-semibold text-slate-300 mb-2">Ubicación del Negocio (Ecuador)</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">Provincia</label>
+                    <select
+                      value={createData.province}
+                      onChange={(e) => {
+                        setCreateData({ ...createData, province: e.target.value, canton: "", parroquia: "" });
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-500"
+                    >
+                      <option value="">Seleccionar...</option>
+                      {Object.keys(ecuadorData).map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">Cantón</label>
+                    <select
+                      value={createData.canton}
+                      disabled={!createData.province}
+                      onChange={(e) => {
+                        setCreateData({ ...createData, canton: e.target.value, parroquia: "" });
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-500 disabled:opacity-50"
+                    >
+                      <option value="">Seleccionar...</option>
+                      {createData.province && ecuadorData[createData.province]?.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">Parroquia / Localidad</label>
+                    {createData.canton && parishData[createData.canton] ? (
+                      <select
+                        value={createData.parroquia}
+                        onChange={(e) => setCreateData({ ...createData, parroquia: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-500"
+                      >
+                        <option value="">Seleccionar...</option>
+                        {parishData[createData.canton].map((pa) => (
+                          <option key={pa} value={pa}>{pa}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={createData.parroquia}
+                        onChange={(e) => setCreateData({ ...createData, parroquia: e.target.value })}
+                        placeholder="ej: Centro"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-red-500"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={createLoading}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 font-bold text-white shadow-lg disabled:opacity-50"
+                >
+                  {createLoading ? "Guardando..." : "Crear Negocio"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MODAL */}
+      {isEditModalOpen && editingRestaurant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-3xl w-full p-6 space-y-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 bg-amber-600/10 border border-amber-500/30 rounded-xl flex items-center justify-center text-amber-500">
+                  <Pencil className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Editar Negocio: {editingRestaurant.name}</h3>
+                  <p className="text-xs text-slate-400">Modifica y guarda directamente cualquier información del negocio y del usuario</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsEditModalOpen(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-lg transition"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditSubmit} className="space-y-4 text-xs max-h-[75vh] overflow-y-auto pr-1">
+              {editError && (
+                <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-xl">
+                  {editError}
+                </div>
+              )}
+
+              {/* Datos Generales y Usuario */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <span className="font-bold text-amber-400 text-xs block uppercase tracking-wider">1. Datos de la Cuenta y Negocio</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Nombre del Dueño</label>
+                    <input
+                      type="text"
+                      required
+                      value={editData.userName}
+                      onChange={(e) => setEditData({ ...editData, userName: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Correo Electrónico</label>
+                    <input
+                      type="email"
+                      required
+                      value={editData.email}
+                      onChange={(e) => setEditData({ ...editData, email: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Nombre del Restaurante/Negocio</label>
+                    <input
+                      type="text"
+                      required
+                      value={editData.restaurantName}
+                      onChange={(e) => setEditData({ ...editData, restaurantName: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Identificador Único (Slug URL)</label>
+                    <input
+                      type="text"
+                      required
+                      value={editData.slug}
+                      onChange={(e) => setEditData({ ...editData, slug: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Teléfono WhatsApp</label>
+                    <input
+                      type="text"
+                      required
+                      value={editData.whatsapp}
+                      onChange={(e) => setEditData({ ...editData, whatsapp: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Plan del Sistema</label>
+                    <select
+                      value={editData.plan}
+                      onChange={(e) => setEditData({ ...editData, plan: e.target.value as "FREE" | "PRO" })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="FREE">FREE (Prueba)</option>
+                      <option value="PRO">PRO ($5/mes)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detalles y Ubicación */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <span className="font-bold text-amber-400 text-xs block uppercase tracking-wider">2. Ubicación y Perfil Comercial</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Localidad / Sector / Ciudad</label>
+                    <input
+                      type="text"
+                      value={editData.locality}
+                      onChange={(e) => setEditData({ ...editData, locality: e.target.value })}
+                      placeholder="ej: Quito, Pichincha, Centro"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Dirección Física Exacta</label>
+                    <input
+                      type="text"
+                      value={editData.address}
+                      onChange={(e) => setEditData({ ...editData, address: e.target.value })}
+                      placeholder="Av. Amazonas N24-15"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Especialidad</label>
+                    <input
+                      type="text"
+                      value={editData.specialty}
+                      onChange={(e) => setEditData({ ...editData, specialty: e.target.value })}
+                      placeholder="ej: Mariscos, Cortes de Carne, Comida Rápida"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Horario de Atención</label>
+                    <input
+                      type="text"
+                      value={editData.schedule}
+                      onChange={(e) => setEditData({ ...editData, schedule: e.target.value })}
+                      placeholder="Lunes a Sábado: 09:00 - 22:00"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-slate-300 mb-1 font-medium">Descripción Corta</label>
+                  <textarea
+                    rows={2}
+                    value={editData.description}
+                    onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                    placeholder="Breve reseña del negocio..."
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500 resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Datos Bancarios */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <span className="font-bold text-amber-400 text-xs block uppercase tracking-wider">3. Datos Bancarios (Transferencias Directas)</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Banco</label>
+                    <input
+                      type="text"
+                      value={editData.bankName}
+                      onChange={(e) => setEditData({ ...editData, bankName: e.target.value })}
+                      placeholder="ej: Banco Pichincha"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Tipo de Cuenta</label>
+                    <input
+                      type="text"
+                      value={editData.bankAccountType}
+                      onChange={(e) => setEditData({ ...editData, bankAccountType: e.target.value })}
+                      placeholder="Ahorros / Corriente"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Número de Cuenta</label>
+                    <input
+                      type="text"
+                      value={editData.bankAccountNumber}
+                      onChange={(e) => setEditData({ ...editData, bankAccountNumber: e.target.value })}
+                      placeholder="2200XXXXXX"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Nombre del Titular</label>
+                    <input
+                      type="text"
+                      value={editData.bankAccountName}
+                      onChange={(e) => setEditData({ ...editData, bankAccountName: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Cédula / RUC Titular</label>
+                    <input
+                      type="text"
+                      value={editData.bankAccountDocument}
+                      onChange={(e) => setEditData({ ...editData, bankAccountDocument: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Correo Notificación Pago</label>
+                    <input
+                      type="email"
+                      value={editData.bankAccountEmail}
+                      onChange={(e) => setEditData({ ...editData, bankAccountEmail: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Redes Sociales */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-3">
+                <span className="font-bold text-amber-400 text-xs block uppercase tracking-wider">4. Redes Sociales</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Instagram</label>
+                    <input
+                      type="text"
+                      value={editData.instagram}
+                      onChange={(e) => setEditData({ ...editData, instagram: e.target.value })}
+                      placeholder="@usuario"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Facebook</label>
+                    <input
+                      type="text"
+                      value={editData.facebook}
+                      onChange={(e) => setEditData({ ...editData, facebook: e.target.value })}
+                      placeholder="facebook.com/pagina"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">TikTok</label>
+                    <input
+                      type="text"
+                      value={editData.tiktok}
+                      onChange={(e) => setEditData({ ...editData, tiktok: e.target.value })}
+                      placeholder="@usuario"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 sticky bottom-0 bg-slate-900 py-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={editLoading}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 font-bold text-white shadow-lg disabled:opacity-50 flex items-center gap-2"
+                >
+                  <Check className="h-4 w-4" />
+                  {editLoading ? "Guardando..." : "Guardar Cambios"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

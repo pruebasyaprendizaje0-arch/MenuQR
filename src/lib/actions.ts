@@ -1,12 +1,14 @@
 "use server";
 
 import { prisma } from "@/lib/db";
-import { getUserSession, setUserSession, clearUserSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession } from "@/lib/auth";
+import { getUserSession, setUserSession, clearUserSession, getSuperAdminSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
+import { randomBytes } from "crypto";
+import { sendPasswordResetEmail } from "@/lib/email";
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -605,12 +607,221 @@ export async function extendTrialAction(restaurantId: string, days: number) {
 }
 
 export async function deleteRestaurantAction(restaurantId: string) {
-  const deleted = await prisma.restaurant.delete({
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado." };
+  }
+
+  const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId }
   });
 
+  if (!restaurant) return { error: "Restaurante no encontrado." };
+
+  const userId = restaurant.userId;
+
+  await prisma.restaurant.delete({
+    where: { id: restaurantId }
+  });
+
+  // Clean up user if they have no remaining restaurants
+  const remainingRestaurants = await prisma.restaurant.count({
+    where: { userId }
+  });
+
+  if (remainingRestaurants === 0) {
+    try {
+      await prisma.user.delete({
+        where: { id: userId }
+      });
+    } catch (e) {
+      console.warn("Could not delete user after restaurant deletion", e);
+    }
+  }
+
   revalidatePath("/super-admin");
-  revalidatePath(`/${deleted.slug}`);
+  revalidatePath(`/${restaurant.slug}`);
+  return { success: true };
+}
+
+export async function superAdminCreateRestaurantAction(data: {
+  userName: string;
+  email: string;
+  password: string;
+  restaurantName: string;
+  whatsapp: string;
+  province: string;
+  canton: string;
+  parroquia: string;
+  sector?: string;
+  plan?: "FREE" | "PRO";
+}) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado." };
+  }
+
+  const cleanEmail = data.email.toLowerCase().trim();
+  const existingUser = await prisma.user.findUnique({
+    where: { email: cleanEmail }
+  });
+
+  if (existingUser) {
+    return { error: "El correo electrónico ya está registrado." };
+  }
+
+  const hashedPassword = bcrypt.hashSync(data.password, 10);
+
+  let baseSlug = data.restaurantName
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+
+  if (!baseSlug) baseSlug = "restaurante";
+
+  let cleanSlug = baseSlug;
+  let isSlugTaken = true;
+  let attempt = 0;
+
+  while (isSlugTaken) {
+    const existingRestaurant = await prisma.restaurant.findUnique({
+      where: { slug: cleanSlug }
+    });
+    if (!existingRestaurant) {
+      isSlugTaken = false;
+    } else {
+      attempt++;
+      cleanSlug = `${baseSlug}-${attempt}`;
+    }
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      name: data.userName,
+      email: cleanEmail,
+      password: hashedPassword,
+    }
+  });
+
+  const localityParts = [data.province, data.canton, data.parroquia, data.sector].filter(Boolean);
+  const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
+
+  await prisma.restaurant.create({
+    data: {
+      userId: user.id,
+      name: data.restaurantName,
+      slug: cleanSlug,
+      whatsapp: data.whatsapp,
+      locality,
+      plan: data.plan || "FREE",
+    }
+  });
+
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
+export async function superAdminUpdateRestaurantAction(
+  restaurantId: string,
+  data: {
+    userName: string;
+    email: string;
+    restaurantName: string;
+    slug: string;
+    whatsapp: string;
+    locality?: string;
+    address?: string;
+    description?: string;
+    schedule?: string;
+    specialty?: string;
+    plan: "FREE" | "PRO";
+    bankName?: string;
+    bankAccountType?: string;
+    bankAccountNumber?: string;
+    bankAccountName?: string;
+    bankAccountDocument?: string;
+    bankAccountEmail?: string;
+    instagram?: string;
+    facebook?: string;
+    tiktok?: string;
+  }
+) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado." };
+  }
+
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    include: { user: true }
+  });
+
+  if (!restaurant) {
+    return { error: "Restaurante no encontrado." };
+  }
+
+  const cleanEmail = data.email.toLowerCase().trim();
+  const cleanSlug = data.slug.toLowerCase().trim();
+
+  // Check unique slug if changed
+  if (cleanSlug !== restaurant.slug) {
+    const existingSlug = await prisma.restaurant.findUnique({
+      where: { slug: cleanSlug }
+    });
+    if (existingSlug && existingSlug.id !== restaurantId) {
+      return { error: "El identificador (slug) ya está en uso por otro restaurante." };
+    }
+  }
+
+  // Check unique email if changed
+  if (cleanEmail !== restaurant.user.email) {
+    const existingEmail = await prisma.user.findUnique({
+      where: { email: cleanEmail }
+    });
+    if (existingEmail && existingEmail.id !== restaurant.userId) {
+      return { error: "El correo electrónico ya está registrado por otro usuario." };
+    }
+  }
+
+  // Update user
+  await prisma.user.update({
+    where: { id: restaurant.userId },
+    data: {
+      name: data.userName,
+      email: cleanEmail,
+    }
+  });
+
+  // Update restaurant
+  const updatedRestaurant = await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: {
+      name: data.restaurantName,
+      slug: cleanSlug,
+      whatsapp: data.whatsapp,
+      locality: data.locality || null,
+      address: data.address || null,
+      description: data.description || null,
+      schedule: data.schedule || null,
+      specialty: data.specialty || null,
+      plan: data.plan,
+      bankName: data.bankName || null,
+      bankAccountType: data.bankAccountType || null,
+      bankAccountNumber: data.bankAccountNumber || null,
+      bankAccountName: data.bankAccountName || null,
+      bankAccountDocument: data.bankAccountDocument || null,
+      bankAccountEmail: data.bankAccountEmail || null,
+      instagram: data.instagram || null,
+      facebook: data.facebook || null,
+      tiktok: data.tiktok || null,
+    }
+  });
+
+  revalidatePath("/super-admin");
+  revalidatePath(`/${updatedRestaurant.slug}`);
+  revalidatePath("/admin");
   return { success: true };
 }
 
@@ -847,6 +1058,102 @@ export async function updateRestaurantChargesConfigAction(
     console.error("Error updating charges config:", error);
     return { error: "No se pudo actualizar la configuración de recargos." };
   }
+}
+
+// Password Recovery Actions
+export async function requestPasswordResetAction(prevState: unknown, formData: FormData) {
+  const email = formData.get("email") as string;
+  if (!email) {
+    return { error: "Por favor ingresa un correo electrónico." };
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+
+  // Find user
+  const user = await prisma.user.findUnique({
+    where: { email: cleanEmail },
+  });
+
+  // Always return success message to protect privacy
+  if (!user) {
+    return {
+      success: true,
+      message: "Si tu correo está registrado, recibirás un mensaje con las instrucciones para restablecer tu contraseña.",
+    };
+  }
+
+  const token = randomBytes(32).toString("hex");
+  const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      resetToken: token,
+      resetTokenExpiry: expiry,
+    },
+  });
+
+  const emailResult = await sendPasswordResetEmail(cleanEmail, token);
+
+  if (!emailResult.success) {
+    return { error: emailResult.error || "Ocurrió un error al enviar el correo de recuperación." };
+  }
+
+  return {
+    success: true,
+    message: "Si tu correo está registrado, recibirás un mensaje con las instrucciones para restablecer tu contraseña.",
+  };
+}
+
+export async function resetPasswordAction(prevState: unknown, formData: FormData) {
+  const token = formData.get("token") as string;
+  const password = formData.get("password") as string;
+  const confirmPassword = formData.get("confirmPassword") as string;
+
+  if (!token) {
+    return { error: "El token de recuperación es inválido o no existe." };
+  }
+
+  if (!password || !confirmPassword) {
+    return { error: "Por favor complete todos los campos." };
+  }
+
+  if (password.length < 6) {
+    return { error: "La contraseña debe tener al menos 6 caracteres." };
+  }
+
+  if (password !== confirmPassword) {
+    return { error: "Las contraseñas no coinciden." };
+  }
+
+  const user = await prisma.user.findFirst({
+    where: {
+      resetToken: token,
+      resetTokenExpiry: {
+        gt: new Date(),
+      },
+    },
+  });
+
+  if (!user) {
+    return { error: "El enlace de recuperación es inválido o ha expirado. Por favor solicita uno nuevo." };
+  }
+
+  const hashedPassword = bcrypt.hashSync(password, 10);
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      password: hashedPassword,
+      resetToken: null,
+      resetTokenExpiry: null,
+    },
+  });
+
+  return {
+    success: true,
+    message: "¡Tu contraseña ha sido actualizada con éxito! Ya puedes iniciar sesión.",
+  };
 }
 
 

@@ -13,13 +13,15 @@ enum Plan {
 }
 
 model User {
-  id          String       @id @default(uuid())
-  email       String       @unique
-  password    String       // bcrypt hash
-  name        String
-  restaurants Restaurant[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id               String       @id @default(uuid())
+  email            String       @unique
+  password         String       // bcrypt hash
+  name             String
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  restaurants      Restaurant[]
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 }
 
 model Restaurant {

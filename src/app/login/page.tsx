@@ -65,9 +65,17 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-300">
-                Contraseña
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="password" className="block text-sm font-medium text-slate-300">
+                  Contraseña
+                </label>
+                <Link
+                  href="/recuperar-password"
+                  className="text-xs text-red-400 hover:text-red-300 font-medium transition"
+                >
+                  ¿Olvidaste tu contraseña?
+                </Link>
+              </div>
               <div className="mt-1 relative rounded-md shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <KeyRound className="h-4 w-4 text-slate-500" />
