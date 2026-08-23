@@ -31,7 +31,8 @@ import {
   MapPin,
   Globe,
   CreditCard,
-  Check
+  Check,
+  Sparkles
 } from "lucide-react";
 import { ecuadorData, parishData } from "@/lib/ecuador";
 
@@ -476,23 +477,24 @@ export function SuperAdminDashboard({
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-xs space-x-2">
                             <button
-                              onClick={() => handleOpenEdit(res)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-amber-400 bg-amber-950/20 border border-amber-900/30 hover:bg-amber-950/40 font-bold transition"
-                              title="Editar y Guardar Información del Negocio"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              Editar
-                            </button>
-                            <button
                               onClick={async () => {
-                                if (confirm(`¿Deseas simular el acceso como el usuario administrador de "${res.name}"? Esto te redirigirá a su panel en Modo Asistencia.`)) {
+                                if (confirm(`¿Deseas ingresar al panel de "${res.name}" en Modo Puesta en Marcha / Asistencia? Podrás crear categorías, agregar platos, subir imágenes y configurar su perfil completo.`)) {
                                   await impersonateUserAction(res.userId);
                                 }
                               }}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-blue-400 bg-blue-950/20 border border-blue-900/30 hover:bg-blue-950/40 font-bold transition"
-                              title="Asistir en Edición como el Cliente"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-emerald-400 bg-emerald-950/30 border border-emerald-800/40 hover:bg-emerald-950/60 font-bold transition shadow-sm"
+                              title="Entrar como este negocio para configurar su carta, categorías, fotos, horarios y datos de cobro"
                             >
-                              Acceso
+                              <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
+                              Puesta en Marcha / Asistir
+                            </button>
+                            <button
+                              onClick={() => handleOpenEdit(res)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-amber-400 bg-amber-950/20 border border-amber-900/30 hover:bg-amber-950/40 font-bold transition"
+                              title="Editar Datos Institucionales y del Usuario"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Editar
                             </button>
                             <button
                               onClick={async () => {

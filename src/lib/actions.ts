@@ -237,8 +237,13 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
 }
 
 export async function logoutUserAction() {
+  const isSuperAdmin = await getSuperAdminSession();
   await clearUserSession();
-  redirect("/");
+  if (isSuperAdmin) {
+    redirect("/super-admin");
+  } else {
+    redirect("/");
+  }
 }
 
 // Restaurant Action
