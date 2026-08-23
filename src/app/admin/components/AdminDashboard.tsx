@@ -1606,6 +1606,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                             onClick={async () => {
                               if (confirm(`¿Estás seguro de eliminar la categoría "${cat.name}"? Se borrarán todos sus platos.`)) {
                                 await deleteCategoryAction(cat.id);
+                                alert(`¡Categoría "${cat.name}" eliminada con éxito!`);
                               }
                             }}
                             className="inline-flex p-2 text-red-500/80 hover:text-red-400 bg-red-950/20 hover:bg-red-950/40 rounded-lg border border-red-900/20 transition-all"
@@ -1631,8 +1632,10 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                     action={async (formData) => {
                       if (editingCategory) {
                         await updateCategoryAction(editingCategory.id, formData);
+                        alert("¡Categoría guardada con éxito!");
                       } else {
                         await createCategoryAction(restaurant.id, formData);
+                        alert("¡Categoría creada con éxito!");
                       }
                       setIsCategoryModalOpen(false);
                     }}
@@ -1661,20 +1664,38 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                         className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
                       />
                     </div>
-                    <div className="flex justify-end gap-3 pt-4">
-                      <button
-                        type="button"
-                        onClick={() => setIsCategoryModalOpen(false)}
-                        className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        className="px-5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-red-600 to-amber-600 text-white hover:from-red-500 hover:to-amber-500 transition"
-                      >
-                        {editingCategory ? "Guardar Cambios" : "Crear"}
-                      </button>
+                    <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-800">
+                      {editingCategory && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (confirm(`¿Estás seguro de eliminar la categoría "${editingCategory.name}"? Se borrarán todos sus platos.`)) {
+                              await deleteCategoryAction(editingCategory.id);
+                              setIsCategoryModalOpen(false);
+                              alert(`¡Categoría "${editingCategory.name}" eliminada con éxito!`);
+                            }
+                          }}
+                          className="px-3.5 py-2 rounded-xl text-xs font-bold text-red-400 bg-red-950/40 hover:bg-red-900/50 border border-red-800/40 transition flex items-center gap-1.5"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Eliminar
+                        </button>
+                      )}
+                      <div className="flex gap-2 ml-auto">
+                        <button
+                          type="button"
+                          onClick={() => setIsCategoryModalOpen(false)}
+                          className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-red-600 to-amber-600 text-white hover:from-red-500 hover:to-amber-500 transition"
+                        >
+                          {editingCategory ? "Guardar Cambios" : "Crear"}
+                        </button>
+                      </div>
                     </div>
                   </form>
                 </div>
@@ -1795,6 +1816,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                                     onClick={async () => {
                                       if (confirm(`¿Estás seguro de eliminar el plato "${dish.name}"?`)) {
                                         await deleteDishAction(dish.id);
+                                        alert(`¡Plato "${dish.name}" eliminado con éxito!`);
                                       }
                                     }}
                                     className="p-1.5 text-red-400/80 hover:text-red-400 bg-red-950/20 border border-red-900/20 rounded-lg hover:bg-red-950/40 transition"
@@ -1827,8 +1849,10 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       
                       if (editingDish) {
                         await updateDishAction(editingDish.id, formData);
+                        alert("¡Plato guardado con éxito!");
                       } else {
                         await createDishAction(dishCatId, formData);
+                        alert("¡Plato creado con éxito!");
                       }
                       setIsDishModalOpen(false);
                     }}
@@ -1924,20 +1948,38 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       </label>
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-6 border-t border-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => setIsDishModalOpen(false)}
-                        className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-red-600 to-amber-600 text-white hover:from-red-500 hover:to-amber-500 transition"
-                      >
-                        {editingDish ? "Guardar Cambios" : "Crear Plato"}
-                      </button>
+                    <div className="flex items-center justify-between gap-3 pt-6 border-t border-slate-800">
+                      {editingDish && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (confirm(`¿Estás seguro de eliminar el plato "${editingDish.name}"?`)) {
+                              await deleteDishAction(editingDish.id);
+                              setIsDishModalOpen(false);
+                              alert(`¡Plato "${editingDish.name}" eliminado con éxito!`);
+                            }
+                          }}
+                          className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-red-400 bg-red-950/40 hover:bg-red-900/50 border border-red-800/40 transition flex items-center gap-1.5"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Eliminar
+                        </button>
+                      )}
+                      <div className="flex gap-2 ml-auto">
+                        <button
+                          type="button"
+                          onClick={() => setIsDishModalOpen(false)}
+                          className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-red-600 to-amber-600 text-white hover:from-red-500 hover:to-amber-500 transition"
+                        >
+                          {editingDish ? "Guardar Cambios" : "Crear Plato"}
+                        </button>
+                      </div>
                     </div>
                   </form>
                 </div>

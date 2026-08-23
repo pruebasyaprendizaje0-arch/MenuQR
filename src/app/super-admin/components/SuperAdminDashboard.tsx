@@ -1772,22 +1772,35 @@ export function SuperAdminDashboard({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 sticky bottom-0 bg-slate-900 py-2">
+              <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-800 sticky bottom-0 bg-slate-900 py-2">
                 <button
                   type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    handleDeleteRestaurant(editingRestaurant.id, editingRestaurant.name);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/40 font-bold flex items-center gap-1.5 transition"
                 >
-                  Cancelar
+                  <Trash2 className="h-4 w-4" />
+                  Eliminar Negocio
                 </button>
-                <button
-                  type="submit"
-                  disabled={editLoading}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 font-bold text-white shadow-lg disabled:opacity-50 flex items-center gap-2"
-                >
-                  <Check className="h-4 w-4" />
-                  {editLoading ? "Guardando..." : "Guardar Cambios"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={editLoading}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 font-bold text-white shadow-lg disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <Check className="h-4 w-4" />
+                    {editLoading ? "Guardando..." : "Guardar Cambios"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
