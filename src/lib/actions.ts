@@ -1161,4 +1161,169 @@ export async function resetPasswordAction(prevState: unknown, formData: FormData
   };
 }
 
+// CRM Server Actions
+export async function updateRestaurantLeadStatusAction(
+  restaurantId: string,
+  leadStatus: string,
+  nextFollowUpAt?: string | null
+) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+
+  await prisma.restaurant.update({
+    where: { id: restaurantId },
+    data: {
+      leadStatus,
+      nextFollowUpAt: nextFollowUpAt ? new Date(nextFollowUpAt) : null,
+    },
+  });
+
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
+export async function addCrmNoteAction(
+  target: { restaurantId?: string; leadId?: string },
+  content: string
+) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+
+  if (!content.trim()) return { error: "El contenido de la nota no puede estar vacío." };
+
+  await prisma.crmNote.create({
+    data: {
+      restaurantId: target.restaurantId || null,
+      leadId: target.leadId || null,
+      content: content.trim(),
+      author: "SuperAdmin",
+    },
+  });
+
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
+export async function createProspectLeadAction(data: {
+  name: string;
+  ownerName?: string;
+  phone: string;
+  email?: string;
+  city?: string;
+  notes?: string;
+  nextFollowUpAt?: string;
+}) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+
+  if (!data.name || !data.phone) {
+    return { error: "El nombre del negocio y el teléfono son requeridos." };
+  }
+
+  await prisma.lead.create({
+    data: {
+      name: data.name.trim(),
+      ownerName: data.ownerName?.trim() || null,
+      phone: data.phone.trim(),
+      email: data.email?.toLowerCase().trim() || null,
+      city: data.city?.trim() || null,
+      notes: data.notes?.trim() || null,
+      nextFollowUpAt: data.nextFollowUpAt ? new Date(data.nextFollowUpAt) : null,
+    },
+  });
+
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
+export async function updateProspectLeadAction(
+  leadId: string,
+  data: {
+    name: string;
+    ownerName?: string;
+    phone: string;
+    email?: string;
+    city?: string;
+    status?: string;
+    notes?: string;
+    nextFollowUpAt?: string | null;
+  }
+) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: {
+      name: data.name.trim(),
+      ownerName: data.ownerName?.trim() || null,
+      phone: data.phone.trim(),
+      email: data.email?.toLowerCase().trim() || null,
+      city: data.city?.trim() || null,
+      status: data.status || "NUEVO",
+      notes: data.notes?.trim() || null,
+      nextFollowUpAt: data.nextFollowUpAt ? new Date(data.nextFollowUpAt) : null,
+    },
+  });
+
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
+export async function deleteProspectLeadAction(leadId: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+
+  await prisma.lead.delete({
+    where: { id: leadId },
+  });
+
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
+export async function convertProspectToRestaurantAction(leadId: string, password: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+  });
+
+  if (!lead) return { error: "Prospecto no encontrado." };
+
+  const email = lead.email || `lead-${lead.id.substring(0, 6)}@menuqrpro.com`;
+  const ownerName = lead.ownerName || lead.name;
+
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (existingUser) {
+    return { error: "El correo ya está registrado en el sistema. Utiliza otro correo." };
+  }
+
+  const res = await superAdminCreateRestaurantAction({
+    userName: ownerName,
+    email,
+    password,
+    restaurantName: lead.name,
+    whatsapp: lead.phone,
+    province: lead.city || "Ecuador",
+    canton: lead.city || "Ciudad",
+    parroquia: "Centro",
+    plan: "FREE",
+  });
+
+  if (res.error) return { error: res.error };
+
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { status: "CONVERTIDO" },
+  });
+
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
 
