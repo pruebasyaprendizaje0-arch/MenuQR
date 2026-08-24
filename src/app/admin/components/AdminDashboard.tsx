@@ -21,7 +21,8 @@ import {
   toggleSeasonRateAction,
   createCustomerAction,
   updateCustomerAction,
-  deleteCustomerAction
+  deleteCustomerAction,
+  importCustomersAction
 } from "@/lib/actions";
 import { 
   Store, 
@@ -380,6 +381,121 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Import Contacts States & Handlers
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importTextContent, setImportTextContent] = useState("");
+  const [importFileName, setImportFileName] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
+
+  const parseImportContent = (text: string, filename?: string) => {
+    const results: { name: string; phone: string; email?: string; address?: string; city?: string; category?: string; notes?: string }[] = [];
+    const isVcard = filename?.toLowerCase().endsWith(".vcf") || text.includes("BEGIN:VCARD");
+
+    if (isVcard) {
+      const cards = text.split("END:VCARD");
+      for (const card of cards) {
+        let name = "";
+        let phone = "";
+        let email = "";
+
+        const fnMatch = card.match(/FN[;:](.+)/i) || card.match(/N[;:](.+)/i);
+        if (fnMatch && fnMatch[1]) {
+          name = fnMatch[1].replace(/;/g, " ").trim();
+        }
+
+        const telMatch = card.match(/TEL[;:].*?([0-9+\s\-()]+)/i);
+        if (telMatch && telMatch[1]) {
+          phone = telMatch[1].trim();
+        }
+
+        const emailMatch = card.match(/EMAIL[;:].*?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+        if (emailMatch && emailMatch[1]) {
+          email = emailMatch[1].trim();
+        }
+
+        if (name && phone) {
+          results.push({ name, phone, email, category: "NUEVO" });
+        }
+      }
+    } else {
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      let startIndex = 0;
+
+      if (lines.length > 0) {
+        const headerLine = lines[0].toLowerCase();
+        if (headerLine.includes("nombre") || headerLine.includes("name") || headerLine.includes("phone") || headerLine.includes("telefono")) {
+          startIndex = 1;
+        }
+      }
+
+      for (let i = startIndex; i < lines.length; i++) {
+        const line = lines[i];
+        const parts = line.includes(";") ? line.split(";") : line.includes("\t") ? line.split("\t") : line.split(",");
+
+        if (parts.length >= 2) {
+          const name = parts[0].replace(/^["']|["']$/g, "").trim();
+          const phone = parts[1].replace(/^["']|["']$/g, "").trim();
+          const email = parts[2] ? parts[2].replace(/^["']|["']$/g, "").trim() : undefined;
+          const address = parts[3] ? parts[3].replace(/^["']|["']$/g, "").trim() : undefined;
+          const city = parts[4] ? parts[4].replace(/^["']|["']$/g, "").trim() : undefined;
+          const category = parts[5] ? parts[5].replace(/^["']|["']$/g, "").trim() : "NUEVO";
+          const notes = parts[6] ? parts[6].replace(/^["']|["']$/g, "").trim() : undefined;
+
+          if (name && phone) {
+            results.push({ name, phone, email, address, city, category, notes });
+          }
+        }
+      }
+    }
+
+    return results;
+  };
+
+  const handleImportFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        setImportTextContent(text);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExecuteImport = async () => {
+    if (!importTextContent.trim()) {
+      alert("Por favor selecciona un archivo (CSV / VCF) o pega el contenido de los contactos a importar.");
+      return;
+    }
+    setIsImporting(true);
+    setImportMessage("");
+
+    const parsedCustomers = parseImportContent(importTextContent, importFileName);
+
+    if (parsedCustomers.length === 0) {
+      setIsImporting(false);
+      alert("No se pudieron detectar contactos válidos. Asegúrate de incluir Nombre y Teléfono.");
+      return;
+    }
+
+    const res = await importCustomersAction(restaurant.id, parsedCustomers);
+    setIsImporting(false);
+
+    if (res.error) {
+      setImportMessage(`Error: ${res.error}`);
+    } else {
+      setImportMessage(`¡Importación exitosa! ${res.importedCount} contactos nuevos registrados, ${res.updatedCount} clientes actualizados.`);
+      setTimeout(() => {
+        setIsImportModalOpen(false);
+        window.location.reload();
+      }, 2000);
+    }
   };
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -2806,6 +2922,18 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <button
+                  onClick={() => {
+                    setImportTextContent("");
+                    setImportFileName("");
+                    setImportMessage("");
+                    setIsImportModalOpen(true);
+                  }}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition flex items-center gap-2 active:scale-95"
+                >
+                  <Upload className="h-4 w-4 text-amber-400" />
+                  Importar Contactos (CSV / VCF)
+                </button>
+                <button
                   onClick={handleExportCustomersCSV}
                   className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition flex items-center gap-2 active:scale-95"
                 >
@@ -3128,6 +3256,86 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       </button>
                     </div>
                   </form>
+                </div>
+              </div>
+            )}
+            {/* Modal for Import Contacts (CSV / VCF / Text) */}
+            {isImportModalOpen && (
+              <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
+                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Upload className="h-5 w-5 text-amber-400" />
+                      Importar Contactos CRM
+                    </h3>
+                    <button
+                      onClick={() => setIsImportModalOpen(false)}
+                      className="text-slate-400 hover:text-white px-2 py-1 text-xs font-bold"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 text-xs">
+                    <div className="bg-slate-950/60 border border-slate-800 p-3.5 rounded-2xl space-y-2">
+                      <span className="font-bold text-amber-400 text-xs block">💡 Formatos Compatibles:</span>
+                      <ul className="list-disc pl-4 space-y-1 text-slate-400 text-[11px]">
+                        <li><strong>vCard (.vcf)</strong>: Contactos exportados directamente de tu celular Android, iPhone o Google Contacts.</li>
+                        <li><strong>CSV / TXT (.csv, .txt)</strong>: Archivos formateados con columnas <code className="text-white">Nombre,Telefono</code> (ej. Excel / Google Sheets).</li>
+                        <li><strong>Texto Directo</strong>: Copia y pega tu lista de contactos directamente en la caja inferior.</li>
+                      </ul>
+                    </div>
+
+                    {/* File Drop / Select Input */}
+                    <div>
+                      <label className="block text-slate-300 mb-1.5 font-bold">1. Seleccionar archivo (.csv, .vcf, .txt):</label>
+                      <input
+                        type="file"
+                        accept=".csv,.vcf,.txt"
+                        onChange={handleImportFileUpload}
+                        className="w-full text-slate-400 text-xs file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-slate-800 file:text-white hover:file:bg-slate-700 cursor-pointer"
+                      />
+                      {importFileName && (
+                        <p className="text-[11px] text-emerald-400 font-bold mt-1">📄 Archivo cargado: {importFileName}</p>
+                      )}
+                    </div>
+
+                    {/* Raw Text Input */}
+                    <div>
+                      <label className="block text-slate-300 mb-1.5 font-bold">2. O pega el contenido directamente aquí:</label>
+                      <textarea
+                        rows={5}
+                        value={importTextContent}
+                        onChange={(e) => setImportTextContent(e.target.value)}
+                        placeholder={`ejemplo CSV:\nJuan Pérez, 0991234567, juan@correo.com, Olón\nMaría López, 0987654321, maria@correo.com, Montañita`}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-2xl p-3 text-white font-mono text-[11px] focus:outline-none"
+                      />
+                    </div>
+
+                    {importMessage && (
+                      <div className={`p-3 rounded-xl text-xs font-bold ${importMessage.startsWith("Error") ? "bg-red-950/40 text-red-400 border border-red-800/40" : "bg-emerald-950/40 text-emerald-400 border border-emerald-800/40"}`}>
+                        {importMessage}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setIsImportModalOpen(false)}
+                        className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExecuteImport}
+                        disabled={isImporting || !importTextContent.trim()}
+                        className="px-5 py-2 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 text-white font-bold hover:from-red-500 hover:to-amber-500 transition shadow-lg disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {isImporting ? "Procesando Importación..." : "Procesar & Importar Contactos"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

@@ -1573,4 +1573,71 @@ export async function deleteCustomerAction(customerId: string) {
   }
 }
 
+export async function importCustomersAction(
+  restaurantId: string,
+  customers: {
+    name: string;
+    phone: string;
+    email?: string;
+    address?: string;
+    city?: string;
+    category?: string;
+    notes?: string;
+  }[]
+) {
+  await refreshUserSession();
+
+  let importedCount = 0;
+  let updatedCount = 0;
+
+  try {
+    for (const item of customers) {
+      if (!item.name || !item.phone) continue;
+      const cleanPhone = item.phone.trim();
+      if (!cleanPhone) continue;
+
+      // @ts-ignore
+      const existing = await prisma.customer.findFirst({
+        where: { restaurantId, phone: cleanPhone },
+      });
+
+      if (existing) {
+        // @ts-ignore
+        await prisma.customer.update({
+          where: { id: existing.id },
+          data: {
+            name: item.name.trim() || existing.name,
+            email: item.email?.trim() || existing.email,
+            address: item.address?.trim() || existing.address,
+            city: item.city?.trim() || existing.city,
+            notes: item.notes?.trim() || existing.notes,
+          },
+        });
+        updatedCount++;
+      } else {
+        // @ts-ignore
+        await prisma.customer.create({
+          data: {
+            restaurantId,
+            name: item.name.trim(),
+            phone: cleanPhone,
+            email: item.email?.trim() || null,
+            address: item.address?.trim() || null,
+            city: item.city?.trim() || null,
+            category: item.category || "NUEVO",
+            notes: item.notes?.trim() || null,
+          },
+        });
+        importedCount++;
+      }
+    }
+
+    revalidatePath("/admin");
+    return { success: true, importedCount, updatedCount };
+  } catch (error) {
+    console.error("Error importing customers:", error);
+    return { error: "Ocurrió un error al importar la lista de contactos." };
+  }
+}
+
 
