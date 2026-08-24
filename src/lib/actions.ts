@@ -265,6 +265,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const services = formData.get("services") as string;
   const contactNumbers = formData.get("contactNumbers") as string;
   const ubicameUrl = formData.get("ubicameUrl") as string;
+  const mapEmbedUrl = formData.get("mapEmbedUrl") as string;
   
   const bankName = formData.get("bankName") as string;
   const bankAccountType = formData.get("bankAccountType") as string;
@@ -315,6 +316,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const serviceOnTable = formData.get("serviceOnTable") === "true";
   const serviceOnTakeout = formData.get("serviceOnTakeout") === "true";
   const deliveryEnabled = formData.get("deliveryEnabled") === "true" || formData.get("deliveryEnabled") === "on";
+  const deliveryRates = formData.get("deliveryRates") as string;
 
   await prisma.restaurant.update({
     where: { id: restaurantId },
@@ -338,6 +340,8 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       services: services || null,
       contactNumbers: contactNumbers || null,
       ubicameUrl: ubicameUrl || null,
+      // @ts-ignore
+      mapEmbedUrl: mapEmbedUrl || null,
       bankName: bankName || null,
       bankAccountType: bankAccountType || null,
       bankAccountNumber: bankAccountNumber || null,
@@ -348,6 +352,8 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       servicePercent,
       deliveryCost,
       deliveryEnabled,
+      // @ts-ignore
+      deliveryRates: deliveryRates || null,
       ivaOnTable,
       ivaOnTakeout,
       serviceOnTable,
@@ -979,6 +985,47 @@ export async function createOrderAction(data: {
       },
     });
 
+    // Auto-upsert into Customer CRM table
+    if (data.customerPhone && data.customerPhone.trim()) {
+      try {
+        const rawPhone = data.customerPhone.trim();
+        // @ts-ignore
+        const existing = await prisma.customer.findFirst({
+          where: { restaurantId: data.restaurantId, phone: rawPhone }
+        });
+        if (existing) {
+          const newOrdersCount = existing.totalOrders + 1;
+          const newCategory = newOrdersCount >= 5 ? "VIP" : newOrdersCount >= 2 ? "FRECUENTE" : existing.category;
+          // @ts-ignore
+          await prisma.customer.update({
+            where: { id: existing.id },
+            data: {
+              name: data.customerName || existing.name,
+              totalOrders: newOrdersCount,
+              totalSpent: existing.totalSpent + data.total,
+              category: newCategory,
+              lastOrderAt: new Date(),
+            }
+          });
+        } else {
+          // @ts-ignore
+          await prisma.customer.create({
+            data: {
+              restaurantId: data.restaurantId,
+              name: data.customerName || "Cliente",
+              phone: rawPhone,
+              totalOrders: 1,
+              totalSpent: data.total,
+              category: "NUEVO",
+              lastOrderAt: new Date(),
+            }
+          });
+        }
+      } catch (e) {
+        console.warn("Error auto-updating customer in CRM:", e);
+      }
+    }
+
     const restaurant = await prisma.restaurant.findUnique({
       where: { id: data.restaurantId },
       select: { slug: true }
@@ -1038,6 +1085,7 @@ export async function updateRestaurantChargesConfigAction(
     servicePercent: number;
     deliveryCost: number;
     deliveryEnabled: boolean;
+    deliveryRates?: string | null;
     ivaOnTable: boolean;
     ivaOnTakeout: boolean;
     serviceOnTable: boolean;
@@ -1053,6 +1101,8 @@ export async function updateRestaurantChargesConfigAction(
         servicePercent: data.servicePercent,
         deliveryCost: data.deliveryCost,
         deliveryEnabled: data.deliveryEnabled,
+        // @ts-ignore
+        deliveryRates: data.deliveryRates || null,
         ivaOnTable: data.ivaOnTable,
         ivaOnTakeout: data.ivaOnTakeout,
         serviceOnTable: data.serviceOnTable,
@@ -1431,6 +1481,96 @@ export async function toggleSeasonRateAction(rateId: string, isActive: boolean) 
   revalidatePath("/admin");
   revalidatePath(`/${updated.restaurant.slug}`);
   return { success: true };
+}
+
+// CRM Customer Actions
+export async function createCustomerAction(data: {
+  restaurantId: string;
+  name: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  category?: string;
+  notes?: string;
+}) {
+  await refreshUserSession();
+
+  try {
+    // @ts-ignore
+    const customer = await prisma.customer.create({
+      data: {
+        restaurantId: data.restaurantId,
+        name: data.name,
+        phone: data.phone,
+        email: data.email || null,
+        address: data.address || null,
+        city: data.city || null,
+        category: data.category || "NUEVO",
+        notes: data.notes || null,
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true, customer };
+  } catch (error) {
+    console.error("Error creating customer:", error);
+    return { error: "No se pudo registrar el cliente." };
+  }
+}
+
+export async function updateCustomerAction(
+  customerId: string,
+  data: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    city?: string;
+    category?: string;
+    notes?: string;
+  }
+) {
+  await refreshUserSession();
+
+  try {
+    // @ts-ignore
+    const customer = await prisma.customer.update({
+      where: { id: customerId },
+      data: {
+        name: data.name,
+        phone: data.phone,
+        email: data.email || null,
+        address: data.address || null,
+        city: data.city || null,
+        category: data.category,
+        notes: data.notes || null,
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true, customer };
+  } catch (error) {
+    console.error("Error updating customer:", error);
+    return { error: "No se pudo actualizar el cliente." };
+  }
+}
+
+export async function deleteCustomerAction(customerId: string) {
+  await refreshUserSession();
+
+  try {
+    // @ts-ignore
+    await prisma.customer.delete({
+      where: { id: customerId },
+    });
+
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting customer:", error);
+    return { error: "No se pudo eliminar el cliente." };
+  }
 }
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction } from "@/lib/actions";
 import { 
@@ -13,6 +13,7 @@ import {
   QrCode, 
   DollarSign,
   MapPin,
+  Truck,
   MessageSquare,
   LogOut,
   Sparkles,
@@ -65,11 +66,13 @@ type Restaurant = {
   services: string | null;
   contactNumbers: string | null;
   ubicameUrl: string | null;
+  mapEmbedUrl?: string | null;
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
   deliveryCost: number;
   deliveryEnabled: boolean;
+  deliveryRates?: string | null;
   bankName: string | null;
   bankAccountType: string | null;
   bankAccountNumber: string | null;
@@ -98,8 +101,33 @@ interface CartItem {
   quantity: number;
 }
 
+function getMapIframeSrc(mapEmbedUrl?: string | null, address?: string | null, ubicameUrl?: string | null): string | null {
+  if (mapEmbedUrl && mapEmbedUrl.trim()) {
+    const raw = mapEmbedUrl.trim();
+    const srcMatch = raw.match(/src=["']([^"']+)["']/i);
+    if (srcMatch && srcMatch[1]) {
+      return srcMatch[1];
+    }
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      return raw;
+    }
+  }
+
+  if (address && address.trim()) {
+    return `https://maps.google.com/maps?q=${encodeURIComponent(address.trim())}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  if (ubicameUrl && ubicameUrl.trim()) {
+    if (ubicameUrl.includes("maps.google.com") || ubicameUrl.includes("goo.gl") || ubicameUrl.includes("maps.app.goo.gl") || ubicameUrl.includes("google.com/maps")) {
+      return `https://maps.google.com/maps?q=${encodeURIComponent(ubicameUrl.trim())}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+    }
+  }
+
+  return null;
+}
+
 export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
-  const [currentTab, setCurrentTab] = useState<"profile" | "menu">("profile");
+  const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -114,7 +142,31 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+
+  const kmRatesList: { id: string; label: string; price: number }[] = useMemo(() => {
+    if (restaurant.deliveryRates) {
+      try {
+        const parsed = JSON.parse(restaurant.deliveryRates);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        console.error("Error parsing deliveryRates:", e);
+      }
+    }
+    return [
+      { id: "km-1", label: "Hasta 2 KM", price: restaurant.deliveryCost || 1.50 },
+      { id: "km-2", label: "De 2 a 5 KM", price: (restaurant.deliveryCost || 1.50) + 1.00 },
+      { id: "km-3", label: "De 5 a 10 KM", price: (restaurant.deliveryCost || 1.50) + 2.50 },
+      { id: "km-4", label: "Más de 10 KM", price: (restaurant.deliveryCost || 1.50) + 4.50 },
+    ];
+  }, [restaurant.deliveryRates, restaurant.deliveryCost]);
+
+  const [selectedKmRate, setSelectedKmRate] = useState<{ id: string; label: string; price: number } | null>(
+    kmRatesList[0] || null
+  );
 
   // States for Logo and Cover upload
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -285,6 +337,49 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const cartTotal = cart.reduce((sum, item) => sum + item.dish.price * item.quantity, 0);
 
+  const handleGetLocation = async () => {
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      alert("La geolocalización no está disponible en tu dispositivo.");
+      return;
+    }
+
+    setIsGettingLocation(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const gpsLink = `https://maps.google.com/?q=${lat},${lng}`;
+
+        let placeName = "";
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.display_name) {
+              placeName = data.display_name;
+            }
+          }
+        } catch (e) {
+          console.warn("Reverse geocode error:", e);
+        }
+
+        const locationText = placeName
+          ? `${placeName}\n📍 GPS: ${gpsLink}`
+          : `📍 Ubicación GPS: ${gpsLink}`;
+
+        setDeliveryAddress((prev) => (prev && !prev.includes(gpsLink) ? `${placeName || "Ubicación detectada"}\n📍 GPS: ${gpsLink}\n${prev}` : locationText));
+        setIsGettingLocation(false);
+      },
+      (err) => {
+        console.error("Error obteniendo GPS:", err);
+        alert("No se pudo obtener tu ubicación GPS. Asegúrate de otorgar permisos de ubicación a la página.");
+        setIsGettingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  };
+
   const handleSendOrder = async (selectedMethod: "cash" | "qr") => {
     if (cart.length === 0) return;
 
@@ -306,7 +401,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     const iva = applyIva ? (subtotal + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
     const serviceCharge = applyService ? (subtotal + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
     const tip = subtotal * (tipPercentage / 100);
-    const deliveryCost = isDeliveryOrder ? restaurant.deliveryCost : 0;
+    const deliveryCost = isDeliveryOrder ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
     const total = subtotal + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
 
     // Save order in database first
@@ -338,8 +433,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       return;
     }
 
-    let message = `¡Hola! Me gustaría hacer una reserva/pedido en *${restaurant.name}*:\n\n`;
-    message += `*Fecha de Reserva/Pedido:* ${targetDate}\n`;
+    let message = `¡Hola! Me gustaría hacer un pedido en *${restaurant.name}*:\n\n`;
     message += `*Detalle del Pedido:*\n`;
     message += `-----------------------------------\n`;
     
@@ -371,7 +465,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     message += `*IVA (${restaurant.ivaPercent}%):* $${iva.toFixed(2)}\n`;
     message += `*Servicio (${restaurant.servicePercent}%):* $${serviceCharge.toFixed(2)}\n`;
     if (selectedTable === "Domicilio" && deliveryCost > 0) {
-      message += `*Costo de Envío:* $${deliveryCost.toFixed(2)}\n`;
+      message += `*Costo de Envío (${selectedKmRate?.label || "Domicilio"}):* $${deliveryCost.toFixed(2)}\n`;
     }
     message += `*Propina:* $${tip.toFixed(2)}\n`;
     message += `*Total a Pagar:* $${total.toFixed(2)}\n`;
@@ -812,6 +906,71 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                 </div>
               </div>
             )}
+
+            {/* Ubicación y Cómo Llegar (Mapa) */}
+            {(() => {
+              const mapIframeSrc = getMapIframeSrc(restaurant.mapEmbedUrl, restaurant.address, restaurant.ubicameUrl);
+              const hasLocation = restaurant.address || restaurant.ubicameUrl || mapIframeSrc;
+
+              if (!hasLocation) return null;
+
+              const gpsUrl = restaurant.ubicameUrl 
+                ? (restaurant.ubicameUrl.startsWith("http") ? restaurant.ubicameUrl : `https://${restaurant.ubicameUrl}`)
+                : restaurant.address 
+                  ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(restaurant.address)}`
+                  : null;
+
+              return (
+                <div className="bg-slate-900/60 border border-white/10 rounded-[2.5rem] p-6 sm:p-8 backdrop-blur-xl shadow-2xl space-y-6 text-white" style={{ fontFamily: 'var(--font-outfit)' }}>
+                  {/* Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <span className="text-[10px] sm:text-xs font-black text-indigo-400 uppercase tracking-[0.25em] block mb-1">
+                        MAPA E INSTALACIONES
+                      </span>
+                      <h3 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2 tracking-tight">
+                        <span className="text-red-500">📍</span> Ubicación y Cómo Llegar
+                      </h3>
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {restaurant.address && (
+                        <div className="px-4 py-2 rounded-2xl bg-slate-950/80 border border-white/10 text-xs font-bold text-slate-300 flex items-center gap-2 shadow-inner max-w-xs truncate">
+                          <span className="text-indigo-400">🌐</span>
+                          <span className="truncate">{restaurant.address}</span>
+                        </div>
+                      )}
+                      {gpsUrl && (
+                        <a
+                          href={gpsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-105 active:scale-95 shrink-0"
+                        >
+                          <span>📍</span> Abrir GPS ↗
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Map iframe container */}
+                  {mapIframeSrc && (
+                    <div className="w-full h-80 sm:h-96 rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-950 relative group">
+                      <iframe
+                        src={mapIframeSrc}
+                        width="100%"
+                        height="100%"
+                        style={{ border: 0 }}
+                        allowFullScreen
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                        className="w-full h-full rounded-3xl filter brightness-95 contrast-105"
+                      ></iframe>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         ) : restaurant.categories.length === 0 ? (
           <div className="py-20 text-center text-slate-500">
@@ -1063,7 +1222,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
       {/* Side Cart Drawer */}
       {isCartOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-[120] flex justify-end">
           {/* Overlay */}
           <div 
             onClick={() => setIsCartOpen(false)}
@@ -1134,7 +1293,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
             </div>
 
             {/* Footer Summary & Submit */}
-            <div className="p-6 border-t border-slate-800 space-y-4">
+            <div className="p-6 pb-24 sm:pb-6 border-t border-slate-800 space-y-4 bg-slate-900">
               <div className="flex justify-between items-center text-slate-350">
                 <span className="text-sm font-medium">Subtotal</span>
                 <span className="text-base font-extrabold text-white">${cartTotal.toFixed(2)}</span>
@@ -1159,7 +1318,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
 
       {/* Checkout Modal */}
       {isCheckoutOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
           {/* Overlay */}
           <div 
             onClick={() => setIsCheckoutOpen(false)}
@@ -1305,8 +1464,123 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               </div>
             )}
 
+            {/* Delivery / Table Modality Selector inside Checkout */}
+            {(() => {
+              const tablesList = restaurant.tablesConfig 
+                ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)
+                : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+              const isTableSelected = selectedTable !== "" && selectedTable !== "Domicilio";
+
+              return (
+                <div className="space-y-3" style={{ fontFamily: 'var(--font-outfit)' }}>
+                  <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">Modalidad del Pedido</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTable("")}
+                      className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
+                        selectedTable === ""
+                          ? "text-white border-transparent shadow-lg"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
+                      }`}
+                      style={{ backgroundColor: selectedTable === "" ? restaurant.themeColor : undefined }}
+                    >
+                      <span>🛍️</span>
+                      <span className="truncate">Para Llevar</span>
+                    </button>
+
+                    {restaurant.deliveryEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTable("Domicilio")}
+                        className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
+                          selectedTable === "Domicilio"
+                            ? "text-white border-transparent shadow-lg"
+                            : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
+                        }`}
+                        style={{ backgroundColor: selectedTable === "Domicilio" ? restaurant.themeColor : undefined }}
+                      >
+                        <span>🛵</span>
+                        <span className="truncate">Domicilio</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isTableSelected) {
+                          setSelectedTable(tablesList[0] || "1");
+                        }
+                      }}
+                      className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
+                        isTableSelected
+                          ? "text-white border-transparent shadow-lg"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
+                      }`}
+                      style={{ backgroundColor: isTableSelected ? restaurant.themeColor : undefined }}
+                    >
+                      <span>🍽️</span>
+                      <span className="truncate">{isTableSelected ? `Mesa #${selectedTable}` : "En Mesa"}</span>
+                    </button>
+                  </div>
+
+                  {/* If Table option is selected, show table numbers grid */}
+                  {isTableSelected && (
+                    <div className="space-y-1.5 pt-1">
+                      <span className="text-[11px] font-extrabold text-amber-400 uppercase tracking-wider block">
+                        Selecciona tu Número de Mesa:
+                      </span>
+                      <div className="grid grid-cols-5 gap-2 max-h-36 overflow-y-auto pr-1">
+                        {tablesList.map((num) => (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => setSelectedTable(num)}
+                            className={`py-2 rounded-xl text-xs font-black border transition duration-200 ${
+                              selectedTable === num
+                                ? "text-white border-transparent shadow-lg scale-105"
+                                : "text-slate-300 bg-slate-950/60 border-slate-800 hover:text-white"
+                            }`}
+                            style={{ backgroundColor: selectedTable === num ? restaurant.themeColor : undefined }}
+                          >
+                            #{num}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {selectedTable === "Domicilio" && (
               <div className="space-y-3" style={{ fontFamily: 'var(--font-outfit)' }}>
+                {/* KM Distance Selector */}
+                <div className="space-y-1.5 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-xs font-extrabold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Truck className="h-4 w-4 text-amber-400" />
+                    Selecciona la Distancia de Envío (por KM):
+                  </span>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {kmRatesList.map((rate) => (
+                      <button
+                        key={rate.id}
+                        type="button"
+                        onClick={() => setSelectedKmRate(rate)}
+                        className={`py-2 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-0.5 text-center transition duration-200 ${
+                          selectedKmRate?.id === rate.id
+                            ? "text-white border-transparent shadow-lg"
+                            : "text-slate-300 bg-slate-900 border-slate-800 hover:text-white"
+                        }`}
+                        style={{ backgroundColor: selectedKmRate?.id === rate.id ? restaurant.themeColor : undefined }}
+                      >
+                        <span>{rate.label}</span>
+                        <span className="text-[11px] font-bold text-amber-300">${rate.price.toFixed(2)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu Nombre</span>
@@ -1332,29 +1606,38 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Dirección de Envío</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Dirección de Envío</span>
+                    <button
+                      type="button"
+                      onClick={handleGetLocation}
+                      disabled={isGettingLocation}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1 rounded-xl border border-amber-500/30 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isGettingLocation ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                          <span>Obteniendo GPS...</span>
+                        </>
+                      ) : (
+                        <>
+                          <MapPin className="h-3.5 w-3.5 text-amber-400" />
+                          <span>📍 Enviar mi ubicación actual (GPS)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <textarea
                     required
-                    placeholder="Escribe tu dirección exacta, ciudad y referencias para la entrega..."
+                    placeholder="Escribe tu dirección exacta o presiona 'Enviar mi ubicación actual'..."
                     value={deliveryAddress}
                     onChange={(e) => setDeliveryAddress(e.target.value)}
                     className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
-                    rows={2}
+                    rows={3}
                   />
                 </div>
               </div>
             )}
-
-            {/* Fecha de Reserva / Consumo */}
-            <div className="space-y-1.5" style={{ fontFamily: 'var(--font-outfit)' }}>
-              <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">Fecha de Reserva / Consumo</label>
-              <input
-                type="date"
-                value={reservationDate}
-                onChange={(e) => setReservationDate(e.target.value)}
-                className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-xs font-medium focus:outline-none focus:border-amber-500"
-              />
-            </div>
 
             {/* Propina Selector */}
             <div className="space-y-2" style={{ fontFamily: 'var(--font-outfit)' }}>
@@ -1398,7 +1681,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               const iva = applyIva ? (subtotal + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
               const serviceCharge = applyService ? (subtotal + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
               const tip = subtotal * (tipPercentage / 100);
-              const deliveryCost = isDelivery ? restaurant.deliveryCost : 0;
+              const deliveryCost = isDelivery ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
               const total = subtotal + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
 
               return (
@@ -1423,10 +1706,10 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                     <span>Servicio ({restaurant.servicePercent}%):</span>
                     <span className="font-bold text-slate-350">${serviceCharge.toFixed(2)}</span>
                   </div>
-                  {isDelivery && restaurant.deliveryCost > 0 && (
+                  {isDelivery && deliveryCost > 0 && (
                     <div className="flex justify-between text-slate-400">
-                      <span>Costo de Envío:</span>
-                      <span className="font-bold text-slate-350">${restaurant.deliveryCost.toFixed(2)}</span>
+                      <span>Costo de Envío ({selectedKmRate?.label || "Domicilio"}):</span>
+                      <span className="font-bold text-slate-350">${deliveryCost.toFixed(2)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-slate-400">
@@ -1645,36 +1928,36 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       )}
 
       {/* Floating Bottom Navigation Bar for Mobile */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 sm:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent">
-        <div className="max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center justify-around shadow-2xl">
+      <div className="fixed bottom-0 left-0 right-0 z-[100] md:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pointer-events-none">
+        <div className="max-w-md mx-auto bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center justify-around shadow-[0_10px_30px_rgba(0,0,0,0.8)] pointer-events-auto">
           {/* Profile Tab */}
           <button
             onClick={() => setCurrentTab("profile")}
-            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition duration-200"
+            className="flex flex-col items-center gap-1 py-1.5 px-3 rounded-xl transition duration-200 active:scale-95"
             style={{ color: currentTab === "profile" ? restaurant.themeColor : "#94a3b8" }}
           >
             <Store className="h-5 w-5" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Inicio</span>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Inicio</span>
           </button>
 
           {/* Menu Tab */}
           <button
             onClick={() => setCurrentTab("menu")}
-            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition duration-200"
+            className="flex flex-col items-center gap-1 py-1.5 px-3 rounded-xl transition duration-200 active:scale-95"
             style={{ color: currentTab === "menu" ? restaurant.themeColor : "#94a3b8" }}
           >
             <BookOpen className="h-5 w-5" />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Menú</span>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Menú</span>
           </button>
 
           {/* Table Selector */}
           <button
             onClick={() => setIsTableModalOpen(true)}
-            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition duration-200"
+            className="flex flex-col items-center gap-1 py-1.5 px-3 rounded-xl transition duration-200 active:scale-95"
             style={{ color: selectedTable ? "#fbbf24" : "#94a3b8" }}
           >
             <Utensils className="h-5 w-5" />
-            <span className="text-[10px] font-bold uppercase tracking-wider truncate max-w-[65px]">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider truncate max-w-[65px]">
               {selectedTable === "Domicilio" ? "Domicilio" : selectedTable ? `#${selectedTable}` : "Mesa"}
             </span>
           </button>
@@ -1682,7 +1965,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
           {/* Cart / Order Trigger */}
           <button
             onClick={() => setIsCartOpen(true)}
-            className="flex flex-col items-center gap-1 py-1 px-3 rounded-xl text-slate-400 hover:text-slate-200 relative transition duration-200"
+            className="flex flex-col items-center gap-1 py-1.5 px-3 rounded-xl text-slate-400 hover:text-slate-200 relative transition duration-200 active:scale-95"
           >
             <div className="relative">
               <ShoppingCart className="h-5 w-5" />
@@ -1695,7 +1978,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
                 </span>
               )}
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider">Pedido</span>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Pedido</span>
           </button>
         </div>
       </div>

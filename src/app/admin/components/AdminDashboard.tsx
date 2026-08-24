@@ -18,7 +18,10 @@ import {
   createSeasonRateAction,
   updateSeasonRateAction,
   deleteSeasonRateAction,
-  toggleSeasonRateAction
+  toggleSeasonRateAction,
+  createCustomerAction,
+  updateCustomerAction,
+  deleteCustomerAction
 } from "@/lib/actions";
 import { 
   Store, 
@@ -43,13 +46,20 @@ import {
   XCircle,
   DollarSign,
   Camera,
+  Truck,
   Upload,
   CreditCard,
   Crown,
   Sparkles,
+  Search,
+  FileSpreadsheet,
+  UserCheck,
+  Heart,
+  MessageSquare,
   CalendarDays,
   Percent,
-  Tag
+  Tag,
+  MapPin
 } from "lucide-react";
 
 type SeasonRate = {
@@ -130,11 +140,13 @@ type Restaurant = {
   services: string | null;
   contactNumbers: string | null;
   ubicameUrl: string | null;
+  mapEmbedUrl?: string | null;
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
   deliveryCost: number;
   deliveryEnabled: boolean;
+  deliveryRates?: string | null;
   bankName: string | null;
   bankAccountType: string | null;
   bankAccountNumber: string | null;
@@ -148,10 +160,27 @@ type Restaurant = {
   categories: Category[];
   orders: Order[];
   seasonRates?: SeasonRate[];
+  customers?: Customer[];
+};
+
+type Customer = {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  category: string;
+  notes?: string | null;
+  totalOrders: number;
+  totalSpent: number;
+  lastOrderAt: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "qr" | "orders" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "qr" | "orders" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState("");
@@ -227,8 +256,131 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [ivaOnTakeout, setIvaOnTakeout] = useState(restaurant.ivaOnTakeout);
   const [serviceOnTable, setServiceOnTable] = useState(restaurant.serviceOnTable);
   const [serviceOnTakeout, setServiceOnTakeout] = useState(restaurant.serviceOnTakeout);
+
+  const [kmRates, setKmRates] = useState<{ id: string; label: string; price: number }[]>(() => {
+    if (restaurant.deliveryRates) {
+      try {
+        const parsed = JSON.parse(restaurant.deliveryRates);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        console.error("Error parsing deliveryRates:", e);
+      }
+    }
+    return [
+      { id: "km-1", label: "Hasta 2 KM", price: 1.50 },
+      { id: "km-2", label: "De 2 a 5 KM", price: 2.50 },
+      { id: "km-3", label: "De 5 a 10 KM", price: 4.00 },
+      { id: "km-4", label: "Más de 10 KM", price: 6.00 },
+    ];
+  });
+
   const [savingCharges, setSavingCharges] = useState(false);
   const [chargesMessage, setChargesMessage] = useState("");
+
+  // CRM State Variables & Handlers
+  const [crmSearch, setCrmSearch] = useState("");
+  const [crmCategoryFilter, setCrmCategoryFilter] = useState("TODOS");
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+
+  const [custName, setCustName] = useState("");
+  const [custPhone, setCustPhone] = useState("");
+  const [custEmail, setCustEmail] = useState("");
+  const [custAddress, setCustAddress] = useState("");
+  const [custCity, setCustCity] = useState("");
+  const [custCategory, setCustCategory] = useState("NUEVO");
+  const [custNotes, setCustNotes] = useState("");
+  const [savingCustomer, setSavingCustomer] = useState(false);
+
+  const handleOpenCustomerModal = (customer?: Customer) => {
+    if (customer) {
+      setEditingCustomer(customer);
+      setCustName(customer.name);
+      setCustPhone(customer.phone);
+      setCustEmail(customer.email || "");
+      setCustAddress(customer.address || "");
+      setCustCity(customer.city || "");
+      setCustCategory(customer.category || "NUEVO");
+      setCustNotes(customer.notes || "");
+    } else {
+      setEditingCustomer(null);
+      setCustName("");
+      setCustPhone("");
+      setCustEmail("");
+      setCustAddress("");
+      setCustCity("");
+      setCustCategory("NUEVO");
+      setCustNotes("");
+    }
+    setIsCustomerModalOpen(true);
+  };
+
+  const handleSaveCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!custName.trim() || !custPhone.trim()) {
+      alert("Por favor ingrese al menos Nombre y Teléfono/WhatsApp del cliente.");
+      return;
+    }
+    setSavingCustomer(true);
+    if (editingCustomer) {
+      const res = await updateCustomerAction(editingCustomer.id, {
+        name: custName,
+        phone: custPhone,
+        email: custEmail,
+        address: custAddress,
+        city: custCity,
+        category: custCategory,
+        notes: custNotes,
+      });
+      setSavingCustomer(false);
+      if (res.error) {
+        alert(res.error);
+      } else {
+        setIsCustomerModalOpen(false);
+        window.location.reload();
+      }
+    } else {
+      const res = await createCustomerAction({
+        restaurantId: restaurant.id,
+        name: custName,
+        phone: custPhone,
+        email: custEmail,
+        address: custAddress,
+        city: custCity,
+        category: custCategory,
+        notes: custNotes,
+      });
+      setSavingCustomer(false);
+      if (res.error) {
+        alert(res.error);
+      } else {
+        setIsCustomerModalOpen(false);
+        window.location.reload();
+      }
+    }
+  };
+
+  const handleExportCustomersCSV = () => {
+    const list = restaurant.customers || [];
+    if (list.length === 0) {
+      alert("No hay clientes registrados para exportar.");
+      return;
+    }
+    const headers = "Nombre,Telefono,Email,Direccion,Ciudad,Categoria,Notas,TotalPedidos,TotalGastado,UltimoPedido\n";
+    const rows = list.map(c => 
+      `"${(c.name || "").replace(/"/g, '""')}","${(c.phone || "").replace(/"/g, '""')}","${(c.email || "").replace(/"/g, '""')}","${(c.address || "").replace(/"/g, '""')}","${(c.city || "").replace(/"/g, '""')}","${c.category}","${(c.notes || "").replace(/"/g, '""')}",${c.totalOrders},${c.totalSpent},"${c.lastOrderAt}"`
+    ).join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `clientes_${restaurant.slug}_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
@@ -529,6 +681,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
       servicePercent,
       deliveryCost,
       deliveryEnabled,
+      deliveryRates: JSON.stringify(kmRates),
       ivaOnTable,
       ivaOnTakeout,
       serviceOnTable,
@@ -538,7 +691,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
     if (res.error) {
       setChargesMessage(`Error: ${res.error}`);
     } else {
-      setChargesMessage("Configuración de recargos guardada correctamente.");
+      setChargesMessage("Configuración de recargos y tarifas por KM guardada correctamente.");
       setTimeout(() => setChargesMessage(""), 3000);
     }
   };
@@ -667,6 +820,24 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
             >
               <ShoppingBag className="h-4 w-4" />
               Historial de Pedidos
+            </button>
+            <button
+              onClick={() => setActiveTab("crm")}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "crm" 
+                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Users className="h-4 w-4 text-amber-400" />
+                <span>CRM Clientes</span>
+              </div>
+              {restaurant.customers && restaurant.customers.length > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
+                  {restaurant.customers.length}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setActiveTab("subscription")}
@@ -972,6 +1143,78 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                         />
                         <span className="font-bold text-white">Activar Envío a Domicilio</span>
                       </label>
+
+                      {/* Tarifas de Envío por Distancia (por KM) */}
+                      {deliveryEnabled && (
+                        <div className="col-span-1 sm:col-span-2 bg-slate-950/60 border border-slate-800 p-4 rounded-xl space-y-3 my-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-850 pb-2">
+                            <div>
+                              <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <Truck className="h-4 w-4 text-amber-400" />
+                                Tarifas de Envío por Distancia (por KM)
+                              </h4>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                Personaliza el precio de envío según la distancia en kilómetros desde tu local al cliente.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setKmRates(prev => [
+                                  ...prev,
+                                  { id: `km-${Date.now()}`, label: `De ${prev.length * 5} a ${(prev.length + 1) * 5} KM`, price: 3.50 }
+                                ]);
+                              }}
+                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-white rounded-lg text-xs font-bold transition border border-white/5 active:scale-95 shrink-0 self-start sm:self-auto"
+                            >
+                              + Añadir Rango de KM
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                            {kmRates.map((item, index) => (
+                              <div key={item.id} className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-2.5 rounded-xl">
+                                <input
+                                  type="text"
+                                  value={item.label}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setKmRates(prev => prev.map((r, i) => i === index ? { ...r, label: val } : r));
+                                  }}
+                                  placeholder="ej. Hasta 2 KM"
+                                  className="flex-1 bg-slate-950 border border-slate-800 focus:border-red-500 px-3 py-1.5 rounded-lg text-xs font-bold text-white focus:outline-none"
+                                />
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <span className="text-xs font-bold text-slate-400">$</span>
+                                  <input
+                                    type="number"
+                                    step="0.25"
+                                    min="0"
+                                    value={item.price}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value) || 0;
+                                      setKmRates(prev => prev.map((r, i) => i === index ? { ...r, price: val } : r));
+                                    }}
+                                    className="w-20 bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1.5 rounded-lg text-xs font-black text-white focus:outline-none text-right"
+                                  />
+                                </div>
+                                {kmRates.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setKmRates(prev => prev.filter((_, i) => i !== index));
+                                    }}
+                                    className="p-1 text-slate-500 hover:text-red-400 transition"
+                                    title="Eliminar rango"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
                         <input
                           type="checkbox"
@@ -1329,14 +1572,42 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Ubicame.info (URL)</label>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Enlace GPS / Google Maps (Botón "Abrir GPS")</label>
                   <input
                     type="text"
                     name="ubicameUrl"
                     defaultValue={restaurant.ubicameUrl || ""}
-                    placeholder="ej: https://ubicame.info/mi-negocio"
+                    placeholder="ej: https://maps.app.goo.gl/xyz... o https://ubicame.info/mi-negocio"
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   />
+                </div>
+              </div>
+
+              {/* Section: Interactive Map Embed */}
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <MapPin className="h-4 w-4 text-red-500" />
+                    Mapa Interactivo de Google Maps (Iframe / Embed URL)
+                  </h4>
+                  <span className="text-[11px] text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1 rounded-lg">
+                    Recomendado para mapa interactivo visual
+                  </span>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                    URL de Iframe de Google Maps o Código Embed completo (`&lt;iframe src="..."&gt;&lt;/iframe&gt;`)
+                  </label>
+                  <textarea
+                    name="mapEmbedUrl"
+                    defaultValue={restaurant.mapEmbedUrl || ""}
+                    rows={2}
+                    placeholder='ej: https://www.google.com/maps/embed?pb=... o pega el código <iframe> completo de Google Maps -> Compartir -> Incorporar mapa'
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1.5">
+                    💡 Si no ingresas un enlace de mapa embed pero ingresas la Dirección Física, el sistema generará automáticamente la vista de mapa en tu menú público.
+                  </p>
                 </div>
               </div>
 
@@ -2516,6 +2787,350 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* CRM Clientes Tab */}
+        {activeTab === "crm" && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <Users className="h-6 w-6 text-amber-400" />
+                  CRM & Fidelización de Clientes
+                </h2>
+                <p className="text-slate-400 text-sm mt-0.5">
+                  Gestiona tu base de clientes, historial de consumo, etiquetas de fidelidad y contacto directo por WhatsApp.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={handleExportCustomersCSV}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition flex items-center gap-2 active:scale-95"
+                >
+                  <FileSpreadsheet className="h-4 w-4 text-emerald-400" />
+                  Exportar CSV
+                </button>
+                <button
+                  onClick={() => handleOpenCustomerModal()}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 transition shadow-lg flex items-center gap-2 active:scale-95"
+                >
+                  <Plus className="h-4 w-4" />
+                  Registrar Cliente
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics Row */}
+            {(() => {
+              const allCust = restaurant.customers || [];
+              const totalCust = allCust.length;
+              const vipCust = allCust.filter(c => c.category === "VIP" || c.category === "FRECUENTE").length;
+              const totalSpentSum = allCust.reduce((acc, c) => acc + (c.totalSpent || 0), 0);
+              const avgSpent = totalCust > 0 ? totalSpentSum / totalCust : 0;
+
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
+                    <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Total Clientes</span>
+                    <p className="text-2xl font-black text-white mt-1">{totalCust}</p>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">Base de datos del local</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
+                    <span className="text-[10px] uppercase font-black text-amber-400 tracking-wider">⭐ VIP & Frecuentes</span>
+                    <p className="text-2xl font-black text-amber-400 mt-1">{vipCust}</p>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">Clientes recurrentes</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
+                    <span className="text-[10px] uppercase font-black text-emerald-400 tracking-wider">Ventas CRM Acumuladas</span>
+                    <p className="text-2xl font-black text-emerald-400 mt-1">${totalSpentSum.toFixed(2)}</p>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">Facturado a clientes</span>
+                  </div>
+                  <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
+                    <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Gasto Promedio</span>
+                    <p className="text-2xl font-black text-white mt-1">${avgSpent.toFixed(2)}</p>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">Por cliente registrado</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Search & Filter Bar */}
+            <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="relative w-full md:w-80">
+                <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar cliente, teléfono o notas..."
+                  value={crmSearch}
+                  onChange={(e) => setCrmSearch(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 pl-10 pr-4 py-2 rounded-xl text-xs text-white focus:outline-none"
+                />
+              </div>
+
+              {/* Category Filter Pills */}
+              <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
+                {["TODOS", "VIP", "FRECUENTE", "NUEVO", "INACTIVO"].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setCrmCategoryFilter(cat)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition border ${
+                      crmCategoryFilter === cat
+                        ? "bg-gradient-to-r from-red-600 to-amber-600 text-white border-transparent shadow-md"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {cat === "TODOS" ? "Todos" : cat === "VIP" ? "⭐ VIP" : cat === "FRECUENTE" ? "🔥 Frecuentes" : cat === "NUEVO" ? "🆕 Nuevos" : "💤 Inactivos"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Customer List Table */}
+            <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl overflow-hidden shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider bg-slate-950/60">
+                      <th className="pb-3 pt-4 pl-4">Cliente</th>
+                      <th className="pb-3 pt-4">Categoría</th>
+                      <th className="pb-3 pt-4 text-center">Pedidos</th>
+                      <th className="pb-3 pt-4 text-right">Total Gastado</th>
+                      <th className="pb-3 pt-4">Último Pedido</th>
+                      <th className="pb-3 pt-4">Notas Internas</th>
+                      <th className="pb-3 pt-4 pr-4 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-xs">
+                    {(() => {
+                      const allCust = restaurant.customers || [];
+                      const filtered = allCust.filter((c) => {
+                        const matchesSearch = 
+                          (c.name && c.name.toLowerCase().includes(crmSearch.toLowerCase())) ||
+                          (c.phone && c.phone.includes(crmSearch)) ||
+                          (c.city && c.city.toLowerCase().includes(crmSearch.toLowerCase())) ||
+                          (c.notes && c.notes.toLowerCase().includes(crmSearch.toLowerCase()));
+
+                        const matchesCategory = 
+                          crmCategoryFilter === "TODOS" || c.category === crmCategoryFilter;
+
+                        return matchesSearch && matchesCategory;
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={7} className="py-12 text-center text-slate-500">
+                              <Users className="h-10 w-10 mx-auto text-slate-700 mb-2" />
+                              <p className="font-bold text-sm">No se encontraron clientes</p>
+                              <p className="text-xs text-slate-600 mt-1">Registra tu primer cliente o realiza pedidos en el menú para alimentar tu CRM automáticamente.</p>
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return filtered.map((cust) => {
+                        const cleanPhone = (cust.phone || "").replace(/\D/g, "");
+                        const waLink = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=¡Hola%20${encodeURIComponent(cust.name)}!%20Te%20saludamos%20de%20*${encodeURIComponent(restaurant.name)}*.%20¡Gracias%20por%20ser%20nuestro%20cliente!`;
+
+                        return (
+                          <tr key={cust.id} className="hover:bg-slate-850/40 transition">
+                            <td className="py-3.5 pl-4">
+                              <div className="font-bold text-white text-sm">{cust.name}</div>
+                              <div className="text-slate-400 text-xs flex items-center gap-1.5 mt-0.5">
+                                <span>📱 {cust.phone}</span>
+                                {cust.city && <span className="text-slate-500">• 📍 {cust.city}</span>}
+                              </div>
+                            </td>
+                            <td className="py-3.5">
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                cust.category === "VIP"
+                                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                  : cust.category === "FRECUENTE"
+                                    ? "bg-red-500/20 text-red-300 border border-red-500/40"
+                                    : cust.category === "INACTIVO"
+                                      ? "bg-slate-800 text-slate-500 border border-slate-700"
+                                      : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                              }`}>
+                                {cust.category === "VIP" ? "⭐ VIP" : cust.category === "FRECUENTE" ? "🔥 FRECUENTE" : cust.category === "INACTIVO" ? "💤 INACTIVO" : "🆕 NUEVO"}
+                              </span>
+                            </td>
+                            <td className="py-3.5 text-center font-bold text-white">
+                              {cust.totalOrders}
+                            </td>
+                            <td className="py-3.5 text-right font-black text-emerald-400">
+                              ${cust.totalSpent.toFixed(2)}
+                            </td>
+                            <td className="py-3.5 text-slate-400">
+                              {new Date(cust.lastOrderAt).toLocaleDateString("es-ES")}
+                            </td>
+                            <td className="py-3.5 text-slate-350 max-w-[200px] truncate">
+                              {cust.notes || <span className="text-slate-600 italic">Sin notas</span>}
+                            </td>
+                            <td className="py-3.5 pr-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <a
+                                  href={waLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-2 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-800/40 transition active:scale-95"
+                                  title="Contactar por WhatsApp"
+                                >
+                                  <MessageSquare className="h-4 w-4" />
+                                </a>
+                                <button
+                                  onClick={() => handleOpenCustomerModal(cust)}
+                                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition active:scale-95"
+                                  title="Editar Cliente"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm(`¿Eliminar al cliente "${cust.name}"?`)) {
+                                      await deleteCustomerAction(cust.id);
+                                      window.location.reload();
+                                    }
+                                  }}
+                                  className="p-2 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/40 transition active:scale-95"
+                                  title="Eliminar Cliente"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal for Create/Edit Customer */}
+            {isCustomerModalOpen && (
+              <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <Users className="h-5 w-5 text-amber-400" />
+                      {editingCustomer ? "Editar Cliente CRM" : "Registrar Nuevo Cliente"}
+                    </h3>
+                    <button
+                      onClick={() => setIsCustomerModalOpen(false)}
+                      className="text-slate-400 hover:text-white px-2 py-1 text-xs"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveCustomer} className="space-y-3.5 text-xs">
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-semibold">Nombre Completo *</label>
+                      <input
+                        type="text"
+                        required
+                        value={custName}
+                        onChange={(e) => setCustName(e.target.value)}
+                        placeholder="Ej. María López"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Teléfono / WhatsApp *</label>
+                        <input
+                          type="tel"
+                          required
+                          value={custPhone}
+                          onChange={(e) => setCustPhone(e.target.value)}
+                          placeholder="Ej. 0991234567"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Categoría CRM</label>
+                        <select
+                          value={custCategory}
+                          onChange={(e) => setCustCategory(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        >
+                          <option value="NUEVO">🆕 Nuevo</option>
+                          <option value="FRECUENTE">🔥 Frecuente</option>
+                          <option value="VIP">⭐ VIP</option>
+                          <option value="INACTIVO">💤 Inactivo</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Ciudad / Sector</label>
+                        <input
+                          type="text"
+                          value={custCity}
+                          onChange={(e) => setCustCity(e.target.value)}
+                          placeholder="Ej. Olón / Montañita"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Correo Electrónico</label>
+                        <input
+                          type="email"
+                          value={custEmail}
+                          onChange={(e) => setCustEmail(e.target.value)}
+                          placeholder="cliente@ejemplo.com"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-semibold">Dirección Habitual</label>
+                      <input
+                        type="text"
+                        value={custAddress}
+                        onChange={(e) => setCustAddress(e.target.value)}
+                        placeholder="Ej. Calle Principal #123 junto a la plaza"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-semibold">Notas Internas & Preferencias</label>
+                      <textarea
+                        rows={3}
+                        value={custNotes}
+                        onChange={(e) => setCustNotes(e.target.value)}
+                        placeholder="Ej. Le gusta entrega en garita, prefiere pizza sin salsa picante..."
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomerModalOpen(false)}
+                        className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingCustomer}
+                        className="px-5 py-2 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 text-white font-bold hover:from-red-500 hover:to-amber-500 transition shadow-lg disabled:opacity-50"
+                      >
+                        {savingCustomer ? "Guardando..." : editingCustomer ? "Guardar Cambios" : "Crear Cliente"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

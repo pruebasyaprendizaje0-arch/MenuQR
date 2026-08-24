@@ -46,12 +46,14 @@ model Restaurant {
   services       String?
   contactNumbers String?
   ubicameUrl     String?
+  mapEmbedUrl    String?
   plan           Plan       @default(FREE)
   tablesConfig   String     @default("1,2,3,4,5,6,7,8,9,10")
   ivaPercent     Float      @default(15.0)
   servicePercent Float      @default(10.0)
   deliveryCost   Float      @default(0.0)
   deliveryEnabled Boolean   @default(true)
+  deliveryRates   String?
   bankName        String?
   bankAccountType String?
   bankAccountNumber String?
@@ -68,6 +70,7 @@ model Restaurant {
   categories     Category[]
   dishes         Dish[]
   orders         Order[]
+  customers      Customer[]
   crmNotes       CrmNote[]
   seasonRates    SeasonRate[]
   createdAt      DateTime   @default(now())
@@ -178,6 +181,24 @@ model SeasonRate {
   isActive        Boolean    @default(true)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
+}
+
+model Customer {
+  id           String     @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String
+  email        String?
+  address      String?
+  city         String?
+  category     String     @default("NUEVO") // VIP, FRECUENTE, NUEVO, INACTIVO
+  notes        String?
+  totalOrders  Int        @default(1)
+  totalSpent   Float      @default(0.0)
+  lastOrderAt  DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 }
 
 
