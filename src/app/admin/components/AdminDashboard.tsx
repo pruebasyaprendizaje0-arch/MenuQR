@@ -14,7 +14,11 @@ import {
   updateOrderStatusAction,
   updateRestaurantTablesAction,
   updateRestaurantChargesConfigAction,
-  subscribeToPremiumAction
+  subscribeToPremiumAction,
+  createSeasonRateAction,
+  updateSeasonRateAction,
+  deleteSeasonRateAction,
+  toggleSeasonRateAction
 } from "@/lib/actions";
 import { 
   Store, 
@@ -42,8 +46,22 @@ import {
   Upload,
   CreditCard,
   Crown,
-  Sparkles
+  Sparkles,
+  CalendarDays,
+  Percent,
+  Tag
 } from "lucide-react";
+
+type SeasonRate = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  percentageBonus: number;
+  fixedBonus: number;
+  isHoliday: boolean;
+  isActive: boolean;
+};
 import { QRCodeCanvas } from "qrcode.react";
 import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
 
@@ -129,10 +147,11 @@ type Restaurant = {
   serviceOnTakeout: boolean;
   categories: Category[];
   orders: Order[];
+  seasonRates?: SeasonRate[];
 };
 
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "qr" | "orders" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "qr" | "orders" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState("");
@@ -456,6 +475,16 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [dishAvailable, setDishAvailable] = useState(true);
   const [dishImageUrl, setDishImageUrl] = useState("");
 
+  // States for Season Rate Dialogs
+  const [editingSeasonRate, setEditingSeasonRate] = useState<SeasonRate | null>(null);
+  const [isSeasonModalOpen, setIsSeasonModalOpen] = useState(false);
+  const [seasonName, setSeasonName] = useState("");
+  const [seasonStartDate, setSeasonStartDate] = useState("");
+  const [seasonEndDate, setSeasonEndDate] = useState("");
+  const [seasonPercentageBonus, setSeasonPercentageBonus] = useState("0");
+  const [seasonFixedBonus, setSeasonFixedBonus] = useState("0");
+  const [seasonIsHoliday, setSeasonIsHoliday] = useState(false);
+
   const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/${restaurant.slug}` : `/${restaurant.slug}`;
 
   const handleCopyLink = () => {
@@ -605,6 +634,17 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
             >
               <Soup className="h-4 w-4" />
               Platos
+            </button>
+            <button
+              onClick={() => setActiveTab("seasons")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "seasons" 
+                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <CalendarDays className="h-4 w-4 text-amber-400" />
+              Tarifas y Temporadas
             </button>
             <button
               onClick={() => setActiveTab("qr")}
@@ -1978,6 +2018,280 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                           className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-red-600 to-amber-600 text-white hover:from-red-500 hover:to-amber-500 transition"
                         >
                           {editingDish ? "Guardar Cambios" : "Crear Plato"}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tarifas y Temporadas Tab */}
+        {activeTab === "seasons" && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <CalendarDays className="h-6 w-6 text-amber-400" />
+                  Tarifas, Temporadas y Festivos
+                </h2>
+                <p className="text-slate-400 text-sm mt-1">Configura recargos o descuentos según rangos de fecha (feriados o temporadas altas/bajas) para reservas y pedidos.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingSeasonRate(null);
+                  setSeasonName("");
+                  setSeasonStartDate(new Date().toISOString().split("T")[0]);
+                  setSeasonEndDate(new Date(Date.now() + 7*24*60*60*1000).toISOString().split("T")[0]);
+                  setSeasonPercentageBonus("15");
+                  setSeasonFixedBonus("0");
+                  setSeasonIsHoliday(false);
+                  setIsSeasonModalOpen(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-amber-600 to-red-600 hover:from-amber-500 hover:to-red-500 shadow-lg shadow-amber-950/20 transition-all duration-200"
+              >
+                <Plus className="h-4 w-4" />
+                Nueva Tarifa / Festivo
+              </button>
+            </div>
+
+            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl">
+              <table className="min-w-full divide-y divide-slate-800">
+                <thead className="bg-slate-900/60">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Nombre de la Tarifa</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Rango de Fechas</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Ajuste / Recargo</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Tipo</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Estado</th>
+                    <th className="px-6 py-4 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/80">
+                  {(restaurant.seasonRates || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-500">
+                        No hay tarifas de temporadas ni festivos configuradas aún.
+                      </td>
+                    </tr>
+                  ) : (
+                    (restaurant.seasonRates || []).map((rate) => (
+                      <tr key={rate.id} className="hover:bg-slate-900/30 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-bold text-white">{rate.name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-300">
+                          {rate.startDate} al {rate.endDate}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-amber-400">
+                          {rate.percentageBonus !== 0 && (
+                            <span className="mr-2">
+                              {rate.percentageBonus > 0 ? `+${rate.percentageBonus}%` : `${rate.percentageBonus}%`}
+                            </span>
+                          )}
+                          {rate.fixedBonus !== 0 && (
+                            <span>
+                              {rate.fixedBonus > 0 ? `+$${rate.fixedBonus.toFixed(2)}` : `-$${Math.abs(rate.fixedBonus).toFixed(2)}`}
+                            </span>
+                          )}
+                          {rate.percentageBonus === 0 && rate.fixedBonus === 0 && (
+                            <span className="text-slate-500 font-normal">Sin recargo</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${
+                            rate.isHoliday 
+                              ? "bg-red-500/10 text-red-400 border-red-500/30" 
+                              : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                          }`}>
+                            {rate.isHoliday ? "Festivo Especial" : "Temporada"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <button
+                            onClick={async () => {
+                              await toggleSeasonRateAction(rate.id, !rate.isActive);
+                              alert(`Tarifa "${rate.name}" ${!rate.isActive ? "activada" : "desactivada"} con éxito.`);
+                            }}
+                            className={`text-xs font-bold px-2.5 py-1 rounded-lg border transition ${
+                              rate.isActive 
+                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20" 
+                                : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
+                            }`}
+                          >
+                            {rate.isActive ? "Activo" : "Inactivo"}
+                          </button>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-xs space-x-2">
+                          <button
+                            onClick={() => {
+                              setEditingSeasonRate(rate);
+                              setSeasonName(rate.name);
+                              setSeasonStartDate(rate.startDate);
+                              setSeasonEndDate(rate.endDate);
+                              setSeasonPercentageBonus(rate.percentageBonus.toString());
+                              setSeasonFixedBonus(rate.fixedBonus.toString());
+                              setSeasonIsHoliday(rate.isHoliday);
+                              setIsSeasonModalOpen(true);
+                            }}
+                            className="inline-flex p-2 text-slate-400 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg transition-all"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm(`¿Estás seguro de eliminar la tarifa "${rate.name}"?`)) {
+                                await deleteSeasonRateAction(rate.id);
+                                alert(`¡Tarifa "${rate.name}" eliminada con éxito!`);
+                              }
+                            }}
+                            className="inline-flex p-2 text-red-500/80 hover:text-red-400 bg-red-950/20 hover:bg-red-950/40 rounded-lg border border-red-900/20 transition-all"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Season Rate Add/Edit Modal */}
+            {isSeasonModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-lg shadow-2xl relative">
+                  <h3 className="text-lg font-bold text-white mb-4">
+                    {editingSeasonRate ? "Editar Tarifa de Temporada" : "Nueva Tarifa / Festivo"}
+                  </h3>
+                  <form
+                    action={async () => {
+                      const payload = {
+                        name: seasonName,
+                        startDate: seasonStartDate,
+                        endDate: seasonEndDate,
+                        percentageBonus: parseFloat(seasonPercentageBonus) || 0,
+                        fixedBonus: parseFloat(seasonFixedBonus) || 0,
+                        isHoliday: seasonIsHoliday
+                      };
+
+                      if (editingSeasonRate) {
+                        await updateSeasonRateAction(editingSeasonRate.id, payload);
+                        alert("¡Tarifa guardada con éxito!");
+                      } else {
+                        await createSeasonRateAction(restaurant.id, payload);
+                        alert("¡Tarifa creada con éxito!");
+                      }
+                      setIsSeasonModalOpen(false);
+                    }}
+                    className="space-y-4 text-xs"
+                  >
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-semibold">Nombre de la Tarifa / Temporada *</label>
+                      <input
+                        type="text"
+                        required
+                        value={seasonName}
+                        onChange={(e) => setSeasonName(e.target.value)}
+                        placeholder="ej: Temporada Alta Feriado de Carnaval"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-amber-500 text-sm"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Fecha Inicio *</label>
+                        <input
+                          type="date"
+                          required
+                          value={seasonStartDate}
+                          onChange={(e) => setSeasonStartDate(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Fecha Fin *</label>
+                        <input
+                          type="date"
+                          required
+                          value={seasonEndDate}
+                          onChange={(e) => setSeasonEndDate(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Recargo Porcentual (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={seasonPercentageBonus}
+                          onChange={(e) => setSeasonPercentageBonus(e.target.value)}
+                          placeholder="ej: 15 para +15%"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-[10px] text-slate-500">Ejemplo: 20 para incremento del +20%</span>
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Recargo Fijo ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={seasonFixedBonus}
+                          onChange={(e) => setSeasonFixedBonus(e.target.value)}
+                          placeholder="ej: 5.00"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-[10px] text-slate-500">Ejemplo: 5.00 para recargo de $5</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <label className="flex items-center gap-2 text-slate-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={seasonIsHoliday}
+                          onChange={(e) => setSeasonIsHoliday(e.target.checked)}
+                          className="h-4.5 w-4.5 rounded border-slate-800 bg-slate-950 text-amber-500 focus:ring-amber-500"
+                        />
+                        <span className="font-semibold text-white">Es Feriado / Día Festivo Especial</span>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 pt-6 border-t border-slate-800">
+                      {editingSeasonRate && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (confirm(`¿Estás seguro de eliminar la tarifa "${editingSeasonRate.name}"?`)) {
+                              await deleteSeasonRateAction(editingSeasonRate.id);
+                              setIsSeasonModalOpen(false);
+                              alert(`¡Tarifa "${editingSeasonRate.name}" eliminada con éxito!`);
+                            }
+                          }}
+                          className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-red-400 bg-red-950/40 hover:bg-red-900/50 border border-red-800/40 transition flex items-center gap-1.5"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Eliminar
+                        </button>
+                      )}
+                      <div className="flex gap-2 ml-auto">
+                        <button
+                          type="button"
+                          onClick={() => setIsSeasonModalOpen(false)}
+                          className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-amber-600 to-red-600 text-white hover:from-amber-500 hover:to-red-500 transition"
+                        >
+                          {editingSeasonRate ? "Guardar Cambios" : "Crear Tarifa"}
                         </button>
                       </div>
                     </div>

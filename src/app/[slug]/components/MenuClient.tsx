@@ -81,6 +81,16 @@ type Restaurant = {
   serviceOnTable: boolean;
   serviceOnTakeout: boolean;
   categories: Category[];
+  seasonRates?: {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+    percentageBonus: number;
+    fixedBonus: number;
+    isHoliday: boolean;
+    isActive: boolean;
+  }[];
 };
 
 interface CartItem {
@@ -96,6 +106,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "qr">("cash");
   const [tipPercentage, setTipPercentage] = useState<number>(0);
+  const [reservationDate, setReservationDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const categoryRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   const [selectedTable, setSelectedTable] = useState<string>("");
@@ -283,11 +294,20 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
 
     const subtotal = cartTotal;
-    const iva = applyIva ? subtotal * (restaurant.ivaPercent / 100) : 0;
-    const serviceCharge = applyService ? subtotal * (restaurant.servicePercent / 100) : 0;
+    const targetDate = reservationDate || new Date().toISOString().split("T")[0];
+    const activeRate = (restaurant.seasonRates || []).find(
+      (r) => r.isActive && targetDate >= r.startDate && targetDate <= r.endDate
+    );
+
+    const seasonBonusAmount = activeRate 
+      ? (subtotal * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
+      : 0;
+
+    const iva = applyIva ? (subtotal + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
+    const serviceCharge = applyService ? (subtotal + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
     const tip = subtotal * (tipPercentage / 100);
     const deliveryCost = isDeliveryOrder ? restaurant.deliveryCost : 0;
-    const total = subtotal + iva + serviceCharge + tip + deliveryCost;
+    const total = subtotal + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
 
     // Save order in database first
     const itemsData = cart.map((item) => ({
@@ -306,6 +326,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       serviceCharge,
       tip,
       deliveryCost,
+      seasonRateName: activeRate ? activeRate.name : undefined,
+      seasonRateAmount: seasonBonusAmount,
       total,
       paymentMethod: selectedMethod,
       items: itemsData,
@@ -316,7 +338,8 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       return;
     }
 
-    let message = `¡Hola! Me gustaría hacer un pedido en *${restaurant.name}*:\n\n`;
+    let message = `¡Hola! Me gustaría hacer una reserva/pedido en *${restaurant.name}*:\n\n`;
+    message += `*Fecha de Reserva/Pedido:* ${targetDate}\n`;
     message += `*Detalle del Pedido:*\n`;
     message += `-----------------------------------\n`;
     
@@ -339,7 +362,12 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     } else {
       message += `*Mesa:* Para llevar / Llevar a casa\n`;
     }
-    message += `*Subtotal:* $${subtotal.toFixed(2)}\n`;
+    message += `*Subtotal Base:* $${subtotal.toFixed(2)}\n`;
+
+    if (activeRate && seasonBonusAmount !== 0) {
+      message += `*Ajuste ${activeRate.isHoliday ? "Festivo" : "Temporada"} (${activeRate.name}):* ${seasonBonusAmount > 0 ? "+" : ""}$${seasonBonusAmount.toFixed(2)}\n`;
+    }
+
     message += `*IVA (${restaurant.ivaPercent}%):* $${iva.toFixed(2)}\n`;
     message += `*Servicio (${restaurant.servicePercent}%):* $${serviceCharge.toFixed(2)}\n`;
     if (selectedTable === "Domicilio" && deliveryCost > 0) {
@@ -1317,6 +1345,17 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               </div>
             )}
 
+            {/* Fecha de Reserva / Consumo */}
+            <div className="space-y-1.5" style={{ fontFamily: 'var(--font-outfit)' }}>
+              <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">Fecha de Reserva / Consumo</label>
+              <input
+                type="date"
+                value={reservationDate}
+                onChange={(e) => setReservationDate(e.target.value)}
+                className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-white text-xs font-medium focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
             {/* Propina Selector */}
             <div className="space-y-2" style={{ fontFamily: 'var(--font-outfit)' }}>
               <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Añadir Propina para el Personal</span>
@@ -1347,18 +1386,35 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
 
               const subtotal = cartTotal;
-              const iva = applyIva ? subtotal * (restaurant.ivaPercent / 100) : 0;
-              const serviceCharge = applyService ? subtotal * (restaurant.servicePercent / 100) : 0;
+              const targetDate = reservationDate || new Date().toISOString().split("T")[0];
+              const activeRate = (restaurant.seasonRates || []).find(
+                (r) => r.isActive && targetDate >= r.startDate && targetDate <= r.endDate
+              );
+
+              const seasonBonusAmount = activeRate 
+                ? (subtotal * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
+                : 0;
+
+              const iva = applyIva ? (subtotal + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
+              const serviceCharge = applyService ? (subtotal + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
               const tip = subtotal * (tipPercentage / 100);
               const deliveryCost = isDelivery ? restaurant.deliveryCost : 0;
-              const total = subtotal + iva + serviceCharge + tip + deliveryCost;
+              const total = subtotal + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
 
               return (
                 <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-2.5 text-xs" style={{ fontFamily: 'var(--font-outfit)' }}>
                   <div className="flex justify-between text-slate-400">
-                    <span>Subtotal:</span>
+                    <span>Subtotal Base:</span>
                     <span className="font-bold text-slate-350">${subtotal.toFixed(2)}</span>
                   </div>
+
+                  {activeRate && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-amber-400 font-bold text-[11px]">
+                      <span>⚡ {activeRate.isHoliday ? "Festivo Especial" : "Temporada Alta"}: {activeRate.name}</span>
+                      <span>{seasonBonusAmount > 0 ? `+$${seasonBonusAmount.toFixed(2)}` : `-$${Math.abs(seasonBonusAmount).toFixed(2)}`}</span>
+                    </div>
+                  )}
+
                   <div className="flex justify-between text-slate-400">
                     <span>IVA ({restaurant.ivaPercent}%):</span>
                     <span className="font-bold text-slate-350">${iva.toFixed(2)}</span>

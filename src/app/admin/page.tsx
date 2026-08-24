@@ -43,6 +43,9 @@ export default async function AdminPage() {
         include: {
           items: true
         }
+      },
+      seasonRates: {
+        orderBy: { startDate: "asc" }
       }
     },
   });
@@ -102,6 +105,13 @@ export default async function AdminPage() {
       createdAt: o.createdAt.toISOString(),
       updatedAt: o.updatedAt.toISOString(),
       items: o.items
+    })),
+    seasonRates: ((restaurant as any).seasonRates ?? []).map((sr: any) => ({
+      ...sr,
+      startDate: sr.startDate.toISOString().split("T")[0],
+      endDate: sr.endDate.toISOString().split("T")[0],
+      createdAt: sr.createdAt.toISOString(),
+      updatedAt: sr.updatedAt.toISOString(),
     }))
   };
 

@@ -947,6 +947,8 @@ export async function createOrderAction(data: {
   serviceCharge: number;
   tip: number;
   deliveryCost: number;
+  seasonRateName?: string;
+  seasonRateAmount?: number;
   total: number;
   paymentMethod: string;
   items: { dishName: string; price: number; quantity: number }[];
@@ -963,6 +965,8 @@ export async function createOrderAction(data: {
         serviceCharge: data.serviceCharge,
         tip: data.tip,
         deliveryCost: data.deliveryCost,
+        seasonRateName: data.seasonRateName || null,
+        seasonRateAmount: data.seasonRateAmount || 0,
         total: data.total,
         paymentMethod: data.paymentMethod,
         items: {
@@ -1323,6 +1327,109 @@ export async function convertProspectToRestaurantAction(leadId: string, password
   });
 
   revalidatePath("/super-admin");
+  return { success: true };
+}
+
+// Season & Holiday Rates Server Actions
+export async function createSeasonRateAction(
+  restaurantId: string,
+  data: {
+    name: string;
+    startDate: string;
+    endDate: string;
+    percentageBonus: number;
+    fixedBonus: number;
+    isHoliday: boolean;
+  }
+) {
+  await refreshUserSession();
+
+  if (!data.name || !data.startDate || !data.endDate) {
+    return { error: "El nombre de la tarifa y las fechas de inicio y fin son obligatorios." };
+  }
+
+  const rate = await prisma.seasonRate.create({
+    data: {
+      restaurantId,
+      name: data.name.trim(),
+      startDate: new Date(data.startDate),
+      endDate: new Date(data.endDate),
+      percentageBonus: data.percentageBonus || 0,
+      fixedBonus: data.fixedBonus || 0,
+      isHoliday: data.isHoliday || false,
+      isActive: true,
+    },
+    include: {
+      restaurant: { select: { slug: true } },
+    },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath(`/${rate.restaurant.slug}`);
+  return { success: true };
+}
+
+export async function updateSeasonRateAction(
+  rateId: string,
+  data: {
+    name: string;
+    startDate: string;
+    endDate: string;
+    percentageBonus: number;
+    fixedBonus: number;
+    isHoliday: boolean;
+  }
+) {
+  await refreshUserSession();
+
+  const rate = await prisma.seasonRate.update({
+    where: { id: rateId },
+    data: {
+      name: data.name.trim(),
+      startDate: new Date(data.startDate),
+      endDate: new Date(data.endDate),
+      percentageBonus: data.percentageBonus || 0,
+      fixedBonus: data.fixedBonus || 0,
+      isHoliday: data.isHoliday || false,
+    },
+    include: {
+      restaurant: { select: { slug: true } },
+    },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath(`/${rate.restaurant.slug}`);
+  return { success: true };
+}
+
+export async function deleteSeasonRateAction(rateId: string) {
+  await refreshUserSession();
+
+  const deleted = await prisma.seasonRate.delete({
+    where: { id: rateId },
+    include: {
+      restaurant: { select: { slug: true } },
+    },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath(`/${deleted.restaurant.slug}`);
+  return { success: true };
+}
+
+export async function toggleSeasonRateAction(rateId: string, isActive: boolean) {
+  await refreshUserSession();
+
+  const updated = await prisma.seasonRate.update({
+    where: { id: rateId },
+    data: { isActive },
+    include: {
+      restaurant: { select: { slug: true } },
+    },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath(`/${updated.restaurant.slug}`);
   return { success: true };
 }
 

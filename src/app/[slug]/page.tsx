@@ -80,6 +80,10 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
             },
           },
         },
+        seasonRates: {
+          where: { isActive: true },
+          orderBy: { startDate: "asc" },
+        },
       },
     });
 
@@ -166,6 +170,13 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       serviceOnTable: r.serviceOnTable ?? true,
       serviceOnTakeout: r.serviceOnTakeout ?? false,
       orders: [],
+      seasonRates: ((restaurant as any).seasonRates ?? []).map((sr: any) => ({
+        ...sr,
+        startDate: sr.startDate.toISOString().split("T")[0],
+        endDate: sr.endDate.toISOString().split("T")[0],
+        createdAt: sr.createdAt.toISOString(),
+        updatedAt: sr.updatedAt.toISOString(),
+      })),
       categories: restaurant.categories.map((c) => ({
         ...c,
         dishes: c.dishes.map((d) => ({

@@ -69,6 +69,7 @@ model Restaurant {
   dishes         Dish[]
   orders         Order[]
   crmNotes       CrmNote[]
+  seasonRates    SeasonRate[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 }
@@ -119,8 +120,10 @@ model Order {
   iva            Float
   serviceCharge  Float
   tip            Float
-  deliveryCost   Float       @default(0.0)
-  total          Float
+  deliveryCost     Float       @default(0.0)
+  seasonRateName   String?
+  seasonRateAmount Float       @default(0.0)
+  total            Float
   paymentMethod  String
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -161,4 +164,20 @@ model CrmNote {
   author       String      @default("SuperAdmin")
   createdAt    DateTime    @default(now())
 }
+
+model SeasonRate {
+  id              String     @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name            String
+  startDate       DateTime
+  endDate         DateTime
+  percentageBonus Float      @default(0.0)
+  fixedBonus      Float      @default(0.0)
+  isHoliday       Boolean    @default(false)
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
 
