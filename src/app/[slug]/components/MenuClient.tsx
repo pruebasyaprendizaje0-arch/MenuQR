@@ -416,6 +416,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       tableName: selectedTable || "Llevar",
       customerName: isDeliveryOrder ? customerName : undefined,
       customerPhone: isDeliveryOrder ? customerPhone : undefined,
+      customerAddress: isDeliveryOrder ? deliveryAddress : undefined,
       subtotal,
       iva,
       serviceCharge,
@@ -434,6 +435,7 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     }
 
     let message = `¡Hola! Me gustaría hacer un pedido en *${restaurant.name}*:\n\n`;
+    message += `*Número de Pedido:* #${result.orderNumber || 1}\n`;
     message += `*Detalle del Pedido:*\n`;
     message += `-----------------------------------\n`;
     
@@ -478,8 +480,9 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
       message += `*QR de Cobro:* ${qrFullUrl}\n`;
     }
 
-    message += `\n_Pedido registrado con ID: ${result.orderId}_\n`;
-    message += `_Enviado desde MenuQR Pro_`;
+    const trackingUrl = `${window.location.origin}/${restaurant.slug}/rastreo?order=${result.orderNumber || result.orderId}`;
+    message += `\n*Rastreo del Pedido en vivo:* ${trackingUrl}\n`;
+    message += `_Pedido registrado en MenuQR Pro_`;
 
     let formattedPhone = restaurant.whatsappNumber.replace(/\D/g, "");
     if (!formattedPhone.startsWith("593") && formattedPhone.startsWith("0")) {

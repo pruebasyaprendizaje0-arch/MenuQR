@@ -112,25 +112,29 @@ model SystemSetting {
 }
 
 model Order {
-  id             String      @id @default(uuid())
-  restaurantId   String
-  restaurant     Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  tableName      String      // mesa
-  customerName   String?
-  customerPhone  String?
-  status         String      @default("PENDING") // PENDING, PREPARING, COMPLETED, CANCELLED
-  subtotal       Float
-  iva            Float
-  serviceCharge  Float
-  tip            Float
+  id               String      @id @default(uuid())
+  orderNumber      Int         @default(autoincrement())
+  restaurantId     String
+  restaurant       Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  tableName        String      // mesa
+  customerName     String?
+  customerPhone    String?
+  customerAddress  String?
+  driverName       String?
+  driverPhone      String?
+  status           String      @default("PENDING") // PENDING, PREPARING, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED
+  subtotal         Float
+  iva              Float
+  serviceCharge    Float
+  tip              Float
   deliveryCost     Float       @default(0.0)
   seasonRateName   String?
   seasonRateAmount Float       @default(0.0)
   total            Float
-  paymentMethod  String
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  items          OrderItem[]
+  paymentMethod    String
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  items            OrderItem[]
 }
 
 model OrderItem {

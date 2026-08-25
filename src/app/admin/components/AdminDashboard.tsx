@@ -103,11 +103,15 @@ type OrderItem = {
 
 type Order = {
   id: string;
+  orderNumber?: number;
   restaurantId: string;
   tableName: string;
   customerName?: string | null;
   customerPhone?: string | null;
-  status: "PENDING" | "PREPARING" | "COMPLETED" | "CANCELLED";
+  customerAddress?: string | null;
+  driverName?: string | null;
+  driverPhone?: string | null;
+  status: "PENDING" | "PREPARING" | "IN_TRANSIT" | "DELIVERED" | "COMPLETED" | "CANCELLED";
   subtotal: number;
   iva: number;
   serviceCharge: number;
@@ -2796,15 +2800,36 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
           </div>
         )}
         {activeTab === "orders" && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
+          <div className="space-y-6 animate-fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-white">Historial de Pedidos</h2>
-                <p className="text-slate-400 text-sm">Visualiza el historial completo de pedidos de las últimas 24 horas.</p>
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <ShoppingBag className="h-6 w-6 text-amber-400" />
+                  Monitor & Historial de Pedidos
+                </h2>
+                <p className="text-slate-400 text-sm mt-0.5">Administra los pedidos de cocina y a domicilio en tiempo real.</p>
               </div>
-              <span className="px-3 py-1.5 rounded-xl bg-red-500/10 border border-red-500/20 text-[11px] font-black uppercase text-red-400 tracking-wider">
-                Autolimpieza: 24 Horas
-              </span>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <a
+                  href={`/${restaurant.slug}/repartidor`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 text-xs font-bold transition flex items-center gap-1.5"
+                >
+                  <Truck className="h-4 w-4" />
+                  <span>Panel Repartidor</span>
+                </a>
+                <a
+                  href={`/${restaurant.slug}/rastreo`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition flex items-center gap-1.5"
+                >
+                  <Search className="h-4 w-4 text-emerald-400" />
+                  <span>Portal Rastreo</span>
+                </a>
+              </div>
             </div>
 
             <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 space-y-4 backdrop-blur-md">
@@ -2813,11 +2838,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider">
                       <th className="pb-3 pt-1 pl-2">Pedido / Mesa</th>
-                      <th className="pb-3 pt-1">Cliente</th>
-                      <th className="pb-3 pt-1">Método de Pago</th>
+                      <th className="pb-3 pt-1">Cliente & Dirección</th>
+                      <th className="pb-3 pt-1">Pago</th>
                       <th className="pb-3 pt-1">Fecha / Hora</th>
-                      <th className="pb-3 pt-1">Estado</th>
-                      <th className="pb-3 pt-1 text-right pr-2">Total</th>
+                      <th className="pb-3 pt-1">Estado de Pedido</th>
+                      <th className="pb-3 pt-1 text-right pr-2">Acciones / Total</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-xs">
@@ -2836,15 +2861,22 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       return allOrders.map((order) => (
                         <tr key={order.id} className="text-slate-300 hover:bg-slate-800/20 transition-all">
                           <td className="py-3.5 pl-2 font-semibold">
-                            {order.tableName === "Llevar" 
-                              ? "🛍_ Para Llevar" 
-                              : order.tableName === "Domicilio" 
-                                ? "🛵 Domicilio" 
-                                : `🪑 Mesa #${order.tableName}`}
+                            <div className="space-y-1">
+                              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono text-[10px] font-bold block w-fit">
+                                #{order.orderNumber || order.id.substring(0, 6)}
+                              </span>
+                              <span className="font-extrabold text-white block">
+                                {order.tableName === "Llevar" 
+                                  ? "🛍 Para Llevar" 
+                                  : order.tableName === "Domicilio" 
+                                    ? "🛵 Domicilio" 
+                                    : `🪑 Mesa #${order.tableName}`}
+                              </span>
+                            </div>
                           </td>
                           <td className="py-3.5">
                             {order.customerName ? (
-                              <div className="space-y-0.5">
+                              <div className="space-y-0.5 max-w-[220px]">
                                 <p className="font-bold text-white">{order.customerName}</p>
                                 {order.customerPhone && (
                                   <a 
@@ -2853,8 +2885,13 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                                     rel="noopener noreferrer"
                                     className="text-red-400 hover:underline text-[10px] block"
                                   >
-                                    {order.customerPhone}
+                                    📱 {order.customerPhone}
                                   </a>
+                                )}
+                                {order.customerAddress && (
+                                  <p className="text-slate-400 text-[10px] truncate" title={order.customerAddress}>
+                                    📍 {order.customerAddress}
+                                  </p>
                                 )}
                               </div>
                             ) : (
@@ -2865,26 +2902,50 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                             {order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
                           </td>
                           <td className="py-3.5 text-slate-400">
-                            {new Date(order.createdAt).toLocaleString()}
+                            {new Date(order.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                           </td>
                           <td className="py-3.5">
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                              order.status === "PENDING" 
-                                ? "bg-yellow-500/10 text-yellow-500" 
-                                : order.status === "PREPARING" 
-                                  ? "bg-blue-500/10 text-blue-500" 
-                                  : order.status === "COMPLETED" 
-                                    ? "bg-green-500/10 text-green-500" 
-                                    : "bg-red-500/10 text-red-500"
-                            }`}>
-                              {order.status === "PENDING" && "Pendiente"}
-                              {order.status === "PREPARING" && "En Cocina"}
-                              {order.status === "COMPLETED" && "Completado"}
-                              {order.status === "CANCELLED" && "Cancelado"}
-                            </span>
+                            <select
+                              value={order.status}
+                              onChange={async (e) => {
+                                const newStatus = e.target.value;
+                                await updateOrderStatusAction(order.id, newStatus);
+                                window.location.reload();
+                              }}
+                              className={`px-2.5 py-1 rounded-xl text-xs font-black uppercase border focus:outline-none transition ${
+                                order.status === "PENDING"
+                                  ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+                                  : order.status === "PREPARING"
+                                    ? "bg-blue-500/20 text-blue-300 border-blue-500/40"
+                                    : order.status === "IN_TRANSIT"
+                                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                      : order.status === "DELIVERED" || order.status === "COMPLETED"
+                                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                        : "bg-red-500/20 text-red-300 border-red-500/40"
+                              }`}
+                            >
+                              <option value="PENDING" className="bg-slate-900 text-yellow-300">⏳ Pendiente</option>
+                              <option value="PREPARING" className="bg-slate-900 text-blue-300">🍳 En Cocina</option>
+                              <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🛵 En Transporte</option>
+                              <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Entregado</option>
+                              <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelado</option>
+                            </select>
                           </td>
-                          <td className="py-3.5 text-right font-extrabold text-white pr-2">
-                            ${order.total.toFixed(2)}
+                          <td className="py-3.5 text-right pr-2">
+                            <div className="space-y-1">
+                              <span className="font-extrabold text-white text-sm block">
+                                ${order.total.toFixed(2)}
+                              </span>
+                              <a
+                                href={`/${restaurant.slug}/rastreo?order=${order.orderNumber || order.id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[10px] text-amber-400 hover:underline inline-flex items-center gap-1 font-semibold"
+                              >
+                                <span>Ver Rastreo</span>
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </div>
                           </td>
                         </tr>
                       ));

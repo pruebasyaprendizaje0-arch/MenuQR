@@ -948,6 +948,7 @@ export async function createOrderAction(data: {
   tableName: string;
   customerName?: string;
   customerPhone?: string;
+  customerAddress?: string;
   subtotal: number;
   iva: number;
   serviceCharge: number;
@@ -966,6 +967,8 @@ export async function createOrderAction(data: {
         tableName: data.tableName,
         customerName: data.customerName || null,
         customerPhone: data.customerPhone || null,
+        // @ts-ignore
+        customerAddress: data.customerAddress || null,
         subtotal: data.subtotal,
         iva: data.iva,
         serviceCharge: data.serviceCharge,
@@ -1001,6 +1004,7 @@ export async function createOrderAction(data: {
             where: { id: existing.id },
             data: {
               name: data.customerName || existing.name,
+              address: data.customerAddress || existing.address,
               totalOrders: newOrdersCount,
               totalSpent: existing.totalSpent + data.total,
               category: newCategory,
@@ -1014,6 +1018,7 @@ export async function createOrderAction(data: {
               restaurantId: data.restaurantId,
               name: data.customerName || "Cliente",
               phone: rawPhone,
+              address: data.customerAddress || null,
               totalOrders: 1,
               totalSpent: data.total,
               category: "NUEVO",
@@ -1034,30 +1039,145 @@ export async function createOrderAction(data: {
     if (restaurant) {
       revalidatePath(`/admin`);
       revalidatePath(`/${restaurant.slug}`);
+      revalidatePath(`/${restaurant.slug}/rastreo`);
+      revalidatePath(`/${restaurant.slug}/repartidor`);
     }
 
-    return { success: true, orderId: order.id };
+    return { 
+      success: true, 
+      orderId: order.id,
+      // @ts-ignore
+      orderNumber: order.orderNumber || 1 
+    };
   } catch (error) {
     console.error("Error creating order:", error);
     return { error: "No se pudo guardar el pedido." };
   }
 }
 
-export async function updateOrderStatusAction(orderId: string, status: string) {
+export async function updateOrderStatusAction(
+  orderId: string, 
+  status: string,
+  driverData?: { driverName?: string; driverPhone?: string }
+) {
   try {
-    await refreshUserSession();
+    const updateData: any = { status };
+    if (driverData?.driverName !== undefined) {
+      updateData.driverName = driverData.driverName;
+    }
+    if (driverData?.driverPhone !== undefined) {
+      updateData.driverPhone = driverData.driverPhone;
+    }
+
     const order = await prisma.order.update({
       where: { id: orderId },
-      data: { status },
+      data: updateData,
       include: { restaurant: { select: { slug: true } } }
     });
 
     revalidatePath(`/admin`);
     revalidatePath(`/${order.restaurant.slug}`);
+    revalidatePath(`/${order.restaurant.slug}/rastreo`);
+    revalidatePath(`/${order.restaurant.slug}/repartidor`);
     return { success: true };
   } catch (error) {
     console.error("Error updating order status:", error);
     return { error: "No se pudo actualizar el estado del pedido." };
+  }
+}
+
+export async function getOrderTrackingAction(restaurantSlug?: string | null, querySearch?: string | null) {
+  try {
+    if (!querySearch || !querySearch.trim()) {
+      return { error: "Por favor ingrese un número de pedido o teléfono." };
+    }
+
+    const cleanQuery = querySearch.trim().replace(/^#/, "");
+    const isNumeric = /^\d+$/.test(cleanQuery);
+    const parsedNumber = isNumeric ? parseInt(cleanQuery, 10) : null;
+
+    let whereClause: any = {};
+
+    if (restaurantSlug) {
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { slug: restaurantSlug }
+      });
+
+      if (!restaurant) {
+        return { error: "Restaurante no encontrado." };
+      }
+
+      whereClause.restaurantId = restaurant.id;
+    }
+
+    const OR_CONDITIONS: any[] = [];
+    if (parsedNumber !== null && !isNaN(parsedNumber)) {
+      OR_CONDITIONS.push({ orderNumber: parsedNumber });
+    }
+    OR_CONDITIONS.push({ id: cleanQuery });
+    OR_CONDITIONS.push({ customerPhone: { contains: cleanQuery } });
+
+    whereClause.OR = OR_CONDITIONS;
+
+    const orders = await prisma.order.findMany({
+      where: whereClause,
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      include: {
+        items: true,
+        restaurant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            logoUrl: true,
+            whatsapp: true,
+            themeColor: true,
+            address: true,
+          }
+        }
+      }
+    });
+
+    if (!orders || orders.length === 0) {
+      return { error: `No se encontraron pedidos con el número o teléfono "${querySearch}". Verifique la información e intente nuevamente.` };
+    }
+
+    return { success: true, orders };
+  } catch (error) {
+    console.error("Error fetching order tracking:", error);
+    return { error: "Ocurrió un error al buscar la información del pedido." };
+  }
+}
+
+export async function getDeliveryOrdersAction(restaurantSlug: string) {
+  try {
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { slug: restaurantSlug },
+      select: { id: true, name: true, slug: true, whatsapp: true, logoUrl: true, themeColor: true }
+    });
+
+    if (!restaurant) {
+      return { error: "Restaurante no encontrado." };
+    }
+
+    const orders = await prisma.order.findMany({
+      where: {
+        restaurantId: restaurant.id,
+        tableName: "Domicilio",
+        status: { in: ["PENDING", "PREPARING", "IN_TRANSIT", "DELIVERED"] }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: {
+        items: true,
+      }
+    });
+
+    return { success: true, restaurant, orders };
+  } catch (error) {
+    console.error("Error fetching delivery orders:", error);
+    return { error: "No se pudieron cargar los pedidos a domicilio." };
   }
 }
 
