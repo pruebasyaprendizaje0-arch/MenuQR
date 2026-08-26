@@ -22,8 +22,17 @@ import {
   createCustomerAction,
   updateCustomerAction,
   deleteCustomerAction,
-  importCustomersAction
+  importCustomersAction,
+  updateRestaurantSchedulesAction
 } from "@/lib/actions";
+import { 
+  WeeklySchedule, 
+  BlockedDateItem, 
+  parseWeeklySchedule, 
+  parseBlockedDates, 
+  DAY_LABELS, 
+  DEFAULT_WEEKLY_SCHEDULE 
+} from "@/lib/schedule";
 import { 
   Store, 
   FolderHeart, 
@@ -141,6 +150,9 @@ type Restaurant = {
   description: string | null;
   locality: string | null;
   schedule: string | null;
+  localSchedule?: string | null;
+  deliverySchedule?: string | null;
+  blockedDates?: string | null;
   specialty: string | null;
   services: string | null;
   contactNumbers: string | null;
@@ -283,6 +295,81 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
 
   const [savingCharges, setSavingCharges] = useState(false);
   const [chargesMessage, setChargesMessage] = useState("");
+
+  // Advanced Schedules & Blocked Dates State Variables
+  const [localSchedule, setLocalSchedule] = useState<WeeklySchedule>(() => parseWeeklySchedule(restaurant.localSchedule));
+  const [sameDeliverySchedule, setSameDeliverySchedule] = useState<boolean>(!restaurant.deliverySchedule);
+  const [deliverySchedule, setDeliverySchedule] = useState<WeeklySchedule>(() => parseWeeklySchedule(restaurant.deliverySchedule || restaurant.localSchedule));
+  const [blockedDatesList, setBlockedDatesList] = useState<BlockedDateItem[]>(() => parseBlockedDates(restaurant.blockedDates));
+
+  const [newBlockDate, setNewBlockDate] = useState("");
+  const [newBlockReason, setNewBlockReason] = useState("");
+  const [newBlockFullDay, setNewBlockFullDay] = useState(true);
+  const [newBlockStartTime, setNewBlockStartTime] = useState("12:00");
+  const [newBlockEndTime, setNewBlockEndTime] = useState("18:00");
+
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleMsg, setScheduleMsg] = useState("");
+
+  const handleAddBlockedDate = () => {
+    if (!newBlockDate) {
+      alert("Por favor selecciona una fecha a bloquear.");
+      return;
+    }
+    const newItem: BlockedDateItem = {
+      id: "blk-" + Date.now(),
+      date: newBlockDate,
+      reason: newBlockReason.trim() || "Cierre Especial",
+      fullDay: newBlockFullDay,
+      startTime: newBlockFullDay ? undefined : newBlockStartTime,
+      endTime: newBlockFullDay ? undefined : newBlockEndTime,
+    };
+    setBlockedDatesList(prev => [...prev, newItem]);
+    setNewBlockDate("");
+    setNewBlockReason("");
+    setNewBlockFullDay(true);
+  };
+
+  const handleRemoveBlockedDate = (id: string) => {
+    setBlockedDatesList(prev => prev.filter(b => b.id !== id));
+  };
+
+  const handleCopyMondayToAllLocal = () => {
+    const mondayConf = localSchedule.monday;
+    setLocalSchedule({
+      monday: { ...mondayConf },
+      tuesday: { ...mondayConf },
+      wednesday: { ...mondayConf },
+      thursday: { ...mondayConf },
+      friday: { ...mondayConf },
+      saturday: { ...mondayConf },
+      sunday: { ...mondayConf },
+    });
+  };
+
+  const handleSaveSchedules = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSchedule(true);
+    setScheduleMsg("");
+
+    const localScheduleJson = JSON.stringify(localSchedule);
+    const deliveryScheduleJson = sameDeliverySchedule ? null : JSON.stringify(deliverySchedule);
+    const blockedDatesJson = JSON.stringify(blockedDatesList);
+
+    const res = await updateRestaurantSchedulesAction(restaurant.id, {
+      localSchedule: localScheduleJson,
+      deliverySchedule: deliveryScheduleJson,
+      blockedDates: blockedDatesJson,
+    });
+
+    setSavingSchedule(false);
+    if (res.error) {
+      setScheduleMsg("Error: " + res.error);
+    } else {
+      setScheduleMsg("¡Horarios y fechas congeladas guardados con éxito!");
+      setTimeout(() => setScheduleMsg(""), 4000);
+    }
+  };
 
   // CRM State Variables & Handlers
   const [crmSearch, setCrmSearch] = useState("");
@@ -1972,6 +2059,314 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 </button>
               </div>
             </form>
+
+            {/* Advanced Horarios & Bloqueo de Fechas Card */}
+            <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 space-y-6 backdrop-blur-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <CalendarDays className="h-5 w-5 text-amber-400" />
+                    Horarios de Atención y Bloqueo de Fechas/Horas
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Configura los horarios del local, los horarios a domicilio y congela días o rangos de horas por feriados, eventos o cierres.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveSchedules}
+                  disabled={savingSchedule}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 transition active:scale-95 flex items-center gap-1.5 shrink-0"
+                >
+                  <Save className="h-4 w-4" />
+                  {savingSchedule ? "Guardando..." : "Guardar Horarios"}
+                </button>
+              </div>
+
+              {scheduleMsg && (
+                <div className={`p-3 rounded-xl text-xs font-bold ${scheduleMsg.startsWith("Error") ? "bg-red-950/60 text-red-300 border border-red-800" : "bg-emerald-950/60 text-emerald-300 border border-emerald-800"}`}>
+                  {scheduleMsg}
+                </div>
+              )}
+
+              {/* 1. Local Schedule */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+                    <Store className="h-4 w-4" />
+                    1. Horario de Atención en el Local (Comer en Mesa / Llevar)
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={handleCopyMondayToAllLocal}
+                    className="text-[11px] font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg border border-slate-700 transition"
+                  >
+                    Copiar Lunes a todos los días
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as (keyof WeeklySchedule)[]).map((dayKey) => {
+                    const conf = localSchedule[dayKey];
+                    return (
+                      <div key={dayKey} className="bg-slate-950/80 border border-slate-850 p-3 rounded-xl flex items-center justify-between gap-2">
+                        <label className="flex items-center gap-2 text-xs font-bold text-white min-w-[90px] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={conf.active}
+                            onChange={(e) => {
+                              setLocalSchedule(prev => ({
+                                ...prev,
+                                [dayKey]: { ...prev[dayKey], active: e.target.checked }
+                              }));
+                            }}
+                            className="h-4 w-4 rounded border-slate-800 bg-slate-900 text-red-600 focus:ring-red-500 cursor-pointer"
+                          />
+                          <span>{DAY_LABELS[dayKey]}</span>
+                        </label>
+
+                        {conf.active ? (
+                          <div className="flex items-center gap-1 text-xs">
+                            <input
+                              type="time"
+                              value={conf.open}
+                              onChange={(e) => {
+                                setLocalSchedule(prev => ({
+                                  ...prev,
+                                  [dayKey]: { ...prev[dayKey], open: e.target.value }
+                                }));
+                              }}
+                              className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs focus:outline-none"
+                            />
+                            <span className="text-slate-500 font-bold">-</span>
+                            <input
+                              type="time"
+                              value={conf.close}
+                              onChange={(e) => {
+                                setLocalSchedule(prev => ({
+                                  ...prev,
+                                  [dayKey]: { ...prev[dayKey], close: e.target.value }
+                                }));
+                              }}
+                              className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs focus:outline-none"
+                            />
+                          </div>
+                        ) : (
+                          <span className="text-[11px] font-bold text-slate-500 italic">Cerrado</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Delivery Schedule */}
+              <div className="border-t border-slate-800/80 pt-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-amber-400 flex items-center gap-2">
+                    <Truck className="h-4 w-4 text-amber-400" />
+                    2. Horario de Envíos a Domicilio
+                  </h4>
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sameDeliverySchedule}
+                      onChange={(e) => setSameDeliverySchedule(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-800 bg-slate-900 text-red-600 focus:ring-red-500 cursor-pointer"
+                    />
+                    <span>Mismo horario que el local</span>
+                  </label>
+                </div>
+
+                {!sameDeliverySchedule && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as (keyof WeeklySchedule)[]).map((dayKey) => {
+                      const conf = deliverySchedule[dayKey];
+                      return (
+                        <div key={dayKey} className="bg-slate-950/80 border border-slate-850 p-3 rounded-xl flex items-center justify-between gap-2">
+                          <label className="flex items-center gap-2 text-xs font-bold text-white min-w-[90px] cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={conf.active}
+                              onChange={(e) => {
+                                setDeliverySchedule(prev => ({
+                                  ...prev,
+                                  [dayKey]: { ...prev[dayKey], active: e.target.checked }
+                                }));
+                              }}
+                              className="h-4 w-4 rounded border-slate-800 bg-slate-900 text-red-600 focus:ring-red-500 cursor-pointer"
+                            />
+                            <span>{DAY_LABELS[dayKey]}</span>
+                          </label>
+
+                          {conf.active ? (
+                            <div className="flex items-center gap-1 text-xs">
+                              <input
+                                type="time"
+                                value={conf.open}
+                                onChange={(e) => {
+                                  setDeliverySchedule(prev => ({
+                                    ...prev,
+                                    [dayKey]: { ...prev[dayKey], open: e.target.value }
+                                  }));
+                                }}
+                                className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs focus:outline-none"
+                              />
+                              <span className="text-slate-500 font-bold">-</span>
+                              <input
+                                type="time"
+                                value={conf.close}
+                                onChange={(e) => {
+                                  setDeliverySchedule(prev => ({
+                                    ...prev,
+                                    [dayKey]: { ...prev[dayKey], close: e.target.value }
+                                  }));
+                                }}
+                                className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs focus:outline-none"
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-[11px] font-bold text-slate-500 italic">Sin Entregas</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Blocked Dates / Special Closures */}
+              <div className="border-t border-slate-800/80 pt-5 space-y-4">
+                <div>
+                  <h4 className="text-sm font-bold text-red-400 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    3. Bloqueo de Fechas y Horas Especiales (Feriados, Mantenimiento, Eventos)
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Bloquea días específicos o rangos de horas para que el sistema impida realizar pedidos en esas fechas.
+                  </p>
+                </div>
+
+                {/* Form to add blocked date */}
+                <div className="bg-slate-950/80 border border-slate-850 p-4 rounded-2xl space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Fecha a bloquear *</label>
+                      <input
+                        type="date"
+                        value={newBlockDate}
+                        onChange={(e) => setNewBlockDate(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white font-mono focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">Motivo / Descripción</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Feriado de Navidad, Mantenimiento"
+                        value={newBlockReason}
+                        onChange={(e) => setNewBlockReason(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                      />
+                    </div>
+                    <div className="flex items-end pb-1">
+                      <label className="flex items-center gap-2 text-slate-300 cursor-pointer font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={newBlockFullDay}
+                          onChange={(e) => setNewBlockFullDay(e.target.checked)}
+                          className="h-4.5 w-4.5 rounded border-slate-800 bg-slate-900 text-red-600 focus:ring-red-500 cursor-pointer"
+                        />
+                        <span>Bloquear todo el día</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {!newBlockFullDay && (
+                    <div className="flex items-center gap-3 text-xs border-t border-slate-850 pt-2">
+                      <span className="text-slate-400 font-semibold">Bloquear rango de hora:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500">Desde</span>
+                        <input
+                          type="time"
+                          value={newBlockStartTime}
+                          onChange={(e) => setNewBlockStartTime(e.target.value)}
+                          className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-white font-mono focus:outline-none"
+                        />
+                        <span className="text-slate-500">hasta</span>
+                        <input
+                          type="time"
+                          value={newBlockEndTime}
+                          onChange={(e) => setNewBlockEndTime(e.target.value)}
+                          className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1 text-white font-mono focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleAddBlockedDate}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl border border-slate-700 transition flex items-center gap-1.5 active:scale-95"
+                    >
+                      <Plus className="h-4 w-4 text-amber-400" />
+                      <span>Agregar Fecha Bloqueada</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* List of blocked dates */}
+                {blockedDatesList.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-400 font-bold uppercase">
+                          <th className="pb-2 pl-2">Fecha</th>
+                          <th className="pb-2">Motivo</th>
+                          <th className="pb-2">Duración / Hora</th>
+                          <th className="pb-2 text-right pr-2">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {blockedDatesList.map((item) => (
+                          <tr key={item.id} className="text-slate-300">
+                            <td className="py-2.5 pl-2 font-mono font-bold text-amber-400">
+                              {item.date}
+                            </td>
+                            <td className="py-2.5 font-semibold text-white">
+                              {item.reason}
+                            </td>
+                            <td className="py-2.5 text-slate-400">
+                              {item.fullDay ? (
+                                <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-300 font-bold text-[10px]">
+                                  Todo el día
+                                </span>
+                              ) : (
+                                <span className="font-mono text-xs">
+                                  {item.startTime} - {item.endTime}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 text-right pr-2">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveBlockedDate(item.id)}
+                                className="p-1 text-slate-500 hover:text-red-400 transition"
+                                title="Eliminar bloqueo"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

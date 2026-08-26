@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction } from "@/lib/actions";
+import { isRestaurantOpen } from "@/lib/schedule";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -404,6 +405,14 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
     const deliveryCost = isDeliveryOrder ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
     const total = subtotal + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
 
+    // Check schedule & blocked dates
+    const scheduleCheck = isRestaurantOpen(restaurant, isDeliveryOrder ? "delivery" : "local");
+    if (!scheduleCheck.isOpen) {
+      alert(`⛔ No se puede procesar el pedido.\n\n${scheduleCheck.reason || "El restaurante se encuentra fuera de horario de atención."}`);
+      setIsSubmittingOrder(false);
+      return;
+    }
+
     // Save order in database first
     const itemsData = cart.map((item) => ({
       dishName: item.dish.name,
@@ -546,7 +555,21 @@ export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
               </div>
             )}
             <div>
-              <h1 className="font-extrabold text-white text-base tracking-tight">{restaurant.name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="font-extrabold text-white text-base tracking-tight">{restaurant.name}</h1>
+                {(() => {
+                  const check = isRestaurantOpen(restaurant, "local");
+                  return (
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${
+                      check.isOpen 
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" 
+                        : "bg-red-500/20 text-red-300 border-red-500/30"
+                    }`} title={check.reason || check.scheduleText}>
+                      {check.isOpen ? "🟢 Abierto" : "🔴 Cerrado"}
+                    </span>
+                  );
+                })()}
+              </div>
               <p className="text-xs text-slate-400">Menú Digital Auténtico</p>
             </div>
           </div>

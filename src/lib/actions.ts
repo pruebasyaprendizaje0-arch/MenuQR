@@ -316,7 +316,9 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const serviceOnTable = formData.get("serviceOnTable") === "true";
   const serviceOnTakeout = formData.get("serviceOnTakeout") === "true";
   const deliveryEnabled = formData.get("deliveryEnabled") === "true" || formData.get("deliveryEnabled") === "on";
-  const deliveryRates = formData.get("deliveryRates") as string;
+  const localSchedule = formData.get("localSchedule") as string;
+  const deliverySchedule = formData.get("deliverySchedule") as string;
+  const blockedDates = formData.get("blockedDates") as string;
 
   await prisma.restaurant.update({
     where: { id: restaurantId },
@@ -336,6 +338,12 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       description: description || null,
       locality: locality || null,
       schedule: schedule || null,
+      // @ts-ignore
+      localSchedule: localSchedule || null,
+      // @ts-ignore
+      deliverySchedule: deliverySchedule || null,
+      // @ts-ignore
+      blockedDates: blockedDates || null,
       specialty: specialty || null,
       services: services || null,
       contactNumbers: contactNumbers || null,
@@ -364,6 +372,39 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   revalidatePath("/admin");
   revalidatePath(`/${slug}`);
   return { success: true };
+}
+
+export async function updateRestaurantSchedulesAction(
+  restaurantId: string,
+  data: {
+    schedule?: string | null;
+    localSchedule?: string | null;
+    deliverySchedule?: string | null;
+    blockedDates?: string | null;
+  }
+) {
+  try {
+    await refreshUserSession();
+    const restaurant = await prisma.restaurant.update({
+      where: { id: restaurantId },
+      data: {
+        schedule: data.schedule || null,
+        // @ts-ignore
+        localSchedule: data.localSchedule || null,
+        // @ts-ignore
+        deliverySchedule: data.deliverySchedule || null,
+        // @ts-ignore
+        blockedDates: data.blockedDates || null,
+      },
+    });
+
+    revalidatePath("/admin");
+    revalidatePath(`/${restaurant.slug}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Error updating restaurant schedules:", error);
+    return { error: "No se pudieron actualizar los horarios y fechas de cierre." };
+  }
 }
 
 export async function updateLogoDirectAction(restaurantId: string, formData: FormData) {

@@ -42,6 +42,9 @@ model Restaurant {
   description    String?
   locality       String?
   schedule       String?
+  localSchedule  String?
+  deliverySchedule String?
+  blockedDates   String?
   specialty      String?
   services       String?
   contactNumbers String?
