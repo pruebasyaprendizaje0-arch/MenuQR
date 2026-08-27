@@ -1,7 +1,8 @@
-import { getUserSession } from "@/lib/auth";
+import { getUserSession, getCentralApiToken } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { AdminDashboard } from "./components/AdminDashboard";
+import { centralApiService, isCentralApiEnabled } from "@/lib/api-service";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,108 @@ export default async function AdminPage() {
     redirect("/login");
   }
 
-  // Automatically delete orders older than 24 hours
+  // Si la API Central está habilitada y tenemos token
+  const token = (session as any).token || (await getCentralApiToken());
+  if (isCentralApiEnabled() && token) {
+    try {
+      const bizRes = await centralApiService.getBusinesses(token);
+      let businessList = Array.isArray(bizRes) ? bizRes : bizRes?.businesses || bizRes?.data || [];
+      
+      let biz = businessList[0];
+      if (!biz) {
+        // Si el usuario no tiene negocio en la API central, creamos uno
+        biz = await centralApiService.createBusiness({ name: "Mi Restaurante", slug: `restaurante-${session.userId.substring(0, 5)}` }, token);
+      }
+
+      const businessId = biz.id || biz.slug;
+      let branches = await centralApiService.getBranches(businessId, token);
+      let branchList = Array.isArray(branches) ? branches : branches?.branches || branches?.data || [];
+      let branch = branchList[0];
+
+      let categories = [];
+      let products = [];
+      let orders = [];
+
+      if (branch) {
+        const branchId = branch.id;
+        try {
+          const catRes = await centralApiService.getCategories(branchId, token);
+          categories = Array.isArray(catRes) ? catRes : catRes?.categories || [];
+        } catch {}
+
+        try {
+          const prodRes = await centralApiService.getProducts(branchId, token);
+          products = Array.isArray(prodRes) ? prodRes : prodRes?.products || [];
+        } catch {}
+
+        try {
+          const ordRes = await centralApiService.getOrders(branchId, token);
+          orders = Array.isArray(ordRes) ? ordRes : ordRes?.orders || [];
+        } catch {}
+      }
+
+      // Estructurar categorías con productos (dishes)
+      const mappedCategories = categories.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        order: c.order ?? 0,
+        isActive: c.isActive ?? true,
+        dishes: products
+          .filter((p: any) => p.categoryId === c.id)
+          .map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description || null,
+            price: p.price,
+            imageUrl: p.imageUrl || null,
+            isAvailable: p.isAvailable ?? true,
+          })),
+      }));
+
+      const serializedRestaurant = {
+        id: branch?.id || biz.id || session.userId,
+        name: biz.name || "Mi Restaurante",
+        slug: biz.slug || `restaurante-${session.userId.substring(0, 5)}`,
+        logoUrl: biz.logoUrl || null,
+        coverUrl: biz.coverUrl || null,
+        whatsappNumber: biz.whatsapp || "",
+        paymentQrUrl: null,
+        trialEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+        tablesConfig: "1,2,3,4,5,6,7,8,9,10",
+        ivaPercent: branch?.ivaPercent ?? 15,
+        servicePercent: branch?.servicePercent ?? 10,
+        deliveryCost: branch?.deliveryCost ?? 0.0,
+        deliveryEnabled: true,
+        bankName: null,
+        bankAccountType: null,
+        bankAccountNumber: null,
+        bankAccountName: null,
+        bankAccountDocument: null,
+        bankAccountEmail: null,
+        ivaOnTable: true,
+        ivaOnTakeout: true,
+        serviceOnTable: true,
+        serviceOnTakeout: false,
+        categories: mappedCategories,
+        orders: orders.map((o: any) => ({
+          ...o,
+          createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
+          updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date(o.updatedAt).toISOString(),
+          items: o.items || [],
+        })),
+        seasonRates: [],
+        customers: [],
+      };
+
+      return <AdminDashboard restaurant={serializedRestaurant as unknown as Parameters<typeof AdminDashboard>[0]["restaurant"]} />;
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[AdminPage Warning] Central API query failed, falling back to local Prisma:", err);
+      }
+    }
+  }
+
+  // Fallback a Prisma local
   try {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await prisma.order.deleteMany({
@@ -26,7 +128,6 @@ export default async function AdminPage() {
     console.error("Error cleaning up old orders:", err);
   }
 
-  // Find user's restaurant
   const restaurant = await prisma.restaurant.findFirst({
     where: { userId: session.userId },
     include: {
@@ -54,7 +155,6 @@ export default async function AdminPage() {
   });
 
   if (!restaurant) {
-    // If no restaurant exists, create a default one for the user
     const cleanSlug = `restaurante-${session.userId.substring(0, 5)}`;
     await prisma.restaurant.create({
       data: {
@@ -67,11 +167,9 @@ export default async function AdminPage() {
       },
     });
     
-    // Redirect to configure it
     redirect("/admin/restaurante");
   }
 
-  // Map null fields to avoid typescript warnings in component
   const serializedRestaurant = {
     ...restaurant,
     logoUrl: restaurant.logoUrl,
@@ -79,7 +177,6 @@ export default async function AdminPage() {
     paymentQrUrl: restaurant.qrCobroUrl,
     coverUrl: (restaurant as any).coverUrl ?? null,
     trialEndsAt: restaurant.trialEndsAt.toISOString(),
-    // Safe defaults for new fields — guards against un-migrated production DB
     tablesConfig: (restaurant as any).tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
     ivaPercent: (restaurant as any).ivaPercent ?? 15,
     servicePercent: (restaurant as any).servicePercent ?? 10,

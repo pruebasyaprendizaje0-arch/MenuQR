@@ -1,7 +1,8 @@
 "use server";
 
 import { prisma } from "@/lib/db";
-import { getUserSession, setUserSession, clearUserSession, getSuperAdminSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession } from "@/lib/auth";
+import { getUserSession, setUserSession, clearUserSession, getSuperAdminSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession, getCentralApiToken, setCentralApiToken, clearCentralApiToken } from "@/lib/auth";
+import { centralApiService, isCentralApiEnabled } from "@/lib/api-service";
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -134,6 +135,24 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
   if (email.toLowerCase().trim() === superAdminEmail.toLowerCase().trim() && password === superAdminPassword) {
     await setSuperAdminSession();
     redirect("/super-admin");
+  }
+
+  if (isCentralApiEnabled()) {
+    try {
+      const result = await centralApiService.login(email.toLowerCase().trim(), password);
+      if (result?.token && result?.user) {
+        await setCentralApiToken(result.token);
+        await setUserSession(result.user.id, result.user.email);
+        redirect("/admin");
+      }
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[Login Warning] Central API login error, trying local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Correo o contraseña incorrectos en la API Central." };
+      }
+    }
   }
 
   const user = await prisma.user.findUnique({
@@ -454,6 +473,22 @@ export async function createCategoryAction(restaurantId: string, formData: FormD
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
 
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      await centralApiService.createCategory(restaurantId, { name, order, isActive: true }, token || undefined);
+      revalidatePath("/admin");
+      return { success: true };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[createCategoryAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al crear la categoría en la API Central." };
+      }
+    }
+  }
+
   await prisma.category.create({
     data: {
       name,
@@ -473,6 +508,22 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
 
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      await centralApiService.updateCategory(categoryId, { name, order, isActive: true }, token || undefined);
+      revalidatePath("/admin");
+      return { success: true };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[updateCategoryAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al actualizar la categoría en la API Central." };
+      }
+    }
+  }
+
   const updated = await prisma.category.update({
     where: { id: categoryId },
     data: {
@@ -489,6 +540,23 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
 
 export async function deleteCategoryAction(categoryId: string) {
   await refreshUserSession();
+
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      await centralApiService.deleteCategory(categoryId, token || undefined);
+      revalidatePath("/admin");
+      return { success: true };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[deleteCategoryAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al eliminar la categoría en la API Central." };
+      }
+    }
+  }
+
   const deleted = await prisma.category.delete({
     where: { id: categoryId },
     include: { restaurant: true },
@@ -513,6 +581,29 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   const uploadedImage = await saveUploadedFile(dishFile);
   if (uploadedImage) {
     imageUrl = uploadedImage;
+  }
+
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      await centralApiService.createProduct(categoryId, {
+        categoryId,
+        name,
+        description,
+        price,
+        imageUrl: imageUrl || undefined,
+        isAvailable,
+      }, token || undefined);
+      revalidatePath("/admin");
+      return { success: true };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[createDishAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al crear el producto en la API Central." };
+      }
+    }
   }
 
   const category = await prisma.category.findUnique({
@@ -554,6 +645,28 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     imageUrl = uploadedImage;
   }
 
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      await centralApiService.updateProduct(dishId, {
+        name,
+        description,
+        price,
+        imageUrl: imageUrl || undefined,
+        isAvailable,
+      }, token || undefined);
+      revalidatePath("/admin");
+      return { success: true };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[updateDishAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al actualizar el producto en la API Central." };
+      }
+    }
+  }
+
   const updated = await prisma.dish.update({
     where: { id: dishId },
     data: {
@@ -577,6 +690,23 @@ export async function updateDishAction(dishId: string, formData: FormData) {
 
 export async function deleteDishAction(dishId: string) {
   await refreshUserSession();
+
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      await centralApiService.deleteProduct(dishId, token || undefined);
+      revalidatePath("/admin");
+      return { success: true };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[deleteDishAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al eliminar el producto en la API Central." };
+      }
+    }
+  }
+
   const deleted = await prisma.dish.delete({
     where: { id: dishId },
     include: {
@@ -594,6 +724,23 @@ export async function deleteDishAction(dishId: string) {
 export async function toggleDishAvailabilityAction(dishId: string, isAvailable: boolean) {
   try {
     await refreshUserSession();
+
+    if (isCentralApiEnabled()) {
+      try {
+        const token = await getCentralApiToken();
+        await centralApiService.setProductAvailability(dishId, isAvailable, token || undefined);
+        revalidatePath("/admin");
+        return { success: true };
+      } catch (err: any) {
+        if (process.env.NODE_ENV === "development") {
+          console.warn("[toggleDishAvailabilityAction Warning] Central API failed, checking local fallback:", err.message);
+        }
+        if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+          return { error: err.message || "Error al cambiar disponibilidad en la API Central." };
+        }
+      }
+    }
+
     const updated = await prisma.dish.update({
       where: { id: dishId },
       data: { isAvailable },
@@ -1001,6 +1148,41 @@ export async function createOrderAction(data: {
   paymentMethod: string;
   items: { dishName: string; price: number; quantity: number }[];
 }) {
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      const apiOrderData = {
+        tableName: data.tableName,
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerAddress: data.customerAddress,
+        paymentMethod: data.paymentMethod,
+        tip: data.tip || 0,
+        items: data.items.map(item => ({
+          productName: item.dishName,
+          unitPrice: item.price,
+          quantity: item.quantity,
+        })),
+      };
+      const response = await centralApiService.createOrder(data.restaurantId, apiOrderData, token || undefined);
+      const createdOrder = response?.order || response;
+      revalidatePath("/admin");
+      return {
+        success: true,
+        orderId: createdOrder.id,
+        orderNumber: createdOrder.orderNumber || createdOrder.id || 1,
+        total: createdOrder.total,
+      };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[createOrderAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al crear el pedido en la API Central." };
+      }
+    }
+  }
+
   try {
     const order = await prisma.order.create({
       data: {
@@ -1101,6 +1283,22 @@ export async function updateOrderStatusAction(
   status: string,
   driverData?: { driverName?: string; driverPhone?: string }
 ) {
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      await centralApiService.updateOrderStatus(orderId, status, token || undefined);
+      revalidatePath("/admin");
+      return { success: true };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[updateOrderStatusAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
+        return { error: err.message || "Error al actualizar estado en la API Central." };
+      }
+    }
+  }
+
   try {
     const updateData: any = { status };
     if (driverData?.driverName !== undefined) {
@@ -1192,6 +1390,23 @@ export async function getOrderTrackingAction(restaurantSlug?: string | null, que
 }
 
 export async function getDeliveryOrdersAction(restaurantSlug: string) {
+  if (isCentralApiEnabled()) {
+    try {
+      const token = await getCentralApiToken();
+      const ordersRes = await centralApiService.getOrders(restaurantSlug, token || undefined);
+      const ordersList = Array.isArray(ordersRes) ? ordersRes : ordersRes?.orders || [];
+      return {
+        success: true,
+        restaurant: { slug: restaurantSlug, name: restaurantSlug },
+        orders: ordersList,
+      };
+    } catch (err: any) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[getDeliveryOrdersAction Warning] Central API failed, checking local fallback:", err.message);
+      }
+    }
+  }
+
   try {
     const restaurant = await prisma.restaurant.findUnique({
       where: { slug: restaurantSlug },

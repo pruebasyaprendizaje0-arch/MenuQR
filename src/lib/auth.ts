@@ -1,9 +1,56 @@
 import { cookies } from "next/headers";
 import { verifyToken, signToken } from "./jwt";
+import { centralApiService, isCentralApiEnabled } from "./api-service";
+
+// Central API Token Management (HttpOnly Cookie)
+export async function getCentralApiToken(): Promise<string | null> {
+  const cookieStore = cookies();
+  return cookieStore.get("central_api_token")?.value || null;
+}
+
+export async function setCentralApiToken(token: string) {
+  const cookieStore = cookies();
+  cookieStore.set("central_api_token", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 60 * 60 * 24 * 7, // 7 days
+    path: "/",
+  });
+}
+
+export async function clearCentralApiToken() {
+  const cookieStore = cookies();
+  cookieStore.delete("central_api_token");
+}
 
 // User session (SaaS Multi-tenant)
 export async function getUserSession() {
   const cookieStore = cookies();
+  const centralToken = cookieStore.get("central_api_token")?.value;
+
+  if (isCentralApiEnabled() && centralToken) {
+    try {
+      const meResponse = await centralApiService.getMe(centralToken);
+      if (meResponse?.user) {
+        const u = meResponse.user;
+        return {
+          userId: u.id,
+          email: u.email,
+          name: u.name,
+          role: u.role,
+          token: centralToken,
+          businesses: u.businesses || [],
+        };
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn("[Auth Session Warning] Central API me check failed, checking local fallback:", error);
+      }
+    }
+  }
+
+  // Fallback to local session JWT if present
   const token = cookieStore.get("session_token")?.value;
   if (!token) return null;
   return verifyToken(token);
@@ -24,6 +71,7 @@ export async function setUserSession(userId: string, email: string) {
 export async function clearUserSession() {
   const cookieStore = cookies();
   cookieStore.delete("session_token");
+  cookieStore.delete("central_api_token");
 }
 
 // Re-issue the session cookie from the current valid token.

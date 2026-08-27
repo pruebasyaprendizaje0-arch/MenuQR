@@ -3,6 +3,7 @@ import { MenuClient } from "./components/MenuClient";
 import { UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
+import { centralApiService, isCentralApiEnabled } from "@/lib/api-service";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,39 @@ interface PageProps {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const slug = params.slug.toLowerCase().trim();
+
+  if (isCentralApiEnabled()) {
+    try {
+      const apiMenu = await centralApiService.getMenu(slug);
+      if (apiMenu?.branch) {
+        const name = apiMenu.branch.name || apiMenu.branch.business?.name || slug;
+        const logoUrl = apiMenu.branch.business?.logoUrl || null;
+        const coverUrl = apiMenu.branch.business?.coverUrl || null;
+        const title = `Menú Digital de ${name} en Ecuador`;
+        const description = `Escanea el código QR y consulta la carta digital completa de ${name}. Haz tu pedido directo a WhatsApp.`;
+        return {
+          title,
+          description,
+          openGraph: {
+            title: `${name} | Menú Digital QR`,
+            description,
+            images: [{ url: logoUrl || coverUrl || "/icon.png", alt: `Logo de ${name}` }],
+          },
+          twitter: {
+            card: "summary_large_image",
+            title: `${name} | Menú Digital QR`,
+            description,
+            images: [logoUrl || coverUrl || "/icon.png"],
+          },
+        };
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn(`[Metadata Warning] Central API menu lookup for ${slug} failed:`, err);
+      }
+    }
+  }
+
   try {
     const restaurant = await prisma.restaurant.findUnique({
       where: { slug },
@@ -67,6 +101,101 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function RestaurantMenuPage({ params }: PageProps) {
   const slug = params.slug.toLowerCase().trim();
+
+  if (isCentralApiEnabled()) {
+    try {
+      const apiMenu = await centralApiService.getMenu(slug);
+      if (apiMenu?.branch) {
+        const b = apiMenu.branch;
+        const biz = b.business || {};
+        const menus = apiMenu.menus || [];
+        const primaryMenu = menus[0] || {};
+        const categories = (primaryMenu.categories || []).map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          order: c.order ?? 0,
+          isActive: c.isActive ?? true,
+          dishes: (c.products || []).map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description ?? null,
+            price: p.price,
+            imageUrl: p.imageUrl ?? null,
+            isAvailable: p.isAvailable ?? true,
+          })),
+        }));
+
+        const session = await getUserSession();
+        const isSuperAdmin = await getSuperAdminSession();
+
+        const serializedRestaurant = {
+          id: b.id,
+          name: b.name || biz.name || slug,
+          slug: b.slug || slug,
+          specialty: biz.industry || "Gastronomía",
+          locality: b.address || "Ecuador",
+          description: biz.description || "",
+          logoUrl: biz.logoUrl || null,
+          coverUrl: biz.coverUrl || null,
+          whatsapp: b.phone || biz.whatsapp || "",
+          whatsappNumber: b.phone || biz.whatsapp || "",
+          paymentQrUrl: null,
+          themeColor: "#ef4444",
+          plan: "PRO",
+          isOwner: !!session || isSuperAdmin,
+          trialEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          tablesConfig: "1,2,3,4,5,6,7,8,9,10",
+          ivaPercent: 15,
+          servicePercent: 10,
+          deliveryCost: 0.0,
+          deliveryEnabled: true,
+          bankName: null,
+          bankAccountType: null,
+          bankAccountNumber: null,
+          bankAccountName: null,
+          bankAccountDocument: null,
+          bankAccountEmail: null,
+          ivaOnTable: true,
+          ivaOnTakeout: true,
+          serviceOnTable: true,
+          serviceOnTakeout: false,
+          orders: [],
+          seasonRates: [],
+          categories,
+        };
+
+        const restaurantSchema = {
+          "@context": "https://schema.org",
+          "@type": "Restaurant",
+          "name": serializedRestaurant.name,
+          "image": serializedRestaurant.logoUrl || serializedRestaurant.coverUrl || undefined,
+          "description": serializedRestaurant.description || `Menú digital de ${serializedRestaurant.name}`,
+          "servesCuisine": serializedRestaurant.specialty || "Gastronomía",
+          "address": {
+            "@type": "PostalAddress",
+            "addressLocality": serializedRestaurant.locality || "Ecuador",
+            "addressCountry": "EC",
+          },
+          "telephone": serializedRestaurant.whatsapp || undefined,
+          "url": `${process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com"}/${serializedRestaurant.slug}`,
+        };
+
+        return (
+          <>
+            <script
+              type="application/ld+json"
+              dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantSchema) }}
+            />
+            <MenuClient restaurant={serializedRestaurant as any} />
+          </>
+        );
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.warn(`[MenuPage Warning] Central API fetch failed for ${slug}, falling back to Prisma local:`, err);
+      }
+    }
+  }
 
   try {
     const restaurant = await prisma.restaurant.findUnique({
