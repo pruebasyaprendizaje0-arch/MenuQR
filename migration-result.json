@@ -1,0 +1,254 @@
+{
+  "timestamp": "2026-08-27T21:46:40.656Z",
+  "status": "SUCCESS",
+  "mode": "EXECUTE",
+  "centralApiUrl": "https://api.ubicame.cc",
+  "error": null,
+  "operations": [
+    {
+      "entity": "user",
+      "localId": "b41836cb-05ca-41b8-906f-7ab53847b948",
+      "centralId": "7aa95330-604c-4b13-a8e0-a5873ee7b629",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "business",
+      "localId": "24efbf36-f29f-44e5-8772-cfffc26bacfe",
+      "centralId": "2778cb6c-d5af-4a39-9414-31b3b0104d1c",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "branch",
+      "localId": "24efbf36-f29f-44e5-8772-cfffc26bacfe",
+      "centralId": "f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
+      "httpStatus": 200,
+      "status": "REUSED"
+    },
+    {
+      "entity": "menu",
+      "localId": "24efbf36-f29f-44e5-8772-cfffc26bacfe",
+      "centralId": "menu_f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
+      "httpStatus": 200,
+      "status": "REUSED"
+    },
+    {
+      "entity": "category",
+      "localId": "57cc900a-8bf6-4bd3-9ba3-6fe5e87734d7",
+      "centralId": "963cdfd0-5349-45dc-84d1-553f0f33a38f",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "3485a0c3-07f1-4d0b-87b6-0698348afb4f",
+      "centralId": "9250b0a0-ac42-4e92-83f2-a45c99036442",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "5ba6eaa1-0768-4adf-9b24-fb2c247e9b64",
+      "centralId": "59c5cc6d-06dd-499b-8119-5b6c2f96606c",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "c587e675-b44d-4a14-aad8-52d6ec3fccce",
+      "centralId": "07ef7ca2-05a4-4bd6-8685-669661e1525b",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "category",
+      "localId": "a2b78087-aff9-495f-9616-52ced38bc023",
+      "centralId": "dd090b53-df3a-47e5-8829-918776945127",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "baba8b33-53b0-4ac3-917f-0ee728a43a9f",
+      "centralId": "5fe0b847-5338-4eaa-b134-2ab7b52e6d25",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "48cbfab7-7d4b-4e35-9b73-b4fd9b82c406",
+      "centralId": "513ef6d6-55f4-4b9b-9127-403d314fa26c",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "category",
+      "localId": "fb40d1cf-a96e-47b6-88dd-6edcf8b8ab43",
+      "centralId": "c85a4ce3-3d9f-4f4e-b887-fcafec356118",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "e6751482-13bc-4d1f-85f1-a5eaa755088d",
+      "centralId": "e4960b19-a90f-47ea-8f0b-3c93902f556f",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "164c7bea-30f8-4fd9-a4af-4b7b08c88ecc",
+      "centralId": "6041953b-c329-410f-aea7-8c9a72d72b3f",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "category",
+      "localId": "a71cca89-f71f-4b2f-9d4e-d497c7cd7c8d",
+      "centralId": "ab766735-fd3d-45c3-9f76-a3d52518be44",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "e499cbb3-5408-4d0f-90f6-bfbacb2f8340",
+      "centralId": "b2e44c77-06a7-4134-bb77-5b9cf5f14708",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "product",
+      "localId": "55f19fd1-508e-4053-a86c-b1ede2fd53df",
+      "centralId": "e2299196-1692-4c2d-ac7b-18ea02278ef6",
+      "httpStatus": 201,
+      "status": "CREATED"
+    },
+    {
+      "entity": "order",
+      "localId": "adc6c951-17aa-498f-82cb-710982a3d717",
+      "centralId": "c8b3521d-4ca1-4325-b050-dbe72a7b375f",
+      "httpStatus": 201,
+      "status": "CREATED"
+    }
+  ],
+  "mappedIds": {
+    "users": {
+      "b41836cb-05ca-41b8-906f-7ab53847b948": {
+        "email": "ad***@admin.com",
+        "centralId": "7aa95330-604c-4b13-a8e0-a5873ee7b629",
+        "status": "REGISTRADO_CENTRAL"
+      }
+    },
+    "businesses": {
+      "24efbf36-f29f-44e5-8772-cfffc26bacfe": {
+        "name": "Mamma Mia",
+        "slug": "mamma-mia",
+        "centralBusinessId": "2778cb6c-d5af-4a39-9414-31b3b0104d1c",
+        "centralBranchId": "f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
+        "centralMenuId": "menu_f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
+        "status": "CREADO_CENTRAL",
+        "config": {
+          "ivaPercent": 0,
+          "servicePercent": 10,
+          "deliveryCost": 2.5,
+          "tablesConfig": "1, 2, 3, 4, 5, VIP-1"
+        }
+      }
+    },
+    "categories": {
+      "57cc900a-8bf6-4bd3-9ba3-6fe5e87734d7": {
+        "name": "Combos",
+        "centralCategoryId": "963cdfd0-5349-45dc-84d1-553f0f33a38f",
+        "status": "CREADO_CENTRAL"
+      },
+      "a2b78087-aff9-495f-9616-52ced38bc023": {
+        "name": "Pizzas",
+        "centralCategoryId": "dd090b53-df3a-47e5-8829-918776945127",
+        "status": "CREADO_CENTRAL"
+      },
+      "fb40d1cf-a96e-47b6-88dd-6edcf8b8ab43": {
+        "name": "Pastas",
+        "centralCategoryId": "c85a4ce3-3d9f-4f4e-b887-fcafec356118",
+        "status": "CREADO_CENTRAL"
+      },
+      "a71cca89-f71f-4b2f-9d4e-d497c7cd7c8d": {
+        "name": "Bebidas",
+        "centralCategoryId": "ab766735-fd3d-45c3-9f76-a3d52518be44",
+        "status": "CREADO_CENTRAL"
+      }
+    },
+    "products": {
+      "3485a0c3-07f1-4d0b-87b6-0698348afb4f": {
+        "name": "Combo Individual 🍕🥤",
+        "centralProductId": "9250b0a0-ac42-4e92-83f2-a45c99036442",
+        "status": "CREADO_CENTRAL"
+      },
+      "5ba6eaa1-0768-4adf-9b24-fb2c247e9b64": {
+        "name": "Combo Pareja 🍕🍝",
+        "centralProductId": "59c5cc6d-06dd-499b-8119-5b6c2f96606c",
+        "status": "CREADO_CENTRAL"
+      },
+      "c587e675-b44d-4a14-aad8-52d6ec3fccce": {
+        "name": "Combo Familiar 👨‍👩‍👧‍👦",
+        "centralProductId": "07ef7ca2-05a4-4bd6-8685-669661e1525b",
+        "status": "CREADO_CENTRAL"
+      },
+      "baba8b33-53b0-4ac3-917f-0ee728a43a9f": {
+        "name": "Pizza Margherita",
+        "centralProductId": "5fe0b847-5338-4eaa-b134-2ab7b52e6d25",
+        "status": "CREADO_CENTRAL"
+      },
+      "48cbfab7-7d4b-4e35-9b73-b4fd9b82c406": {
+        "name": "Pizza Pepperoni",
+        "centralProductId": "513ef6d6-55f4-4b9b-9127-403d314fa26c",
+        "status": "CREADO_CENTRAL"
+      },
+      "e6751482-13bc-4d1f-85f1-a5eaa755088d": {
+        "name": "Fettuccine Alfredo",
+        "centralProductId": "e4960b19-a90f-47ea-8f0b-3c93902f556f",
+        "status": "CREADO_CENTRAL"
+      },
+      "164c7bea-30f8-4fd9-a4af-4b7b08c88ecc": {
+        "name": "Lasagna de Carne",
+        "centralProductId": "6041953b-c329-410f-aea7-8c9a72d72b3f",
+        "status": "CREADO_CENTRAL"
+      },
+      "e499cbb3-5408-4d0f-90f6-bfbacb2f8340": {
+        "name": "Coca Cola",
+        "centralProductId": "b2e44c77-06a7-4134-bb77-5b9cf5f14708",
+        "status": "CREADO_CENTRAL"
+      },
+      "55f19fd1-508e-4053-a86c-b1ede2fd53df": {
+        "name": "Agua Mineral",
+        "centralProductId": "e2299196-1692-4c2d-ac7b-18ea02278ef6",
+        "status": "CREADO_CENTRAL"
+      }
+    },
+    "orders": {
+      "adc6c951-17aa-498f-82cb-710982a3d717": {
+        "orderNumber": 4,
+        "centralOrderId": "c8b3521d-4ca1-4325-b050-dbe72a7b375f",
+        "status": "CREADO_CENTRAL"
+      }
+    }
+  },
+  "unmigratedData": {
+    "Customer": {
+      "count": 827,
+      "reason": "La API Central actual no posee modelo Customer."
+    },
+    "Lead": {
+      "count": 0,
+      "reason": "La API Central actual no posee modelo Lead."
+    },
+    "CrmNote": {
+      "count": 0,
+      "reason": "La API Central actual no posee modelo CrmNote."
+    },
+    "SeasonRate": {
+      "count": 0,
+      "reason": "La API Central actual no posee modelo SeasonRate."
+    }
+  }
+}

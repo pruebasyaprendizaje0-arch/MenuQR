@@ -66,7 +66,11 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
     throw error;
   }
 
-  return response.json();
+  const data = await response.json();
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    data._httpStatus = response.status;
+  }
+  return data;
 }
 
 export const centralApiService = {
@@ -190,6 +194,27 @@ export const centralApiService = {
     return apiFetch(`/v1/businesses/${businessId}`, {
       method: "PUT",
       body: JSON.stringify(businessData),
+      token,
+    });
+  },
+
+  /**
+   * Crear una nueva sucursal en un negocio.
+   * POST /v1/businesses/:businessId/branches
+   */
+  async createBranch(businessId: string, branchData: {
+    name: string;
+    slug?: string;
+    address?: string;
+    phone?: string;
+    deliveryCost?: number;
+    ivaPercent?: number;
+    servicePercent?: number;
+    tablesConfig?: string;
+  }, token: string) {
+    return apiFetch(`/v1/businesses/${businessId}/branches`, {
+      method: "POST",
+      body: JSON.stringify(branchData),
       token,
     });
   },

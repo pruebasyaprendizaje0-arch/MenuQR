@@ -34,6 +34,7 @@ async function runTests() {
   // 4. Write Endpoints (Fase 3)
   assert.strictEqual(typeof centralApiService.createBusiness, "function", "createBusiness debe estar definido");
   assert.strictEqual(typeof centralApiService.updateBusiness, "function", "updateBusiness debe estar definido");
+  assert.strictEqual(typeof centralApiService.createBranch, "function", "createBranch debe estar definido");
   assert.strictEqual(typeof centralApiService.createCategory, "function", "createCategory debe estar definido");
   assert.strictEqual(typeof centralApiService.updateCategory, "function", "updateCategory debe estar definido");
   assert.strictEqual(typeof centralApiService.deleteCategory, "function", "deleteCategory debe estar definido");
