@@ -1,5 +1,8 @@
 /**
- * Motor de Migración de MenúQR Pro a API Central (ubicame-api)
+ * Motor de Migración Autónomo de MenúQR Pro a API Central (ubicame-api)
+ *
+ * Totalmente independiente de la estructura /app/src para ejecutarse
+ * sin problemas dentro del contenedor de producción (stage runner de Docker).
  *
  * MODOS DE EJECUCIÓN:
  *   npx tsx scripts/dry-run-migration.ts            (Modo por defecto: --dry-run / simulación)
@@ -11,20 +14,154 @@
  *   Valor por defecto objetivo: "e0dab57b-190e-4fce-a0ac-4e4b4b5dacee" (Pigro)
  */
 
-import { prisma } from "../src/lib/db";
-import { centralApiService } from "../src/lib/api-service";
+import { PrismaClient } from "@prisma/client";
 import { validateMigrationResult } from "./validate-migration-result";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 
-// 1. Parsing Flags
+// Instancia independiente de Prisma Client
+const prisma = new PrismaClient();
+
+// URL Base de la API Central
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.API_URL ||
+  "https://api.ubicame.cc"
+).replace(/\/$/, "");
+
+interface FetchOptions extends RequestInit {
+  token?: string;
+}
+
+/**
+ * Cliente HTTP autónomo para comunicación con la API Central.
+ */
+async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): Promise<T> {
+  const { token, headers: customHeaders, ...restOptions } = options;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(customHeaders as Record<string, string>),
+  };
+
+  if (token) {
+    const cleanToken = token.replace(/^Bearer\s+/i, "").trim();
+    headers["Authorization"] = `Bearer ${cleanToken}`;
+  }
+
+  const url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+
+  console.log(`[Central API Request] ${options.method || "GET"} ${url}`);
+
+  const response = await fetch(url, {
+    headers,
+    ...restOptions,
+  });
+
+  console.log(`[Central API Response] HTTP ${response.status} for ${url}`);
+
+  if (!response.ok) {
+    let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
+    try {
+      const errorJson = await response.json();
+      if (errorJson?.message) {
+        errorMessage = errorJson.message;
+      }
+    } catch {}
+    const error: any = new Error(errorMessage);
+    error.status = response.status;
+    throw error;
+  }
+
+  const data = await response.json();
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    data._httpStatus = response.status;
+  }
+  return data;
+}
+
+/**
+ * Servicio autónomo de API Central.
+ */
+const centralApiService = {
+  async login(email: string, password: string) {
+    return apiFetch("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+  },
+  async register(data: { name: string; email: string; password: string; phone?: string; role?: string }) {
+    return apiFetch("/v1/auth/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  async getMe(token: string) {
+    return apiFetch("/v1/auth/me", { token });
+  },
+  async getBusinesses(token: string) {
+    return apiFetch("/v1/businesses", { token });
+  },
+  async createBusiness(
+    businessData: { name: string; slug?: string; industry?: string; description?: string; whatsapp?: string },
+    token: string
+  ) {
+    return apiFetch("/v1/businesses", {
+      method: "POST",
+      body: JSON.stringify(businessData),
+      token,
+    });
+  },
+  async getBranches(businessId: string, token: string) {
+    return apiFetch(`/v1/businesses/${businessId}/branches`, { token });
+  },
+  async createBranch(businessId: string, branchData: any, token: string) {
+    return apiFetch(`/v1/businesses/${businessId}/branches`, {
+      method: "POST",
+      body: JSON.stringify(branchData),
+      token,
+    });
+  },
+  async getCategories(branchId: string, token: string) {
+    return apiFetch(`/v1/branches/${branchId}/categories`, { token });
+  },
+  async createCategory(branchId: string, categoryData: any, token: string) {
+    return apiFetch(`/v1/branches/${branchId}/categories`, {
+      method: "POST",
+      body: JSON.stringify(categoryData),
+      token,
+    });
+  },
+  async getProducts(branchId: string, token: string, categoryId?: string) {
+    const query = categoryId ? `?categoryId=${encodeURIComponent(categoryId)}` : "";
+    return apiFetch(`/v1/branches/${branchId}/products${query}`, { token });
+  },
+  async createProduct(branchId: string, productData: any, token: string) {
+    return apiFetch(`/v1/branches/${branchId}/products`, {
+      method: "POST",
+      body: JSON.stringify(productData),
+      token,
+    });
+  },
+  async getOrders(branchId: string, token: string) {
+    return apiFetch(`/v1/branches/${branchId}/orders`, { token });
+  },
+  async createOrder(branchId: string, orderData: any, token?: string) {
+    return apiFetch(`/v1/branches/${branchId}/orders`, {
+      method: "POST",
+      body: JSON.stringify(orderData),
+      token,
+    });
+  },
+};
+
+// Parsing de argumentos CLI y variables de entorno
 const args = process.argv.slice(2);
 const isExecuteMode = args.includes("--execute");
 const isDryRunMode = !isExecuteMode || args.includes("--dry-run");
 const isConfirmedViaFlag = args.includes("--yes") || args.includes("-y");
 
-// Extraer restaurante objetivo de los argumentos o variables de entorno
 function getTargetArg(): string | null {
   const targetIndex = args.indexOf("--target");
   if (targetIndex !== -1 && args[targetIndex + 1]) {
@@ -35,7 +172,6 @@ function getTargetArg(): string | null {
 
 const targetFilter = getTargetArg();
 
-// 2. Validación de credenciales vía variables de entorno
 const initialCentralPassword = process.env.INITIAL_CENTRAL_PASSWORD || process.env.SUPER_ADMIN_PASSWORD;
 const rawDatabaseUrl = process.env.DATABASE_URL || "";
 
@@ -81,7 +217,7 @@ interface MigrationOperation {
 
 async function main() {
   console.log("=================================================================");
-  console.log(`  MenuQR Pro -> Central API Migration Engine [${isDryRunMode ? "MODO SIMULACIÓN (--dry-run)" : "MODO EJECUCIÓN REAL (--execute)"}]`);
+  console.log(`  MenuQR Pro -> Central API Migration Engine (Standalone) [${isDryRunMode ? "MODO SIMULACIÓN (--dry-run)" : "MODO EJECUCIÓN REAL (--execute)"}]`);
   console.log("=================================================================\n");
 
   if (isExecuteMode && !initialCentralPassword) {
@@ -89,8 +225,7 @@ async function main() {
     process.exit(1);
   }
 
-  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "https://api.ubicame.cc").replace(/\/$/, "");
-  console.log(`🌐 API Central configurada: ${apiUrl}`);
+  console.log(`🌐 API Central configurada: ${API_BASE_URL}`);
   console.log(`🗄️ Base de datos origen (DATABASE_URL): ${maskDatabaseUrl(rawDatabaseUrl)}`);
 
   // Leer restaurantes desde la base de datos de producción / local configurada
@@ -116,7 +251,7 @@ async function main() {
     console.warn("⚠️ No se encontraron restaurantes en la base de datos configurada.");
   }
 
-  // Filtrar el restaurante objetivo de forma estricta (por ID o por Slug) si se especificó o por defecto "e0dab57b-190e-4fce-a0ac-4e4b4b5dacee" / "pigro"
+  // Filtrar el restaurante objetivo de forma estricta (por ID o por Slug) si se especificó
   let localRestaurants = allRestaurants;
   if (targetFilter) {
     localRestaurants = allRestaurants.filter(
@@ -139,7 +274,7 @@ async function main() {
   const crmNotesCount = await prisma.crmNote.count();
   const seasonRatesCount = await prisma.seasonRate.count();
 
-  console.log(`\n📊 DATOS REALES DE PRODUCCIÓN DETECTADOS:`);
+  console.log(`\n📊 DATOS REALES DETECTADOS EN BASE DE DATOS:`);
   console.log(`   - Usuarios a migrar: ${localUsers.length}`);
   console.log(`   - Negocios seleccionados: ${localRestaurants.length}`);
   localRestaurants.forEach((r) => {
@@ -198,7 +333,6 @@ async function main() {
     }
 
     for (const r of localRestaurants) {
-      // Usar la clave real r.id (UUID), NUNCA la cadena literal "localRestaurantId"
       mappedBusinesses[r.id] = {
         localRestaurantId: r.id,
         name: r.name,
@@ -246,7 +380,7 @@ async function main() {
       timestamp: new Date().toISOString(),
       status: "DRY_RUN",
       mode: "DRY-RUN",
-      centralApiUrl: apiUrl,
+      centralApiUrl: API_BASE_URL,
       error: null,
       mappedIds: {
         users: mappedUsers,
@@ -614,7 +748,7 @@ async function main() {
     timestamp: new Date().toISOString(),
     status: finalStatus,
     mode: "EXECUTE",
-    centralApiUrl: apiUrl,
+    centralApiUrl: API_BASE_URL,
     error: globalError,
     operations,
     mappedIds: {
