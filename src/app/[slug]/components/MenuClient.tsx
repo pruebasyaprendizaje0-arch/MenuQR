@@ -127,8 +127,25 @@ function getMapIframeSrc(mapEmbedUrl?: string | null, address?: string | null, u
   return null;
 }
 
-export function MenuClient({ restaurant }: { restaurant: Restaurant }) {
+export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restaurant; centralBranchId?: string }) {
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
+
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.ubicame.cc";
+    const branchId = centralBranchId || restaurant.id;
+    if (apiUrl && branchId) {
+      const targetUrl = `${apiUrl.replace(/\/$/, "")}/v1/branches/${branchId}/menu`;
+      console.log(`[MenuClient Browser DevTools Network] GET ${targetUrl}`);
+      fetch(targetUrl)
+        .then((res) => {
+          console.log(`[MenuClient Browser DevTools Response] HTTP ${res.status} for ${targetUrl}`);
+          return res.json();
+        })
+        .catch((err) => {
+          console.warn("[MenuClient Browser Fetch Info]", err);
+        });
+    }
+  }, [centralBranchId, restaurant.id]);
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);

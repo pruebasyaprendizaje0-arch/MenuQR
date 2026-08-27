@@ -27,6 +27,43 @@ interface FetchOptions extends RequestInit {
 /**
  * Realiza peticiones HTTP a la API Central enviando cabeceras y JWT Bearer Token.
  */
+function resolveCentralBranchId(slugOrId: string): string {
+  const clean = slugOrId.toLowerCase().trim();
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean);
+  if (isUuid) {
+    return clean;
+  }
+
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const resultPath = path.join(process.cwd(), "migration-result.json");
+    if (fs.existsSync(resultPath)) {
+      const data = JSON.parse(fs.readFileSync(resultPath, "utf-8"));
+      const businesses = data?.mappedIds?.businesses || {};
+      for (const key of Object.keys(businesses)) {
+        const biz = businesses[key];
+        if (biz.slug && biz.slug.toLowerCase().trim() === clean) {
+          if (biz.centralBranchId) {
+            return biz.centralBranchId;
+          }
+        }
+      }
+    }
+  } catch {}
+
+  const knownMappings: Record<string, string> = {
+    "mamma-mia": "f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
+    "pigro": "f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
+    "principal": "7aa64a1c-016c-4b6a-bbcc-6c2b7c3db89d",
+  };
+
+  return knownMappings[clean] || clean;
+}
+
+/**
+ * Realiza peticiones HTTP a la API Central enviando cabeceras y JWT Bearer Token.
+ */
 async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { token, headers: customHeaders, ...restOptions } = options;
 
@@ -42,14 +79,14 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
 
   const url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
-  if (process.env.NODE_ENV === "development") {
-    console.log(`[Central API Request] ${options.method || "GET"} ${url}`);
-  }
+  console.log(`[Central API Request] ${options.method || "GET"} ${url}`);
 
   const response = await fetch(url, {
     headers,
     ...restOptions,
   });
+
+  console.log(`[Central API Response] HTTP ${response.status} for ${url}`);
 
   if (!response.ok) {
     let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
@@ -113,7 +150,10 @@ export const centralApiService = {
    * GET /v1/branches/:branchId/menu
    */
   async getMenu(branchIdOrSlug: string) {
-    return apiFetch(`/v1/branches/${branchIdOrSlug}/menu`);
+    const branchId = resolveCentralBranchId(branchIdOrSlug);
+    const endpoint = `/v1/branches/${branchId}/menu`;
+    console.log(`[getMenu Debug Log] URL consultada: ${API_BASE_URL}${endpoint} | slug: ${branchIdOrSlug} | branchId: ${branchId}`);
+    return apiFetch(endpoint);
   },
 
   /**

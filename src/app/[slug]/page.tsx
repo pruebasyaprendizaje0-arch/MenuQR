@@ -186,7 +186,7 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
               type="application/ld+json"
               dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantSchema) }}
             />
-            <MenuClient restaurant={serializedRestaurant as any} />
+            <MenuClient restaurant={serializedRestaurant as any} centralBranchId={b.id} />
           </>
         );
       }
