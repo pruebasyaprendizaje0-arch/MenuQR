@@ -3,19 +3,23 @@
  * Conecta las peticiones cliente/servidor HTTP con https://api.ubicame.cc
  */
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  process.env.API_URL ||
-  process.env.VITE_API_URL ||
-  "https://api.ubicame.cc"
-).replace(/\/$/, "");
+export const getApiBaseUrl = (): string => {
+  const rawUrl =
+    process.env.MIGRATION_API_URL ||
+    process.env.API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.VITE_API_URL ||
+    "https://api.ubicame.cc";
+  return rawUrl.replace(/\/$/, "");
+};
 
 export const isCentralApiEnabled = (): boolean => {
   return (
     process.env.USE_CENTRAL_API === "true" ||
     process.env.NEXT_PUBLIC_USE_CENTRAL_API === "true" ||
-    !!process.env.NEXT_PUBLIC_API_URL ||
+    !!process.env.MIGRATION_API_URL ||
     !!process.env.API_URL ||
+    !!process.env.NEXT_PUBLIC_API_URL ||
     !!process.env.VITE_API_URL
   );
 };
@@ -76,7 +80,8 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
     headers["Authorization"] = `Bearer ${cleanToken}`;
   }
 
-  const url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
   console.log(`[Central API Request] ${options.method || "GET"} ${url}`);
 

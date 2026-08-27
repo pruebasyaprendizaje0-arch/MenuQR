@@ -23,12 +23,15 @@ import * as readline from "readline";
 // Instancia independiente de Prisma Client
 const prisma = new PrismaClient();
 
-// URL Base de la API Central
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  process.env.API_URL ||
-  "https://api.ubicame.cc"
-).replace(/\/$/, "");
+// Función autónoma para obtener la URL Base de la API Central
+function getApiBaseUrl(): string {
+  const rawUrl =
+    process.env.MIGRATION_API_URL ||
+    process.env.API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "https://api.ubicame.cc";
+  return rawUrl.replace(/\/$/, "");
+}
 
 interface FetchOptions extends RequestInit {
   token?: string;
@@ -50,7 +53,8 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
     headers["Authorization"] = `Bearer ${cleanToken}`;
   }
 
-  const url = `${API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+  const baseUrl = getApiBaseUrl();
+  const url = `${baseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
   console.log(`[Central API Request] ${options.method || "GET"} ${url}`);
 
@@ -225,7 +229,8 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`🌐 API Central configurada: ${API_BASE_URL}`);
+  const apiUrl = getApiBaseUrl();
+  console.log(`🌐 API Central configurada: ${apiUrl}`);
   console.log(`🗄️ Base de datos origen (DATABASE_URL): ${maskDatabaseUrl(rawDatabaseUrl)}`);
 
   // Leer restaurantes desde la base de datos de producción / local configurada
@@ -380,7 +385,7 @@ async function main() {
       timestamp: new Date().toISOString(),
       status: "DRY_RUN",
       mode: "DRY-RUN",
-      centralApiUrl: API_BASE_URL,
+      centralApiUrl: getApiBaseUrl(),
       error: null,
       mappedIds: {
         users: mappedUsers,
@@ -748,7 +753,7 @@ async function main() {
     timestamp: new Date().toISOString(),
     status: finalStatus,
     mode: "EXECUTE",
-    centralApiUrl: API_BASE_URL,
+    centralApiUrl: getApiBaseUrl(),
     error: globalError,
     operations,
     mappedIds: {

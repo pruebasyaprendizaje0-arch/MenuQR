@@ -3,7 +3,7 @@
  * Verifica la existencia y firma de cada llamada a la API Central.
  */
 import assert from "assert";
-import { centralApiService, isCentralApiEnabled } from "./api-service";
+import { centralApiService, isCentralApiEnabled, getApiBaseUrl } from "./api-service";
 
 async function runTests() {
   console.log("==========================================");
@@ -45,6 +45,42 @@ async function runTests() {
   assert.strictEqual(typeof centralApiService.createOrder, "function", "createOrder debe estar definido");
   assert.strictEqual(typeof centralApiService.updateOrderStatus, "function", "updateOrderStatus debe estar definido");
   console.log("✔ Test 4: Métodos de Escritura de la API Central (Fase 3) verificados.");
+
+  // 5. Test MIGRATION_API_URL priority in getApiBaseUrl
+  const originalMigrationUrl = process.env.MIGRATION_API_URL;
+  const originalApiUrl = process.env.API_URL;
+  const originalNextPublicUrl = process.env.NEXT_PUBLIC_API_URL;
+
+  try {
+    process.env.MIGRATION_API_URL = "http://host-interno-migration:3000";
+    process.env.API_URL = "http://host-interno-api:3000";
+    process.env.NEXT_PUBLIC_API_URL = "https://api.ubicame.cc";
+
+    assert.strictEqual(
+      getApiBaseUrl(),
+      "http://host-interno-migration:3000",
+      "MIGRATION_API_URL debe tener la prioridad más alta"
+    );
+
+    delete process.env.MIGRATION_API_URL;
+    assert.strictEqual(
+      getApiBaseUrl(),
+      "http://host-interno-api:3000",
+      "API_URL debe tener la segunda prioridad más alta"
+    );
+
+    delete process.env.API_URL;
+    assert.strictEqual(
+      getApiBaseUrl(),
+      "https://api.ubicame.cc",
+      "NEXT_PUBLIC_API_URL debe usarse si MIGRATION_API_URL y API_URL no están presentes"
+    );
+  } finally {
+    process.env.MIGRATION_API_URL = originalMigrationUrl;
+    process.env.API_URL = originalApiUrl;
+    process.env.NEXT_PUBLIC_API_URL = originalNextPublicUrl;
+  }
+  console.log("✔ Test 5: Prioridad de MIGRATION_API_URL verificada correctamente.");
 
   console.log("------------------------------------------");
   console.log("  TODAS LAS PRUEBAS DE LA API PASARON (100%)");
