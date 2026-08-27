@@ -129,25 +129,32 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
     return { error: "Por favor complete todos los campos." };
   }
 
-  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com";
-  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971*";
+  const cleanEmail = email.toLowerCase().trim();
 
-  if (email.toLowerCase().trim() === superAdminEmail.toLowerCase().trim() && password === superAdminPassword) {
-    await setSuperAdminSession();
-    redirect("/super-admin");
-  }
-
+  // 1. Intento prioritario en la API Central cuando está habilitada
   if (isCentralApiEnabled()) {
     try {
-      const result = await centralApiService.login(email.toLowerCase().trim(), password);
+      const result = await centralApiService.login(cleanEmail, password);
       if (result?.token && result?.user) {
         await setCentralApiToken(result.token);
         await setUserSession(result.user.id, result.user.email);
-        redirect("/admin");
+
+        if (process.env.NODE_ENV === "development") {
+          console.log(`[Central API Login Success] User ${result.user.email} (Role: ${result.user.role}) logged in.`);
+        }
+
+        // Únicamente si el rol de la API Central es estrictamente "SUPERADMIN", ir a /super-admin
+        if (result.user.role === "SUPERADMIN") {
+          await setSuperAdminSession();
+          redirect("/super-admin");
+        } else {
+          // Para dueños/administradores de restaurante (rol ADMIN, MANAGER, etc.), ir a /admin
+          redirect("/admin");
+        }
       }
     } catch (err: any) {
       if (process.env.NODE_ENV === "development") {
-        console.warn("[Login Warning] Central API login error, trying local fallback:", err.message);
+        console.warn("[Login Warning] Central API login error, testing local fallback:", err.message);
       }
       if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
         return { error: err.message || "Correo o contraseña incorrectos en la API Central." };
@@ -155,8 +162,17 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
     }
   }
 
+  // 2. Fallback a credenciales locales de Prisma/SuperAdmin si la API Central no está activa o falla en desarrollo
+  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com";
+  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971*";
+
+  if (cleanEmail === superAdminEmail.toLowerCase().trim() && password === superAdminPassword) {
+    await setSuperAdminSession();
+    redirect("/super-admin");
+  }
+
   const user = await prisma.user.findUnique({
-    where: { email: email.toLowerCase().trim() },
+    where: { email: cleanEmail },
   });
 
   if (!user || !bcrypt.compareSync(password, user.password)) {
