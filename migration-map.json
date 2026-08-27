@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-27T21:46:32.147Z",
+  "timestamp": "2026-08-27T22:14:24.557Z",
   "status": "DRY_RUN",
   "mode": "DRY-RUN",
   "centralApiUrl": "https://api.ubicame.cc",
@@ -8,18 +8,22 @@
     "users": {
       "b41836cb-05ca-41b8-906f-7ab53847b948": {
         "email": "ad***@admin.com",
-        "centralId": null,
-        "status": "PENDIENTE_REGISTRO"
+        "centralId": "7aa95330-604c-4b13-a8e0-a5873ee7b629",
+        "status": "REUTILIZAR_USUARIO_EXISTENTE"
       }
     },
     "businesses": {
       "24efbf36-f29f-44e5-8772-cfffc26bacfe": {
+        "localRestaurantId": "24efbf36-f29f-44e5-8772-cfffc26bacfe",
         "name": "Mamma Mia",
         "slug": "mamma-mia",
         "centralBusinessId": null,
         "centralBranchId": null,
         "centralMenuId": null,
         "status": "PENDIENTE_CREAR",
+        "categoriesCount": 4,
+        "productsCount": 9,
+        "ordersCount": 1,
         "config": {
           "ivaPercent": 0,
           "servicePercent": 10,

@@ -54,7 +54,6 @@ function resolveCentralBranchId(slugOrId: string): string {
 
   const knownMappings: Record<string, string> = {
     "mamma-mia": "f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
-    "pigro": "f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
     "principal": "7aa64a1c-016c-4b6a-bbcc-6c2b7c3db89d",
   };
 

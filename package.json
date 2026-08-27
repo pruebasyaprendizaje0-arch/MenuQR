@@ -18,7 +18,8 @@
     "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "tsx": "^4.19.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -1,0 +1,14 @@
+# Node modules and build output
+node_modules
+.next
+.git
+.vscode
+.agents
+
+# Local environment and secret files
+.env
+.env*.local
+.env.production
+.env.development
+*.pem
+*.key

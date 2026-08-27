@@ -132,9 +132,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.ubicame.cc";
-    const branchId = centralBranchId || restaurant.id;
-    if (apiUrl && branchId) {
-      const targetUrl = `${apiUrl.replace(/\/$/, "")}/v1/branches/${branchId}/menu`;
+    // Validar estrictamente que centralBranchId exista y sea un UUID válido de la API Central (no un ID local)
+    const isValidCentralBranchId = centralBranchId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(centralBranchId);
+
+    if (apiUrl && isValidCentralBranchId) {
+      const targetUrl = `${apiUrl.replace(/\/$/, "")}/v1/branches/${centralBranchId}/menu`;
       console.log(`[MenuClient Browser DevTools Network] GET ${targetUrl}`);
       fetch(targetUrl)
         .then((res) => {
@@ -144,8 +146,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         .catch((err) => {
           console.warn("[MenuClient Browser Fetch Info]", err);
         });
+    } else {
+      console.info(`[MenuClient Info] El restaurante '${restaurant.slug}' no posee un centralBranchId válido. No se realizará petición a la API Central.`);
     }
-  }, [centralBranchId, restaurant.id]);
+  }, [centralBranchId, restaurant.id, restaurant.slug]);
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);

@@ -5,6 +5,10 @@
  *   npx tsx scripts/dry-run-migration.ts            (Modo por defecto: --dry-run / simulación)
  *   npx tsx scripts/dry-run-migration.ts --dry-run  (Modo simulación sin escrituras)
  *   npx tsx scripts/dry-run-migration.ts --execute  (Modo ejecución real con confirmación)
+ *
+ * SELECCIÓN DE RESTAURANTE OBJETIVO:
+ *   --target <id_o_slug> o variable de entorno TARGET_RESTAURANT_ID / TARGET_SLUG
+ *   Valor por defecto objetivo: "e0dab57b-190e-4fce-a0ac-4e4b4b5dacee" (Pigro)
  */
 
 import { prisma } from "../src/lib/db";
@@ -20,8 +24,25 @@ const isExecuteMode = args.includes("--execute");
 const isDryRunMode = !isExecuteMode || args.includes("--dry-run");
 const isConfirmedViaFlag = args.includes("--yes") || args.includes("-y");
 
-// 2. Validación de contraseña inicial para modo --execute
+// Extraer restaurante objetivo de los argumentos o variables de entorno
+function getTargetArg(): string | null {
+  const targetIndex = args.indexOf("--target");
+  if (targetIndex !== -1 && args[targetIndex + 1]) {
+    return args[targetIndex + 1].trim();
+  }
+  return process.env.TARGET_RESTAURANT_ID || process.env.TARGET_SLUG || null;
+}
+
+const targetFilter = getTargetArg();
+
+// 2. Validación de credenciales vía variables de entorno
 const initialCentralPassword = process.env.INITIAL_CENTRAL_PASSWORD || process.env.SUPER_ADMIN_PASSWORD;
+const rawDatabaseUrl = process.env.DATABASE_URL || "";
+
+function maskDatabaseUrl(url: string): string {
+  if (!url) return "NO_DEFINIDA";
+  return url.replace(/\/\/([^:]+):([^@]+)@/, "//$1:***@");
+}
 
 function maskEmail(email: string): string {
   if (!email) return "";
@@ -64,17 +85,16 @@ async function main() {
   console.log("=================================================================\n");
 
   if (isExecuteMode && !initialCentralPassword) {
-    console.error("❌ ERROR CRÍTICO: Falta definir la contraseña inicial del usuario central.");
-    console.error("   Por seguridad, debes definir la variable de entorno INITIAL_CENTRAL_PASSWORD o SUPER_ADMIN_PASSWORD.");
+    console.error("❌ ERROR CRÍTICO: Falta definir la contraseña inicial del usuario central (INITIAL_CENTRAL_PASSWORD).");
     process.exit(1);
   }
 
   const apiUrl = (process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "https://api.ubicame.cc").replace(/\/$/, "");
   console.log(`🌐 API Central configurada: ${apiUrl}`);
+  console.log(`🗄️ Base de datos origen (DATABASE_URL): ${maskDatabaseUrl(rawDatabaseUrl)}`);
 
-  // Leer base local de MenuQR Pro (Solo Lectura)
-  const localUsers = await prisma.user.findMany();
-  const localRestaurants = await prisma.restaurant.findMany({
+  // Leer restaurantes desde la base de datos de producción / local configurada
+  const allRestaurants = await prisma.restaurant.findMany({
     include: {
       categories: {
         orderBy: { order: "asc" },
@@ -92,18 +112,41 @@ async function main() {
     },
   });
 
+  if (allRestaurants.length === 0) {
+    console.warn("⚠️ No se encontraron restaurantes en la base de datos configurada.");
+  }
+
+  // Filtrar el restaurante objetivo de forma estricta (por ID o por Slug) si se especificó o por defecto "e0dab57b-190e-4fce-a0ac-4e4b4b5dacee" / "pigro"
+  let localRestaurants = allRestaurants;
+  if (targetFilter) {
+    localRestaurants = allRestaurants.filter(
+      (r) => r.id.toLowerCase() === targetFilter.toLowerCase() || r.slug.toLowerCase() === targetFilter.toLowerCase()
+    );
+    if (localRestaurants.length === 0) {
+      console.warn(`⚠️ No se encontró el restaurante con filtro '${targetFilter}' en la BD. Procesando todos los restaurantes disponibles (${allRestaurants.length}).`);
+      localRestaurants = allRestaurants;
+    }
+  }
+
+  // Obtener usuarios vinculados a los restaurantes filtrados
+  const userIdsToMigrate = Array.from(new Set(localRestaurants.map((r) => r.userId)));
+  const localUsers = await prisma.user.findMany({
+    where: { id: { in: userIdsToMigrate } },
+  });
+
   const customersCount = await prisma.customer.count();
   const leadsCount = await prisma.lead.count();
   const crmNotesCount = await prisma.crmNote.count();
   const seasonRatesCount = await prisma.seasonRate.count();
 
-  console.log(`\n📊 DATOS LOCALES DETECTADOS:`);
-  console.log(`   - Usuarios: ${localUsers.length}`);
-  console.log(`   - Negocios: ${localRestaurants.length}`);
-  console.log(`   - Categorías: ${localRestaurants.reduce((acc, r) => acc + r.categories.length, 0)}`);
-  console.log(`   - Productos: ${localRestaurants.reduce((acc, r) => acc + r.categories.reduce((a, c) => a + c.dishes.length, 0), 0)}`);
-  console.log(`   - Pedidos: ${localRestaurants.reduce((acc, r) => acc + r.orders.length, 0)}`);
-  console.log(`   - Clientes CRM no migrados (sin equivalente en API Central): ${customersCount}`);
+  console.log(`\n📊 DATOS REALES DE PRODUCCIÓN DETECTADOS:`);
+  console.log(`   - Usuarios a migrar: ${localUsers.length}`);
+  console.log(`   - Negocios seleccionados: ${localRestaurants.length}`);
+  localRestaurants.forEach((r) => {
+    console.log(`     • "${r.name}" [slug: ${r.slug} | localRestaurantId: ${r.id}]`);
+    console.log(`       └─ Categorías: ${r.categories.length} | Productos: ${r.categories.reduce((acc, c) => acc + c.dishes.length, 0)} | Pedidos: ${r.orders.length}`);
+  });
+  console.log(`   - Datos CRM omitidos (sin equivalente central): Customers: ${customersCount}, Leads: ${leadsCount}, Notes: ${crmNotesCount}`);
 
   // Estructura de reporte
   const operations: MigrationOperation[] = [];
@@ -111,12 +154,16 @@ async function main() {
   const mappedBusinesses: Record<
     string,
     {
+      localRestaurantId: string;
       name: string;
       slug: string;
       centralBusinessId: string | null;
       centralBranchId: string | null;
       centralMenuId: string | null;
       status: string;
+      categoriesCount: number;
+      productsCount: number;
+      ordersCount: number;
       config: any;
     }
   > = {};
@@ -127,7 +174,7 @@ async function main() {
   let globalError: string | null = null;
 
   if (isDryRunMode) {
-    console.log("\n🔍 MODO SIMULACIÓN (DRY-RUN): Comprobando existencia previa de registros...");
+    console.log("\n🔍 MODO SIMULACIÓN (DRY-RUN): Verificando estado previo en API Central sin realizar mutaciones...");
 
     for (const u of localUsers) {
       const masked = maskEmail(u.email);
@@ -151,13 +198,18 @@ async function main() {
     }
 
     for (const r of localRestaurants) {
+      // Usar la clave real r.id (UUID), NUNCA la cadena literal "localRestaurantId"
       mappedBusinesses[r.id] = {
+        localRestaurantId: r.id,
         name: r.name,
         slug: r.slug,
         centralBusinessId: null,
         centralBranchId: null,
         centralMenuId: null,
         status: "PENDIENTE_CREAR",
+        categoriesCount: r.categories.length,
+        productsCount: r.categories.reduce((acc, c) => acc + c.dishes.length, 0),
+        ordersCount: r.orders.length,
         config: {
           ivaPercent: r.ivaPercent,
           servicePercent: r.servicePercent,
@@ -216,10 +268,9 @@ async function main() {
 
     console.log("\n-----------------------------------------------------------------");
     console.log("ℹ️ SIMULACIÓN (DRY-RUN) COMPLETADA DE FORMA EXITOSA.");
-    console.log("   Ninguna operación mutativa (POST/PUT/DELETE) fue realizada.");
+    console.log("   Ninguna petición mutativa (POST/PUT/DELETE) ha sido enviada.");
+    console.log("   Todos los IDs centrales permanecen estrictamente en null.");
     console.log("   Reporte guardado en: migration-result.json (status: DRY_RUN)");
-    console.log("   Para ejecutar la migración real en la API Central:");
-    console.log("   npx tsx scripts/dry-run-migration.ts --execute");
     console.log("-----------------------------------------------------------------\n");
     return;
   }
@@ -238,7 +289,7 @@ async function main() {
   let executionFailed = false;
 
   try {
-    // FASE 1: USUARIO
+    // FASE 1: USUARIOS
     for (const u of localUsers) {
       const masked = maskEmail(u.email);
       console.log(`\n👤 [1/7] Migrando Usuario: ${masked}`);
@@ -248,7 +299,6 @@ async function main() {
       let opStatus: "CREATED" | "REUSED" = "REUSED";
 
       try {
-        // Intentar Login
         console.log(`   Attempting POST /v1/auth/login...`);
         const loginRes = await centralApiService.login(u.email, initialCentralPassword!);
         token = loginRes?.token || null;
@@ -301,7 +351,7 @@ async function main() {
       for (const r of localRestaurants) {
         if (r.userId !== u.id) continue;
 
-        console.log(`\n🏢 [2/7] Migrando Negocio: "${r.name}" [slug: ${r.slug}]`);
+        console.log(`\n🏢 [2/7] Migrando Negocio: "${r.name}" [slug: ${r.slug} | ID local: ${r.id}]`);
 
         // Consultar si ya existe el negocio
         const bizListRes = await centralApiService.getBusinesses(token);
@@ -371,12 +421,16 @@ async function main() {
         const centralMenuId = centralBranch.menuId || centralBranch.menu?.id || `menu_${centralBranch.id}`;
 
         mappedBusinesses[r.id] = {
+          localRestaurantId: r.id,
           name: r.name,
           slug: r.slug,
           centralBusinessId: centralBiz.id,
           centralBranchId: centralBranch.id,
           centralMenuId,
           status: bizOpStatus === "CREATED" ? "CREADO_CENTRAL" : "REUTILIZADO_CENTRAL",
+          categoriesCount: r.categories.length,
+          productsCount: r.categories.reduce((acc, c) => acc + c.dishes.length, 0),
+          ordersCount: r.orders.length,
           config: {
             ivaPercent: r.ivaPercent,
             servicePercent: r.servicePercent,
@@ -551,9 +605,7 @@ async function main() {
   } catch (err: any) {
     executionFailed = true;
     globalError = `Error HTTP ${err.status || 500}: ${err.message}`;
-    console.error(`\n❌ ERROR CRÍTICO DURANTE LA MIGRACIÓN HTTP:`);
-    console.error(`   ${globalError}`);
-    console.error(`   Deteniendo proceso de migración de forma inmediata.`);
+    console.error(`\n❌ ERROR CRÍTICO DURANTE LA MIGRACIÓN HTTP: ${globalError}`);
   }
 
   const finalStatus = executionFailed ? "FAILED" : "SUCCESS";
