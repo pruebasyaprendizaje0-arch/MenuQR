@@ -56,7 +56,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
     return [...staticRoutes, ...restaurantRoutes];
   } catch (error) {
-    console.error("Error generating sitemap:", error);
+    if (process.env.NODE_ENV === "development" || process.env.DATABASE_URL) {
+      console.warn("[Sitemap Warning] No se pudieron cargar restaurantes para sitemap:", error);
+    }
     return staticRoutes;
   }
 }
