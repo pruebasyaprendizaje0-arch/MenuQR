@@ -4,17 +4,19 @@
  */
 
 const API_BASE_URL = (
-  process.env.VITE_API_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.API_URL ||
+  process.env.VITE_API_URL ||
   "https://api.ubicame.cc"
 ).replace(/\/$/, "");
 
 export const isCentralApiEnabled = (): boolean => {
   return (
     process.env.USE_CENTRAL_API === "true" ||
-    !!process.env.VITE_API_URL ||
-    !!process.env.NEXT_PUBLIC_API_URL
+    process.env.NEXT_PUBLIC_USE_CENTRAL_API === "true" ||
+    !!process.env.NEXT_PUBLIC_API_URL ||
+    !!process.env.API_URL ||
+    !!process.env.VITE_API_URL
   );
 };
 

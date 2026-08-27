@@ -17,6 +17,9 @@ export default async function AdminPage() {
   const token = (session as any).token || (await getCentralApiToken());
   if (isCentralApiEnabled() && token) {
     try {
+      if (process.env.NODE_ENV === "development") {
+        console.log(`[AdminPage] Consultando GET /v1/businesses a la API Central (token: ${token.substring(0, 12)}...)`);
+      }
       const bizRes = await centralApiService.getBusinesses(token);
       let businessList = Array.isArray(bizRes) ? bizRes : bizRes?.businesses || bizRes?.data || [];
       
