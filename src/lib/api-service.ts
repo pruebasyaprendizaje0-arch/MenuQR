@@ -57,6 +57,7 @@ function resolveCentralBranchId(slugOrId: string): string {
   } catch {}
 
   const knownMappings: Record<string, string> = {
+    "pigro": "6b8f6423-7ef6-4c8b-9305-51fc0b201f3f",
     "mamma-mia": "f4dfe49c-622b-4f71-9d46-3aaf95074e8b",
     "principal": "7aa64a1c-016c-4b6a-bbcc-6c2b7c3db89d",
   };
@@ -156,7 +157,7 @@ export const centralApiService = {
   async getMenu(branchIdOrSlug: string) {
     const branchId = resolveCentralBranchId(branchIdOrSlug);
     const endpoint = `/v1/branches/${branchId}/menu`;
-    console.log(`[getMenu Debug Log] URL consultada: ${API_BASE_URL}${endpoint} | slug: ${branchIdOrSlug} | branchId: ${branchId}`);
+    console.log(`[getMenu Debug Log] URL consultada: ${getApiBaseUrl()}${endpoint} | slug: ${branchIdOrSlug} | branchId: ${branchId}`);
     return apiFetch(endpoint);
   },
 
