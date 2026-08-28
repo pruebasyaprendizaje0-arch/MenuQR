@@ -124,6 +124,8 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         })),
       }));
 
+      console.log(`[MenuPage Source Log] FUENTE PRINCIPAL UTILIZADA: API Central para '${slug}' (centralBranchId: ${b.id} | Categorías: ${categories.length})`);
+
       const session = await getUserSession();
       const isSuperAdmin = await getSuperAdminSession();
 
@@ -190,9 +192,7 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       );
     }
   } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn(`[MenuPage Warning] Central API fetch failed for ${slug}, falling back to Prisma local:`, err);
-    }
+    console.warn(`[MenuPage Source Log] FALLBACK LOCAL UTILIZADO: La API Central no respondió para '${slug}'. Consultando PostgreSQL local via Prisma...`);
   }
 
   try {
@@ -240,6 +240,8 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         </div>
       );
     }
+
+    console.log(`[MenuPage Source Log] Restaurante '${slug}' cargado desde PostgreSQL local (Prisma localRestaurantId: ${restaurant.id})`);
 
     if (restaurant.trialEndsAt < new Date()) {
       return (
