@@ -99,11 +99,15 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function RestaurantMenuPage({ params }: PageProps) {
+  const pageStartTime = performance.now();
   const slug = params.slug.toLowerCase().trim();
 
   // 1. FUENTE PRINCIPAL: Consultar la API Central
+  const apiStartTime = performance.now();
   try {
     const apiMenu = await centralApiService.getMenu(slug);
+    const apiDuration = Math.round(performance.now() - apiStartTime);
+
     if (apiMenu?.branch) {
       const b = apiMenu.branch;
       const biz = b.business || {};
@@ -124,7 +128,8 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         })),
       }));
 
-      console.log(`[MenuPage Source Log] FUENTE PRINCIPAL UTILIZADA: API Central para '${slug}' (centralBranchId: ${b.id} | Categorías: ${categories.length})`);
+      const totalDuration = Math.round(performance.now() - pageStartTime);
+      console.log(`[MenuPage Performance Log] FUENTE PRINCIPAL: API Central para '${slug}' (centralBranchId: ${b.id} | Categorías: ${categories.length}) - API Central: ${apiDuration}ms, Total Servidor: ${totalDuration}ms`);
 
       const session = await getUserSession();
       const isSuperAdmin = await getSuperAdminSession();
@@ -191,10 +196,12 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         </>
       );
     }
-  } catch (err) {
-    console.warn(`[MenuPage Source Log] FALLBACK LOCAL UTILIZADO: La API Central no respondió para '${slug}'. Consultando PostgreSQL local via Prisma...`);
+  } catch (err: any) {
+    const apiDuration = Math.round(performance.now() - apiStartTime);
+    console.warn(`[MenuPage Performance Log] FALLBACK LOCAL UTILIZADO: La API Central falló o superó el timeout en ${apiDuration}ms para '${slug}' (${err?.message}). Consultando PostgreSQL local via Prisma...`);
   }
 
+  const prismaStartTime = performance.now();
   try {
     const restaurant = await prisma.restaurant.findUnique({
       where: { slug },
@@ -213,6 +220,8 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         },
       },
     });
+
+    const prismaDuration = Math.round(performance.now() - prismaStartTime);
 
     if (!restaurant) {
       return (
@@ -241,7 +250,8 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       );
     }
 
-    console.log(`[MenuPage Source Log] Restaurante '${slug}' cargado desde PostgreSQL local (Prisma localRestaurantId: ${restaurant.id})`);
+    const totalDuration = Math.round(performance.now() - pageStartTime);
+    console.log(`[MenuPage Performance Log] FALLBACK LOCAL: Restaurante '${slug}' cargado desde PostgreSQL local (Prisma: ${prismaDuration}ms | Total Servidor: ${totalDuration}ms)`);
 
     if (restaurant.trialEndsAt < new Date()) {
       return (

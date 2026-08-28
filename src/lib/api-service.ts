@@ -67,6 +67,7 @@ function resolveCentralBranchId(slugOrId: string): string {
 
 /**
  * Realiza peticiones HTTP a la API Central enviando cabeceras y JWT Bearer Token.
+ * Soporta timeout de 5 segundos con AbortController y revalidación de caché de Next.js.
  */
 async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { token, headers: customHeaders, ...restOptions } = options;
@@ -84,35 +85,61 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
   const baseUrl = getApiBaseUrl();
   const url = `${baseUrl}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
-  console.log(`[Central API Request] ${options.method || "GET"} ${url}`);
+  const isGet = !options.method || options.method.toUpperCase() === "GET";
+  const method = (options.method || "GET").toUpperCase();
 
-  const response = await fetch(url, {
-    headers,
-    ...restOptions,
-  });
+  // Configurar timeout máximo de 5 segundos
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-  console.log(`[Central API Response] HTTP ${response.status} for ${url}`);
+  const startTime = performance.now();
+  console.log(`[Central API Request] ${method} ${url}`);
 
-  if (!response.ok) {
-    let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
-    try {
-      const errorJson = await response.json();
-      if (errorJson?.message) {
-        errorMessage = errorJson.message;
+  try {
+    const response = await fetch(url, {
+      headers,
+      signal: controller.signal,
+      // Aplicar caché de revalidación de 60s para lecturas GET si no se especifica caché personalizada
+      ...(isGet ? { next: { revalidate: 60 } } : {}),
+      ...restOptions,
+    });
+
+    clearTimeout(timeoutId);
+    const duration = Math.round(performance.now() - startTime);
+    console.log(`[Central API Timing] ${method} ${url} respondió en ${duration}ms (HTTP ${response.status})`);
+
+    if (!response.ok) {
+      let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
+      try {
+        const errorJson = await response.json();
+        if (errorJson?.message) {
+          errorMessage = errorJson.message;
+        }
+      } catch {
+        // Ignorar si no es JSON
       }
-    } catch {
-      // Ignorar si no es JSON
+      const error: any = new Error(errorMessage);
+      error.status = response.status;
+      throw error;
     }
-    const error: any = new Error(errorMessage);
-    error.status = response.status;
-    throw error;
-  }
 
-  const data = await response.json();
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    data._httpStatus = response.status;
+    const data = await response.json();
+    if (data && typeof data === "object" && !Array.isArray(data)) {
+      data._httpStatus = response.status;
+    }
+    return data;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    const duration = Math.round(performance.now() - startTime);
+    if (err.name === "AbortError") {
+      console.error(`[Central API Timeout Error] ${method} ${url} superó el tiempo límite de 5000ms (${duration}ms)`);
+      const timeoutError: any = new Error(`Request to Central API timed out after 5000ms (${url})`);
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+    console.error(`[Central API Error] ${method} ${url} falló en ${duration}ms: ${err.message}`);
+    throw err;
   }
-  return data;
 }
 
 export const centralApiService = {

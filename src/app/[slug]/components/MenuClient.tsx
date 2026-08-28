@@ -131,24 +131,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
 
   useEffect(() => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.ubicame.cc";
-    // Validar estrictamente que centralBranchId exista y sea un UUID válido de la API Central (no un ID local)
-    const isValidCentralBranchId = centralBranchId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(centralBranchId);
-
-    if (apiUrl && isValidCentralBranchId) {
-      const targetUrl = `${apiUrl.replace(/\/$/, "")}/v1/branches/${centralBranchId}/menu`;
-      console.log(`[MenuClient Browser DevTools Network] GET ${targetUrl}`);
-      fetch(targetUrl)
-        .then((res) => {
-          console.log(`[MenuClient Browser DevTools Response] HTTP ${res.status} for ${targetUrl}`);
-          return res.json();
-        })
-        .catch((err) => {
-          console.warn("[MenuClient Browser Fetch Info]", err);
-        });
-    } else {
-      console.info(`[MenuClient Info] El restaurante '${restaurant.slug}' no posee un centralBranchId válido. No se realizará petición a la API Central.`);
-    }
+    // La consulta a la API Central se realiza como fuente principal en el Server Component ([slug]/page.tsx).
+    // Se deshabilita la consulta duplicada en el cliente para evitar llamadas de red redundantes.
   }, [centralBranchId, restaurant.id, restaurant.slug]);
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -1208,6 +1192,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                               <img 
                                 src={dish.imageUrl} 
                                 alt={dish.name} 
+                                loading="lazy"
+                                decoding="async"
                                 className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
                               />
                             ) : (
