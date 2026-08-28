@@ -135,10 +135,6 @@ const formatPrice = (price: unknown): string => {
 export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restaurant; centralBranchId?: string }) {
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
 
-  useEffect(() => {
-    // La consulta a la API Central se realiza como fuente principal en el Server Component ([slug]/page.tsx).
-    // Se deshabilita la consulta duplicada en el cliente para evitar llamadas de red redundantes.
-  }, [centralBranchId, restaurant.id, restaurant.slug]);
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -154,6 +150,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
   const kmRatesList: { id: string; label: string; price: number }[] = useMemo(() => {

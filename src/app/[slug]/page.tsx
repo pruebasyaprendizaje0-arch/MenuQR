@@ -3,7 +3,7 @@ import { MenuClient } from "./components/MenuClient";
 import { UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
-import { centralApiService, isCentralApiEnabled } from "@/lib/api-service";
+import { centralApiService } from "@/lib/api-service";
 
 export const dynamic = "force-dynamic";
 
@@ -24,42 +24,43 @@ const IGNORED_STATIC_SLUGS = [
   "manifest.json",
 ];
 
+function normalizeMenuName(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Función auxiliar para seleccionar valores respetando la prioridad: API Central -> PostgreSQL Local -> Predeterminado
+function pickVal<T>(centralVal: any, localVal: any, defaultVal: T): T {
+  if (centralVal !== null && centralVal !== undefined) {
+    if (typeof centralVal === "string" && centralVal.trim().length > 0) {
+      return centralVal as unknown as T;
+    } else if (typeof centralVal === "number" && !isNaN(centralVal)) {
+      return centralVal as unknown as T;
+    } else if (typeof centralVal === "boolean") {
+      return centralVal as unknown as T;
+    }
+  }
+  if (localVal !== null && localVal !== undefined) {
+    if (typeof localVal === "string" && localVal.trim().length > 0) {
+      return localVal as unknown as T;
+    } else if (typeof localVal === "number" && !isNaN(localVal)) {
+      return localVal as unknown as T;
+    } else if (typeof localVal === "boolean") {
+      return localVal as unknown as T;
+    }
+  }
+  return defaultVal;
+}
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const slug = params.slug.toLowerCase().trim();
 
   if (IGNORED_STATIC_SLUGS.includes(slug)) {
     return {};
-  }
-
-  // 1. Intentar la API Central como fuente principal para metadata
-  try {
-    const apiMenu = await centralApiService.getMenu(slug);
-    if (apiMenu?.branch) {
-      const name = apiMenu.branch.business?.name || apiMenu.branch.name || slug;
-      const logoUrl = apiMenu.branch.business?.logoUrl || null;
-      const coverUrl = apiMenu.branch.business?.coverUrl || null;
-      const title = `Menú Digital de ${name} en Ecuador`;
-      const description = `Escanea el código QR y consulta la carta digital completa de ${name}. Haz tu pedido directo a WhatsApp.`;
-      return {
-        title,
-        description,
-        openGraph: {
-          title: `${name} | Menú Digital QR`,
-          description,
-          images: [{ url: logoUrl || coverUrl || "/icon.png", alt: `Logo de ${name}` }],
-        },
-        twitter: {
-          card: "summary_large_image",
-          title: `${name} | Menú Digital QR`,
-          description,
-          images: [logoUrl || coverUrl || "/icon.png"],
-        },
-      };
-    }
-  } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn(`[Metadata Warning] Central API menu lookup for ${slug} failed, fallback to local:`, err);
-    }
   }
 
   try {
@@ -104,7 +105,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         images: [restaurant.logoUrl || restaurant.coverUrl || "/icon.png"],
       },
     };
-  } catch (err) {
+  } catch {
     return {
       title: "Menú Digital QR | MenuQR Pro",
     };
@@ -131,43 +132,32 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       const menus = apiMenu.menus || [];
       const primaryMenu = menus[0] || {};
 
-      // Consultar imágenes locales de respaldo en PostgreSQL para logoUrl, coverUrl y platos cuando el valor central sea nulo o vacío
+      let localRest: any = null;
       let localImageMap: Map<string, string> = new Map();
-      let localLogoUrl: string | null = null;
-      let localCoverUrl: string | null = null;
 
       try {
-        const localRest = await prisma.restaurant.findUnique({
+        localRest = await prisma.restaurant.findUnique({
           where: { slug },
-          select: {
-            logoUrl: true,
-            coverUrl: true,
+          include: {
             categories: {
-              select: {
-                dishes: {
-                  select: {
-                    name: true,
-                    imageUrl: true,
-                  },
-                },
+              include: {
+                dishes: true,
               },
             },
           },
         });
 
         if (localRest) {
-          localLogoUrl = localRest.logoUrl || null;
-          localCoverUrl = localRest.coverUrl || null;
           for (const cat of localRest.categories || []) {
             for (const dish of cat.dishes || []) {
               if (dish.name && dish.imageUrl) {
-                localImageMap.set(dish.name.toLowerCase().trim(), dish.imageUrl);
+                localImageMap.set(normalizeMenuName(dish.name), dish.imageUrl);
               }
             }
           }
         }
       } catch {
-        // Ignorar si falla la consulta secundaria de imágenes locales
+        // Ignorar si falla la consulta secundaria de datos locales
       }
 
       const categories = (primaryMenu.categories || []).map((c: any) => ({
@@ -177,7 +167,7 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         isActive: c.isActive ?? true,
         dishes: (c.products || []).map((p: any) => {
           const numPrice = Number(p.price);
-          const cleanName = (p.name || "").toLowerCase().trim();
+          const cleanName = normalizeMenuName(p.name);
           const fallbackDishImage = localImageMap.get(cleanName) || null;
           const hasCentralImage = p.imageUrl && typeof p.imageUrl === "string" && p.imageUrl.trim().length > 0;
 
@@ -200,40 +190,55 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         getSuperAdminSession(),
       ]);
 
-      const hasCentralLogo = biz.logoUrl && typeof biz.logoUrl === "string" && biz.logoUrl.trim().length > 0;
-      const hasCentralCover = biz.coverUrl && typeof biz.coverUrl === "string" && biz.coverUrl.trim().length > 0;
+      const phoneNum = pickVal<string>(b.phone || biz.whatsapp || biz.phone, localRest?.whatsapp, "");
 
       const serializedRestaurant = {
         id: b.id,
-        name: biz.name || b.name || slug,
-        slug: b.slug || slug,
-        specialty: biz.industry || "Gastronomía",
-        locality: b.address || "Ecuador",
-        description: biz.description || "",
-        logoUrl: hasCentralLogo ? biz.logoUrl : localLogoUrl,
-        coverUrl: hasCentralCover ? biz.coverUrl : localCoverUrl,
-        whatsapp: b.phone || biz.whatsapp || "",
-        whatsappNumber: b.phone || biz.whatsapp || "",
-        paymentQrUrl: null,
-        themeColor: "#ef4444",
+        name: pickVal<string>(biz.name || b.name, localRest?.name, slug),
+        slug: pickVal<string>(b.slug || biz.slug, localRest?.slug, slug),
+        specialty: pickVal<string>(biz.industry || biz.specialty || b.specialty, localRest?.specialty, "Gastronomía"),
+        description: pickVal<string>(biz.description || b.description, localRest?.description, ""),
+        logoUrl: pickVal<string | null>(biz.logoUrl || b.logoUrl, localRest?.logoUrl, null),
+        coverUrl: pickVal<string | null>(biz.coverUrl || b.coverUrl, localRest?.coverUrl, null),
+        paymentQrUrl: pickVal<string | null>(b.qrCobroUrl || b.paymentQrUrl || biz.qrCobroUrl, localRest?.qrCobroUrl, null),
+        whatsapp: phoneNum,
+        whatsappNumber: phoneNum,
+        instagram: pickVal<string | null>(biz.instagram || b.instagram, localRest?.instagram, null),
+        facebook: pickVal<string | null>(biz.facebook || b.facebook, localRest?.facebook, null),
+        tiktok: pickVal<string | null>(biz.tiktok || b.tiktok, localRest?.tiktok, null),
+        address: pickVal<string | null>(b.address || biz.address, localRest?.address, null),
+        locality: pickVal<string | null>(b.locality || b.city || (b.provincia ? `${b.city ? b.city + ", " : ""}${b.provincia}` : null), localRest?.locality, "Ecuador"),
+        city: pickVal<string | null>(b.city, (localRest as any)?.city || null, null),
+        provincia: pickVal<string | null>(b.provincia || b.state, (localRest as any)?.province || (localRest as any)?.provincia || null, null),
+        phone: pickVal<string | null>(b.phone || biz.phone, (localRest as any)?.phone || localRest?.whatsapp || null, null),
+        email: pickVal<string | null>(b.email || biz.email, (localRest as any)?.email || null, null),
+        tablesConfig: pickVal<string>(b.tablesConfig, localRest?.tablesConfig, "1,2,3,4,5,6,7,8,9,10"),
+        schedule: pickVal<string | null>(b.schedule, localRest?.schedule, null),
+        localSchedule: pickVal<string | null>(b.localSchedule, (localRest as any)?.localSchedule || localRest?.schedule || null, null),
+        deliverySchedule: pickVal<string | null>(b.deliverySchedule, (localRest as any)?.deliverySchedule || localRest?.schedule || null, null),
+        deliveryEnabled: pickVal<boolean>(b.deliveryEnabled, localRest?.deliveryEnabled, true),
+        deliveryCost: pickVal<number>(b.deliveryCost, localRest?.deliveryCost, 0.0),
+        deliveryRates: pickVal<string | null>(b.deliveryRates, localRest?.deliveryRates, null),
+        ivaPercent: pickVal<number>(b.ivaPercent, localRest?.ivaPercent, 15.0),
+        servicePercent: pickVal<number>(b.servicePercent, localRest?.servicePercent, 10.0),
+        bankName: pickVal<string | null>(b.bankName, localRest?.bankName, null),
+        bankAccountType: pickVal<string | null>(b.bankAccountType, localRest?.bankAccountType, null),
+        bankAccountNumber: pickVal<string | null>(b.bankAccountNumber, localRest?.bankAccountNumber, null),
+        bankAccountName: pickVal<string | null>(b.bankAccountName, localRest?.bankAccountName, null),
+        bankAccountDocument: pickVal<string | null>(b.bankAccountDocument, localRest?.bankAccountDocument, null),
+        bankAccountEmail: pickVal<string | null>(b.bankAccountEmail, localRest?.bankAccountEmail, null),
+        themeColor: pickVal<string>(b.themeColor || biz.themeColor, localRest?.themeColor, "#ef4444"),
+        mapEmbedUrl: pickVal<string | null>(b.mapEmbedUrl || biz.mapEmbedUrl, localRest?.mapEmbedUrl, null),
+        ubicameUrl: pickVal<string | null>(b.ubicameUrl || biz.ubicameUrl, localRest?.ubicameUrl, null),
+        services: pickVal<string | null>(b.services || biz.services, localRest?.services, null),
+        contactNumbers: pickVal<string | null>(b.contactNumbers || biz.contactNumbers, localRest?.contactNumbers, null),
+        ivaOnTable: pickVal<boolean>(b.ivaOnTable, localRest?.ivaOnTable, true),
+        ivaOnTakeout: pickVal<boolean>(b.ivaOnTakeout, localRest?.ivaOnTakeout, true),
+        serviceOnTable: pickVal<boolean>(b.serviceOnTable, localRest?.serviceOnTable, true),
+        serviceOnTakeout: pickVal<boolean>(b.serviceOnTakeout, localRest?.serviceOnTakeout, false),
         plan: "PRO",
         isOwner: !!session || isSuperAdmin,
         trialEndsAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-        tablesConfig: "1,2,3,4,5,6,7,8,9,10",
-        ivaPercent: 15,
-        servicePercent: 10,
-        deliveryCost: 0.0,
-        deliveryEnabled: true,
-        bankName: null,
-        bankAccountType: null,
-        bankAccountNumber: null,
-        bankAccountName: null,
-        bankAccountDocument: null,
-        bankAccountEmail: null,
-        ivaOnTable: true,
-        ivaOnTakeout: true,
-        serviceOnTable: true,
-        serviceOnTakeout: false,
         orders: [],
         seasonRates: [],
         categories,
@@ -327,123 +332,52 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center relative overflow-hidden">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-amber-600/10 rounded-full blur-[100px] pointer-events-none"></div>
           <div className="relative z-10 max-w-md space-y-6">
-            <div className="h-16 w-16 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center mx-auto text-amber-500 shadow-xl">
-              <UtensilsCrossed className="h-8 w-8" />
-            </div>
-            <div className="space-y-2">
-              <h1 className="text-3xl font-extrabold tracking-tight text-white">Demo Expirada</h1>
-              <p className="text-slate-400 text-sm">
-                El período de prueba de 30 días para <strong>{restaurant.name}</strong> ha finalizado.
-              </p>
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Contacta al administrador para renovar la suscripción.
-              </p>
-            </div>
-            <div className="pt-4">
-              <Link href="/admin" className="px-6 py-3 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-white font-bold text-sm shadow-lg transition-all">
-                Acceder al Panel Admin
-              </Link>
-            </div>
+            <h1 className="text-2xl font-bold text-amber-400">Suscripción Expirada</h1>
+            <p className="text-slate-300 text-sm">El menú de {restaurant.name} se encuentra temporalmente inactivo por vencimiento de plan.</p>
           </div>
         </div>
       );
     }
 
-    const session = await getUserSession();
-    const isSuperAdmin = await getSuperAdminSession();
-    const isOwner = (session && session.userId === restaurant.userId) || isSuperAdmin;
+    const [session, isSuperAdmin] = await Promise.all([
+      getUserSession(),
+      getSuperAdminSession(),
+    ]);
 
-    // Build serialised restaurant with safe defaults for fields that may not yet exist in production DB
-    const r = restaurant as any;
     const serializedRestaurant = {
       ...restaurant,
-      whatsappNumber: r.whatsapp ?? "",
-      paymentQrUrl: r.qrCobroUrl ?? null,
-      coverUrl: r.coverUrl ?? null,
-      isOwner: !!isOwner,
       trialEndsAt: restaurant.trialEndsAt.toISOString(),
-      tablesConfig: r.tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
-      ivaPercent: r.ivaPercent ?? 15,
-      servicePercent: r.servicePercent ?? 10,
-      deliveryCost: r.deliveryCost ?? 0.0,
-      deliveryEnabled: r.deliveryEnabled ?? true,
-      bankName: r.bankName ?? null,
-      bankAccountType: r.bankAccountType ?? null,
-      bankAccountNumber: r.bankAccountNumber ?? null,
-      bankAccountName: r.bankAccountName ?? null,
-      bankAccountDocument: r.bankAccountDocument ?? null,
-      bankAccountEmail: r.bankAccountEmail ?? null,
-      ivaOnTable: r.ivaOnTable ?? true,
-      ivaOnTakeout: r.ivaOnTakeout ?? true,
-      serviceOnTable: r.serviceOnTable ?? true,
-      serviceOnTakeout: r.serviceOnTakeout ?? false,
-      orders: [],
-      seasonRates: ((restaurant as any).seasonRates ?? []).map((sr: any) => ({
-        ...sr,
-        startDate: sr.startDate.toISOString().split("T")[0],
-        endDate: sr.endDate.toISOString().split("T")[0],
-        createdAt: sr.createdAt.toISOString(),
-        updatedAt: sr.updatedAt.toISOString(),
-      })),
-      categories: restaurant.categories.map((c) => ({
-        ...c,
-        dishes: c.dishes.map((d) => ({
-          ...d,
-          description: d.description ?? null,
-          imageUrl: d.imageUrl ?? null,
+      createdAt: restaurant.createdAt.toISOString(),
+      updatedAt: restaurant.updatedAt.toISOString(),
+      isOwner: !!session || isSuperAdmin,
+      categories: restaurant.categories.map((cat) => ({
+        ...cat,
+        createdAt: cat.createdAt.toISOString(),
+        updatedAt: cat.updatedAt.toISOString(),
+        dishes: cat.dishes.map((dish) => ({
+          ...dish,
+          createdAt: dish.createdAt.toISOString(),
+          updatedAt: dish.updatedAt.toISOString(),
         })),
       })),
-    };
-
-    const restaurantSchema = {
-      "@context": "https://schema.org",
-      "@type": "Restaurant",
-      "name": restaurant.name,
-      "image": restaurant.logoUrl || restaurant.coverUrl || undefined,
-      "description": restaurant.description || `Menú digital de ${restaurant.name}`,
-      "servesCuisine": restaurant.specialty || "Gastronomía",
-      "address": {
-        "@type": "PostalAddress",
-        "addressLocality": restaurant.locality || "Ecuador",
-        "addressCountry": "EC",
-      },
-      "telephone": restaurant.whatsapp || undefined,
-      "url": `${process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com"}/${restaurant.slug}`,
+      seasonRates: (restaurant.seasonRates || []).map((rate) => ({
+        ...rate,
+        startDate: rate.startDate.toISOString(),
+        endDate: rate.endDate.toISOString(),
+        createdAt: rate.createdAt.toISOString(),
+        updatedAt: rate.updatedAt.toISOString(),
+      })),
     };
 
     return (
-      <>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantSchema) }}
-        />
-        <MenuClient restaurant={serializedRestaurant} />
-      </>
+      <MenuClient restaurant={serializedRestaurant as any} />
     );
-
-  } catch (err) {
-    // Print the real error to server stdout — visible in Coolify logs
-    console.error(`[MenuPage] Error loading /${slug}:`, err);
-
+  } catch (err: any) {
+    console.error("[MenuPage Error] Fallo critico en Server Component:", err);
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center relative overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-red-600/10 rounded-full blur-[100px] pointer-events-none"></div>
-        <div className="relative z-10 max-w-md space-y-6">
-          <div className="h-16 w-16 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center mx-auto text-red-500 shadow-xl">
-            <UtensilsCrossed className="h-8 w-8" />
-          </div>
-          <div className="space-y-2">
-            <h1 className="text-3xl font-extrabold tracking-tight text-white">Error Temporal</h1>
-            <p className="text-slate-400 text-sm">
-              Hubo un problema al cargar el menú de <strong>/{slug}</strong>. Por favor intenta nuevamente en unos minutos.
-            </p>
-          </div>
-          <div className="pt-4">
-            <Link href={`/${slug}`} className="px-6 py-3 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 text-white font-bold text-sm shadow-lg transition-all">
-              Reintentar
-            </Link>
-          </div>
-        </div>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center">
+        <h1 className="text-xl font-bold text-red-500">Error al cargar el restaurante</h1>
+        <p className="text-slate-400 text-xs mt-2">{err?.message || "Ocurrió un error inesperado."}</p>
       </div>
     );
   }
