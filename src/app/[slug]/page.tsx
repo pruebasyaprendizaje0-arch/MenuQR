@@ -130,6 +130,46 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       const biz = b.business || {};
       const menus = apiMenu.menus || [];
       const primaryMenu = menus[0] || {};
+
+      // Consultar imágenes locales de respaldo en PostgreSQL para logoUrl, coverUrl y platos cuando el valor central sea nulo o vacío
+      let localImageMap: Map<string, string> = new Map();
+      let localLogoUrl: string | null = null;
+      let localCoverUrl: string | null = null;
+
+      try {
+        const localRest = await prisma.restaurant.findUnique({
+          where: { slug },
+          select: {
+            logoUrl: true,
+            coverUrl: true,
+            categories: {
+              select: {
+                dishes: {
+                  select: {
+                    name: true,
+                    imageUrl: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        if (localRest) {
+          localLogoUrl = localRest.logoUrl || null;
+          localCoverUrl = localRest.coverUrl || null;
+          for (const cat of localRest.categories || []) {
+            for (const dish of cat.dishes || []) {
+              if (dish.name && dish.imageUrl) {
+                localImageMap.set(dish.name.toLowerCase().trim(), dish.imageUrl);
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignorar si falla la consulta secundaria de imágenes locales
+      }
+
       const categories = (primaryMenu.categories || []).map((c: any) => ({
         id: c.id,
         name: c.name,
@@ -137,12 +177,16 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         isActive: c.isActive ?? true,
         dishes: (c.products || []).map((p: any) => {
           const numPrice = Number(p.price);
+          const cleanName = (p.name || "").toLowerCase().trim();
+          const fallbackDishImage = localImageMap.get(cleanName) || null;
+          const hasCentralImage = p.imageUrl && typeof p.imageUrl === "string" && p.imageUrl.trim().length > 0;
+
           return {
             id: p.id,
             name: p.name,
             description: p.description ?? null,
             price: Number.isFinite(numPrice) ? numPrice : 0,
-            imageUrl: p.imageUrl ?? null,
+            imageUrl: hasCentralImage ? p.imageUrl : fallbackDishImage,
             isAvailable: p.isAvailable ?? true,
           };
         }),
@@ -156,6 +200,9 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         getSuperAdminSession(),
       ]);
 
+      const hasCentralLogo = biz.logoUrl && typeof biz.logoUrl === "string" && biz.logoUrl.trim().length > 0;
+      const hasCentralCover = biz.coverUrl && typeof biz.coverUrl === "string" && biz.coverUrl.trim().length > 0;
+
       const serializedRestaurant = {
         id: b.id,
         name: biz.name || b.name || slug,
@@ -163,8 +210,8 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         specialty: biz.industry || "Gastronomía",
         locality: b.address || "Ecuador",
         description: biz.description || "",
-        logoUrl: biz.logoUrl || null,
-        coverUrl: biz.coverUrl || null,
+        logoUrl: hasCentralLogo ? biz.logoUrl : localLogoUrl,
+        coverUrl: hasCentralCover ? biz.coverUrl : localCoverUrl,
         whatsapp: b.phone || biz.whatsapp || "",
         whatsappNumber: b.phone || biz.whatsapp || "",
         paymentQrUrl: null,
