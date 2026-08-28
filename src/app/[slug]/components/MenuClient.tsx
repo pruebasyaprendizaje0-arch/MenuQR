@@ -127,6 +127,11 @@ function getMapIframeSrc(mapEmbedUrl?: string | null, address?: string | null, u
   return null;
 }
 
+const formatPrice = (price: unknown): string => {
+  const numericPrice = Number(price);
+  return Number.isFinite(numericPrice) ? numericPrice.toFixed(2) : "0.00";
+};
+
 export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restaurant; centralBranchId?: string }) {
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
 
@@ -341,7 +346,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   };
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const cartTotal = cart.reduce((sum, item) => sum + item.dish.price * item.quantity, 0);
+  const cartTotal = cart.reduce((sum, item) => sum + (Number(item.dish.price) || 0) * item.quantity, 0);
 
   const handleGetLocation = async () => {
     if (typeof window === "undefined" || !navigator.geolocation) {
@@ -454,7 +459,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     message += `-----------------------------------\n`;
     
     cart.forEach((item) => {
-      message += `• *${item.quantity}x* ${item.dish.name} ($${item.dish.price.toFixed(2)} c/u)\n`;
+      message += `• *${item.quantity}x* ${item.dish.name} ($${formatPrice(item.dish.price)} c/u)\n`;
     });
 
     message += `-----------------------------------\n`;
@@ -1091,7 +1096,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           </div>
                           <div className="flex items-center justify-between pt-2">
                             <span className="text-xs font-black text-white" style={{ color: restaurant.themeColor }}>
-                              ${dish.price.toFixed(2)}
+                              ${formatPrice(dish.price)}
                             </span>
                             {dish.isAvailable ? (
                               <button
@@ -1166,7 +1171,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 <p className="text-slate-400 text-xs mt-1.5 leading-relaxed line-clamp-3">{dish.description || "Pack especial seleccionado."}</p>
                               </div>
                               <div className="flex items-center justify-between pt-2">
-                                <span className="text-base font-black text-amber-400">${dish.price.toFixed(2)}</span>
+                                <span className="text-base font-black text-amber-400">${formatPrice(dish.price)}</span>
                                 <div>
                                   {dish.isAvailable ? (
                                     <button
@@ -1215,7 +1220,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                               <p className="text-slate-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{dish.description || "Nuestra receta clásica seleccionada."}</p>
                             </div>
                             <div className="flex items-center justify-between pt-1">
-                              <span className="text-sm font-black text-white" style={{ color: restaurant.themeColor }}>${dish.price.toFixed(2)}</span>
+                              <span className="text-sm font-black text-white" style={{ color: restaurant.themeColor }}>${formatPrice(dish.price)}</span>
                               <div className="flex justify-end pt-2">
                                 {dish.isAvailable ? (
                                   <button
@@ -1301,7 +1306,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="font-bold text-white text-sm truncate">{item.dish.name}</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">${item.dish.price.toFixed(2)} c/u</p>
+                      <p className="text-xs text-slate-400 mt-0.5">${formatPrice(item.dish.price)} c/u</p>
                     </div>
                     
                     {/* Controls */}

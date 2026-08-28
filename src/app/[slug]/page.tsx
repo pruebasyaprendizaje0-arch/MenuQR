@@ -135,14 +135,17 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         name: c.name,
         order: c.order ?? 0,
         isActive: c.isActive ?? true,
-        dishes: (c.products || []).map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description ?? null,
-          price: p.price,
-          imageUrl: p.imageUrl ?? null,
-          isAvailable: p.isAvailable ?? true,
-        })),
+        dishes: (c.products || []).map((p: any) => {
+          const numPrice = Number(p.price);
+          return {
+            id: p.id,
+            name: p.name,
+            description: p.description ?? null,
+            price: Number.isFinite(numPrice) ? numPrice : 0,
+            imageUrl: p.imageUrl ?? null,
+            isAvailable: p.isAvailable ?? true,
+          };
+        }),
       }));
 
       const totalDuration = Math.round(performance.now() - pageStartTime);

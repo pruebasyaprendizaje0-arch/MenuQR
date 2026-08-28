@@ -1,7 +1,10 @@
-/**
- * Capa de Servicios de API Central (`ubicame-api`) para MenuQR Pro.
- * Conecta las peticiones cliente/servidor HTTP con https://api.ubicame.cc
- */
+let serverCache = <T extends (...args: any[]) => any>(fn: T): T => fn;
+try {
+  const reactModule = require("react");
+  if (typeof reactModule.cache === "function") {
+    serverCache = reactModule.cache;
+  }
+} catch {}
 
 export const getApiBaseUrl = (): string => {
   const isServer = typeof window === "undefined";
@@ -194,7 +197,7 @@ export const centralApiService = {
    * Obtener menú público completo (categorías y productos) por branchId o Slug.
    * GET /v1/branches/:branchId/menu
    */
-  async getMenu(branchIdOrSlug: string) {
+  getMenu: serverCache(async (branchIdOrSlug: string) => {
     const clean = branchIdOrSlug.toLowerCase().trim();
     const staticAssets = ["favicon.ico", "robots.txt", "sitemap.xml", "icon.png", "apple-touch-icon.png", "manifest.json"];
     if (staticAssets.includes(clean)) {
@@ -206,7 +209,7 @@ export const centralApiService = {
     const endpoint = `/v1/branches/${branchId}/menu`;
     console.log(`[getMenu Debug Log] URL consultada: ${getApiBaseUrl()}${endpoint} | slug: ${branchIdOrSlug} | branchId: ${branchId}`);
     return apiFetch(endpoint);
-  },
+  }),
 
   /**
    * Listar negocios del usuario autenticado.
