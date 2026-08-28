@@ -98,7 +98,7 @@ function TrackingContent({ slug }: { slug: string }) {
       setErrorMsg(res.error);
       setOrders([]);
     } else if (res.orders) {
-      setOrders(res.orders as OrderTrack[]);
+      setOrders(res.orders as unknown as OrderTrack[]);
       setLastUpdated(new Date());
     }
   };

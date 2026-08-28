@@ -256,7 +256,7 @@ export const centralApiService = {
    * Obtener lista de pedidos de una sucursal.
    * GET /v1/branches/:branchId/orders
    */
-  async getOrders(branchId: string, token: string, status?: string) {
+  async getOrders(branchId: string, token?: string, status?: string) {
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
     return apiFetch(`/v1/branches/${branchId}/orders${query}`, { token });
   },
@@ -273,7 +273,7 @@ export const centralApiService = {
     industry?: string;
     description?: string;
     whatsapp?: string;
-  }, token: string) {
+  }, token?: string) {
     return apiFetch("/v1/businesses", {
       method: "POST",
       body: JSON.stringify(businessData),
@@ -285,7 +285,7 @@ export const centralApiService = {
    * Actualizar un negocio existente.
    * PUT /v1/businesses/:businessId
    */
-  async updateBusiness(businessId: string, businessData: any, token: string) {
+  async updateBusiness(businessId: string, businessData: any, token?: string) {
     return apiFetch(`/v1/businesses/${businessId}`, {
       method: "PUT",
       body: JSON.stringify(businessData),
@@ -306,7 +306,7 @@ export const centralApiService = {
     ivaPercent?: number;
     servicePercent?: number;
     tablesConfig?: string;
-  }, token: string) {
+  }, token?: string) {
     return apiFetch(`/v1/businesses/${businessId}/branches`, {
       method: "POST",
       body: JSON.stringify(branchData),
@@ -322,7 +322,7 @@ export const centralApiService = {
     name: string;
     order?: number;
     isActive?: boolean;
-  }, token: string) {
+  }, token?: string) {
     return apiFetch(`/v1/branches/${branchId}/categories`, {
       method: "POST",
       body: JSON.stringify(categoryData),
@@ -338,7 +338,7 @@ export const centralApiService = {
     name?: string;
     order?: number;
     isActive?: boolean;
-  }, token: string) {
+  }, token?: string) {
     return apiFetch(`/v1/categories/${categoryId}`, {
       method: "PUT",
       body: JSON.stringify(categoryData),
@@ -350,7 +350,7 @@ export const centralApiService = {
    * Eliminar una categoría.
    * DELETE /v1/categories/:categoryId
    */
-  async deleteCategory(categoryId: string, token: string) {
+  async deleteCategory(categoryId: string, token?: string) {
     return apiFetch(`/v1/categories/${categoryId}`, {
       method: "DELETE",
       token,
@@ -369,7 +369,7 @@ export const centralApiService = {
     imageUrl?: string;
     isAvailable?: boolean;
     order?: number;
-  }, token: string) {
+  }, token?: string) {
     return apiFetch(`/v1/branches/${branchId}/products`, {
       method: "POST",
       body: JSON.stringify(productData),
@@ -388,7 +388,7 @@ export const centralApiService = {
     imageUrl?: string;
     isAvailable?: boolean;
     order?: number;
-  }, token: string) {
+  }, token?: string) {
     return apiFetch(`/v1/products/${productId}`, {
       method: "PUT",
       body: JSON.stringify(productData),
@@ -400,7 +400,7 @@ export const centralApiService = {
    * Cambiar disponibilidad de un producto (Activar / Desactivar).
    * PATCH /v1/products/:productId/availability
    */
-  async setProductAvailability(productId: string, isAvailable: boolean, token: string) {
+  async setProductAvailability(productId: string, isAvailable: boolean, token?: string) {
     return apiFetch(`/v1/products/${productId}/availability`, {
       method: "PATCH",
       body: JSON.stringify({ isAvailable }),
@@ -412,7 +412,7 @@ export const centralApiService = {
    * Eliminar un producto.
    * DELETE /v1/products/:productId
    */
-  async deleteProduct(productId: string, token: string) {
+  async deleteProduct(productId: string, token?: string) {
     return apiFetch(`/v1/products/${productId}`, {
       method: "DELETE",
       token,
@@ -448,7 +448,7 @@ export const centralApiService = {
    * Actualizar estado de un pedido.
    * PATCH /v1/orders/:orderId/status
    */
-  async updateOrderStatus(orderId: string, status: string, token: string) {
+  async updateOrderStatus(orderId: string, status: string, token?: string) {
     return apiFetch(`/v1/orders/${orderId}/status`, {
       method: "PATCH",
       body: JSON.stringify({ status }),

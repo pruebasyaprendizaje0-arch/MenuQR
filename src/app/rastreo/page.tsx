@@ -77,7 +77,7 @@ export default function GlobalOrderTrackingPage() {
       setErrorMsg(res.error);
       setOrders([]);
     } else if (res.orders) {
-      setOrders(res.orders as OrderTrack[]);
+      setOrders(res.orders as unknown as OrderTrack[]);
     }
   };
 

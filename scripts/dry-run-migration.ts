@@ -263,8 +263,8 @@ async function main() {
       (r) => r.id.toLowerCase() === targetFilter.toLowerCase() || r.slug.toLowerCase() === targetFilter.toLowerCase()
     );
     if (localRestaurants.length === 0) {
-      console.warn(`⚠️ No se encontró el restaurante con filtro '${targetFilter}' en la BD. Procesando todos los restaurantes disponibles (${allRestaurants.length}).`);
-      localRestaurants = allRestaurants;
+      console.error(`❌ ERROR: No se encontró el restaurante con el filtro especificado '${targetFilter}' en la base de datos.`);
+      process.exit(1);
     }
   }
 
@@ -506,7 +506,7 @@ async function main() {
               name: r.name,
               slug: r.slug,
               description: r.description || undefined,
-              whatsapp: r.phone || undefined,
+              whatsapp: (r as any).phone || r.whatsapp,
             },
             token
           );
@@ -541,7 +541,7 @@ async function main() {
             {
               name: "Principal",
               slug: r.slug,
-              phone: r.phone || undefined,
+              phone: (r as any).phone || r.whatsapp,
               deliveryCost: r.deliveryCost,
               ivaPercent: r.ivaPercent,
               servicePercent: r.servicePercent,
@@ -655,7 +655,7 @@ async function main() {
                   name: dish.name,
                   description: dish.description || undefined,
                   price: Number(dish.price),
-                  imageUrl: dish.image || undefined,
+                  imageUrl: dish.imageUrl || (dish as any).image || undefined,
                   isAvailable: dish.isAvailable,
                 },
                 token
@@ -696,7 +696,7 @@ async function main() {
           if (!centralOrder) {
             console.log(`   ➕ Creando pedido #${order.orderNumber}...`);
             const orderItemsPayload = order.items.map((item) => {
-              const centralProdId = mappedProducts[item.dishId]?.centralProductId;
+              const centralProdId = mappedProducts[(item as any).dishId || item.id]?.centralProductId;
               return {
                 productId: centralProdId || undefined,
                 productName: item.dishName,
@@ -711,10 +711,10 @@ async function main() {
                 tableName: order.tableName || undefined,
                 customerName: order.customerName || "Cliente Local",
                 customerPhone: order.customerPhone || undefined,
-                customerAddress: order.address || undefined,
+                customerAddress: (order as any).address || undefined,
                 items: orderItemsPayload,
                 paymentMethod: order.paymentMethod || "EFECTIVO",
-                notes: order.notes || undefined,
+                notes: (order as any).notes || undefined,
               },
               token
             );
