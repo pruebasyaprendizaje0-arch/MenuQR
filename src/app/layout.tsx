@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
+import { Outfit, Playfair_Display } from "next/font/google";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -11,6 +12,18 @@ const geistMono = localFont({
   src: "./fonts/GeistMonoVF.woff",
   variable: "--font-geist-mono",
   weight: "100 900",
+});
+
+const outfit = Outfit({
+  subsets: ["latin"],
+  variable: "--font-outfit",
+  display: "swap",
+});
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  variable: "--font-playfair",
+  display: "swap",
 });
 
 const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com";
@@ -129,7 +142,7 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="es" className="dark scroll-smooth">
+    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${outfit.variable} ${playfair.variable} dark scroll-smooth`}>
       <head>
         <script
           type="application/ld+json"

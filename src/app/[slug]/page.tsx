@@ -131,8 +131,10 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       const totalDuration = Math.round(performance.now() - pageStartTime);
       console.log(`[MenuPage Performance Log] FUENTE PRINCIPAL: API Central para '${slug}' (centralBranchId: ${b.id} | Categorías: ${categories.length}) - API Central: ${apiDuration}ms, Total Servidor: ${totalDuration}ms`);
 
-      const session = await getUserSession();
-      const isSuperAdmin = await getSuperAdminSession();
+      const [session, isSuperAdmin] = await Promise.all([
+        getUserSession(),
+        getSuperAdminSession(),
+      ]);
 
       const serializedRestaurant = {
         id: b.id,

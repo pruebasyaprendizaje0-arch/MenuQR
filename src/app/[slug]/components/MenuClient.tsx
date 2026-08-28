@@ -549,6 +549,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               <img 
                 src={logoClean} 
                 alt={restaurant.name} 
+                loading="lazy"
+                decoding="async"
                 className="h-12 w-12 rounded-2xl object-cover border border-slate-800"
               />
             ) : (
@@ -676,6 +678,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 <img 
                   src={coverBg} 
                   alt="" 
+                  loading="lazy"
+                  decoding="async"
                   className={`absolute inset-0 w-full h-full object-cover transition-all duration-300 ${
                     coverBg === logoClean ? "filter blur-2xl opacity-25 scale-110" : "opacity-45"
                   }`} 
@@ -711,6 +715,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     <img 
                       src={logoClean} 
                       alt={restaurant.name} 
+                      loading="lazy"
+                      decoding="async"
                       className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl object-cover border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover/logo:scale-105"
                     />
                   ) : (
