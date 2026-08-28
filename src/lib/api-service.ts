@@ -4,12 +4,22 @@
  */
 
 export const getApiBaseUrl = (): string => {
-  const rawUrl =
-    process.env.MIGRATION_API_URL ||
-    process.env.API_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    process.env.VITE_API_URL ||
-    "https://api.ubicame.cc";
+  const isServer = typeof window === "undefined";
+  let rawUrl: string;
+
+  if (isServer) {
+    rawUrl =
+      process.env.API_INTERNAL_URL ||
+      process.env.MIGRATION_API_URL ||
+      process.env.API_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      "https://api.ubicame.cc";
+  } else {
+    rawUrl =
+      process.env.NEXT_PUBLIC_API_URL ||
+      "https://api.ubicame.cc";
+  }
+
   return rawUrl.replace(/\/$/, "");
 };
 
@@ -17,6 +27,7 @@ export const isCentralApiEnabled = (): boolean => {
   return (
     process.env.USE_CENTRAL_API === "true" ||
     process.env.NEXT_PUBLIC_USE_CENTRAL_API === "true" ||
+    !!process.env.API_INTERNAL_URL ||
     !!process.env.MIGRATION_API_URL ||
     !!process.env.API_URL ||
     !!process.env.NEXT_PUBLIC_API_URL ||
@@ -67,7 +78,7 @@ function resolveCentralBranchId(slugOrId: string): string {
 
 /**
  * Realiza peticiones HTTP a la API Central enviando cabeceras y JWT Bearer Token.
- * Soporta timeout de 5 segundos con AbortController y revalidación de caché de Next.js.
+ * Soporta timeout de 3 segundos con AbortController y revalidación de caché de Next.js.
  */
 async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { token, headers: customHeaders, ...restOptions } = options;
@@ -87,13 +98,15 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
 
   const isGet = !options.method || options.method.toUpperCase() === "GET";
   const method = (options.method || "GET").toUpperCase();
+  const isServer = typeof window === "undefined";
+  const connType = isServer ? "INTERNA" : "PUBLICA";
 
-  // Configurar timeout máximo de 5 segundos
+  // Configurar timeout máximo de 3 segundos (3000 ms)
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
 
   const startTime = performance.now();
-  console.log(`[Central API Request] ${method} ${url}`);
+  console.log(`[Central API Request] [${connType}] ${method} ${url}`);
 
   try {
     const response = await fetch(url, {
@@ -106,7 +119,7 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
 
     clearTimeout(timeoutId);
     const duration = Math.round(performance.now() - startTime);
-    console.log(`[Central API Timing] ${method} ${url} respondió en ${duration}ms (HTTP ${response.status})`);
+    console.log(`[Central API Timing] [${connType}] ${method} ${url} respondió en ${duration}ms (HTTP ${response.status})`);
 
     if (!response.ok) {
       let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`;
@@ -132,12 +145,12 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
     clearTimeout(timeoutId);
     const duration = Math.round(performance.now() - startTime);
     if (err.name === "AbortError") {
-      console.error(`[Central API Timeout Error] ${method} ${url} superó el tiempo límite de 5000ms (${duration}ms)`);
-      const timeoutError: any = new Error(`Request to Central API timed out after 5000ms (${url})`);
+      console.error(`[Central API Timeout Error] [${connType}] ${method} ${url} superó el tiempo límite de 3000ms (${duration}ms)`);
+      const timeoutError: any = new Error(`Request to Central API timed out after 3000ms (${url})`);
       timeoutError.status = 504;
       throw timeoutError;
     }
-    console.error(`[Central API Error] ${method} ${url} falló en ${duration}ms: ${err.message}`);
+    console.error(`[Central API Error] [${connType}] ${method} ${url} falló en ${duration}ms: ${err.message}`);
     throw err;
   }
 }
@@ -146,7 +159,7 @@ export const centralApiService = {
   // --- FASE 1: AUTENTICACIÓN ---
 
   /**
-   * Iniciar sesión en la API Central.
+   * Autenticar usuario con email y password.
    * POST /v1/auth/login
    */
   async login(email: string, password: string) {
@@ -182,6 +195,13 @@ export const centralApiService = {
    * GET /v1/branches/:branchId/menu
    */
   async getMenu(branchIdOrSlug: string) {
+    const clean = branchIdOrSlug.toLowerCase().trim();
+    const staticAssets = ["favicon.ico", "robots.txt", "sitemap.xml", "icon.png", "apple-touch-icon.png", "manifest.json"];
+    if (staticAssets.includes(clean)) {
+      console.warn(`[getMenu Info] Omite consulta a la API Central para recurso estático: ${clean}`);
+      return null;
+    }
+
     const branchId = resolveCentralBranchId(branchIdOrSlug);
     const endpoint = `/v1/branches/${branchId}/menu`;
     console.log(`[getMenu Debug Log] URL consultada: ${getApiBaseUrl()}${endpoint} | slug: ${branchIdOrSlug} | branchId: ${branchId}`);

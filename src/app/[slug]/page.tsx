@@ -15,8 +15,21 @@ interface PageProps {
   };
 }
 
+const IGNORED_STATIC_SLUGS = [
+  "favicon.ico",
+  "robots.txt",
+  "sitemap.xml",
+  "icon.png",
+  "apple-touch-icon.png",
+  "manifest.json",
+];
+
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const slug = params.slug.toLowerCase().trim();
+
+  if (IGNORED_STATIC_SLUGS.includes(slug)) {
+    return {};
+  }
 
   // 1. Intentar la API Central como fuente principal para metadata
   try {
@@ -102,6 +115,10 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
   const pageStartTime = performance.now();
   const slug = params.slug.toLowerCase().trim();
 
+  if (IGNORED_STATIC_SLUGS.includes(slug)) {
+    return null;
+  }
+
   // 1. FUENTE PRINCIPAL: Consultar la API Central
   const apiStartTime = performance.now();
   try {
@@ -129,7 +146,7 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       }));
 
       const totalDuration = Math.round(performance.now() - pageStartTime);
-      console.log(`[MenuPage Performance Log] FUENTE PRINCIPAL: API Central para '${slug}' (centralBranchId: ${b.id} | Categorías: ${categories.length}) - API Central: ${apiDuration}ms, Total Servidor: ${totalDuration}ms`);
+      console.log(`[API CENTRAL INTERNA] Exitoso para '${slug}' (centralBranchId: ${b.id} | Categorías: ${categories.length}) - API Central: ${apiDuration}ms | Total Servidor: ${totalDuration}ms`);
 
       const [session, isSuperAdmin] = await Promise.all([
         getUserSession(),
@@ -200,7 +217,7 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
     }
   } catch (err: any) {
     const apiDuration = Math.round(performance.now() - apiStartTime);
-    console.warn(`[MenuPage Performance Log] FALLBACK LOCAL UTILIZADO: La API Central falló o superó el timeout en ${apiDuration}ms para '${slug}' (${err?.message}). Consultando PostgreSQL local via Prisma...`);
+    console.warn(`[FALLBACK LOCAL] La API Central no respondió o superó el timeout de 3000ms en ${apiDuration}ms para '${slug}' (${err?.message}). Consultando PostgreSQL local via Prisma...`);
   }
 
   const prismaStartTime = performance.now();
