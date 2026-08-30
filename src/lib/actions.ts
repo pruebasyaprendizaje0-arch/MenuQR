@@ -1,8 +1,7 @@
 "use server";
 
 import { prismaControl, prismaTenant, prisma } from "@/lib/db";
-import { getUserSession, setUserSession, clearUserSession, getSuperAdminSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession, getCentralApiToken, setCentralApiToken, clearCentralApiToken } from "@/lib/auth";
-import { centralApiService, isCentralApiEnabled } from "@/lib/api-service";
+import { getUserSession, setUserSession, clearUserSession, getSuperAdminSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -131,33 +130,7 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
 
   const cleanEmail = email.toLowerCase().trim();
 
-  // 1. Intento prioritario en la API Central cuando está habilitada
-  if (isCentralApiEnabled()) {
-    try {
-      const result = await centralApiService.login(cleanEmail, password);
-      if (result?.token && result?.user) {
-        await setCentralApiToken(result.token);
-        await setUserSession(result.user.id, result.user.email);
-
-        if (process.env.NODE_ENV === "development") {
-          console.log(`[Central API Login Success] User ${result.user.email} (Role: ${result.user.role}) logged in.`);
-        }
-
-        // Únicamente si el rol de la API Central es estrictamente "SUPERADMIN", ir a /super-admin
-        if (result.user.role === "SUPERADMIN") {
-          await setSuperAdminSession();
-          redirect("/super-admin");
-        } else {
-          // Para dueños/administradores de restaurante (rol ADMIN, MANAGER, etc.), ir a /admin
-          redirect("/admin");
-        }
-      }
-    } catch (err: any) {
-      console.warn("[Login Warning] Central API login error, testing local fallback:", err.message);
-    }
-  }
-
-  // 2. Fallback a credenciales locales de Prisma/SuperAdmin si la API Central no está activa o falla en desarrollo
+  // Autenticación en la base de datos local de Prisma / SuperAdmin
   const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com";
   const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971*";
 
@@ -487,16 +460,7 @@ export async function createCategoryAction(restaurantId: string, formData: FormD
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
 
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      await centralApiService.createCategory(restaurantId, { name, order, isActive: true }, token || undefined);
-      revalidatePath("/admin");
-      return { success: true };
-    } catch (err: any) {
-      console.warn("[createCategoryAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   await prisma.category.create({
     data: {
@@ -517,16 +481,7 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
 
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      await centralApiService.updateCategory(categoryId, { name, order, isActive: true }, token || undefined);
-      revalidatePath("/admin");
-      return { success: true };
-    } catch (err: any) {
-      console.warn("[updateCategoryAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   const updated = await prisma.category.update({
     where: { id: categoryId },
@@ -545,16 +500,7 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
 export async function deleteCategoryAction(categoryId: string) {
   await refreshUserSession();
 
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      await centralApiService.deleteCategory(categoryId, token || undefined);
-      revalidatePath("/admin");
-      return { success: true };
-    } catch (err: any) {
-      console.warn("[deleteCategoryAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   const deleted = await prisma.category.delete({
     where: { id: categoryId },
@@ -582,23 +528,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     imageUrl = uploadedImage;
   }
 
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      await centralApiService.createProduct(categoryId, {
-        categoryId,
-        name,
-        description,
-        price,
-        imageUrl: imageUrl || undefined,
-        isAvailable,
-      }, token || undefined);
-      revalidatePath("/admin");
-      return { success: true };
-    } catch (err: any) {
-      console.warn("[createDishAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   const category = await prisma.category.findUnique({
     where: { id: categoryId },
@@ -639,22 +569,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     imageUrl = uploadedImage;
   }
 
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      await centralApiService.updateProduct(dishId, {
-        name,
-        description,
-        price,
-        imageUrl: imageUrl || undefined,
-        isAvailable,
-      }, token || undefined);
-      revalidatePath("/admin");
-      return { success: true };
-    } catch (err: any) {
-      console.warn("[updateDishAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   const updated = await prisma.dish.update({
     where: { id: dishId },
@@ -680,16 +595,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
 export async function deleteDishAction(dishId: string) {
   await refreshUserSession();
 
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      await centralApiService.deleteProduct(dishId, token || undefined);
-      revalidatePath("/admin");
-      return { success: true };
-    } catch (err: any) {
-      console.warn("[deleteDishAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   const deleted = await prisma.dish.delete({
     where: { id: dishId },
@@ -709,16 +615,7 @@ export async function toggleDishAvailabilityAction(dishId: string, isAvailable: 
   try {
     await refreshUserSession();
 
-    if (isCentralApiEnabled()) {
-      try {
-        const token = await getCentralApiToken();
-        await centralApiService.setProductAvailability(dishId, isAvailable, token || undefined);
-        revalidatePath("/admin");
-        return { success: true };
-      } catch (err: any) {
-        console.warn("[toggleDishAvailabilityAction Warning] Central API failed, using local fallback:", err.message);
-      }
-    }
+
 
     const updated = await prisma.dish.update({
       where: { id: dishId },
@@ -1132,35 +1029,7 @@ export async function createOrderAction(data: {
   paymentMethod: string;
   items: { dishName: string; price: number; quantity: number }[];
 }) {
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      const apiOrderData = {
-        tableName: data.tableName,
-        customerName: data.customerName,
-        customerPhone: data.customerPhone,
-        customerAddress: data.customerAddress,
-        paymentMethod: data.paymentMethod,
-        tip: data.tip || 0,
-        items: data.items.map(item => ({
-          productName: item.dishName,
-          unitPrice: item.price,
-          quantity: item.quantity,
-        })),
-      };
-      const response = await centralApiService.createOrder(data.restaurantId, apiOrderData, token || undefined);
-      const createdOrder = response?.order || response;
-      revalidatePath("/admin");
-      return {
-        success: true,
-        orderId: createdOrder.id,
-        orderNumber: createdOrder.orderNumber || createdOrder.id || 1,
-        total: createdOrder.total,
-      };
-    } catch (err: any) {
-      console.warn("[createOrderAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   try {
     const order = await prisma.order.create({
@@ -1262,16 +1131,7 @@ export async function updateOrderStatusAction(
   status: string,
   driverData?: { driverName?: string; driverPhone?: string }
 ) {
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      await centralApiService.updateOrderStatus(orderId, status, token || undefined);
-      revalidatePath("/admin");
-      return { success: true };
-    } catch (err: any) {
-      console.warn("[updateOrderStatusAction Warning] Central API failed, using local fallback:", err.message);
-    }
-  }
+
 
   try {
     const updateData: any = { status };
@@ -1364,22 +1224,7 @@ export async function getOrderTrackingAction(restaurantSlug?: string | null, que
 }
 
 export async function getDeliveryOrdersAction(restaurantSlug: string) {
-  if (isCentralApiEnabled()) {
-    try {
-      const token = await getCentralApiToken();
-      const ordersRes = await centralApiService.getOrders(restaurantSlug, token || undefined);
-      const ordersList = Array.isArray(ordersRes) ? ordersRes : ordersRes?.orders || [];
-      return {
-        success: true,
-        restaurant: { slug: restaurantSlug, name: restaurantSlug },
-        orders: ordersList,
-      };
-    } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[getDeliveryOrdersAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-    }
-  }
+
 
   try {
     const restaurant = await prisma.restaurant.findUnique({
@@ -1404,7 +1249,14 @@ export async function getDeliveryOrdersAction(restaurantSlug: string) {
       }
     });
 
-    return { success: true, restaurant, orders };
+    const serializedOrders = orders.map((o: any) => ({
+      ...o,
+      createdAt: typeof o.createdAt === "string" ? o.createdAt : o.createdAt.toISOString(),
+      updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : o.updatedAt.toISOString(),
+      items: o.items || [],
+    }));
+
+    return { success: true, restaurant, orders: serializedOrders };
   } catch (error) {
     console.error("Error fetching delivery orders:", error);
     return { error: "No se pudieron cargar los pedidos a domicilio." };

@@ -4,7 +4,6 @@
  * y la lógica de branchId y exclusión de favicon.
  */
 import assert from "assert";
-import { centralApiService } from "./api-service";
 
 export const formatPrice = (price: unknown): string => {
   if (price === null || price === undefined) {
@@ -46,21 +45,11 @@ async function runPriceAndApiTests() {
   assert.strictEqual(formatPrice("invalid"), "0.00", "String no numérico debe retornar '0.00'");
   console.log("✔ Test 4: Precios inválidos (null, undefined, NaN -> '0.00') verificados.");
 
-  // 5. Pigro usa el centralBranchId correcto
-  // 6. Nunca usa el ID local como branchId central
-  const menuCallResult = await centralApiService.getMenu("pigro");
-  console.log("✔ Test 5 & 6: Resolutor de branchId verificado sin usar ID local.");
-
-  // 7. favicon.ico no llama a la API Central
-  const faviconResult = await centralApiService.getMenu("favicon.ico");
-  assert.strictEqual(faviconResult, null, "favicon.ico debe omitir la llamada a la API Central");
-  console.log("✔ Test 7: Omitir favicon.ico verificado exitosamente.");
-
-  // 8. Normalización de precios de productos
+  // 5. Normalización de precios de productos
   const p1 = normalizeProductPrice("12.5");
   assert.strictEqual(typeof p1, "number", "Normalización debe retornar number");
   assert.strictEqual(p1.toFixed(2), "12.50", "toFixed(2) sobre precio normalizado debe funcionar sin errores");
-  console.log("✔ Test 8: Normalización de precios y ejecución de toFixed(2) sin error comprobada.");
+  console.log("✔ Test 5: Normalización de precios y ejecución de toFixed(2) sin error comprobada.");
 
   console.log("------------------------------------------");
   console.log("  TODAS LAS PRUEBAS DE PRECIOS PASARON (100%)");
