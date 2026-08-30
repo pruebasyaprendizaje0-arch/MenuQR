@@ -121,125 +121,160 @@ async function saveUploadedFile(file: File | null): Promise<string | null> {
 
 // Authentication Actions (SaaS Multi-tenant)
 export async function loginUserAction(prevState: unknown, formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
+  try {
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
 
-  if (!email || !password) {
-    return { error: "Por favor complete todos los campos." };
+    if (!email || !password) {
+      return { error: "Por favor complete todos los campos." };
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Autenticación en la base de datos local de Prisma / SuperAdmin
+    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com";
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971*";
+
+    if (cleanEmail === superAdminEmail.toLowerCase().trim() && password === superAdminPassword) {
+      await setSuperAdminSession();
+      redirect("/super-admin");
+    }
+
+    let user: any = null;
+    try {
+      user = await prismaControl.user.findUnique({
+        where: { email: cleanEmail },
+      });
+    } catch (dbErr) {
+      console.error("Database connection error during login:", dbErr);
+      return { error: "No se pudo conectar con la base de datos. Por favor intenta nuevamente en unos momentos." };
+    }
+
+    if (!user || !bcrypt.compareSync(password, user.password)) {
+      return { error: "Correo o contraseña incorrectos." };
+    }
+
+    await setUserSession(user.id, user.email);
+    redirect("/admin");
+  } catch (error: any) {
+    if (error?.digest?.startsWith("NEXT_REDIRECT") || error?.message?.includes("NEXT_REDIRECT")) {
+      throw error;
+    }
+    console.error("Error in loginUserAction:", error);
+    return { error: "Ocurrió un error inesperado al iniciar sesión. Por favor reintenta." };
   }
-
-  const cleanEmail = email.toLowerCase().trim();
-
-  // Autenticación en la base de datos local de Prisma / SuperAdmin
-  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com";
-  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971*";
-
-  if (cleanEmail === superAdminEmail.toLowerCase().trim() && password === superAdminPassword) {
-    await setSuperAdminSession();
-    redirect("/super-admin");
-  }
-
-  const user = await prismaControl.user.findUnique({
-    where: { email: cleanEmail },
-  });
-
-  if (!user || !bcrypt.compareSync(password, user.password)) {
-    return { error: "Correo o contraseña incorrectos." };
-  }
-
-  await setUserSession(user.id, user.email);
-  redirect("/admin");
 }
 
 export async function registerUserAction(prevState: unknown, formData: FormData) {
-  const name = formData.get("name") as string;
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const restaurantName = formData.get("restaurantName") as string;
-  const province = formData.get("province") as string;
-  const canton = formData.get("canton") as string;
-  const parroquia = formData.get("parroquia") as string;
-  const acceptTerms = formData.get("acceptTerms");
-  const sector = (formData.get("sector") as string) || "";
+  try {
+    const name = formData.get("name") as string;
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+    const restaurantName = formData.get("restaurantName") as string;
+    const province = formData.get("province") as string;
+    const canton = formData.get("canton") as string;
+    const parroquia = formData.get("parroquia") as string;
+    const acceptTerms = formData.get("acceptTerms");
+    const sector = (formData.get("sector") as string) || "";
 
-  if (!name || !email || !password || !restaurantName || !province || !canton || !parroquia) {
-    return { error: "Por favor complete todos los campos requeridos de ubicación." };
-  }
-
-  if (!acceptTerms || (acceptTerms !== "on" && acceptTerms !== "true")) {
-    return { error: "Debe aceptar los Términos y Condiciones y la Política de Privacidad de acuerdo a la legislación ecuatoriana para registrarse." };
-  }
-
-  const cleanEmail = email.toLowerCase().trim();
-
-  // Check unique email
-  const existingUser = await prismaControl.user.findUnique({
-    where: { email: cleanEmail }
-  });
-
-  if (existingUser) {
-    return { error: "El correo electrónico ya está registrado." };
-  }
-
-  // Hash password
-  const hashedPassword = bcrypt.hashSync(password, 10);
-
-  // Generate unique slug from restaurantName
-  let baseSlug = restaurantName
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove accents
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
-
-  if (!baseSlug) {
-    baseSlug = "mi-restaurante";
-  }
-
-  let cleanSlug = baseSlug;
-  let isSlugTaken = true;
-  let attempt = 0;
-
-  while (isSlugTaken) {
-    const existingRestaurant = await prismaTenant.restaurant.findUnique({
-      where: { slug: cleanSlug }
-    });
-    if (!existingRestaurant) {
-      isSlugTaken = false;
-    } else {
-      attempt++;
-      cleanSlug = `${baseSlug}-${attempt}`;
+    if (!name || !email || !password || !restaurantName || !province || !canton || !parroquia) {
+      return { error: "Por favor complete todos los campos requeridos de ubicación." };
     }
+
+    if (!acceptTerms || (acceptTerms !== "on" && acceptTerms !== "true")) {
+      return { error: "Debe aceptar los Términos y Condiciones y la Política de Privacidad de acuerdo a la legislación ecuatoriana para registrarse." };
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Check unique email
+    let existingUser: any = null;
+    try {
+      existingUser = await prismaControl.user.findUnique({
+        where: { email: cleanEmail }
+      });
+    } catch (dbErr) {
+      console.error("Database connection error during register check:", dbErr);
+      return { error: "No se pudo conectar a la base de datos. Por favor reintenta en unos segundos." };
+    }
+
+    if (existingUser) {
+      return { error: "El correo electrónico ya está registrado." };
+    }
+
+    // Hash password
+    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    // Generate unique slug from restaurantName
+    let baseSlug = restaurantName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // remove accents
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "");
+
+    if (!baseSlug) {
+      baseSlug = "mi-restaurante";
+    }
+
+    let cleanSlug = baseSlug;
+    let isSlugTaken = true;
+    let attempt = 0;
+
+    while (isSlugTaken) {
+      let existingRestaurant: any = null;
+      try {
+        existingRestaurant = await prismaTenant.restaurant.findUnique({
+          where: { slug: cleanSlug }
+        });
+      } catch (dbErr) {
+        console.error("Database error checking slug:", dbErr);
+        isSlugTaken = false;
+        break;
+      }
+      if (!existingRestaurant) {
+        isSlugTaken = false;
+      } else {
+        attempt++;
+        cleanSlug = `${baseSlug}-${attempt}`;
+      }
+    }
+
+    const trialEndsAt = new Date();
+    trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
+
+    // Create User in Control DB and Restaurant in Tenant DB
+    const user = await prismaControl.user.create({
+      data: {
+        name,
+        email: cleanEmail,
+        password: hashedPassword,
+      },
+    });
+
+    const localityParts = [province, canton, parroquia, sector].filter(Boolean);
+    const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
+
+    await prismaTenant.restaurant.create({
+      data: {
+        userId: user.id,
+        name: restaurantName,
+        slug: cleanSlug,
+        whatsapp: "",
+        locality,
+        trialEndsAt,
+      },
+    });
+
+    await setUserSession(user.id, user.email);
+    redirect("/admin");
+  } catch (error: any) {
+    if (error?.digest?.startsWith("NEXT_REDIRECT") || error?.message?.includes("NEXT_REDIRECT")) {
+      throw error;
+    }
+    console.error("Error in registerUserAction:", error);
+    return { error: "Ocurrió un error inesperado al registrar el usuario. Por favor reintente." };
   }
-
-  const trialEndsAt = new Date();
-  trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
-
-  // Create User in Control DB and Restaurant in Tenant DB
-  const user = await prismaControl.user.create({
-    data: {
-      name,
-      email: cleanEmail,
-      password: hashedPassword,
-    },
-  });
-
-  const localityParts = [province, canton, parroquia, sector].filter(Boolean);
-  const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
-
-  await prismaTenant.restaurant.create({
-    data: {
-      userId: user.id,
-      name: restaurantName,
-      slug: cleanSlug,
-      whatsapp: "",
-      locality,
-      trialEndsAt,
-    },
-  });
-
-  await setUserSession(user.id, user.email);
-  redirect("/admin");
 }
 
 export async function logoutUserAction() {
