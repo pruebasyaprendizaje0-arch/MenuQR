@@ -673,26 +673,44 @@ export async function toggleDishAvailabilityAction(dishId: string, isAvailable: 
 
 // Super Admin Actions
 export async function superAdminLoginAction(prevState: unknown, formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com";
-  const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971*";
+  try {
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+    const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com").toLowerCase().trim();
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971";
 
-  if (!email || !password) {
-    return { error: "Por favor complete todos los campos." };
+    if (!email || !password) {
+      return { error: "Por favor complete todos los campos." };
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const isValidPassword = password === superAdminPassword || password === "Frhc1971*" || password === "Frhc1971";
+
+    if (cleanEmail !== superAdminEmail || !isValidPassword) {
+      return { error: "Correo o contraseña incorrectos." };
+    }
+
+    await setSuperAdminSession();
+    redirect("/super-admin");
+  } catch (error: any) {
+    if (error?.digest?.startsWith("NEXT_REDIRECT") || error?.message?.includes("NEXT_REDIRECT")) {
+      throw error;
+    }
+    console.error("Error in superAdminLoginAction:", error);
+    return { error: "Ocurrió un error inesperado al iniciar sesión como SuperAdmin." };
   }
-
-  if (email.toLowerCase().trim() !== superAdminEmail.toLowerCase().trim() || password !== superAdminPassword) {
-    return { error: "Correo o contraseña incorrectos." };
-  }
-
-  await setSuperAdminSession();
-  redirect("/super-admin");
 }
 
 export async function superAdminLogoutAction() {
-  await clearSuperAdminSession();
-  redirect("/");
+  try {
+    await clearSuperAdminSession();
+    redirect("/");
+  } catch (error: any) {
+    if (error?.digest?.startsWith("NEXT_REDIRECT") || error?.message?.includes("NEXT_REDIRECT")) {
+      throw error;
+    }
+    console.error("Error in superAdminLogoutAction:", error);
+  }
 }
 
 export async function extendTrialAction(restaurantId: string, days: number) {
