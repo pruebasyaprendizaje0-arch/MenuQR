@@ -784,71 +784,88 @@ export async function superAdminCreateRestaurantAction(data: {
   sector?: string;
   plan?: "FREE" | "PRO";
 }) {
-  const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) {
-    return { error: "No autorizado." };
-  }
+  try {
+    const isSuperAdmin = await getSuperAdminSession();
+    if (!isSuperAdmin) {
+      return { error: "No autorizado." };
+    }
 
-  const cleanEmail = data.email.toLowerCase().trim();
-  const existingUser = await prismaControl.user.findUnique({
-    where: { email: cleanEmail }
-  });
+    const cleanEmail = data.email.toLowerCase().trim();
+    let existingUser: any = null;
+    try {
+      existingUser = await prismaControl.user.findUnique({
+        where: { email: cleanEmail }
+      });
+    } catch (dbErr: any) {
+      console.error("Database error in superAdminCreateRestaurantAction:", dbErr);
+      return { error: `Error al verificar el correo de usuario (${dbErr?.message || "fallo de BD"}).` };
+    }
 
-  if (existingUser) {
-    return { error: "El correo electrónico ya está registrado." };
-  }
+    if (existingUser) {
+      return { error: "El correo electrónico ya está registrado." };
+    }
 
-  const hashedPassword = bcrypt.hashSync(data.password, 10);
+    const hashedPassword = bcrypt.hashSync(data.password || "123456", 10);
 
-  let baseSlug = data.restaurantName
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
+    let baseSlug = data.restaurantName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "");
 
-  if (!baseSlug) baseSlug = "restaurante";
+    if (!baseSlug) baseSlug = "restaurante";
 
-  let cleanSlug = baseSlug;
-  let isSlugTaken = true;
-  let attempt = 0;
+    let cleanSlug = baseSlug;
+    let isSlugTaken = true;
+    let attempt = 0;
 
-  while (isSlugTaken) {
-    const existingRestaurant = await prismaTenant.restaurant.findUnique({
-      where: { slug: cleanSlug }
+    while (isSlugTaken) {
+      let existingRestaurant: any = null;
+      try {
+        existingRestaurant = await prismaTenant.restaurant.findUnique({
+          where: { slug: cleanSlug }
+        });
+      } catch (e) {
+        isSlugTaken = false;
+        break;
+      }
+      if (!existingRestaurant) {
+        isSlugTaken = false;
+      } else {
+        attempt++;
+        cleanSlug = `${baseSlug}-${attempt}`;
+      }
+    }
+
+    const user = await prismaControl.user.create({
+      data: {
+        name: data.userName,
+        email: cleanEmail,
+        password: hashedPassword,
+      }
     });
-    if (!existingRestaurant) {
-      isSlugTaken = false;
-    } else {
-      attempt++;
-      cleanSlug = `${baseSlug}-${attempt}`;
-    }
+
+    const localityParts = [data.province, data.canton, data.parroquia, data.sector].filter(Boolean);
+    const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
+
+    await prismaTenant.restaurant.create({
+      data: {
+        userId: user.id,
+        name: data.restaurantName,
+        slug: cleanSlug,
+        whatsapp: data.whatsapp || "",
+        locality,
+        plan: data.plan || "FREE",
+      }
+    });
+
+    revalidatePath("/super-admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error creating restaurant as super admin:", error);
+    return { error: error?.message || "No se pudo crear el negocio. Revisa la conexión con la base de datos." };
   }
-
-  const user = await prismaControl.user.create({
-    data: {
-      name: data.userName,
-      email: cleanEmail,
-      password: hashedPassword,
-    }
-  });
-
-  const localityParts = [data.province, data.canton, data.parroquia, data.sector].filter(Boolean);
-  const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
-
-  await prismaTenant.restaurant.create({
-    data: {
-      userId: user.id,
-      name: data.restaurantName,
-      slug: cleanSlug,
-      whatsapp: data.whatsapp,
-      locality,
-      plan: data.plan || "FREE",
-    }
-  });
-
-  revalidatePath("/super-admin");
-  return { success: true };
 }
 
 export async function superAdminUpdateRestaurantAction(

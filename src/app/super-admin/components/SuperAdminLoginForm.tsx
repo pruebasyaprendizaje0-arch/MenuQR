@@ -1,6 +1,7 @@
 "use client";
 
 import { useFormState, useFormStatus } from "react-dom";
+import { useEffect } from "react";
 import { superAdminLoginAction } from "@/lib/actions";
 import { ShieldAlert, KeyRound, Mail } from "lucide-react";
 
@@ -20,6 +21,12 @@ function SubmitButton() {
 
 export function SuperAdminLoginForm() {
   const [state, formAction] = useFormState(superAdminLoginAction, null);
+
+  useEffect(() => {
+    if ((state as any)?.success) {
+      window.location.href = "/super-admin";
+    }
+  }, [state]);
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
