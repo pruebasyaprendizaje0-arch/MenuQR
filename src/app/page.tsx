@@ -7,22 +7,28 @@ import { ScrollVideoBackground } from "./components/ScrollVideoBackground";
 export const dynamic = "force-dynamic";
 
 export default async function LandingPage() {
-  // Query all restaurants from the DB to build the public directory
-  const restaurants = await prismaTenant.restaurant.findMany({
-    select: {
-      id: true,
-      slug: true,
-      name: true,
-      logoUrl: true,
-      specialty: true,
-      locality: true,
-      description: true,
-      themeColor: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  // Query all restaurants from the DB to build the public directory safely
+  let restaurants: any[] = [];
+  try {
+    restaurants = await prismaTenant.restaurant.findMany({
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        logoUrl: true,
+        specialty: true,
+        locality: true,
+        description: true,
+        themeColor: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching restaurants on root landing page:", error);
+    restaurants = [];
+  }
 
   let whatsappSupport = "";
   try {

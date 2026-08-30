@@ -26,31 +26,37 @@ export default async function AdminPage() {
     console.error("Error cleaning up old orders:", err);
   }
 
-  const restaurant = await prisma.restaurant.findFirst({
-    where: { userId: session.userId },
-    include: {
-      categories: {
-        orderBy: { order: "asc" },
-        include: {
-          dishes: {
-            orderBy: { createdAt: "desc" },
+  let restaurant: any = null;
+  try {
+    restaurant = await prisma.restaurant.findFirst({
+      where: { userId: session.userId },
+      include: {
+        categories: {
+          orderBy: { order: "asc" },
+          include: {
+            dishes: {
+              orderBy: { createdAt: "desc" },
+            },
           },
         },
-      },
-      orders: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          items: true
+        orders: {
+          orderBy: { createdAt: "desc" },
+          include: {
+            items: true
+          }
+        },
+        seasonRates: {
+          orderBy: { startDate: "asc" }
+        },
+        customers: {
+          orderBy: { lastOrderAt: "desc" }
         }
       },
-      seasonRates: {
-        orderBy: { startDate: "asc" }
-      },
-      customers: {
-        orderBy: { lastOrderAt: "desc" }
-      }
-    },
-  });
+    });
+  } catch (err) {
+    console.error("Error fetching restaurant for admin page:", err);
+    restaurant = null;
+  }
 
   if (!restaurant) {
     const cleanSlug = `restaurante-${session.userId.substring(0, 5)}`;
