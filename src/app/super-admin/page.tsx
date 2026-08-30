@@ -63,7 +63,7 @@ export default async function SuperAdminPage() {
 
   // Serialize dates for Client Boundary
   const serializedRestaurants = restaurants.map((r: any) => {
-    const owner = userMap.get(r.userId);
+    const owner = userMap.get(r.userId) as any;
     return {
       ...r,
       userName: owner?.name || "Usuario",

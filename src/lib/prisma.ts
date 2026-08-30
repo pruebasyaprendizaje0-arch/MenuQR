@@ -1,67 +1,43 @@
-import { PrismaClient as PrismaControlClient } from "@prisma/control";
-import { PrismaClient as PrismaTenantClient } from "@prisma/tenant";
+import { PrismaClient } from "@prisma/client";
 
 const globalForPrisma = globalThis as unknown as {
-  prismaControl: PrismaControlClient | undefined;
-  prismaTenant: PrismaTenantClient | undefined;
-  tenantCache: Map<string, PrismaTenantClient> | undefined;
+  prismaMain: PrismaClient | undefined;
+  tenantCache: Map<string, PrismaClient> | undefined;
 };
 
-// --- CLIENTE CONTROL (BD Global / Admin) ---
-function getControlDatabaseUrl(): string {
+function getDatabaseUrl(): string {
   return (
+    process.env.DATABASE_URL ||
     process.env.CONTROL_DATABASE_URL ||
-    process.env.DATABASE_URL_CONTROL ||
-    process.env.DATABASE_URL ||
-    "postgresql://postgres:postgres@localhost:5432/menuqr_control?schema=public"
-  );
-}
-
-export const prismaControl =
-  globalForPrisma.prismaControl ??
-  new PrismaControlClient({
-    datasources: {
-      db: {
-        url: getControlDatabaseUrl(),
-      },
-    },
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
-  });
-
-globalForPrisma.prismaControl = prismaControl;
-
-// --- CLIENTE TENANT (BD Inquilino / Restaurante por defecto) ---
-function getTenantDatabaseUrl(): string {
-  return (
     process.env.TENANT_DATABASE_URL ||
-    process.env.DATABASE_URL_TENANT ||
-    process.env.DATABASE_URL ||
-    "postgresql://postgres:postgres@localhost:5432/menuqr_tenant?schema=public"
+    "postgresql://postgres:postgres@localhost:5432/menuqr_pro?schema=public"
   );
 }
 
-export const prismaTenant =
-  globalForPrisma.prismaTenant ??
-  new PrismaTenantClient({
+export const prisma =
+  globalForPrisma.prismaMain ??
+  new PrismaClient({
     datasources: {
       db: {
-        url: getTenantDatabaseUrl(),
+        url: getDatabaseUrl(),
       },
     },
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 
-globalForPrisma.prismaTenant = prismaTenant;
+globalForPrisma.prismaMain = prisma;
 
-// --- CLIENTES DINÁMICOS POR INQUILINO (OPCIONAL EN PRODUCCIÓN MULTI-BD) ---
+export const prismaControl = prisma as any;
+export const prismaTenant = prisma as any;
+
 if (!globalForPrisma.tenantCache) {
-  globalForPrisma.tenantCache = new Map<string, PrismaTenantClient>();
+  globalForPrisma.tenantCache = new Map<string, PrismaClient>();
 }
 const tenantCache = globalForPrisma.tenantCache;
 
-export function getTenantClient(dbUrl?: string): PrismaTenantClient {
-  if (!dbUrl) {
-    return prismaTenant;
+export function getTenantClient(dbUrl?: string): PrismaClient {
+  if (!dbUrl || dbUrl === getDatabaseUrl()) {
+    return prisma;
   }
 
   const existing = tenantCache.get(dbUrl);
@@ -73,7 +49,7 @@ export function getTenantClient(dbUrl?: string): PrismaTenantClient {
     url = `${url}${separator}connection_limit=3`;
   }
 
-  const client = new PrismaTenantClient({
+  const client = new PrismaClient({
     datasources: { db: { url } },
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
@@ -81,6 +57,3 @@ export function getTenantClient(dbUrl?: string): PrismaTenantClient {
   tenantCache.set(dbUrl, client);
   return client;
 }
-
-// Retrocompatibilidad con importaciones previas
-export const prisma = prismaTenant;
