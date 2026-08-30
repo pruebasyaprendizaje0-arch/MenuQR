@@ -28,9 +28,7 @@ export const prismaControl =
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prismaControl = prismaControl;
-}
+globalForPrisma.prismaControl = prismaControl;
 
 // --- CLIENTE TENANT (BD Inquilino / Restaurante por defecto) ---
 function getTenantDatabaseUrl(): string {
@@ -53,9 +51,7 @@ export const prismaTenant =
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prismaTenant = prismaTenant;
-}
+globalForPrisma.prismaTenant = prismaTenant;
 
 // --- CLIENTES DINÁMICOS POR INQUILINO (OPCIONAL EN PRODUCCIÓN MULTI-BD) ---
 if (!globalForPrisma.tenantCache) {

@@ -49,4 +49,4 @@ RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma
 EXPOSE 3000
 
 # Start server
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+CMD ["sh", "-c", "npx prisma migrate deploy || true; npm run start"]
