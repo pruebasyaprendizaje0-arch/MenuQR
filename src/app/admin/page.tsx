@@ -5,8 +5,24 @@ import { AdminDashboard } from "./components/AdminDashboard";
 
 export const dynamic = "force-dynamic";
 
+function toIso(val: any): string {
+  if (!val) return new Date().toISOString();
+  if (typeof val === "string") return val;
+  if (val instanceof Date) return val.toISOString();
+  try {
+    return new Date(val).toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
 export default async function AdminPage() {
-  const session = await getUserSession();
+  let session: any = null;
+  try {
+    session = await getUserSession();
+  } catch (err) {
+    console.error("Error fetching user session in AdminPage:", err);
+  }
 
   if (!session) {
     redirect("/login");
@@ -60,16 +76,20 @@ export default async function AdminPage() {
 
   if (!restaurant) {
     const cleanSlug = `restaurante-${session.userId.substring(0, 5)}`;
-    await prisma.restaurant.create({
-      data: {
-        userId: session.userId,
-        name: "Mi Restaurante",
-        slug: cleanSlug,
-        whatsapp: "",
-        themeColor: "#ef4444",
-        plan: "FREE",
-      },
-    });
+    try {
+      await prisma.restaurant.create({
+        data: {
+          userId: session.userId,
+          name: "Mi Restaurante",
+          slug: cleanSlug,
+          whatsapp: "",
+          themeColor: "#ef4444",
+          plan: "FREE",
+        },
+      });
+    } catch (err) {
+      console.error("Error creating default restaurant:", err);
+    }
     
     redirect("/admin/restaurante");
   }
@@ -80,7 +100,7 @@ export default async function AdminPage() {
     whatsappNumber: restaurant.whatsapp,
     paymentQrUrl: restaurant.qrCobroUrl,
     coverUrl: (restaurant as any).coverUrl ?? null,
-    trialEndsAt: restaurant.trialEndsAt.toISOString(),
+    trialEndsAt: toIso(restaurant.trialEndsAt),
     tablesConfig: (restaurant as any).tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",
     ivaPercent: (restaurant as any).ivaPercent ?? 15,
     servicePercent: (restaurant as any).servicePercent ?? 10,
@@ -96,32 +116,32 @@ export default async function AdminPage() {
     ivaOnTakeout: (restaurant as any).ivaOnTakeout ?? true,
     serviceOnTable: (restaurant as any).serviceOnTable ?? true,
     serviceOnTakeout: (restaurant as any).serviceOnTakeout ?? false,
-    categories: restaurant.categories.map(c => ({
+    categories: (restaurant.categories || []).map((c: any) => ({
       ...c,
-      dishes: c.dishes.map(d => ({
+      dishes: (c.dishes || []).map((d: any) => ({
         ...d,
         description: d.description || null,
         imageUrl: d.imageUrl || null
       }))
     })),
-    orders: (restaurant.orders ?? []).map(o => ({
+    orders: (restaurant.orders ?? []).map((o: any) => ({
       ...o,
-      createdAt: o.createdAt.toISOString(),
-      updatedAt: o.updatedAt.toISOString(),
-      items: o.items
+      createdAt: toIso(o.createdAt),
+      updatedAt: toIso(o.updatedAt),
+      items: o.items || []
     })),
     seasonRates: ((restaurant as any).seasonRates ?? []).map((sr: any) => ({
       ...sr,
-      startDate: sr.startDate.toISOString().split("T")[0],
-      endDate: sr.endDate.toISOString().split("T")[0],
-      createdAt: sr.createdAt.toISOString(),
-      updatedAt: sr.updatedAt.toISOString(),
+      startDate: toIso(sr.startDate).split("T")[0],
+      endDate: toIso(sr.endDate).split("T")[0],
+      createdAt: toIso(sr.createdAt),
+      updatedAt: toIso(sr.updatedAt),
     })),
     customers: ((restaurant as any).customers ?? []).map((c: any) => ({
       ...c,
-      lastOrderAt: c.lastOrderAt ? c.lastOrderAt.toISOString() : c.createdAt.toISOString(),
-      createdAt: c.createdAt.toISOString(),
-      updatedAt: c.updatedAt.toISOString(),
+      lastOrderAt: toIso(c.lastOrderAt),
+      createdAt: toIso(c.createdAt),
+      updatedAt: toIso(c.updatedAt),
     }))
   };
 

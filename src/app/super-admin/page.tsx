@@ -5,28 +5,56 @@ import { SuperAdminDashboard } from "./components/SuperAdminDashboard";
 
 export const dynamic = "force-dynamic";
 
+function toIso(val: any): string {
+  if (!val) return new Date().toISOString();
+  if (typeof val === "string") return val;
+  if (val instanceof Date) return val.toISOString();
+  try {
+    return new Date(val).toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
 export default async function SuperAdminPage() {
-  const isSuperAdmin = await getSuperAdminSession();
+  let isSuperAdmin = false;
+  try {
+    isSuperAdmin = await getSuperAdminSession();
+  } catch (e) {
+    console.error("Error reading super admin session:", e);
+  }
 
   if (!isSuperAdmin) {
     return <SuperAdminLoginForm />;
   }
 
   // Load all restaurants
-  const restaurants = await prismaTenant.restaurant.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      _count: {
-        select: { categories: true }
+  let restaurants: any[] = [];
+  try {
+    restaurants = await prismaTenant.restaurant.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        _count: {
+          select: { categories: true }
+        }
       }
-    }
-  });
+    });
+  } catch (err) {
+    console.error("Error loading restaurants in SuperAdminPage:", err);
+  }
 
   // Load users to match owner details
-  const userIds = [...new Set(restaurants.map((r) => r.userId))];
-  const users = await prismaControl.user.findMany({
-    where: { id: { in: userIds } },
-  });
+  let users: any[] = [];
+  try {
+    const userIds = [...new Set(restaurants.map((r) => r.userId))];
+    if (userIds.length > 0) {
+      users = await prismaControl.user.findMany({
+        where: { id: { in: userIds } },
+      });
+    }
+  } catch (err) {
+    console.error("Error loading users in SuperAdminPage:", err);
+  }
   const userMap = new Map(users.map((u) => [u.id, u]));
 
   // Load all prospect leads
@@ -47,11 +75,17 @@ export default async function SuperAdminPage() {
   // Calculate metrics
   const now = new Date();
   const totalRestaurants = restaurants.length;
-  const activeTrials = restaurants.filter(r => new Date(r.trialEndsAt) > now).length;
+  const activeTrials = restaurants.filter(r => r.trialEndsAt && new Date(r.trialEndsAt) > now).length;
   const expiredTrials = totalRestaurants - activeTrials;
 
-  const totalCategories = await prismaTenant.category.count();
-  const totalDishes = await prismaTenant.dish.count();
+  let totalCategories = 0;
+  let totalDishes = 0;
+  try {
+    totalCategories = await prismaTenant.category.count();
+    totalDishes = await prismaTenant.dish.count();
+  } catch (err) {
+    console.error("Error counting categories/dishes:", err);
+  }
 
   const metrics = {
     totalRestaurants,
@@ -71,23 +105,23 @@ export default async function SuperAdminPage() {
       whatsappNumber: r.whatsapp,
       qrCobroUrl: r.qrCobroUrl,
       leadStatus: r.leadStatus || "LEAD_NUEVO",
-      nextFollowUpAt: r.nextFollowUpAt ? r.nextFollowUpAt.toISOString() : null,
+      nextFollowUpAt: r.nextFollowUpAt ? toIso(r.nextFollowUpAt) : null,
       crmNotes: [],
-      createdAt: r.createdAt.toISOString(),
-      trialEndsAt: r.trialEndsAt.toISOString(),
-      updatedAt: r.updatedAt.toISOString(),
+      createdAt: toIso(r.createdAt),
+      trialEndsAt: toIso(r.trialEndsAt),
+      updatedAt: toIso(r.updatedAt),
     };
   });
 
   const serializedLeads = leads.map(l => ({
     ...l,
-    nextFollowUpAt: l.nextFollowUpAt ? l.nextFollowUpAt.toISOString() : null,
+    nextFollowUpAt: l.nextFollowUpAt ? toIso(l.nextFollowUpAt) : null,
     crmNotes: (l.crmNotes || []).map((n: any) => ({
       ...n,
-      createdAt: n.createdAt.toISOString()
+      createdAt: toIso(n.createdAt)
     })),
-    createdAt: l.createdAt.toISOString(),
-    updatedAt: l.updatedAt.toISOString(),
+    createdAt: toIso(l.createdAt),
+    updatedAt: toIso(l.updatedAt),
   }));
 
   let whatsappSupport = "";
