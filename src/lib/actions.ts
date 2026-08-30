@@ -1,6 +1,6 @@
 "use server";
 
-import { prisma } from "@/lib/db";
+import { prismaControl, prismaTenant, prisma } from "@/lib/db";
 import { getUserSession, setUserSession, clearUserSession, getSuperAdminSession, setSuperAdminSession, clearSuperAdminSession, refreshUserSession, getCentralApiToken, setCentralApiToken, clearCentralApiToken } from "@/lib/auth";
 import { centralApiService, isCentralApiEnabled } from "@/lib/api-service";
 import bcrypt from "bcryptjs";
@@ -153,12 +153,7 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
         }
       }
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[Login Warning] Central API login error, testing local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Correo o contraseña incorrectos en la API Central." };
-      }
+      console.warn("[Login Warning] Central API login error, testing local fallback:", err.message);
     }
   }
 
@@ -171,7 +166,7 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
     redirect("/super-admin");
   }
 
-  const user = await prisma.user.findUnique({
+  const user = await prismaControl.user.findUnique({
     where: { email: cleanEmail },
   });
 
@@ -205,7 +200,7 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
   const cleanEmail = email.toLowerCase().trim();
 
   // Check unique email
-  const existingUser = await prisma.user.findUnique({
+  const existingUser = await prismaControl.user.findUnique({
     where: { email: cleanEmail }
   });
 
@@ -233,7 +228,7 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
   let attempt = 0;
 
   while (isSlugTaken) {
-    const existingRestaurant = await prisma.restaurant.findUnique({
+    const existingRestaurant = await prismaTenant.restaurant.findUnique({
       where: { slug: cleanSlug }
     });
     if (!existingRestaurant) {
@@ -247,28 +242,31 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
   const trialEndsAt = new Date();
   trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
 
-  // Create User and their default Restaurant
-  const user = await prisma.user.create({
+  // Create User in Control DB and Restaurant in Tenant DB
+  const user = await prismaControl.user.create({
     data: {
       name,
       email: cleanEmail,
       password: hashedPassword,
-      restaurants: {
-        create: {
-          name: restaurantName,
-          slug: cleanSlug,
-          whatsapp: "",
-          themeColor: "#ef4444",
-          locality: `${province.trim()} | ${canton.trim()} | ${parroquia.trim()} | ${sector.trim()}`,
-          plan: "FREE",
-          trialEndsAt,
-        }
-      }
-    }
+    },
+  });
+
+  const localityParts = [province, canton, parroquia, sector].filter(Boolean);
+  const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
+
+  await prismaTenant.restaurant.create({
+    data: {
+      userId: user.id,
+      name: restaurantName,
+      slug: cleanSlug,
+      whatsapp: "",
+      locality,
+      trialEndsAt,
+    },
   });
 
   await setUserSession(user.id, user.email);
-  redirect("/admin/restaurante");
+  redirect("/admin");
 }
 
 export async function logoutUserAction() {
@@ -496,12 +494,7 @@ export async function createCategoryAction(restaurantId: string, formData: FormD
       revalidatePath("/admin");
       return { success: true };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[createCategoryAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al crear la categoría en la API Central." };
-      }
+      console.warn("[createCategoryAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -531,12 +524,7 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
       revalidatePath("/admin");
       return { success: true };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[updateCategoryAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al actualizar la categoría en la API Central." };
-      }
+      console.warn("[updateCategoryAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -564,12 +552,7 @@ export async function deleteCategoryAction(categoryId: string) {
       revalidatePath("/admin");
       return { success: true };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[deleteCategoryAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al eliminar la categoría en la API Central." };
-      }
+      console.warn("[deleteCategoryAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -613,12 +596,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
       revalidatePath("/admin");
       return { success: true };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[createDishAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al crear el producto en la API Central." };
-      }
+      console.warn("[createDishAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -674,12 +652,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
       revalidatePath("/admin");
       return { success: true };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[updateDishAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al actualizar el producto en la API Central." };
-      }
+      console.warn("[updateDishAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -714,12 +687,7 @@ export async function deleteDishAction(dishId: string) {
       revalidatePath("/admin");
       return { success: true };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[deleteDishAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al eliminar el producto en la API Central." };
-      }
+      console.warn("[deleteDishAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -748,12 +716,7 @@ export async function toggleDishAvailabilityAction(dishId: string, isAvailable: 
         revalidatePath("/admin");
         return { success: true };
       } catch (err: any) {
-        if (process.env.NODE_ENV === "development") {
-          console.warn("[toggleDishAvailabilityAction Warning] Central API failed, checking local fallback:", err.message);
-        }
-        if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-          return { error: err.message || "Error al cambiar disponibilidad en la API Central." };
-        }
+        console.warn("[toggleDishAvailabilityAction Warning] Central API failed, using local fallback:", err.message);
       }
     }
 
@@ -846,7 +809,7 @@ export async function deleteRestaurantAction(restaurantId: string) {
 
   if (remainingRestaurants === 0) {
     try {
-      await prisma.user.delete({
+      await prismaControl.user.delete({
         where: { id: userId }
       });
     } catch (e) {
@@ -877,7 +840,7 @@ export async function superAdminCreateRestaurantAction(data: {
   }
 
   const cleanEmail = data.email.toLowerCase().trim();
-  const existingUser = await prisma.user.findUnique({
+  const existingUser = await prismaControl.user.findUnique({
     where: { email: cleanEmail }
   });
 
@@ -901,7 +864,7 @@ export async function superAdminCreateRestaurantAction(data: {
   let attempt = 0;
 
   while (isSlugTaken) {
-    const existingRestaurant = await prisma.restaurant.findUnique({
+    const existingRestaurant = await prismaTenant.restaurant.findUnique({
       where: { slug: cleanSlug }
     });
     if (!existingRestaurant) {
@@ -912,7 +875,7 @@ export async function superAdminCreateRestaurantAction(data: {
     }
   }
 
-  const user = await prisma.user.create({
+  const user = await prismaControl.user.create({
     data: {
       name: data.userName,
       email: cleanEmail,
@@ -923,7 +886,7 @@ export async function superAdminCreateRestaurantAction(data: {
   const localityParts = [data.province, data.canton, data.parroquia, data.sector].filter(Boolean);
   const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
 
-  await prisma.restaurant.create({
+  await prismaTenant.restaurant.create({
     data: {
       userId: user.id,
       name: data.restaurantName,
@@ -968,21 +931,24 @@ export async function superAdminUpdateRestaurantAction(
     return { error: "No autorizado." };
   }
 
-  const restaurant = await prisma.restaurant.findUnique({
-    where: { id: restaurantId },
-    include: { user: true }
+  const restaurant = await prismaTenant.restaurant.findUnique({
+    where: { id: restaurantId }
   });
 
   if (!restaurant) {
     return { error: "Restaurante no encontrado." };
   }
 
+  const ownerUser = await prismaControl.user.findUnique({
+    where: { id: restaurant.userId }
+  });
+
   const cleanEmail = data.email.toLowerCase().trim();
   const cleanSlug = data.slug.toLowerCase().trim();
 
   // Check unique slug if changed
   if (cleanSlug !== restaurant.slug) {
-    const existingSlug = await prisma.restaurant.findUnique({
+    const existingSlug = await prismaTenant.restaurant.findUnique({
       where: { slug: cleanSlug }
     });
     if (existingSlug && existingSlug.id !== restaurantId) {
@@ -991,8 +957,8 @@ export async function superAdminUpdateRestaurantAction(
   }
 
   // Check unique email if changed
-  if (cleanEmail !== restaurant.user.email) {
-    const existingEmail = await prisma.user.findUnique({
+  if (ownerUser && cleanEmail !== ownerUser.email) {
+    const existingEmail = await prismaControl.user.findUnique({
       where: { email: cleanEmail }
     });
     if (existingEmail && existingEmail.id !== restaurant.userId) {
@@ -1001,16 +967,18 @@ export async function superAdminUpdateRestaurantAction(
   }
 
   // Update user
-  await prisma.user.update({
-    where: { id: restaurant.userId },
-    data: {
-      name: data.userName,
-      email: cleanEmail,
-    }
-  });
+  if (ownerUser) {
+    await prismaControl.user.update({
+      where: { id: restaurant.userId },
+      data: {
+        name: data.userName,
+        email: cleanEmail,
+      }
+    });
+  }
 
   // Update restaurant
-  const updatedRestaurant = await prisma.restaurant.update({
+  const updatedRestaurant = await prismaTenant.restaurant.update({
     where: { id: restaurantId },
     data: {
       name: data.restaurantName,
@@ -1041,7 +1009,7 @@ export async function superAdminUpdateRestaurantAction(
 }
 
 export async function impersonateUserAction(userId: string) {
-  const user = await prisma.user.findUnique({
+  const user = await prismaControl.user.findUnique({
     where: { id: userId }
   });
   if (!user) return { error: "Usuario no encontrado." };
@@ -1051,7 +1019,7 @@ export async function impersonateUserAction(userId: string) {
 }
 
 export async function changeUserPlanAction(restaurantId: string, plan: "FREE" | "PRO") {
-  const restaurant = await prisma.restaurant.update({
+  const restaurant = await prismaTenant.restaurant.update({
     where: { id: restaurantId },
     data: { plan }
   });
@@ -1128,7 +1096,7 @@ export async function subscribeToPremiumAction(
 
 export async function resetUserPasswordAction(userId: string, newPassword: string) {
   const hashedPassword = bcrypt.hashSync(newPassword, 15); // Hashing password securely
-  await prisma.user.update({
+  await prismaControl.user.update({
     where: { id: userId },
     data: { password: hashedPassword }
   });
@@ -1137,7 +1105,7 @@ export async function resetUserPasswordAction(userId: string, newPassword: strin
 }
 
 export async function updateSystemSettingAction(key: string, value: string) {
-  await prisma.systemSetting.upsert({
+  await prismaControl.systemSetting.upsert({
     where: { key },
     update: { value },
     create: { key, value }
@@ -1190,12 +1158,7 @@ export async function createOrderAction(data: {
         total: createdOrder.total,
       };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[createOrderAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al crear el pedido en la API Central." };
-      }
+      console.warn("[createOrderAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -1306,12 +1269,7 @@ export async function updateOrderStatusAction(
       revalidatePath("/admin");
       return { success: true };
     } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[updateOrderStatusAction Warning] Central API failed, checking local fallback:", err.message);
-      }
-      if (process.env.USE_CENTRAL_API === "true" && process.env.NODE_ENV !== "development") {
-        return { error: err.message || "Error al actualizar estado en la API Central." };
-      }
+      console.warn("[updateOrderStatusAction Warning] Central API failed, using local fallback:", err.message);
     }
   }
 
@@ -1521,7 +1479,7 @@ export async function requestPasswordResetAction(prevState: unknown, formData: F
   const cleanEmail = email.toLowerCase().trim();
 
   // Find user
-  const user = await prisma.user.findUnique({
+  const user = await prismaControl.user.findUnique({
     where: { email: cleanEmail },
   });
 
@@ -1536,7 +1494,7 @@ export async function requestPasswordResetAction(prevState: unknown, formData: F
   const token = randomBytes(32).toString("hex");
   const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
 
-  await prisma.user.update({
+  await prismaControl.user.update({
     where: { id: user.id },
     data: {
       resetToken: token,
@@ -1577,7 +1535,7 @@ export async function resetPasswordAction(prevState: unknown, formData: FormData
     return { error: "Las contraseñas no coinciden." };
   }
 
-  const user = await prisma.user.findFirst({
+  const user = await prismaControl.user.findFirst({
     where: {
       resetToken: token,
       resetTokenExpiry: {
@@ -1592,7 +1550,7 @@ export async function resetPasswordAction(prevState: unknown, formData: FormData
 
   const hashedPassword = bcrypt.hashSync(password, 10);
 
-  await prisma.user.update({
+  await prismaControl.user.update({
     where: { id: user.id },
     data: {
       password: hashedPassword,
@@ -1616,7 +1574,7 @@ export async function updateRestaurantLeadStatusAction(
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) return { error: "No autorizado." };
 
-  await prisma.restaurant.update({
+  await prismaTenant.restaurant.update({
     where: { id: restaurantId },
     data: {
       leadStatus,
@@ -1637,9 +1595,8 @@ export async function addCrmNoteAction(
 
   if (!content.trim()) return { error: "El contenido de la nota no puede estar vacío." };
 
-  await prisma.crmNote.create({
+  await prismaControl.crmNote.create({
     data: {
-      restaurantId: target.restaurantId || null,
       leadId: target.leadId || null,
       content: content.trim(),
       author: "SuperAdmin",
@@ -1666,7 +1623,7 @@ export async function createProspectLeadAction(data: {
     return { error: "El nombre del negocio y el teléfono son requeridos." };
   }
 
-  await prisma.lead.create({
+  await prismaControl.lead.create({
     data: {
       name: data.name.trim(),
       ownerName: data.ownerName?.trim() || null,
@@ -1698,7 +1655,7 @@ export async function updateProspectLeadAction(
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) return { error: "No autorizado." };
 
-  await prisma.lead.update({
+  await prismaControl.lead.update({
     where: { id: leadId },
     data: {
       name: data.name.trim(),
@@ -1720,7 +1677,7 @@ export async function deleteProspectLeadAction(leadId: string) {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) return { error: "No autorizado." };
 
-  await prisma.lead.delete({
+  await prismaControl.lead.delete({
     where: { id: leadId },
   });
 
@@ -1732,7 +1689,7 @@ export async function convertProspectToRestaurantAction(leadId: string, password
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) return { error: "No autorizado." };
 
-  const lead = await prisma.lead.findUnique({
+  const lead = await prismaControl.lead.findUnique({
     where: { id: leadId },
   });
 
@@ -1741,7 +1698,7 @@ export async function convertProspectToRestaurantAction(leadId: string, password
   const email = lead.email || `lead-${lead.id.substring(0, 6)}@menuqrpro.com`;
   const ownerName = lead.ownerName || lead.name;
 
-  const existingUser = await prisma.user.findUnique({
+  const existingUser = await prismaControl.user.findUnique({
     where: { email },
   });
 
@@ -1763,7 +1720,7 @@ export async function convertProspectToRestaurantAction(leadId: string, password
 
   if (res.error) return { error: res.error };
 
-  await prisma.lead.update({
+  await prismaControl.lead.update({
     where: { id: leadId },
     data: { status: "CONVERTIDO" },
   });

@@ -44,7 +44,7 @@ export default function RecuperarPasswordPage() {
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10 px-4 sm:px-0">
         <div className="bg-slate-900/60 backdrop-blur-xl py-8 px-4 border border-slate-800/80 shadow-2xl rounded-2xl sm:px-10">
-          {state?.success ? (
+          {(state as any)?.success ? (
             <div className="space-y-6 text-center">
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-emerald-500/10 border border-emerald-500/30">
                 <CheckCircle2 className="h-6 w-6 text-emerald-400" />
@@ -52,7 +52,7 @@ export default function RecuperarPasswordPage() {
               <div>
                 <h3 className="text-lg font-semibold text-white">¡Solicitud enviada!</h3>
                 <p className="mt-2 text-sm text-slate-300">
-                  {state.message}
+                  {(state as any).message}
                 </p>
                 <p className="mt-3 text-xs text-slate-400 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
                   💡 Revisa también tu carpeta de correo no deseado o spam.
@@ -89,10 +89,10 @@ export default function RecuperarPasswordPage() {
                 </div>
               </div>
 
-              {state?.error && (
+              {(state as any)?.error && (
                 <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-400 flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 shrink-0" />
-                  <span>{state.error}</span>
+                  <span>{(state as any).error}</span>
                 </div>
               )}
 

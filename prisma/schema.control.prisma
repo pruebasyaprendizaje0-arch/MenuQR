@@ -1,0 +1,59 @@
+// Control Plane schema (Global DB / Admin)
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../node_modules/.prisma/control"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("CONTROL_DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+model User {
+  id               String       @id @default(uuid())
+  email            String       @unique
+  password         String       // bcrypt hash
+  name             String
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Lead {
+  id             String    @id @default(uuid())
+  name           String
+  ownerName      String?
+  phone          String
+  email          String?
+  city           String?
+  status         String    @default("NUEVO")
+  nextFollowUpAt DateTime?
+  notes          String?
+  crmNotes       CrmNote[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model CrmNote {
+  id        String   @id @default(uuid())
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  content   String
+  author    String   @default("SuperAdmin")
+  createdAt DateTime @default(now())
+}

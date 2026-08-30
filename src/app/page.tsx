@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { UtensilsCrossed, Sparkles, QrCode, MessageSquare, ShieldCheck, ArrowRight, MapPin, HelpCircle } from "lucide-react";
-import { prisma } from "@/lib/db";
+import { prismaControl, prismaTenant } from "@/lib/db";
 import { LandingSearch } from "./components/LandingSearch";
 import { ScrollVideoBackground } from "./components/ScrollVideoBackground";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LandingPage() {
   // Query all restaurants from the DB to build the public directory
-  const restaurants = await prisma.restaurant.findMany({
+  const restaurants = await prismaTenant.restaurant.findMany({
     select: {
       id: true,
       slug: true,
@@ -26,7 +26,7 @@ export default async function LandingPage() {
 
   let whatsappSupport = "";
   try {
-    const whatsappSupportSetting = await prisma.systemSetting.findUnique({
+    const whatsappSupportSetting = await prismaControl.systemSetting.findUnique({
       where: { key: "whatsapp_support" }
     });
     whatsappSupport = whatsappSupportSetting?.value || "";

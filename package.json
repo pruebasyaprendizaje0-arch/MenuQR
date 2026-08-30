@@ -4,9 +4,18 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
-    "start": "next start",
-    "lint": "next lint"
+    "build": "prisma generate --schema=prisma/schema.control.prisma && prisma generate --schema=prisma/schema.tenant.prisma && next build",
+    "start": "prisma migrate deploy --schema=prisma/schema.control.prisma && next start",
+    "lint": "next lint",
+    "prisma:control:generate": "prisma generate --schema=prisma/schema.control.prisma",
+    "prisma:control:migrate": "prisma migrate dev --schema=prisma/schema.control.prisma",
+    "prisma:control:deploy": "prisma migrate deploy --schema=prisma/schema.control.prisma",
+    "prisma:tenant:generate": "prisma generate --schema=prisma/schema.tenant.prisma",
+    "prisma:tenant:deploy": "prisma migrate deploy --schema=prisma/schema.tenant.prisma"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",

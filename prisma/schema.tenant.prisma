@@ -1,0 +1,164 @@
+// Tenant schema (Restaurant / Inquilino DB)
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../node_modules/.prisma/tenant"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("TENANT_DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+model Restaurant {
+  id                  String       @id @default(uuid())
+  userId              String
+  name                String
+  slug                String       @unique
+  whatsapp            String
+  themeColor          String       @default("#ef4444")
+  logoUrl             String?
+  coverUrl            String?
+  qrCobroUrl          String?
+  instagram           String?
+  facebook            String?
+  tiktok              String?
+  address             String?
+  description         String?
+  locality            String?
+  schedule            String?
+  localSchedule       String?
+  deliverySchedule    String?
+  blockedDates        String?
+  specialty           String?
+  services            String?
+  contactNumbers      String?
+  ubicameUrl          String?
+  mapEmbedUrl         String?
+  plan                Plan         @default(FREE)
+  tablesConfig        String       @default("1,2,3,4,5,6,7,8,9,10")
+  ivaPercent          Float        @default(15.0)
+  servicePercent      Float        @default(10.0)
+  deliveryCost        Float        @default(0.0)
+  deliveryEnabled     Boolean      @default(true)
+  deliveryRates       String?
+  bankName            String?
+  bankAccountType     String?
+  bankAccountNumber   String?
+  bankAccountName     String?
+  bankAccountDocument String?
+  bankAccountEmail    String?
+  ivaOnTable          Boolean      @default(true)
+  ivaOnTakeout        Boolean      @default(true)
+  serviceOnTable      Boolean      @default(true)
+  serviceOnTakeout    Boolean      @default(false)
+  trialEndsAt         DateTime     @default(now())
+  leadStatus          String       @default("LEAD_NUEVO")
+  nextFollowUpAt      DateTime?
+  categories          Category[]
+  dishes              Dish[]
+  orders              Order[]
+  customers           Customer[]
+  seasonRates         SeasonRate[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+model Category {
+  id           String     @id @default(uuid())
+  name         String
+  order        Int        @default(0)
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  dishes       Dish[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Dish {
+  id           String     @id @default(uuid())
+  name         String
+  description  String?
+  price        Float
+  imageUrl     String?
+  isAvailable  Boolean    @default(true)
+  categoryId   String
+  category     Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Order {
+  id               String      @id @default(uuid())
+  orderNumber      Int         @default(autoincrement())
+  restaurantId     String
+  restaurant       Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  tableName        String
+  customerName     String?
+  customerPhone    String?
+  customerAddress  String?
+  driverName       String?
+  driverPhone      String?
+  status           String      @default("PENDING")
+  subtotal         Float
+  iva              Float
+  serviceCharge    Float
+  tip              Float
+  deliveryCost     Float       @default(0.0)
+  seasonRateName   String?
+  seasonRateAmount Float       @default(0.0)
+  total            Float
+  paymentMethod    String
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  items            OrderItem[]
+}
+
+model OrderItem {
+  id       String @id @default(uuid())
+  orderId  String
+  order    Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dishName String
+  price    Float
+  quantity Int
+}
+
+model SeasonRate {
+  id              String     @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name            String
+  startDate       DateTime
+  endDate         DateTime
+  percentageBonus Float      @default(0.0)
+  fixedBonus      Float      @default(0.0)
+  isHoliday       Boolean    @default(false)
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model Customer {
+  id           String     @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String
+  email        String?
+  address      String?
+  city         String?
+  category     String     @default("NUEVO")
+  notes        String?
+  totalOrders  Int        @default(1)
+  totalSpent   Float      @default(0.0)
+  lastOrderAt  DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}

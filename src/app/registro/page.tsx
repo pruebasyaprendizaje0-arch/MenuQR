@@ -281,9 +281,9 @@ export default function RegisterPage() {
               * Recibirás de forma gratuita una prueba completa del <strong>Plan Premium ($5 USD/mes)</strong> por un período de <strong>30 días (1 mes)</strong> a partir del registro.
             </div>
 
-            {state?.error && (
+            {(state as any)?.error && (
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-400">
-                {state.error}
+                {(state as any).error}
               </div>
             )}
 

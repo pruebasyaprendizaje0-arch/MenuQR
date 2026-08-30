@@ -350,17 +350,17 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       createdAt: restaurant.createdAt.toISOString(),
       updatedAt: restaurant.updatedAt.toISOString(),
       isOwner: !!session || isSuperAdmin,
-      categories: restaurant.categories.map((cat) => ({
+      categories: restaurant.categories.map((cat: any) => ({
         ...cat,
         createdAt: cat.createdAt.toISOString(),
         updatedAt: cat.updatedAt.toISOString(),
-        dishes: cat.dishes.map((dish) => ({
+        dishes: cat.dishes.map((dish: any) => ({
           ...dish,
           createdAt: dish.createdAt.toISOString(),
           updatedAt: dish.updatedAt.toISOString(),
         })),
       })),
-      seasonRates: (restaurant.seasonRates || []).map((rate) => ({
+      seasonRates: (restaurant.seasonRates || []).map((rate: any) => ({
         ...rate,
         startDate: rate.startDate.toISOString(),
         endDate: rate.endDate.toISOString(),

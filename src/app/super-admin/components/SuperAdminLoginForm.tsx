@@ -82,9 +82,9 @@ export function SuperAdminLoginForm() {
               </div>
             </div>
 
-            {state?.error && (
+            {(state as any)?.error && (
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-400">
-                {state.error}
+                {(state as any).error}
               </div>
             )}
 

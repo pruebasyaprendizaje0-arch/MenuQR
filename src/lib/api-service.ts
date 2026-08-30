@@ -153,7 +153,12 @@ async function apiFetch<T = any>(endpoint: string, options: FetchOptions = {}): 
       timeoutError.status = 504;
       throw timeoutError;
     }
-    console.error(`[Central API Error] [${connType}] ${method} ${url} falló en ${duration}ms: ${err.message}`);
+    let errorMessage = err?.message || "Error de conexión con la API Central.";
+    if (errorMessage === "fetch failed" || errorMessage.includes("fetch failed") || err?.name === "TypeError") {
+      errorMessage = "No se pudo conectar con la API Central (fetch failed).";
+    }
+    console.error(`[Central API Error] [${connType}] ${method} ${url} falló en ${duration}ms: ${errorMessage}`);
+    err.message = errorMessage;
     throw err;
   }
 }

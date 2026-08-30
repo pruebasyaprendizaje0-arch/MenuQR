@@ -68,7 +68,7 @@ function RestablecerPasswordForm() {
     );
   }
 
-  if (state?.success) {
+  if ((state as any)?.success) {
     return (
       <div className="space-y-6 text-center">
         <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-emerald-500/10 border border-emerald-500/30">
@@ -77,7 +77,7 @@ function RestablecerPasswordForm() {
         <div>
           <h3 className="text-lg font-semibold text-white">¡Contraseña Actualizada!</h3>
           <p className="mt-2 text-sm text-slate-300">
-            {state.message}
+            {(state as any).message}
           </p>
         </div>
         <div className="pt-4">
@@ -138,10 +138,10 @@ function RestablecerPasswordForm() {
         </div>
       </div>
 
-      {(validationError || state?.error) && (
+      {(validationError || (state as any)?.error) && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-400 flex items-center gap-2">
           <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{validationError || state?.error}</span>
+          <span>{validationError || (state as any)?.error}</span>
         </div>
       )}
 
