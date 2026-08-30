@@ -500,7 +500,15 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     message += `\n*Rastreo del Pedido en vivo:* ${trackingUrl}\n`;
     message += `_Pedido registrado en MenuQR Pro_`;
 
-    let formattedPhone = restaurant.whatsappNumber.replace(/\D/g, "");
+    const rawPhone = (restaurant.whatsappNumber || (restaurant as any).whatsapp || "").toString();
+    let formattedPhone = rawPhone.replace(/\D/g, "");
+    if (!formattedPhone) {
+      alert("¡Tu pedido se ha guardado exitosamente! No obstante, este comercio aún no ha configurado un número de WhatsApp para el envío directo del mensaje.");
+      setCart([]);
+      setIsCheckoutOpen(false);
+      return;
+    }
+
     if (!formattedPhone.startsWith("593") && formattedPhone.startsWith("0")) {
       formattedPhone = "593" + formattedPhone.substring(1);
     } else if (!formattedPhone.startsWith("593") && formattedPhone.length === 9) {

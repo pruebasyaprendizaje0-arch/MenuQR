@@ -158,6 +158,8 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
 
     const serializedRestaurant = {
       ...restaurant,
+      whatsappNumber: restaurant.whatsapp || "",
+      paymentQrUrl: restaurant.qrCobroUrl || null,
       trialEndsAt: restaurant.trialEndsAt.toISOString(),
       createdAt: restaurant.createdAt.toISOString(),
       updatedAt: restaurant.updatedAt.toISOString(),
