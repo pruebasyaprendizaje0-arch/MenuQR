@@ -16,7 +16,7 @@ RUN mkdir -p public
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Generate Prisma Client
-RUN npx prisma generate
+RUN npx prisma generate && npx prisma generate --schema=prisma/schema.control.prisma && npx prisma generate --schema=prisma/schema.tenant.prisma
 
 # Build Next.js application
 RUN npm run build
@@ -49,4 +49,4 @@ RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma
 EXPOSE 3000
 
 # Start server
-CMD ["sh", "-c", "npx prisma db push && npm run start"]
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
