@@ -32,19 +32,19 @@ ENV HOSTNAME="0.0.0.0"
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-RUN mkdir -p public
+# Copy essential standalone assets, static CSS/JS chunks & public files
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/public ./.next/standalone/public
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/standalone/.next/static
 
-# Copy essential standalone assets & migration tools
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/.next ./.next
-
-# Ensure public/uploads exists and has correct permissions
-RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma
+# Ensure persistent uploads directory permissions
+RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma /app/.next
 
 EXPOSE 3000
 
 # Start server
-CMD ["sh", "-c", "npx prisma migrate deploy || true; npm run start"]
+CMD ["sh", "-c", "npx prisma migrate deploy || true; node .next/standalone/server.js"]
