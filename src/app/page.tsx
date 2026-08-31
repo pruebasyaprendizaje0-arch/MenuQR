@@ -35,10 +35,21 @@ export default async function LandingPage() {
     const whatsappSupportSetting = await prismaControl.systemSetting.findUnique({
       where: { key: "whatsapp_support" }
     });
-    whatsappSupport = whatsappSupportSetting?.value || "";
+    whatsappSupport = whatsappSupportSetting?.value || process.env.NEXT_PUBLIC_WHATSAPP_SUPPORT || process.env.WHATSAPP_SUPPORT || "593999999999";
   } catch (error) {
     console.warn("WARNING: SystemSetting table is missing or not migrated yet.", error);
+    whatsappSupport = process.env.NEXT_PUBLIC_WHATSAPP_SUPPORT || process.env.WHATSAPP_SUPPORT || "593999999999";
   }
+
+  const rawPhone = (whatsappSupport || "593999999999").toString();
+  let formattedPhone = rawPhone.replace(/\D/g, "");
+  if (!formattedPhone.startsWith("593") && formattedPhone.startsWith("0")) {
+    formattedPhone = "593" + formattedPhone.substring(1);
+  } else if (!formattedPhone.startsWith("593") && formattedPhone.length === 9) {
+    formattedPhone = "593" + formattedPhone;
+  }
+
+  const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent("Hola, quisiera saber más información sobre MenuQR Pro")}`;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans">
@@ -106,35 +117,46 @@ export default async function LandingPage() {
         {/* Dedicated Spacing Block: Exposes the full-screen background video in the center */}
         <div className="py-20 md:py-36 w-full pointer-events-none"></div>
 
-        {/* Bottom Search Section */}
-        <div className="w-full bg-transparent border border-white/10 rounded-[2.5rem] p-8 shadow-2xl">
+        {/* Directory Search & Filter Section */}
+        <div className="w-full space-y-6 pt-4">
+          <div className="flex items-center justify-center gap-2 text-amber-500 text-xs font-black uppercase tracking-widest">
+            <Sparkles className="h-4 w-4" />
+            <span>Negocios Registrados ({restaurants.length})</span>
+          </div>
+
           <LandingSearch restaurants={restaurants} />
         </div>
 
-        {/* Feature grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full text-left">
-          <div className="bg-transparent border border-white/10 p-8 rounded-[2rem] shadow-xl hover:scale-[1.02] transition-all duration-300">
-            <div className="h-10 w-10 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl flex items-center justify-center mb-4">
-              <QrCode className="h-5 w-5" />
+        {/* Features grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full text-left pt-12">
+          <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-4 hover:border-red-500/30 transition duration-300">
+            <div className="h-12 w-12 bg-red-950/50 border border-red-900/50 rounded-2xl flex items-center justify-center text-red-500">
+              <QrCode className="h-6 w-6" />
             </div>
-            <h3 className="font-bold text-white text-base mb-2">Generador de QR</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">Genera códigos QR listos para imprimir y colocar en tus mesas para que tus clientes escaneen y ordenen.</p>
+            <h3 className="font-extrabold text-white text-lg">Códigos QR Ilimitados</h3>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              Genera e imprime códigos QR para cada mesa o punto de venta. Tus clientes escanean y ven el menú al instante sin descargar apps.
+            </p>
           </div>
 
-          <div className="bg-transparent border border-white/10 p-8 rounded-[2rem] shadow-xl hover:scale-[1.02] transition-all duration-300">
-            <div className="h-10 w-10 bg-orange-500/10 border border-orange-500/20 text-orange-400 rounded-xl flex items-center justify-center mb-4">
-              <MessageSquare className="h-5 w-5" />
+          <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-4 hover:border-amber-500/30 transition duration-300">
+            <div className="h-12 w-12 bg-amber-950/50 border border-amber-900/50 rounded-2xl flex items-center justify-center text-amber-500">
+              <MessageSquare className="h-6 w-6" />
             </div>
-            <h3 className="font-bold text-white text-base mb-2">Pedidos por WhatsApp</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">Tus clientes arman su carrito completo y el pedido se envía automáticamente con formato directo a tu WhatsApp.</p>
+            <h3 className="font-extrabold text-white text-lg">Pedidos a tu WhatsApp</h3>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              El cliente arma su carrito de compras y te envía el pedido formateado con detalle, número de mesa, recargos y total directo a tu número.
+            </p>
           </div>
 
-          <div className="bg-transparent border border-white/10 p-8 rounded-[2rem] shadow-xl hover:scale-[1.02] transition-all duration-300">
-            <div className="h-10 w-10 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl flex items-center justify-center mb-4">
-              <ShieldCheck className="h-5 w-5" />
+          <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-4 hover:border-orange-500/30 transition duration-300">
+            <div className="h-12 w-12 bg-orange-950/50 border border-orange-900/50 rounded-2xl flex items-center justify-center text-orange-500">
+              <ShieldCheck className="h-6 w-6" />
             </div>
-            <h3 className="font-bold text-white text-base mb-2">Panel Admin CRUD</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">Crea, edita y elimina platos o categorías al instante, sube fotos y cambia la disponibilidad en tiempo real.</p>
+            <h3 className="font-extrabold text-white text-lg">Panel de Gestión Fácil</h3>
+            <p className="text-slate-400 text-xs leading-relaxed">
+              Administra tus categorías, productos, precios, fotos, horarios y datos bancarios desde un panel intuitivo sin depender de programadores.
+            </p>
           </div>
         </div>
 
@@ -316,20 +338,21 @@ export default async function LandingPage() {
           </Link>
         </div>
       </footer>
-      {/* Floating WhatsApp Button */}
-      {whatsappSupport && (
-        <a
-          href={`https://wa.me/${whatsappSupport.replace(/\D/g, "")}?text=Hola,%20quisiera%20saber%20más%20información%20sobre%20MenuQR%20Pro`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="fixed bottom-6 right-6 z-50 bg-[#25D366] hover:bg-[#20ba5a] text-white p-4 rounded-full shadow-2xl transition-all duration-300 transform hover:scale-110 flex items-center justify-center hover:shadow-[#25D366]/20 hover:shadow-lg"
-          title="Contactar por WhatsApp"
-        >
-          <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
-            <path d="M17.472 14.382c-.022-.08-.124-.22-.326-.321-.202-.1-.197-.59-.197-.59s-.11-.223-.254-.3c-.144-.08-.854-.423-1.002-.493-.148-.07-.256-.104-.369.066-.113.17-.435.547-.533.66-.098.112-.197.126-.399.025-.202-.1-.854-.315-1.627-.887-.6-.52-1.005-1.164-1.123-1.365-.118-.2-.013-.309.088-.408.09-.09.202-.236.302-.354.1-.118.134-.2.202-.336.068-.135.034-.254-.017-.354-.05-.1-.435-.989-.595-1.378-.158-.387-.33-.33-.48-.33h-.414c-.16 0-.417.06-.635.293-.22.23-1.02.997-1.02 2.43 0 1.433 1.05 2.816 1.196 3.01.147.195 2.063 3.109 4.996 4.316.697.288 1.242.46 1.666.59.7.22 1.34.19 1.84.116.56-.083 1.72-.702 1.96-1.38.24-.678.24-1.258.17-1.38zM12.01 20c-1.62 0-3.1-.42-4.4-1.2l-.3-.2-3.2.9.9-3.1-.2-.3c-.8-1.4-1.3-3-1.3-4.7 0-4.9 4-9 9-9s9 4.1 9 9-4 9-9 9zM21 11.5C21 6.3 16.7 2 11.5 2S2 6.3 2 11.5c0 1.8.5 3.5 1.4 5L2 22l5.7-1.5c1.4.8 3 1.3 4.8 1.3 5.2 0 9.5-4.3 9.5-9.5z" />
-          </svg>
-        </a>
-      )}
+      {/* Floating WhatsApp Action Button */}
+      <a
+        href={waUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-[0_10px_30px_rgba(37,211,102,0.5)] hover:shadow-[0_15px_35px_rgba(37,211,102,0.7)] transition-all duration-300 hover:scale-105 active:scale-95 group/wa cursor-pointer"
+        title="Contactar por WhatsApp"
+      >
+        <div className="relative flex items-center justify-center">
+          <MessageSquare className="h-6 w-6 text-white shrink-0 group-hover/wa:rotate-12 transition-transform duration-300" />
+          <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-emerald-200 animate-ping opacity-75"></span>
+          <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-white"></span>
+        </div>
+        <span className="hidden sm:inline text-xs font-black uppercase tracking-wider">WhatsApp Soporte</span>
+      </a>
     </div>
   );
 }

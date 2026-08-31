@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction } from "@/lib/actions";
+import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction, validateCouponAction } from "@/lib/actions";
 import { isRestaurantOpen } from "@/lib/schedule";
 import { 
   Utensils, 
@@ -27,7 +27,8 @@ import {
   Check,
   Camera,
   Upload,
-  Loader2
+  Loader2,
+  Tag
 } from "lucide-react";
 
 type Dish = {
@@ -146,6 +147,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
   const [selectedTable, setSelectedTable] = useState<string>("");
   const [deliveryAddress, setDeliveryAddress] = useState<string>("");
+  const [deliveryReference, setDeliveryReference] = useState<string>("");
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
@@ -153,13 +155,24 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
-  const kmRatesList: { id: string; label: string; price: number }[] = useMemo(() => {
+  // Coupon State
+  const [inputCouponCode, setInputCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discountType: string; discountValue: number; discountAmount: number } | null>(null);
+  const [validatingCoupon, setValidatingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState("");
+
+  const kmRatesList: { id: string; label: string; price: number; minOrder?: number }[] = useMemo(() => {
     const rawRates = restaurant?.deliveryRates || null;
     if (rawRates) {
       try {
         const parsed = JSON.parse(rawRates);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map((item: any) => ({
+            id: item.id || `km-${Math.random()}`,
+            label: item.label || "",
+            price: typeof item.price === "number" ? item.price : 0,
+            minOrder: typeof item.minOrder === "number" ? item.minOrder : (typeof item.minPurchase === "number" ? item.minPurchase : 0),
+          }));
         }
       } catch (e) {
         console.error("Error parsing deliveryRates:", e);
@@ -167,14 +180,14 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     }
     const baseCost = restaurant?.deliveryCost ?? 1.50;
     return [
-      { id: "km-1", label: "Hasta 2 KM", price: baseCost },
-      { id: "km-2", label: "De 2 a 5 KM", price: baseCost + 1.00 },
-      { id: "km-3", label: "De 5 a 10 KM", price: baseCost + 2.50 },
-      { id: "km-4", label: "Más de 10 KM", price: baseCost + 4.50 },
+      { id: "km-1", label: "Hasta 2 KM", price: baseCost, minOrder: 0 },
+      { id: "km-2", label: "De 2 a 5 KM", price: baseCost + 1.00, minOrder: 0 },
+      { id: "km-3", label: "De 5 a 10 KM", price: baseCost + 2.50, minOrder: 0 },
+      { id: "km-4", label: "Más de 10 KM", price: baseCost + 4.50, minOrder: 0 },
     ];
   }, [restaurant?.deliveryRates, restaurant?.deliveryCost]);
 
-  const [selectedKmRate, setSelectedKmRate] = useState<{ id: string; label: string; price: number } | null>(
+  const [selectedKmRate, setSelectedKmRate] = useState<{ id: string; label: string; price: number; minOrder?: number } | null>(
     kmRatesList[0] || null
   );
 
@@ -399,25 +412,35 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
 
     const subtotal = cartTotal;
+    const couponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
+    const subtotalAfterCoupon = Math.max(0, subtotal - couponDiscount);
+
     const targetDate = reservationDate || new Date().toISOString().split("T")[0];
     const activeRate = (restaurant.seasonRates || []).find(
       (r) => r.isActive && targetDate >= r.startDate && targetDate <= r.endDate
     );
 
     const seasonBonusAmount = activeRate 
-      ? (subtotal * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
+      ? (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
       : 0;
 
-    const iva = applyIva ? (subtotal + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
-    const serviceCharge = applyService ? (subtotal + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
-    const tip = subtotal * (tipPercentage / 100);
+    const iva = applyIva ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
+    const serviceCharge = applyService ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
+    const tip = subtotalAfterCoupon * (tipPercentage / 100);
     const deliveryCost = isDeliveryOrder ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
-    const total = subtotal + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
+    const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
 
     // Check schedule & blocked dates
     const scheduleCheck = isRestaurantOpen(restaurant, isDeliveryOrder ? "delivery" : "local");
     if (!scheduleCheck.isOpen) {
       alert(`⛔ No se puede procesar el pedido.\n\n${scheduleCheck.reason || "El restaurante se encuentra fuera de horario de atención."}`);
+      setIsSubmittingOrder(false);
+      return;
+    }
+
+    // Check minimum order requirement for delivery distance
+    if (isDeliveryOrder && selectedKmRate?.minOrder && subtotal < selectedKmRate.minOrder) {
+      alert(`⛔ No se puede procesar el pedido.\n\nPara el rango "${selectedKmRate.label}", el mínimo de compra requerido es de $${selectedKmRate.minOrder.toFixed(2)}.\nTu subtotal actual es de $${subtotal.toFixed(2)} (te faltan $${(selectedKmRate.minOrder - subtotal).toFixed(2)} en consumo).`);
       setIsSubmittingOrder(false);
       return;
     }
@@ -429,12 +452,18 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       quantity: item.quantity,
     }));
 
+    const fullCustomerAddress = isDeliveryOrder
+      ? (deliveryReference.trim()
+          ? `${deliveryAddress.trim()}\nRef: ${deliveryReference.trim()}`
+          : deliveryAddress.trim())
+      : undefined;
+
     const result = await createOrderAction({
       restaurantId: restaurant.id,
       tableName: selectedTable || "Llevar",
       customerName: isDeliveryOrder ? customerName : undefined,
       customerPhone: isDeliveryOrder ? customerPhone : undefined,
-      customerAddress: isDeliveryOrder ? deliveryAddress : undefined,
+      customerAddress: fullCustomerAddress,
       subtotal,
       iva,
       serviceCharge,
@@ -442,6 +471,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       deliveryCost,
       seasonRateName: activeRate ? activeRate.name : undefined,
       seasonRateAmount: seasonBonusAmount,
+      couponCode: appliedCoupon ? appliedCoupon.code : undefined,
+      discountAmount: couponDiscount,
       total,
       paymentMethod: selectedMethod,
       items: itemsData,
@@ -471,10 +502,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         message += `*WhatsApp Cliente:* ${customerPhone.trim()}\n`;
       }
       message += `*Dirección de Envío:* ${deliveryAddress}\n`;
+      if (deliveryReference.trim()) {
+        message += `*Referencia:* ${deliveryReference.trim()}\n`;
+      }
     } else if (selectedTable) {
       message += `*Mesa:* #${selectedTable}\n`;
     } else {
       message += `*Mesa:* Para llevar / Llevar a casa\n`;
+    }
+    if (appliedCoupon) {
+      message += `*Cupón Aplicado:* ${appliedCoupon.code} (-$${couponDiscount.toFixed(2)})\n`;
     }
     message += `*Subtotal Base:* $${subtotal.toFixed(2)}\n`;
 
@@ -683,158 +720,278 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       {/* Main Menu Feed */}
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 pt-6 pb-32 relative z-10 space-y-12">
         {currentTab === "profile" ? (
-          <div className="space-y-8 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
-            {/* Cover Banner Card */}
-            <div className="relative h-56 rounded-[2rem] overflow-hidden bg-slate-900/60 border border-white/5 shadow-2xl backdrop-blur-md group/cover">
-              {coverBg ? (
-                <img 
-                  src={coverBg} 
-                  alt="" 
-                  loading="lazy"
-                  decoding="async"
-                  className={`absolute inset-0 w-full h-full object-cover transition-all duration-300 ${
-                    coverBg === logoClean ? "filter blur-2xl opacity-25 scale-110" : "opacity-45"
-                  }`} 
-                />
-              ) : (
-                <div 
-                  className="absolute inset-0 bg-gradient-to-tr opacity-30"
-                  style={{ backgroundColor: restaurant.themeColor }}
-                ></div>
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent"></div>
-              
+          <div className="space-y-10 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
+            {/* COOLINARY STAGE HERO SECTION */}
+            <div className="relative rounded-[2.5rem] bg-gradient-to-b from-slate-900/90 via-slate-950 to-slate-950 border border-white/10 p-6 sm:p-10 shadow-2xl overflow-hidden group/hero">
+              {/* Subtle Ambient Theme Background Glow */}
+              <div 
+                className="absolute top-0 right-0 w-[450px] h-[450px] rounded-full blur-[140px] opacity-25 pointer-events-none transition-all duration-700"
+                style={{ backgroundColor: restaurant.themeColor }}
+              ></div>
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:24px_24px] opacity-[0.03] pointer-events-none"></div>
+
               {/* Owner Controls for Cover */}
               {restaurant.isOwner && (
                 <button 
                   onClick={() => setCoverModalOpen(true)}
-                  className="absolute top-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 bg-black/60 hover:bg-black/80 border border-white/10 rounded-xl text-[10px] sm:text-xs font-bold text-white transition-all backdrop-blur-sm cursor-pointer shadow-lg"
+                  className="absolute top-5 right-5 z-30 flex items-center gap-1.5 px-3.5 py-2 bg-black/70 hover:bg-black border border-white/15 rounded-xl text-xs font-bold text-white transition-all backdrop-blur-md cursor-pointer shadow-xl active:scale-95"
                 >
                   {uploadingCover ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Camera className="h-3.5 w-3.5 text-amber-500" />
+                    <Camera className="h-4 w-4 text-amber-400" />
                   )}
-                  <span>Cambiar Fondo</span>
+                  <span>Cambiar Portada</span>
                 </button>
               )}
 
-              <div className="absolute bottom-6 left-6 right-6 sm:bottom-8 sm:left-8 sm:right-8 flex items-center gap-5">
-                <div className="relative group/logo shrink-0">
-                  <div className="absolute -inset-1 bg-gradient-to-tr rounded-3xl opacity-75 blur-md group-hover/logo:opacity-100 transition duration-300"
-                       style={{ backgroundImage: `linear-gradient(to top right, ${restaurant.themeColor}, #ffffff)` }}></div>
-                  {logoClean ? (
-                    <img 
-                      src={logoClean} 
-                      alt={restaurant.name} 
-                      loading="lazy"
-                      decoding="async"
-                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl object-cover border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover/logo:scale-105"
-                    />
-                  ) : (
-                    <div 
-                      className="relative h-20 w-20 sm:h-24 sm:w-24 rounded-3xl flex items-center justify-center font-black text-white text-2xl border-2 border-slate-950 shadow-2xl transition-transform duration-300 group-hover/logo:scale-105"
-                      style={{ backgroundColor: restaurant.themeColor }}
-                    >
-                      {restaurant.name.charAt(0)}
-                    </div>
-                  )}
+              {/* Main Coolinary Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center relative z-10">
+                {/* Left Column: Social Bar + Headline + Description + CTAs */}
+                <div className="md:col-span-7 flex flex-col justify-center space-y-6">
+                  {/* Category / Badge */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-black uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/20">
+                      <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                      {restaurant.specialty || "EXPERIENCIA CULINARIA ÚNICA"}
+                    </span>
+                    {(() => {
+                      const check = isRestaurantOpen(restaurant, "local");
+                      return (
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                          check.isOpen 
+                            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" 
+                            : "bg-red-500/20 text-red-300 border-red-500/30"
+                        }`}>
+                          {check.isOpen ? "🟢 Abierto Ahora" : "🔴 Cerrado Por Ahora"}
+                        </span>
+                      );
+                    })()}
+                  </div>
 
-                  {/* Owner Controls for Logo (Touch-friendly floating button) */}
-                  {restaurant.isOwner && (
-                    <button 
-                      onClick={() => setLogoModalOpen(true)}
-                      className="absolute -bottom-1 -right-1 h-7 w-7 flex items-center justify-center bg-black/80 hover:bg-black border border-white/10 rounded-full z-20 cursor-pointer text-white shadow-lg transition-transform active:scale-90"
-                      title="Cambiar Logo"
+                  {/* Main Display Headline (Big Bold Typography) */}
+                  <div className="space-y-2">
+                    <h1 className="text-4xl sm:text-6xl font-black text-white leading-[1.05] tracking-tight uppercase">
+                      {restaurant.name}
+                    </h1>
+                    <p className="text-sm sm:text-base text-amber-400/90 font-bold uppercase tracking-wider">
+                      ¡LA MEJOR CALIDAD, ESO ES TODO!
+                    </p>
+                  </div>
+
+                  {/* Description / Tagline */}
+                  <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-xl font-normal">
+                    {restaurant.description || "Sabores incomparables preparados al instante con los mejores ingredientes y la máxima calidad."}
+                  </p>
+
+                  {/* Social Media Column / Row + Action Buttons */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-2">
+                    {/* Social Media Pills */}
+                    {(restaurant.instagram || restaurant.facebook || restaurant.tiktok || restaurant.whatsappNumber || restaurant.ubicameUrl) && (
+                      <div className="flex items-center gap-2 bg-slate-950/80 p-2 rounded-2xl border border-white/10 shrink-0">
+                        {restaurant.instagram && (
+                          <a
+                            href={restaurant.instagram.startsWith("http") ? restaurant.instagram : `https://instagram.com/${restaurant.instagram.replace("@", "")}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="h-9 w-9 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-pink-500/50 hover:bg-pink-500/10 transition duration-200"
+                            title="Instagram"
+                          >
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
+                          </a>
+                        )}
+                        {restaurant.facebook && (
+                          <a
+                            href={restaurant.facebook.startsWith("http") ? restaurant.facebook : `https://facebook.com/${restaurant.facebook}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="h-9 w-9 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-blue-500/50 hover:bg-blue-500/10 transition duration-200"
+                            title="Facebook"
+                          >
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
+                          </a>
+                        )}
+                        {restaurant.tiktok && (
+                          <a
+                            href={restaurant.tiktok.startsWith("http") ? restaurant.tiktok : `https://tiktok.com/${restaurant.tiktok}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="h-9 w-9 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-slate-100/50 hover:bg-white/10 transition duration-200"
+                            title="TikTok"
+                          >
+                            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
+                          </a>
+                        )}
+                        {restaurant.whatsappNumber && (
+                          <a
+                            href={`https://wa.me/${restaurant.whatsappNumber.replace(/\D/g, "")}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="h-9 w-9 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition duration-200"
+                            title="WhatsApp"
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </a>
+                        )}
+                        {restaurant.ubicameUrl && (
+                          <a
+                            href={restaurant.ubicameUrl.startsWith("http") ? restaurant.ubicameUrl : `https://${restaurant.ubicameUrl}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="h-9 w-9 rounded-xl bg-slate-900 border border-white/5 flex items-center justify-center text-slate-400 hover:text-amber-400 hover:border-amber-500/50 hover:bg-amber-500/10 transition duration-200"
+                            title="Ubicame.info"
+                          >
+                            <Globe className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Primary CTA Buttons */}
+                  <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                    <button
+                      onClick={() => setCurrentTab("menu")}
+                      className="px-8 py-4 rounded-2xl text-sm font-black text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 shadow-xl relative overflow-hidden group flex items-center justify-center gap-2.5"
+                      style={{ 
+                        backgroundColor: restaurant.themeColor,
+                        boxShadow: `0 12px 30px -5px ${restaurant.themeColor}55`
+                      }}
                     >
-                      {uploadingLogo ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <div className="absolute inset-0 w-1/2 h-full bg-white/15 skew-x-[-25deg] -translate-x-full group-hover:animate-shimmer"></div>
+                      <Utensils className="h-5 w-5 transition-transform group-hover:rotate-12 duration-300" />
+                      <span>Ver Menú Digital</span>
+                    </button>
+
+                    <button
+                      onClick={handleShare}
+                      className="px-6 py-4 rounded-2xl text-sm font-bold text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2"
+                    >
+                      {shareCopied ? (
+                        <>
+                          <Check className="h-4.5 w-4.5 text-green-400" />
+                          <span className="text-green-400">¡Enlace Copiado!</span>
+                        </>
                       ) : (
-                        <Camera className="h-3.5 w-3.5 text-amber-500" />
+                        <>
+                          <Share2 className="h-4.5 w-4.5 text-amber-400" />
+                          <span>Compartir</span>
+                        </>
                       )}
                     </button>
-                  )}
+                  </div>
                 </div>
-                <div className="mb-1">
-                  <h2 className="text-3xl sm:text-5xl font-extrabold text-white leading-tight tracking-tight">{restaurant.name}</h2>
-                  <p className="text-sm sm:text-base text-slate-400/90 font-medium tracking-wide mt-1">Categorías premium y pedidos automáticos</p>
+
+                {/* Right Column: Floating Dish Plate Container */}
+                <div className="md:col-span-5 flex justify-center">
+                  <div className="relative w-full max-w-sm aspect-square rounded-[3rem] p-3 bg-gradient-to-tr from-slate-900/80 via-slate-800/40 to-white/10 border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.8)] group/plate overflow-hidden">
+                    {/* Inner Circular Dish Showcase */}
+                    <div className="w-full h-full rounded-[2.5rem] overflow-hidden relative bg-slate-950 flex items-center justify-center">
+                      {coverBg ? (
+                        <img 
+                          src={coverBg} 
+                          alt={restaurant.name} 
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover transition-transform duration-700 group-hover/plate:scale-110 filter brightness-95"
+                        />
+                      ) : (
+                        <div 
+                          className="w-full h-full flex flex-col items-center justify-center gap-2 p-6 text-center text-white"
+                          style={{ backgroundColor: restaurant.themeColor }}
+                        >
+                          <Utensils className="h-16 w-16 opacity-80" />
+                          <span className="font-extrabold text-lg">{restaurant.name}</span>
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent"></div>
+
+                      {/* Logo Avatar Overlay (Bottom Left) */}
+                      <div className="absolute bottom-4 left-4 z-20 flex items-center gap-3 bg-slate-950/80 backdrop-blur-md p-2 pr-4 rounded-2xl border border-white/15 shadow-xl">
+                        <div className="relative shrink-0">
+                          {logoClean ? (
+                            <img 
+                              src={logoClean} 
+                              alt={restaurant.name} 
+                              loading="lazy"
+                              decoding="async"
+                              className="h-12 w-12 rounded-xl object-cover border border-white/20"
+                            />
+                          ) : (
+                            <div 
+                              className="h-12 w-12 rounded-xl flex items-center justify-center font-bold text-white text-lg border border-white/20"
+                              style={{ backgroundColor: restaurant.themeColor }}
+                            >
+                              {restaurant.name.charAt(0)}
+                            </div>
+                          )}
+
+                          {restaurant.isOwner && (
+                            <button 
+                              onClick={() => setLogoModalOpen(true)}
+                              className="absolute -bottom-1 -right-1 h-5.5 w-5.5 flex items-center justify-center bg-black border border-white/20 rounded-full z-30 text-white shadow-md transition-transform active:scale-90"
+                              title="Cambiar Logo"
+                            >
+                              {uploadingLogo ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Camera className="h-3 w-3 text-amber-400" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                        <div>
+                          <span className="text-xs font-black text-white block truncate max-w-[120px]">{restaurant.name}</span>
+                          <span className="text-[10px] text-amber-400 font-bold block">Menú Digital QR</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Description & About Us */}
+            {/* Description & Story Section */}
             {restaurant.description && (
-              <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-8 backdrop-blur-md space-y-3 relative overflow-hidden">
-                <div className="absolute top-0 right-0 h-24 w-24 bg-gradient-to-bl from-white/5 to-transparent rounded-bl-full pointer-events-none"></div>
-                <h3 className="text-xs font-extrabold uppercase tracking-[0.25em] text-slate-500">Sobre Nosotros</h3>
-                <p className="text-slate-350 text-lg leading-relaxed font-serif italic" style={{ fontFamily: 'var(--font-playfair)' }}>
+              <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl space-y-4 relative overflow-hidden">
+                <div className="absolute top-0 right-0 h-32 w-32 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-bl-full pointer-events-none"></div>
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-amber-400"></span>
+                  <h3 className="text-xs font-extrabold uppercase tracking-[0.25em] text-amber-400">Sobre Nosotros & Nuestra Historia</h3>
+                </div>
+                <p className="text-slate-200 text-lg sm:text-xl leading-relaxed font-serif italic" style={{ fontFamily: 'var(--font-playfair)' }}>
                   "{restaurant.description}"
                 </p>
               </div>
             )}
 
-            {/* Quick Specs (Especialidad y Horario) */}
+            {/* Quick Specs Grid (Especialidad y Horario) */}
             {(restaurant.specialty || restaurant.schedule) && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {restaurant.specialty && (
-                  <div className="bg-slate-900/40 border border-white/5 p-6 rounded-[2rem] backdrop-blur-md flex items-start gap-4 transition-all duration-300 hover:border-white/10 hover:bg-slate-900/50">
-                    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
-                         style={{ backgroundColor: `${restaurant.themeColor}15`, color: restaurant.themeColor }}>
-                      <Sparkles className="h-5 w-5" />
+                  <div className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] backdrop-blur-xl flex items-start gap-4 transition-all duration-300 hover:border-amber-500/30">
+                    <div className="h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      <Sparkles className="h-6 w-6" />
                     </div>
                     <div>
-                      <span className="text-xs text-slate-500 font-extrabold uppercase tracking-[0.2em]">Especialidad de la Casa</span>
-                      <p className="text-base text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.specialty}</p>
+                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Especialidad de la Casa</span>
+                      <p className="text-base text-white font-black mt-1 leading-snug">{restaurant.specialty}</p>
                     </div>
                   </div>
                 )}
                 {restaurant.schedule && (
-                  <div className="bg-slate-900/40 border border-white/5 p-6 rounded-[2rem] backdrop-blur-md flex items-start gap-4 transition-all duration-300 hover:border-white/10 hover:bg-slate-900/50">
-                    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
-                         style={{ backgroundColor: `${restaurant.themeColor}15`, color: restaurant.themeColor }}>
-                      <Clock className="h-5 w-5" />
+                  <div className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] backdrop-blur-xl flex items-start gap-4 transition-all duration-300 hover:border-amber-500/30">
+                    <div className="h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      <Clock className="h-6 w-6" />
                     </div>
                     <div>
-                      <span className="text-xs text-slate-500 font-extrabold uppercase tracking-[0.2em]">Horario de Atención</span>
-                      <p className="text-base text-slate-200 font-bold mt-1.5 leading-snug">{restaurant.schedule}</p>
+                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Horario de Atención</span>
+                      <p className="text-base text-white font-black mt-1 leading-snug">{restaurant.schedule}</p>
                     </div>
                   </div>
                 )}
               </div>
             )}
-
-            {/* CTA Button "Ver Menú" */}
-            <button
-              onClick={() => setCurrentTab("menu")}
-              className="w-full flex items-center justify-center gap-3 py-5 rounded-2xl text-base font-black text-white transition-all transform hover:scale-[1.01] hover:brightness-110 active:scale-[0.99] duration-300 shadow-xl relative overflow-hidden group"
-              style={{ 
-                backgroundColor: restaurant.themeColor,
-                boxShadow: `0 15px 30px -5px ${restaurant.themeColor}44`
-              }}
-            >
-              <div className="absolute inset-0 w-1/2 h-full bg-white/10 skew-x-[-25deg] -translate-x-full group-hover:animate-shimmer"></div>
-              <Utensils className="h-5.5 w-5.5 transition-transform group-hover:rotate-12 duration-300" />
-              <span className="tracking-wide">Ver Menú Digital</span>
-            </button>
-
-            {/* Share Button */}
-            <button
-              onClick={handleShare}
-              className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl text-sm font-black text-white transition-all transform hover:scale-[1.01] hover:bg-slate-800 active:scale-[0.99] duration-300 border border-white/10 bg-slate-900/40 backdrop-blur-md shadow-lg relative overflow-hidden group"
-              title="Compartir este perfil"
-            >
-              {shareCopied ? (
-                <>
-                  <Check className="h-5 w-5 text-green-400" />
-                  <span className="tracking-wide text-green-400">¡Enlace copiado!</span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="h-5 w-5 transition-transform group-hover:rotate-12 duration-300" style={{ color: restaurant.themeColor }} />
-                  <span className="tracking-wide">Compartir Perfil</span>
-                </>
-              )}
-            </button>
 
             {/* Contact Information Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -843,28 +1000,28 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   href={`https://wa.me/${restaurant.whatsappNumber.replace(/\D/g, "")}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="bg-slate-900/30 border border-white/5 p-6 rounded-[2rem] flex items-center gap-5 hover:bg-slate-900/50 hover:border-white/10 transition-all duration-300 hover:scale-[1.02]"
+                  className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] flex items-center gap-5 hover:bg-slate-900/80 hover:border-emerald-500/40 transition-all duration-300 group"
                 >
-                  <div className="h-12 w-12 bg-green-500/10 text-green-400 rounded-2xl flex items-center justify-center shrink-0">
-                    <MessageSquare className="h-5.5 w-5.5" />
+                  <div className="h-14 w-14 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center shrink-0 border border-emerald-500/20 group-hover:scale-110 transition duration-300">
+                    <MessageSquare className="h-6 w-6" />
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">WhatsApp</span>
-                    <p className="text-xs text-slate-200 font-bold mt-1">Enviar mensaje directo</p>
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">Hacer consultas en línea</span>
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Atención por WhatsApp</span>
+                    <p className="text-sm text-white font-black mt-0.5">Enviar mensaje directo</p>
+                    <span className="text-xs text-slate-400 mt-0.5 block">Hacer consultas y pedidos en línea</span>
                   </div>
                 </a>
               )}
 
               {restaurant.address && (
-                <div className="bg-slate-900/30 border border-white/5 p-6 rounded-[2rem] flex items-center gap-5 transition-all duration-300 hover:scale-[1.02]">
-                  <div className="h-12 w-12 bg-red-500/10 text-red-400 rounded-2xl flex items-center justify-center shrink-0">
-                    <MapPin className="h-5.5 w-5.5" />
+                <div className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] flex items-center gap-5 transition-all duration-300">
+                  <div className="h-14 w-14 bg-red-500/10 text-red-400 rounded-2xl flex items-center justify-center shrink-0 border border-red-500/20">
+                    <MapPin className="h-6 w-6" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Dirección</span>
-                    <p className="text-xs text-slate-200 font-bold mt-1 leading-relaxed truncate">{restaurant.address}</p>
-                    {restaurant.locality && <span className="block text-[10px] text-slate-400 mt-0.5">{restaurant.locality}</span>}
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Dirección Principal</span>
+                    <p className="text-sm text-white font-black mt-0.5 leading-relaxed truncate">{restaurant.address}</p>
+                    {restaurant.locality && <span className="block text-xs text-slate-400 mt-0.5">{restaurant.locality}</span>}
                   </div>
                 </div>
               )}
@@ -872,15 +1029,15 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
             {/* Services & Facilities */}
             {restaurant.services && (
-              <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-8 backdrop-blur-md space-y-4">
-                <span className="text-xs font-extrabold text-slate-500 uppercase tracking-[0.2em] block">Servicios y Facilidades</span>
+              <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl space-y-4">
+                <span className="text-xs font-extrabold text-amber-400 uppercase tracking-[0.2em] block">Servicios y Facilidades del Local</span>
                 <div className="flex flex-wrap gap-2.5">
                   {restaurant.services.split(",").map((service, idx) => (
                     <span 
                       key={idx} 
-                      className="px-4 py-2 rounded-full text-xs font-semibold bg-slate-950/80 border border-white/5 text-slate-350 hover:border-white/10 hover:text-white transition duration-200 flex items-center gap-1.5"
+                      className="px-4 py-2.5 rounded-2xl text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 flex items-center gap-2 shadow-inner"
                     >
-                      <span style={{ color: restaurant.themeColor }}>✓</span> {service.trim()}
+                      <span className="text-emerald-400 font-black">✓</span> {service.trim()}
                     </span>
                   ))}
                 </div>
@@ -889,16 +1046,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
             {/* Contact Numbers */}
             {restaurant.contactNumbers && (
-              <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-8 backdrop-blur-md space-y-4">
-                <span className="text-xs font-extrabold text-slate-500 uppercase tracking-[0.2em] block">Otros Números de Contacto</span>
+              <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl space-y-4">
+                <span className="text-xs font-extrabold text-amber-400 uppercase tracking-[0.2em] block">Otros Números de Contacto</span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {restaurant.contactNumbers.split(",").map((phone, idx) => (
                     <a
                       key={idx}
                       href={`tel:${phone.replace(/\s+/g, "")}`}
-                      className="flex items-center gap-3.5 px-5 py-4 rounded-2xl bg-slate-950/80 border border-white/5 hover:border-white/10 hover:bg-slate-900 text-sm font-bold text-slate-300 hover:text-white transition-all duration-300 hover:scale-[1.01]"
+                      className="flex items-center gap-3.5 px-5 py-4 rounded-2xl bg-slate-950 border border-white/10 hover:border-amber-400/40 hover:bg-slate-900 text-sm font-bold text-slate-200 hover:text-white transition-all duration-300"
                     >
-                      <Phone className="h-4.5 w-4.5 text-slate-400 shrink-0" />
+                      <Phone className="h-5 w-5 text-amber-400 shrink-0" />
                       <span>{phone.trim()}</span>
                     </a>
                   ))}
@@ -906,57 +1063,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               </div>
             )}
 
-            {/* Social Networks Section */}
-            {(restaurant.instagram || restaurant.facebook || restaurant.tiktok || restaurant.ubicameUrl) && (
-              <div className="bg-slate-900/20 border border-white/5 rounded-[2rem] p-8 flex flex-col items-center gap-5 backdrop-blur-md">
-                <span className="text-xs font-extrabold text-slate-500 uppercase tracking-[0.2em]">Enlaces y Redes Sociales</span>
-                <div className="flex gap-4 flex-wrap justify-center">
-                  {restaurant.instagram && (
-                    <a
-                      href={restaurant.instagram.startsWith("http") ? restaurant.instagram : `https://instagram.com/${restaurant.instagram.replace("@", "")}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="h-13 w-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-pink-500/50 hover:bg-gradient-to-tr hover:from-yellow-600/10 hover:via-pink-600/10 hover:to-purple-600/10 hover:shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all duration-300"
-                    >
-                      <svg className="h-5.5 w-5.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
-                    </a>
-                  )}
-                  {restaurant.facebook && (
-                    <a
-                      href={restaurant.facebook.startsWith("http") ? restaurant.facebook : `https://facebook.com/${restaurant.facebook}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="h-13 w-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-blue-500/50 hover:bg-blue-500/5 hover:shadow-[0_0_20px_rgba(59,130,246,0.4)] transition-all duration-300"
-                    >
-                      <svg className="h-5.5 w-5.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>
-                    </a>
-                  )}
-                  {restaurant.tiktok && (
-                    <a
-                      href={restaurant.tiktok.startsWith("http") ? restaurant.tiktok : `https://tiktok.com/${restaurant.tiktok}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="h-13 w-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center text-slate-400 hover:text-white hover:border-slate-100/50 hover:bg-white/5 hover:shadow-[0_0_20px_rgba(255,255,255,0.2)] transition-all duration-300"
-                    >
-                      <svg className="h-5.5 w-5.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
-                    </a>
-                  )}
-                  {restaurant.ubicameUrl && (
-                    <a
-                      href={restaurant.ubicameUrl.startsWith("http") ? restaurant.ubicameUrl : `https://${restaurant.ubicameUrl}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-5 h-13 rounded-full bg-slate-950 border border-white/5 flex items-center justify-center gap-2.5 text-slate-400 hover:text-white hover:border-red-500/55 hover:bg-red-500/5 hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] transition-all duration-300 text-xs font-black"
-                    >
-                      <Globe className="h-4.5 w-4.5 text-slate-400 shrink-0" />
-                      <span>Ubicame.info</span>
-                    </a>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Ubicación y Cómo Llegar (Mapa) */}
+            {/* Ubicación y Cómo Llegar (Mapa Embed) */}
             {(() => {
               const mapIframeSrc = getMapIframeSrc(restaurant.mapEmbedUrl, restaurant.address, restaurant.ubicameUrl);
               const hasLocation = restaurant.address || restaurant.ubicameUrl || mapIframeSrc;
@@ -970,11 +1077,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   : null;
 
               return (
-                <div className="bg-slate-900/60 border border-white/10 rounded-[2.5rem] p-6 sm:p-8 backdrop-blur-xl shadow-2xl space-y-6 text-white" style={{ fontFamily: 'var(--font-outfit)' }}>
+                <div className="bg-slate-900/80 border border-white/15 rounded-[2.5rem] p-6 sm:p-8 backdrop-blur-xl shadow-2xl space-y-6 text-white" style={{ fontFamily: 'var(--font-outfit)' }}>
                   {/* Header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
                     <div>
-                      <span className="text-[10px] sm:text-xs font-black text-indigo-400 uppercase tracking-[0.25em] block mb-1">
+                      <span className="text-[10px] sm:text-xs font-black text-amber-400 uppercase tracking-[0.25em] block mb-1">
                         MAPA E INSTALACIONES
                       </span>
                       <h3 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2 tracking-tight">
@@ -984,8 +1091,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                     <div className="flex items-center gap-3 flex-wrap">
                       {restaurant.address && (
-                        <div className="px-4 py-2 rounded-2xl bg-slate-950/80 border border-white/10 text-xs font-bold text-slate-300 flex items-center gap-2 shadow-inner max-w-xs truncate">
-                          <span className="text-indigo-400">🌐</span>
+                        <div className="px-4 py-2 rounded-2xl bg-slate-950 border border-white/10 text-xs font-bold text-slate-300 flex items-center gap-2 shadow-inner max-w-xs truncate">
+                          <span className="text-amber-400">🌐</span>
                           <span className="truncate">{restaurant.address}</span>
                         </div>
                       )}
@@ -994,7 +1101,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           href={gpsUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="px-5 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all hover:scale-105 active:scale-95 shrink-0"
+                          className="px-5 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all hover:scale-105 active:scale-95 shrink-0"
                         >
                           <span>📍</span> Abrir GPS ↗
                         </a>
@@ -1613,23 +1720,41 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     Selecciona la Distancia de Envío (por KM):
                   </span>
                   <div className="grid grid-cols-2 gap-2 pt-1">
-                    {kmRatesList.map((rate) => (
-                      <button
-                        key={rate.id}
-                        type="button"
-                        onClick={() => setSelectedKmRate(rate)}
-                        className={`py-2 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-0.5 text-center transition duration-200 ${
-                          selectedKmRate?.id === rate.id
-                            ? "text-white border-transparent shadow-lg"
-                            : "text-slate-300 bg-slate-900 border-slate-800 hover:text-white"
-                        }`}
-                        style={{ backgroundColor: selectedKmRate?.id === rate.id ? restaurant.themeColor : undefined }}
-                      >
-                        <span>{rate.label}</span>
-                        <span className="text-[11px] font-bold text-amber-300">${rate.price.toFixed(2)}</span>
-                      </button>
-                    ))}
+                    {kmRatesList.map((rate) => {
+                      const isSelected = selectedKmRate?.id === rate.id;
+                      const minRequired = rate.minOrder || 0;
+
+                      return (
+                        <button
+                          key={rate.id}
+                          type="button"
+                          onClick={() => setSelectedKmRate(rate)}
+                          className={`py-2 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-0.5 text-center transition duration-200 ${
+                            isSelected
+                              ? "text-white border-transparent shadow-lg"
+                              : "text-slate-300 bg-slate-900 border-slate-800 hover:text-white"
+                          }`}
+                          style={{ backgroundColor: isSelected ? restaurant.themeColor : undefined }}
+                        >
+                          <span>{rate.label}</span>
+                          <span className="text-[11px] font-bold text-amber-300">${rate.price.toFixed(2)}</span>
+                          {minRequired > 0 && (
+                            <span className={`text-[9.5px] font-medium ${isSelected ? "text-white/90" : "text-amber-400/90"}`}>
+                              Mín: ${minRequired.toFixed(2)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
+                  {selectedKmRate?.minOrder && cartTotal < selectedKmRate.minOrder ? (
+                    <div className="mt-2 bg-red-500/10 border border-red-500/30 p-2.5 rounded-xl text-xs text-red-300 font-medium flex items-center gap-2">
+                      <span className="shrink-0 text-base">⚠️</span>
+                      <span>
+                        Consumo mínimo requerido para <strong>{selectedKmRate.label}</strong>: <strong>${selectedKmRate.minOrder.toFixed(2)}</strong>. Te faltan <strong>${(selectedKmRate.minOrder - cartTotal).toFixed(2)}</strong> en consumo.
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1687,8 +1812,77 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     rows={3}
                   />
                 </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Referencia / Lugar (Opcional)</span>
+                  <input
+                    type="text"
+                    placeholder="Ej. Hostal, tienda, casa color verde, lugar cercano..."
+                    value={deliveryReference}
+                    onChange={(e) => setDeliveryReference(e.target.value)}
+                    className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+                  />
+                </div>
               </div>
             )}
+
+            {/* Sección Cupón de Descuento */}
+            <div className="space-y-1.5" style={{ fontFamily: 'var(--font-outfit)' }}>
+              <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">¿Tienes un Cupón de Descuento?</span>
+              {appliedCoupon ? (
+                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-xl text-xs text-emerald-300">
+                  <div className="flex items-center gap-2 font-bold">
+                    <Tag className="h-4 w-4 text-emerald-400" />
+                    <span>Cupón <strong>{appliedCoupon.code}</strong> aplicado (-${appliedCoupon.discountAmount.toFixed(2)})</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAppliedCoupon(null);
+                      setInputCouponCode("");
+                      setCouponError("");
+                    }}
+                    className="text-red-400 hover:text-red-300 font-bold px-2.5 py-1 rounded-lg bg-slate-950/80 border border-red-500/20 active:scale-95 transition"
+                  >
+                    Quitar
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Ej. BIENVENIDA10"
+                    value={inputCouponCode}
+                    onChange={(e) => {
+                      setInputCouponCode(e.target.value.toUpperCase());
+                      setCouponError("");
+                    }}
+                    className="flex-1 bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white font-mono font-bold uppercase focus:outline-none text-xs"
+                  />
+                  <button
+                    type="button"
+                    disabled={validatingCoupon || !inputCouponCode.trim()}
+                    onClick={async () => {
+                      if (!inputCouponCode.trim()) return;
+                      setValidatingCoupon(true);
+                      setCouponError("");
+                      const res = await validateCouponAction(restaurant.id, inputCouponCode, cartTotal);
+                      setValidatingCoupon(false);
+                      if (res.error) {
+                        setCouponError(res.error);
+                      } else if (res.coupon) {
+                        setAppliedCoupon(res.coupon);
+                      }
+                    }}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-amber-400 font-extrabold text-xs rounded-xl border border-white/5 transition active:scale-95 disabled:opacity-50"
+                  >
+                    {validatingCoupon ? "Validando..." : "Aplicar"}
+                  </button>
+                </div>
+              )}
+              {couponError && (
+                <p className="text-[11px] text-red-400 font-semibold mt-1">⚠️ {couponError}</p>
+              )}
+            </div>
 
             {/* Propina Selector */}
             <div className="space-y-2" style={{ fontFamily: 'var(--font-outfit)' }}>
@@ -1720,20 +1914,23 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
 
               const subtotal = cartTotal;
+              const couponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
+              const subtotalAfterCoupon = Math.max(0, subtotal - couponDiscount);
+
               const targetDate = reservationDate || new Date().toISOString().split("T")[0];
               const activeRate = (restaurant.seasonRates || []).find(
                 (r) => r.isActive && targetDate >= r.startDate && targetDate <= r.endDate
               );
 
               const seasonBonusAmount = activeRate 
-                ? (subtotal * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
+                ? (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
                 : 0;
 
-              const iva = applyIva ? (subtotal + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
-              const serviceCharge = applyService ? (subtotal + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
-              const tip = subtotal * (tipPercentage / 100);
+              const iva = applyIva ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
+              const serviceCharge = applyService ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
+              const tip = subtotalAfterCoupon * (tipPercentage / 100);
               const deliveryCost = isDelivery ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
-              const total = subtotal + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
+              const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
 
               return (
                 <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-2.5 text-xs" style={{ fontFamily: 'var(--font-outfit)' }}>
@@ -1741,6 +1938,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     <span>Subtotal Base:</span>
                     <span className="font-bold text-slate-350">${subtotal.toFixed(2)}</span>
                   </div>
+
+                  {appliedCoupon && (
+                    <div className="bg-emerald-500/10 border border-emerald-500/30 p-2.5 rounded-xl flex items-center justify-between text-emerald-400 font-bold text-[11px]">
+                      <span>🎟️ Descuento Cupón ({appliedCoupon.code}):</span>
+                      <span>-${couponDiscount.toFixed(2)}</span>
+                    </div>
+                  )}
 
                   {activeRate && (
                     <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-xl flex items-center justify-between text-amber-400 font-bold text-[11px]">
@@ -2033,6 +2237,40 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           </button>
         </div>
       </div>
+
+      {/* Floating WhatsApp Action Button */}
+      {(() => {
+        const rawPhone = (restaurant.whatsappNumber || (restaurant as any).whatsapp || "").toString();
+        let formattedPhone = rawPhone.replace(/\D/g, "");
+        if (!formattedPhone) return null;
+
+        if (!formattedPhone.startsWith("593") && formattedPhone.startsWith("0")) {
+          formattedPhone = "593" + formattedPhone.substring(1);
+        } else if (!formattedPhone.startsWith("593") && formattedPhone.length === 9) {
+          formattedPhone = "593" + formattedPhone;
+        } else if (formattedPhone.length === 10 && formattedPhone.startsWith("09")) {
+          formattedPhone = "593" + formattedPhone.substring(1);
+        }
+
+        const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(`¡Hola! Me gustaría información o hacer un pedido en *${restaurant.name}*.`)}`;
+
+        return (
+          <a
+            href={waUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 z-40 flex items-center gap-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-[0_10px_30px_rgba(37,211,102,0.5)] hover:shadow-[0_15px_35px_rgba(37,211,102,0.7)] transition-all duration-300 hover:scale-105 active:scale-95 group/wa cursor-pointer"
+            title="Chatear por WhatsApp"
+          >
+            <div className="relative flex items-center justify-center">
+              <MessageSquare className="h-6 w-6 text-white shrink-0 group-hover/wa:rotate-12 transition-transform duration-300" />
+              <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-emerald-200 animate-ping opacity-75"></span>
+              <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-white"></span>
+            </div>
+            <span className="hidden sm:inline text-xs font-black uppercase tracking-wider">WhatsApp</span>
+          </a>
+        );
+      })()}
     </div>
   );
 }

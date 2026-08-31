@@ -76,6 +76,7 @@ model Restaurant {
   customers      Customer[]
   crmNotes       CrmNote[]
   seasonRates    SeasonRate[]
+  coupons        Coupon[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -140,6 +141,8 @@ model Order {
   deliveryCost     Float       @default(0.0)
   seasonRateName   String?
   seasonRateAmount Float       @default(0.0)
+  couponCode       String?
+  discountAmount   Float       @default(0.0)
   total            Float
   paymentMethod    String
   createdAt        DateTime    @default(now())
@@ -228,6 +231,25 @@ model Customer {
 
   @@index([restaurantId])
   @@index([phone])
+}
+
+model Coupon {
+  id              String     @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  code            String
+  discountType    String     // PERCENTAGE, FIXED
+  discountValue   Float
+  minOrder        Float      @default(0.0)
+  maxUses         Int?
+  usedCount       Int        @default(0)
+  isActive        Boolean    @default(true)
+  expiresAt       DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@unique([restaurantId, code])
+  @@index([restaurantId, isActive])
 }
 
 

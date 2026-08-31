@@ -1100,6 +1100,8 @@ export async function createOrderAction(data: {
   deliveryCost: number;
   seasonRateName?: string;
   seasonRateAmount?: number;
+  couponCode?: string;
+  discountAmount?: number;
   total: number;
   paymentMethod: string;
   items: { dishName: string; price: number; quantity: number }[];
@@ -1122,6 +1124,10 @@ export async function createOrderAction(data: {
         deliveryCost: data.deliveryCost,
         seasonRateName: data.seasonRateName || null,
         seasonRateAmount: data.seasonRateAmount || 0,
+        // @ts-ignore
+        couponCode: data.couponCode || null,
+        // @ts-ignore
+        discountAmount: data.discountAmount || 0,
         total: data.total,
         paymentMethod: data.paymentMethod,
         items: {
@@ -1133,6 +1139,18 @@ export async function createOrderAction(data: {
         },
       },
     });
+
+    if (data.couponCode && data.couponCode.trim()) {
+      try {
+        // @ts-ignore
+        await prisma.coupon.updateMany({
+          where: { restaurantId: data.restaurantId, code: data.couponCode.trim().toUpperCase() },
+          data: { usedCount: { increment: 1 } },
+        });
+      } catch (e) {
+        console.warn("Could not increment coupon usedCount:", e);
+      }
+    }
 
     // Auto-upsert into Customer CRM table
     if (data.customerPhone && data.customerPhone.trim()) {
@@ -1915,5 +1933,179 @@ export async function importCustomersAction(
     return { error: "Ocurrió un error al importar la lista de contactos." };
   }
 }
+
+// Coupon System Server Actions
+export async function getRestaurantCouponsAction(restaurantId: string) {
+  try {
+    // @ts-ignore
+    const coupons = await prisma.coupon.findMany({
+      where: { restaurantId },
+      orderBy: { createdAt: "desc" },
+    });
+    return { coupons };
+  } catch (error: any) {
+    console.error("Error fetching coupons:", error);
+    return { coupons: [], error: error?.message || "No se pudieron obtener los cupones." };
+  }
+}
+
+export async function createCouponAction(
+  restaurantId: string,
+  data: {
+    code: string;
+    discountType: "PERCENTAGE" | "FIXED";
+    discountValue: number;
+    minOrder?: number;
+    maxUses?: number | null;
+    expiresAt?: string | null;
+  }
+) {
+  try {
+    await refreshUserSession();
+    const cleanCode = data.code.trim().toUpperCase();
+
+    if (!cleanCode) {
+      return { error: "El código del cupón es obligatorio." };
+    }
+
+    if (data.discountValue <= 0) {
+      return { error: "El valor del descuento debe ser mayor a 0." };
+    }
+
+    if (data.discountType === "PERCENTAGE" && data.discountValue > 100) {
+      return { error: "El porcentaje de descuento no puede ser mayor al 100%." };
+    }
+
+    // @ts-ignore
+    const existing = await prisma.coupon.findFirst({
+      where: {
+        restaurantId,
+        code: cleanCode,
+      },
+    });
+
+    if (existing) {
+      return { error: `Ya existe un cupón con el código "${cleanCode}" para este restaurante.` };
+    }
+
+    let parsedExpiresAt: Date | null = null;
+    if (data.expiresAt && typeof data.expiresAt === "string" && data.expiresAt.trim() !== "") {
+      const d = new Date(data.expiresAt);
+      if (!isNaN(d.getTime())) {
+        parsedExpiresAt = d;
+      }
+    }
+
+    // @ts-ignore
+    const coupon = await prisma.coupon.create({
+      data: {
+        restaurantId,
+        code: cleanCode,
+        discountType: data.discountType,
+        discountValue: Number(data.discountValue),
+        minOrder: Number(data.minOrder) || 0,
+        maxUses: data.maxUses ? Math.max(1, Number(data.maxUses)) : null,
+        expiresAt: parsedExpiresAt,
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true, coupon };
+  } catch (error: any) {
+    console.error("Error creating coupon:", error);
+    return { error: error?.message || "No se pudo crear el cupón de descuento." };
+  }
+}
+
+export async function deleteCouponAction(couponId: string, restaurantId: string) {
+  try {
+    await refreshUserSession();
+    // @ts-ignore
+    await prisma.coupon.deleteMany({
+      where: { id: couponId, restaurantId },
+    });
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error deleting coupon:", error);
+    return { error: error?.message || "No se pudo eliminar el cupón." };
+  }
+}
+
+export async function toggleCouponStatusAction(couponId: string, restaurantId: string) {
+  try {
+    await refreshUserSession();
+    // @ts-ignore
+    const coupon = await prisma.coupon.findFirst({
+      where: { id: couponId, restaurantId },
+    });
+    if (!coupon) return { error: "Cupón no encontrado." };
+
+    // @ts-ignore
+    await prisma.coupon.update({
+      where: { id: couponId },
+      data: { isActive: !coupon.isActive },
+    });
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error toggling coupon status:", error);
+    return { error: error?.message || "No se pudo actualizar el estado del cupón." };
+  }
+}
+
+export async function validateCouponAction(restaurantId: string, code: string, subtotal: number) {
+  const cleanCode = code.trim().toUpperCase();
+  if (!cleanCode) return { error: "Ingresa un código de cupón." };
+
+  try {
+    // @ts-ignore
+    const coupon = await prisma.coupon.findFirst({
+      where: {
+        restaurantId,
+        code: cleanCode,
+      },
+    });
+
+    if (!coupon || !coupon.isActive) {
+      return { error: "El cupón ingresado no existe o está inactivo." };
+    }
+
+    if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
+      return { error: "El cupón ha expirado." };
+    }
+
+    if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+      return { error: "El cupón ha alcanzado su límite máximo de usos." };
+    }
+
+    if (subtotal < coupon.minOrder) {
+      return {
+        error: `Este cupón requiere un consumo mínimo de $${coupon.minOrder.toFixed(2)}. Tu subtotal actual es de $${subtotal.toFixed(2)}.`,
+      };
+    }
+
+    let discountAmount = 0;
+    if (coupon.discountType === "PERCENTAGE") {
+      discountAmount = (subtotal * coupon.discountValue) / 100;
+    } else {
+      discountAmount = Math.min(subtotal, coupon.discountValue);
+    }
+
+    return {
+      success: true,
+      coupon: {
+        code: coupon.code,
+        discountType: coupon.discountType,
+        discountValue: coupon.discountValue,
+        discountAmount: Number(discountAmount.toFixed(2)),
+      },
+    };
+  } catch (error: any) {
+    console.error("Error validating coupon:", error);
+    return { error: error?.message || "No se pudo validar el cupón." };
+  }
+}
+
 
 

@@ -23,7 +23,11 @@ import {
   updateCustomerAction,
   deleteCustomerAction,
   importCustomersAction,
-  updateRestaurantSchedulesAction
+  updateRestaurantSchedulesAction,
+  getRestaurantCouponsAction,
+  createCouponAction,
+  deleteCouponAction,
+  toggleCouponStatusAction
 } from "@/lib/actions";
 import { 
   WeeklySchedule, 
@@ -81,6 +85,19 @@ type SeasonRate = {
   fixedBonus: number;
   isHoliday: boolean;
   isActive: boolean;
+};
+
+type Coupon = {
+  id: string;
+  code: string;
+  discountType: "PERCENTAGE" | "FIXED";
+  discountValue: number;
+  minOrder: number;
+  maxUses: number | null;
+  usedCount: number;
+  isActive: boolean;
+  expiresAt: string | null;
+  createdAt: string;
 };
 import { QRCodeCanvas } from "qrcode.react";
 import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
@@ -177,6 +194,7 @@ type Restaurant = {
   categories: Category[];
   orders: Order[];
   seasonRates?: SeasonRate[];
+  coupons?: Coupon[];
   customers?: Customer[];
 };
 
@@ -197,7 +215,7 @@ type Customer = {
 };
 
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "qr" | "orders" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "qr" | "orders" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState("");
@@ -274,28 +292,54 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [serviceOnTable, setServiceOnTable] = useState(restaurant.serviceOnTable);
   const [serviceOnTakeout, setServiceOnTakeout] = useState(restaurant.serviceOnTakeout);
 
-  const [kmRates, setKmRates] = useState<{ id: string; label: string; price: number }[]>(() => {
+  const [kmRates, setKmRates] = useState<{ id: string; label: string; price: number; minOrder?: number }[]>(() => {
     const rawRates = restaurant?.deliveryRates || null;
     if (rawRates) {
       try {
         const parsed = JSON.parse(rawRates);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map((item: any) => ({
+            id: item.id || `km-${Math.random()}`,
+            label: item.label || "",
+            price: typeof item.price === "number" ? item.price : 0,
+            minOrder: typeof item.minOrder === "number" ? item.minOrder : (typeof item.minPurchase === "number" ? item.minPurchase : 0),
+          }));
         }
       } catch (e) {
         console.error("Error parsing deliveryRates:", e);
       }
     }
     return [
-      { id: "km-1", label: "Hasta 2 KM", price: 1.50 },
-      { id: "km-2", label: "De 2 a 5 KM", price: 2.50 },
-      { id: "km-3", label: "De 5 a 10 KM", price: 4.00 },
-      { id: "km-4", label: "Más de 10 KM", price: 6.00 },
+      { id: "km-1", label: "Hasta 2 KM", price: 1.50, minOrder: 0 },
+      { id: "km-2", label: "De 2 a 5 KM", price: 2.50, minOrder: 0 },
+      { id: "km-3", label: "De 5 a 10 KM", price: 4.00, minOrder: 0 },
+      { id: "km-4", label: "Más de 10 KM", price: 6.00, minOrder: 0 },
     ];
   });
 
   const [savingCharges, setSavingCharges] = useState(false);
   const [chargesMessage, setChargesMessage] = useState("");
+
+  // Coupons System State Variables
+  const [coupons, setCoupons] = useState<Coupon[]>(() => (restaurant as any).coupons || []);
+  const [isCouponModalOpen, setIsCouponModalOpen] = useState(false);
+  const [couponCode, setCouponCode] = useState("");
+  const [couponType, setCouponType] = useState<"PERCENTAGE" | "FIXED">("PERCENTAGE");
+  const [couponValue, setCouponValue] = useState("");
+  const [couponMinOrder, setCouponMinOrder] = useState("");
+  const [couponMaxUses, setCouponMaxUses] = useState("");
+  const [couponExpiresAt, setCouponExpiresAt] = useState("");
+  const [savingCoupon, setSavingCoupon] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === "coupons") {
+      getRestaurantCouponsAction(restaurant.id).then((res) => {
+        if (res.coupons) {
+          setCoupons(res.coupons as any);
+        }
+      });
+    }
+  }, [activeTab, restaurant.id]);
 
   // Advanced Schedules & Blocked Dates State Variables
   const [localSchedule, setLocalSchedule] = useState<WeeklySchedule>(() => parseWeeklySchedule(restaurant.localSchedule));
@@ -1008,6 +1052,17 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               Tarifas y Temporadas
             </button>
             <button
+              onClick={() => setActiveTab("coupons")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "coupons" 
+                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <Tag className="h-4 w-4 text-amber-400" />
+              Cupones de Descuento
+            </button>
+            <button
               onClick={() => setActiveTab("qr")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
                 activeTab === "qr" 
@@ -1370,7 +1425,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                               onClick={() => {
                                 setKmRates(prev => [
                                   ...prev,
-                                  { id: `km-${Date.now()}`, label: `De ${prev.length * 5} a ${(prev.length + 1) * 5} KM`, price: 3.50 }
+                                  { id: `km-${Date.now()}`, label: `De ${prev.length * 5} a ${(prev.length + 1) * 5} KM`, price: 3.50, minOrder: 0 }
                                 ]);
                               }}
                               className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-white rounded-lg text-xs font-bold transition border border-white/5 active:scale-95 shrink-0 self-start sm:self-auto"
@@ -1381,43 +1436,68 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                             {kmRates.map((item, index) => (
-                              <div key={item.id} className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-2.5 rounded-xl">
-                                <input
-                                  type="text"
-                                  value={item.label}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setKmRates(prev => prev.map((r, i) => i === index ? { ...r, label: val } : r));
-                                  }}
-                                  placeholder="ej. Hasta 2 KM"
-                                  className="flex-1 bg-slate-950 border border-slate-800 focus:border-red-500 px-3 py-1.5 rounded-lg text-xs font-bold text-white focus:outline-none"
-                                />
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <span className="text-xs font-bold text-slate-400">$</span>
+                              <div key={item.id} className="bg-slate-900 border border-slate-800 p-3 rounded-xl space-y-2">
+                                <div className="flex items-center gap-2">
                                   <input
-                                    type="number"
-                                    step="0.25"
-                                    min="0"
-                                    value={item.price}
+                                    type="text"
+                                    value={item.label}
                                     onChange={(e) => {
-                                      const val = parseFloat(e.target.value) || 0;
-                                      setKmRates(prev => prev.map((r, i) => i === index ? { ...r, price: val } : r));
+                                      const val = e.target.value;
+                                      setKmRates(prev => prev.map((r, i) => i === index ? { ...r, label: val } : r));
                                     }}
-                                    className="w-20 bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1.5 rounded-lg text-xs font-black text-white focus:outline-none text-right"
+                                    placeholder="ej. Hasta 2 KM"
+                                    className="flex-1 bg-slate-950 border border-slate-800 focus:border-red-500 px-3 py-1.5 rounded-lg text-xs font-bold text-white focus:outline-none"
                                   />
+                                  {kmRates.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setKmRates(prev => prev.filter((_, i) => i !== index));
+                                      }}
+                                      className="p-1 text-slate-500 hover:text-red-400 transition shrink-0"
+                                      title="Eliminar rango"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </div>
-                                {kmRates.length > 1 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setKmRates(prev => prev.filter((_, i) => i !== index));
-                                    }}
-                                    className="p-1 text-slate-500 hover:text-red-400 transition"
-                                    title="Eliminar rango"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                )}
+                                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/60">
+                                  <div>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">Precio Envío</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs font-bold text-slate-400">$</span>
+                                      <input
+                                        type="number"
+                                        step="0.25"
+                                        min="0"
+                                        value={item.price}
+                                        onChange={(e) => {
+                                          const val = parseFloat(e.target.value) || 0;
+                                          setKmRates(prev => prev.map((r, i) => i === index ? { ...r, price: val } : r));
+                                        }}
+                                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1 rounded-lg text-xs font-black text-white focus:outline-none text-right"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] font-bold text-amber-400/90 uppercase block mb-0.5">Mín. Compra</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs font-bold text-slate-400">$</span>
+                                      <input
+                                        type="number"
+                                        step="0.50"
+                                        min="0"
+                                        value={item.minOrder || 0}
+                                        onChange={(e) => {
+                                          const val = parseFloat(e.target.value) || 0;
+                                          setKmRates(prev => prev.map((r, i) => i === index ? { ...r, minOrder: val } : r));
+                                        }}
+                                        placeholder="0.00"
+                                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1 rounded-lg text-xs font-black text-amber-300 focus:outline-none text-right"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -3081,6 +3161,289 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                           {editingSeasonRate ? "Guardar Cambios" : "Crear Tarifa"}
                         </button>
                       </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Coupons System Tab */}
+        {activeTab === "coupons" && (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-6 rounded-2xl">
+              <div>
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Tag className="h-5 w-5 text-amber-400" />
+                  Cupones de Descuento
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Crea códigos promocionales por porcentaje o monto fijo para fidelizar a tus clientes.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setCouponCode("");
+                  setCouponType("PERCENTAGE");
+                  setCouponValue("");
+                  setCouponMinOrder("");
+                  setCouponMaxUses("");
+                  setCouponExpiresAt("");
+                  setIsCouponModalOpen(true);
+                }}
+                className="px-4 py-2.5 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white rounded-xl font-bold text-xs shadow-lg transition flex items-center gap-2 shrink-0 active:scale-95"
+              >
+                <Plus className="h-4 w-4" />
+                <span>+ Crear Nuevo Cupón</span>
+              </button>
+            </div>
+
+            {/* Coupons Table */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3.5 px-4">Código</th>
+                      <th className="py-3.5 px-4">Tipo & Valor</th>
+                      <th className="py-3.5 px-4">Mín. Compra</th>
+                      <th className="py-3.5 px-4">Usos Totales</th>
+                      <th className="py-3.5 px-4">Expiración</th>
+                      <th className="py-3.5 px-4 text-center">Estado</th>
+                      <th className="py-3.5 px-4 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-850">
+                    {coupons.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center text-slate-500">
+                          <Tag className="h-10 w-10 mx-auto text-slate-700 mb-2" />
+                          <p className="font-semibold text-sm">No has creado ningún cupón aún.</p>
+                          <p className="text-xs text-slate-600 mt-0.5">Haz clic en "+ Crear Nuevo Cupón" para comenzar.</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      coupons.map((coupon) => (
+                        <tr key={coupon.id} className="hover:bg-slate-850/50 transition">
+                          <td className="py-3.5 px-4 font-mono font-black text-amber-400 text-sm">
+                            {coupon.code}
+                          </td>
+                          <td className="py-3.5 px-4 font-bold text-white">
+                            {coupon.discountType === "PERCENTAGE" ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-400">
+                                <Percent className="h-3.5 w-3.5" />
+                                {coupon.discountValue}% OFF
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-emerald-400">
+                                <DollarSign className="h-3.5 w-3.5" />
+                                ${coupon.discountValue.toFixed(2)} OFF
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 font-semibold text-slate-300">
+                            ${coupon.minOrder.toFixed(2)}
+                          </td>
+                          <td className="py-3.5 px-4 font-medium text-slate-400">
+                            {coupon.usedCount} {coupon.maxUses !== null ? `/ ${coupon.maxUses}` : "usos"}
+                          </td>
+                          <td className="py-3.5 px-4 font-medium text-slate-400">
+                            {coupon.expiresAt ? (
+                              new Date(coupon.expiresAt).toLocaleDateString()
+                            ) : (
+                              <span className="text-slate-500 italic">Sin expiración</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${
+                              coupon.isActive
+                                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                : "bg-slate-800 text-slate-500 border-slate-700"
+                            }`}>
+                              {coupon.isActive ? "🟢 Activo" : "⚪ Inactivo"}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right space-x-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const res = await toggleCouponStatusAction(coupon.id, restaurant.id);
+                                if (res.success) {
+                                  setCoupons(prev => prev.map(c => c.id === coupon.id ? { ...c, isActive: !c.isActive } : c));
+                                } else if (res.error) {
+                                  alert(res.error);
+                                }
+                              }}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                                coupon.isActive
+                                  ? "bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700"
+                                  : "bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border-emerald-800/40"
+                              }`}
+                            >
+                              {coupon.isActive ? "Desactivar" : "Activar"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (confirm(`¿Eliminar el cupón "${coupon.code}"?`)) {
+                                  const res = await deleteCouponAction(coupon.id, restaurant.id);
+                                  if (res.success) {
+                                    setCoupons(prev => prev.filter(c => c.id !== coupon.id));
+                                  } else if (res.error) {
+                                    alert(res.error);
+                                  }
+                                }
+                              }}
+                              className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded-lg transition"
+                              title="Eliminar cupón"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Create Coupon Modal */}
+            {isCouponModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md shadow-2xl space-y-4 text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Tag className="h-4 w-4 text-amber-400" />
+                      Crear Nuevo Cupón de Descuento
+                    </h3>
+                    <button
+                      onClick={() => setIsCouponModalOpen(false)}
+                      className="text-slate-400 hover:text-white text-lg font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      setSavingCoupon(true);
+                      const res = await createCouponAction(restaurant.id, {
+                        code: couponCode,
+                        discountType: couponType,
+                        discountValue: parseFloat(couponValue) || 0,
+                        minOrder: parseFloat(couponMinOrder) || 0,
+                        maxUses: couponMaxUses ? parseInt(couponMaxUses) : null,
+                        expiresAt: couponExpiresAt || null,
+                      });
+                      setSavingCoupon(false);
+                      if (res.error) {
+                        alert(res.error);
+                      } else if (res.coupon) {
+                        setCoupons(prev => [res.coupon as any, ...prev]);
+                        setIsCouponModalOpen(false);
+                        alert(`¡Cupón "${couponCode.toUpperCase()}" creado exitosamente!`);
+                      }
+                    }}
+                    className="space-y-4"
+                  >
+                    <div>
+                      <label className="block text-slate-300 font-bold mb-1">Código del Cupón *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej. BIENVENIDA10, PROMO2026"
+                        value={couponCode}
+                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-4 py-2.5 text-white font-mono font-bold uppercase focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-bold mb-1">Tipo de Descuento *</label>
+                        <select
+                          value={couponType}
+                          onChange={(e) => setCouponType(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white font-semibold focus:outline-none"
+                        >
+                          <option value="PERCENTAGE">Porcentaje (%)</option>
+                          <option value="FIXED">Monto Fijo ($)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 font-bold mb-1">
+                          Valor ({couponType === "PERCENTAGE" ? "%" : "$"}) *
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          max={couponType === "PERCENTAGE" ? "100" : undefined}
+                          required
+                          placeholder={couponType === "PERCENTAGE" ? "Ej. 20" : "Ej. 5.00"}
+                          value={couponValue}
+                          onChange={(e) => setCouponValue(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white font-black text-right focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 font-bold mb-1">Mínimo de Compra ($)</label>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          placeholder="0.00 (sin mínimo)"
+                          value={couponMinOrder}
+                          onChange={(e) => setCouponMinOrder(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white font-black text-right focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-300 font-bold mb-1">Límite de Usos (Opcional)</label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="1"
+                          placeholder="Ilimitado"
+                          value={couponMaxUses}
+                          onChange={(e) => setCouponMaxUses(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white font-semibold focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 font-bold mb-1">Fecha de Expiración (Opcional)</label>
+                      <input
+                        type="date"
+                        value={couponExpiresAt}
+                        onChange={(e) => setCouponExpiresAt(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2.5 text-white font-mono focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setIsCouponModalOpen(false)}
+                        className="px-4 py-2.5 rounded-xl font-bold bg-slate-800 text-slate-300 hover:bg-slate-750 transition"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingCoupon}
+                        className="px-5 py-2.5 rounded-xl font-bold bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white shadow-lg transition active:scale-95 disabled:opacity-50"
+                      >
+                        {savingCoupon ? "Guardando..." : "Crear Cupón"}
+                      </button>
                     </div>
                   </form>
                 </div>
