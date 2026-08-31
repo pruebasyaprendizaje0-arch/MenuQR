@@ -54,6 +54,20 @@ function parseLocality(localityStr: string | null): ParsedLocality {
   };
 }
 
+function renderLocalityBadge(locality: string | null) {
+  if (!locality) return null;
+  const parsed = parseLocality(locality);
+  const displayLoc = [parsed.sector, parsed.parroquia, parsed.canton, parsed.province]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+      <MapPin className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+      {displayLoc || locality}
+    </div>
+  );
+}
+
 export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem[] }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSpecialty, setSelectedSpecialty] = useState<string>("TODAS");
@@ -303,18 +317,7 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
                       <h4 className="font-extrabold text-white text-base group-hover:text-amber-500 transition duration-200">
                         {res.name}
                       </h4>
-                      {res.locality && (() => {
-                        const parsed = parseLocality(res.locality);
-                        const displayLoc = [parsed.sector, parsed.parroquia, parsed.canton, parsed.province]
-                          .filter(Boolean)
-                          .join(", ");
-                        return (
-                          <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                            <MapPin className="h-3.5 w-3.5 text-slate-550 shrink-0" />
-                            {displayLoc || res.locality}
-                          </div>
-                        );
-                      })()}
+                      {renderLocalityBadge(res.locality)}
                     </div>
                   </div>
 
