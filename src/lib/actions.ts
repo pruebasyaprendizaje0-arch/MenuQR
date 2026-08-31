@@ -769,14 +769,13 @@ export async function deleteRestaurantAction(restaurantId: string) {
   }
 
   revalidatePath("/super-admin");
-  revalidatePath(`/${restaurant.slug}`);
   return { success: true };
 }
 
 export async function superAdminCreateRestaurantAction(data: {
   userName: string;
   email: string;
-  password: string;
+  password?: string;
   restaurantName: string;
   whatsapp: string;
   province: string;
@@ -784,6 +783,7 @@ export async function superAdminCreateRestaurantAction(data: {
   parroquia: string;
   sector?: string;
   plan?: "FREE" | "PRO";
+  existingUserId?: string;
 }) {
   try {
     const isSuperAdmin = await getSuperAdminSession();
@@ -792,21 +792,34 @@ export async function superAdminCreateRestaurantAction(data: {
     }
 
     const cleanEmail = data.email.toLowerCase().trim();
-    let existingUser: any = null;
-    try {
-      existingUser = await prismaControl.user.findUnique({
-        where: { email: cleanEmail }
-      });
-    } catch (dbErr: any) {
-      console.error("Database error in superAdminCreateRestaurantAction:", dbErr);
-      return { error: `Error al verificar el correo de usuario (${dbErr?.message || "fallo de BD"}).` };
-    }
+    let assignedUserId = data.existingUserId || "";
 
-    if (existingUser) {
-      return { error: "El correo electrónico ya está registrado." };
-    }
+    if (!assignedUserId) {
+      let existingUser: any = null;
+      try {
+        existingUser = await prismaControl.user.findUnique({
+          where: { email: cleanEmail }
+        });
+      } catch (dbErr: any) {
+        console.error("Database error in superAdminCreateRestaurantAction:", dbErr);
+        return { error: `Error al verificar el correo de usuario (${dbErr?.message || "fallo de BD"}).` };
+      }
 
-    const hashedPassword = bcrypt.hashSync(data.password || "123456", 10);
+      if (existingUser) {
+        // Reuse existing user ID if found
+        assignedUserId = existingUser.id;
+      } else {
+        const hashedPassword = bcrypt.hashSync(data.password || "123456", 10);
+        const user = await prismaControl.user.create({
+          data: {
+            name: data.userName || "Propietario",
+            email: cleanEmail,
+            password: hashedPassword,
+          }
+        });
+        assignedUserId = user.id;
+      }
+    }
 
     let baseSlug = data.restaurantName
       .toLowerCase()
@@ -839,20 +852,12 @@ export async function superAdminCreateRestaurantAction(data: {
       }
     }
 
-    const user = await prismaControl.user.create({
-      data: {
-        name: data.userName,
-        email: cleanEmail,
-        password: hashedPassword,
-      }
-    });
-
     const localityParts = [data.province, data.canton, data.parroquia, data.sector].filter(Boolean);
     const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
 
     await prismaTenant.restaurant.create({
       data: {
-        userId: user.id,
+        userId: assignedUserId,
         name: data.restaurantName,
         slug: cleanSlug,
         whatsapp: data.whatsapp || "",
@@ -924,24 +929,37 @@ export async function superAdminUpdateRestaurantAction(
     }
   }
 
-  // Check unique email if changed
-  if (ownerUser && cleanEmail !== ownerUser.email) {
-    const existingEmail = await prismaControl.user.findUnique({
+  let finalUserId = restaurant.userId;
+
+  // Check if owner email changed to another user
+  if (cleanEmail && (!ownerUser || cleanEmail !== ownerUser.email)) {
+    const targetUser = await prismaControl.user.findUnique({
       where: { email: cleanEmail }
     });
-    if (existingEmail && existingEmail.id !== restaurant.userId) {
-      return { error: "El correo electrónico ya está registrado por otro usuario." };
+    if (targetUser) {
+      finalUserId = targetUser.id;
+    } else if (ownerUser) {
+      await prismaControl.user.update({
+        where: { id: ownerUser.id },
+        data: {
+          name: data.userName,
+          email: cleanEmail,
+        }
+      });
+    } else {
+      const newUser = await prismaControl.user.create({
+        data: {
+          name: data.userName || "Propietario",
+          email: cleanEmail,
+          password: bcrypt.hashSync("123456", 10),
+        }
+      });
+      finalUserId = newUser.id;
     }
-  }
-
-  // Update user
-  if (ownerUser) {
+  } else if (ownerUser && data.userName) {
     await prismaControl.user.update({
-      where: { id: restaurant.userId },
-      data: {
-        name: data.userName,
-        email: cleanEmail,
-      }
+      where: { id: ownerUser.id },
+      data: { name: data.userName }
     });
   }
 
@@ -952,6 +970,7 @@ export async function superAdminUpdateRestaurantAction(
   const updatedRestaurant = await prismaTenant.restaurant.update({
     where: { id: restaurantId },
     data: {
+      userId: finalUserId,
       name: data.restaurantName,
       slug: cleanSlug,
       whatsapp: data.whatsapp,
@@ -978,6 +997,44 @@ export async function superAdminUpdateRestaurantAction(
   revalidatePath(`/${updatedRestaurant.slug}`);
   revalidatePath("/admin");
   return { success: true };
+}
+
+export async function reassignRestaurantOwnerAction(restaurantId: string, ownerEmailOrUserId: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+
+  if (!ownerEmailOrUserId || !ownerEmailOrUserId.trim()) {
+    return { error: "Por favor proporciona un correo o ID de usuario válido." };
+  }
+
+  const cleanTarget = ownerEmailOrUserId.trim();
+
+  let targetUser = await prismaControl.user.findFirst({
+    where: {
+      OR: [
+        { id: cleanTarget },
+        { email: cleanTarget.toLowerCase() }
+      ]
+    }
+  });
+
+  if (!targetUser) {
+    return { error: `No se encontró ningún usuario registrado con el correo o ID "${cleanTarget}".` };
+  }
+
+  const updatedRestaurant = await prismaTenant.restaurant.update({
+    where: { id: restaurantId },
+    data: { userId: targetUser.id }
+  });
+
+  revalidatePath("/super-admin");
+  revalidatePath(`/${updatedRestaurant.slug}`);
+  revalidatePath("/admin");
+
+  return { 
+    success: true, 
+    message: `Negocio "${updatedRestaurant.name}" adjudicado con éxito al usuario ${targetUser.email} (${targetUser.name}).` 
+  };
 }
 
 export async function impersonateUserAction(userId: string) {

@@ -43,19 +43,17 @@ export default async function SuperAdminPage() {
     console.error("Error loading restaurants in SuperAdminPage:", err);
   }
 
-  // Load users to match owner details
-  let users: any[] = [];
+  // Load all registered users
+  let allUsers: any[] = [];
   try {
-    const userIds = [...new Set(restaurants.map((r) => r.userId))];
-    if (userIds.length > 0) {
-      users = await prismaControl.user.findMany({
-        where: { id: { in: userIds } },
-      });
-    }
+    allUsers = await prismaControl.user.findMany({
+      select: { id: true, name: true, email: true },
+      orderBy: { email: "asc" }
+    });
   } catch (err) {
     console.error("Error loading users in SuperAdminPage:", err);
   }
-  const userMap = new Map(users.map((u) => [u.id, u]));
+  const userMap = new Map(allUsers.map((u) => [u.id, u]));
 
   // Load all prospect leads
   let leads: any[] = [];
@@ -140,6 +138,7 @@ export default async function SuperAdminPage() {
       leads={serializedLeads}
       metrics={metrics} 
       whatsappSupport={whatsappSupport}
+      allUsers={allUsers}
     />
   );
 }

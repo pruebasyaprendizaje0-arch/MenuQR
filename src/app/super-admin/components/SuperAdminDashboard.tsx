@@ -16,7 +16,8 @@ import {
   createProspectLeadAction,
   updateProspectLeadAction,
   deleteProspectLeadAction,
-  convertProspectToRestaurantAction
+  convertProspectToRestaurantAction,
+  reassignRestaurantOwnerAction
 } from "@/lib/actions";
 import { 
   Building, 
@@ -125,20 +126,37 @@ const CRM_STAGES = [
   { id: "EXPIRADO_INACTIVO", label: "Expirados / Inactivos", color: "bg-red-500/10 text-red-400 border-red-500/30" },
 ];
 
+type UserOption = {
+  id: string;
+  name: string;
+  email: string;
+};
+
 export function SuperAdminDashboard({ 
   restaurants,
   leads = [],
   metrics,
-  whatsappSupport
+  whatsappSupport,
+  allUsers = []
 }: { 
   restaurants: Restaurant[]; 
   leads?: ProspectLead[];
   metrics: Metrics; 
   whatsappSupport: string;
+  allUsers?: UserOption[];
 }) {
   const [activeTab, setActiveTab] = useState<"directory" | "kanban" | "prospects" | "reminders">("directory");
   const [searchTerm, setSearchTerm] = useState("");
   const [waSupport, setWaSupport] = useState(whatsappSupport);
+
+  // Reassign / Adjudicate Modal State
+  const [reassignModalTarget, setReassignModalTarget] = useState<Restaurant | null>(null);
+  const [reassignEmail, setReassignEmail] = useState("");
+  const [reassignLoading, setReassignLoading] = useState(false);
+  const [reassignMsg, setReassignMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Owner mode for Create Restaurant Modal
+  const [ownerMode, setOwnerMode] = useState<"new" | "existing">("new");
 
   // Modals state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -275,6 +293,27 @@ export function SuperAdminDashboard({
     });
     setEditError("");
     setIsEditModalOpen(true);
+  };
+
+  const handleReassignSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reassignModalTarget) return;
+
+    setReassignLoading(true);
+    setReassignMsg(null);
+
+    const res = await reassignRestaurantOwnerAction(reassignModalTarget.id, reassignEmail);
+    setReassignLoading(false);
+
+    if (res?.error) {
+      setReassignMsg({ type: "error", text: res.error });
+    } else {
+      setReassignMsg({ type: "success", text: res?.message || "Propietario reasignado con éxito." });
+      setTimeout(() => {
+        setReassignModalTarget(null);
+        setReassignMsg(null);
+      }, 1500);
+    }
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -706,6 +745,19 @@ export function SuperAdminDashboard({
                                 >
                                   <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
                                   Asistir
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    setReassignModalTarget(res);
+                                    setReassignEmail(res.email || "");
+                                    setReassignMsg(null);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-blue-400 bg-blue-950/30 border border-blue-800/40 hover:bg-blue-950/60 font-bold transition"
+                                  title="Adjudicar o reasignar propiedad a otro usuario"
+                                >
+                                  <UserCheck className="h-3.5 w-3.5 text-blue-300" />
+                                  Adjudicar
                                 </button>
 
                                 <button
@@ -1330,6 +1382,91 @@ export function SuperAdminDashboard({
         </div>
       )}
 
+      {/* REASSIGN / ADJUDICATE MODAL */}
+      {reassignModalTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 bg-blue-600/10 border border-blue-500/30 rounded-xl flex items-center justify-center text-blue-400">
+                  <UserCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Adjudicar Negocio</h3>
+                  <p className="text-[11px] text-slate-400">Reasigna la propiedad a otro usuario</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setReassignModalTarget(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl space-y-1">
+              <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Negocio Seleccionado</span>
+              <p className="text-sm font-bold text-white">{reassignModalTarget.name}</p>
+              <p className="text-xs text-slate-400">Propietario Actual: <span className="text-amber-400 font-semibold">{reassignModalTarget.userName} ({reassignModalTarget.email || "Sin email"})</span></p>
+            </div>
+
+            <form onSubmit={handleReassignSubmit} className="space-y-4 text-xs">
+              {reassignMsg && (
+                <div className={`p-3 rounded-xl border ${reassignMsg.type === "success" ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-red-500/10 border-red-500/30 text-red-400"}`}>
+                  {reassignMsg.text}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="block font-medium text-slate-300">Seleccionar Usuario Registrado</label>
+                <select
+                  value={allUsers.some(u => u.email.toLowerCase() === reassignEmail.toLowerCase()) ? allUsers.find(u => u.email.toLowerCase() === reassignEmail.toLowerCase())?.email : ""}
+                  onChange={(e) => setReassignEmail(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none"
+                >
+                  <option value="">-- O selecciona de la lista ({allUsers.length} usuarios) --</option>
+                  {allUsers.map((u) => (
+                    <option key={u.id} value={u.email}>
+                      {u.name} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-medium text-slate-300">O escribe el Correo del Nuevo Propietario *</label>
+                <input
+                  type="email"
+                  required
+                  value={reassignEmail}
+                  onChange={(e) => setReassignEmail(e.target.value)}
+                  placeholder="ej: usuario@ejemplo.com"
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setReassignModalTarget(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={reassignLoading}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 font-bold text-white shadow-lg disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <UserCheck className="h-4 w-4" />
+                  {reassignLoading ? "Procesando..." : "Adjudicar Negocio"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* CREATE MODAL */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
@@ -1358,6 +1495,54 @@ export function SuperAdminDashboard({
                   {createError}
                 </div>
               )}
+
+              {/* Owner Mode Selector */}
+              <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-2xl space-y-2">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-amber-400">Tipo de Asignación de Usuario</label>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setOwnerMode("new")}
+                    className={`flex-1 py-2 px-3 rounded-xl font-extrabold border transition ${ownerMode === "new" ? "bg-red-600 text-white border-red-500 shadow-md" : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-850"}`}
+                  >
+                    ✨ Crear Nuevo Usuario
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOwnerMode("existing")}
+                    className={`flex-1 py-2 px-3 rounded-xl font-extrabold border transition ${ownerMode === "existing" ? "bg-blue-600 text-white border-blue-500 shadow-md" : "bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-850"}`}
+                  >
+                    👤 Adjudicar a Usuario Existente
+                  </button>
+                </div>
+
+                {ownerMode === "existing" && (
+                  <div className="pt-2">
+                    <label className="block text-slate-300 mb-1 font-medium">Seleccionar Propietario Existente</label>
+                    <select
+                      onChange={(e) => {
+                        const target = allUsers.find(u => u.id === e.target.value);
+                        if (target) {
+                          setCreateData({
+                            ...createData,
+                            userName: target.name,
+                            email: target.email,
+                            password: "N/A"
+                          });
+                        }
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">-- Elige un usuario de la lista ({allUsers.length}) --</option>
+                      {allUsers.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} ({u.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
