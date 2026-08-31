@@ -154,9 +154,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [shareCopied, setShareCopied] = useState(false);
 
   const kmRatesList: { id: string; label: string; price: number }[] = useMemo(() => {
-    if (restaurant.deliveryRates) {
+    const rawRates = restaurant?.deliveryRates || null;
+    if (rawRates) {
       try {
-        const parsed = JSON.parse(restaurant.deliveryRates);
+        const parsed = JSON.parse(rawRates);
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
@@ -164,13 +165,14 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         console.error("Error parsing deliveryRates:", e);
       }
     }
+    const baseCost = restaurant?.deliveryCost ?? 1.50;
     return [
-      { id: "km-1", label: "Hasta 2 KM", price: restaurant.deliveryCost || 1.50 },
-      { id: "km-2", label: "De 2 a 5 KM", price: (restaurant.deliveryCost || 1.50) + 1.00 },
-      { id: "km-3", label: "De 5 a 10 KM", price: (restaurant.deliveryCost || 1.50) + 2.50 },
-      { id: "km-4", label: "Más de 10 KM", price: (restaurant.deliveryCost || 1.50) + 4.50 },
+      { id: "km-1", label: "Hasta 2 KM", price: baseCost },
+      { id: "km-2", label: "De 2 a 5 KM", price: baseCost + 1.00 },
+      { id: "km-3", label: "De 5 a 10 KM", price: baseCost + 2.50 },
+      { id: "km-4", label: "Más de 10 KM", price: baseCost + 4.50 },
     ];
-  }, [restaurant.deliveryRates, restaurant.deliveryCost]);
+  }, [restaurant?.deliveryRates, restaurant?.deliveryCost]);
 
   const [selectedKmRate, setSelectedKmRate] = useState<{ id: string; label: string; price: number } | null>(
     kmRatesList[0] || null

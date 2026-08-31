@@ -275,9 +275,10 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [serviceOnTakeout, setServiceOnTakeout] = useState(restaurant.serviceOnTakeout);
 
   const [kmRates, setKmRates] = useState<{ id: string; label: string; price: number }[]>(() => {
-    if (restaurant.deliveryRates) {
+    const rawRates = restaurant?.deliveryRates || null;
+    if (rawRates) {
       try {
-        const parsed = JSON.parse(restaurant.deliveryRates);
+        const parsed = JSON.parse(rawRates);
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed;
         }
