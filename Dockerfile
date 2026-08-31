@@ -14,11 +14,10 @@ COPY . .
 RUN mkdir -p public
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
 
-# Generate Prisma Client
-RUN npx prisma generate && npx prisma generate --schema=prisma/schema.control.prisma && npx prisma generate --schema=prisma/schema.tenant.prisma
-
-# Build Next.js application
+# Generate Prisma Client & build Next.js standalone application
+RUN npx prisma generate
 RUN npm run build
 
 # Stage 3: Runner
@@ -35,16 +34,15 @@ RUN adduser --system --uid 1001 nextjs
 
 RUN mkdir -p public
 
-# Copy essential files & migration tools
+# Copy essential standalone assets & migration tools
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 
 # Ensure public/uploads exists and has correct permissions
-RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma /app/scripts
+RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma
 
 EXPOSE 3000
 
