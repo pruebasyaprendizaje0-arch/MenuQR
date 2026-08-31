@@ -1,3 +1,5 @@
-import AdminPage from "../page";
+import { redirect } from "next/navigation";
 
-export default AdminPage;
+export default function RestauranteRedirectPage() {
+  redirect("/admin");
+}

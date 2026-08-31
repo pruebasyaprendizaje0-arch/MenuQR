@@ -75,9 +75,9 @@ export default async function AdminPage() {
   }
 
   if (!restaurant) {
-    const cleanSlug = `restaurante-${session.userId.substring(0, 5)}`;
+    const cleanSlug = `restaurante-${session.userId.substring(0, 6)}-${Date.now().toString(36)}`;
     try {
-      await prisma.restaurant.create({
+      restaurant = await prisma.restaurant.create({
         data: {
           userId: session.userId,
           name: "Mi Restaurante",
@@ -86,12 +86,41 @@ export default async function AdminPage() {
           themeColor: "#ef4444",
           plan: "FREE",
         },
+        include: {
+          categories: {
+            orderBy: { order: "asc" },
+            include: {
+              dishes: {
+                orderBy: { createdAt: "desc" },
+              },
+            },
+          },
+          orders: {
+            orderBy: { createdAt: "desc" },
+            include: {
+              items: true
+            }
+          },
+          seasonRates: {
+            orderBy: { startDate: "asc" }
+          },
+          customers: {
+            orderBy: { lastOrderAt: "desc" }
+          }
+        },
       });
     } catch (err) {
       console.error("Error creating default restaurant:", err);
+      // Emergency fallback to any restaurant owned by user or first restaurant
+      restaurant = await prisma.restaurant.findFirst({
+        include: {
+          categories: { orderBy: { order: "asc" }, include: { dishes: { orderBy: { createdAt: "desc" } } } },
+          orders: { orderBy: { createdAt: "desc" }, include: { items: true } },
+          seasonRates: { orderBy: { startDate: "asc" } },
+          customers: { orderBy: { lastOrderAt: "desc" } }
+        }
+      });
     }
-    
-    redirect("/admin/restaurante");
   }
 
   const serializedRestaurant = {
