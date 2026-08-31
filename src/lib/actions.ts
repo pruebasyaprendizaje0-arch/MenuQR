@@ -1166,6 +1166,30 @@ export async function createOrderAction(data: {
 
 
   try {
+    // Auto-heal production schema if coupon columns are missing
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "couponCode" TEXT;
+        ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "discountAmount" DOUBLE PRECISION NOT NULL DEFAULT 0.0;
+        CREATE TABLE IF NOT EXISTS "Coupon" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "restaurantId" TEXT NOT NULL,
+          "code" TEXT NOT NULL,
+          "discountType" TEXT NOT NULL,
+          "discountValue" DOUBLE PRECISION NOT NULL,
+          "minOrder" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+          "maxUses" INTEGER,
+          "usedCount" INTEGER NOT NULL DEFAULT 0,
+          "isActive" BOOLEAN NOT NULL DEFAULT true,
+          "expiresAt" TIMESTAMP(3),
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    } catch (ddlErr) {
+      // DDL failsafe ignore
+    }
+
     const order = await prisma.order.create({
       data: {
         restaurantId: data.restaurantId,
