@@ -410,7 +410,7 @@ function TrackingContent({ slug }: { slug: string }) {
                       </h4>
                       <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-850 space-y-2">
                         <div className="space-y-1 divide-y divide-slate-800/40">
-                          {order.items.map((item) => (
+                          {(order.items || []).map((item) => (
                             <div key={item.id} className="flex justify-between pt-1 font-medium">
                               <span><strong className="text-amber-400">{item.quantity}x</strong> {item.dishName}</span>
                               <span className="text-slate-300">${(item.price * item.quantity).toFixed(2)}</span>

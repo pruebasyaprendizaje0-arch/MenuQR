@@ -351,7 +351,7 @@ export default function DeliveryDriverPanelPage({ params }: { params: { slug: st
                     {/* Items List */}
                     <div className="bg-slate-950/40 p-3 rounded-2xl border border-slate-850 space-y-1">
                       <span className="text-[10px] text-slate-400 uppercase font-black block mb-1">Platos a Entregar</span>
-                      {order.items.map((item) => (
+                      {(order.items || []).map((item) => (
                         <div key={item.id} className="flex justify-between text-xs text-slate-300 font-medium">
                           <span><strong className="text-amber-400">{item.quantity}x</strong> {item.dishName}</span>
                           <span>${(item.price * item.quantity).toFixed(2)}</span>
