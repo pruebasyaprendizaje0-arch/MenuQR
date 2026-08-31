@@ -1213,9 +1213,9 @@ export async function createOrderAction(data: {
       // @ts-ignore
       orderNumber: order.orderNumber || 1 
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating order:", error);
-    return { error: "No se pudo guardar el pedido." };
+    return { error: error?.message || "No se pudo guardar el pedido." };
   }
 }
 
