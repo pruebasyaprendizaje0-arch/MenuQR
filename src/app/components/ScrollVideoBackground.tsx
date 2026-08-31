@@ -54,13 +54,14 @@ export function ScrollVideoBackground() {
   }, []);
 
   return (
-    <div className="fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden">
+    <div className="fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden" suppressHydrationWarning>
       <video
         ref={videoRef}
         src="/landpage.mp4"
         muted
         playsInline
         preload="auto"
+        suppressHydrationWarning
         className="w-full h-full object-cover opacity-[0.65]"
         style={{ filter: "contrast(1.05) brightness(0.9)" }}
       />

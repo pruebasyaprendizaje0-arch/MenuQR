@@ -244,6 +244,7 @@ export default async function LandingPage() {
         <div className="w-full max-w-4xl text-left space-y-8 my-8">
           <script
             type="application/ld+json"
+            suppressHydrationWarning
             dangerouslySetInnerHTML={{
               __html: JSON.stringify({
                 "@context": "https://schema.org",
