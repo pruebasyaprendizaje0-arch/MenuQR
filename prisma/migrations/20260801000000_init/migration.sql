@@ -219,6 +219,21 @@ CREATE UNIQUE INDEX "Restaurant_slug_key" ON "Restaurant"("slug");
 -- CreateIndex
 CREATE UNIQUE INDEX "SystemSetting_key_key" ON "SystemSetting"("key");
 
+-- CreateIndex
+CREATE INDEX "Restaurant_userId_idx" ON "Restaurant"("userId");
+CREATE INDEX "Category_restaurantId_order_idx" ON "Category"("restaurantId", "order");
+CREATE INDEX "Dish_categoryId_idx" ON "Dish"("categoryId");
+CREATE INDEX "Dish_restaurantId_idx" ON "Dish"("restaurantId");
+CREATE INDEX "Order_restaurantId_createdAt_idx" ON "Order"("restaurantId", "createdAt");
+CREATE INDEX "Order_status_idx" ON "Order"("status");
+CREATE INDEX "OrderItem_orderId_idx" ON "OrderItem"("orderId");
+CREATE INDEX "Lead_phone_idx" ON "Lead"("phone");
+CREATE INDEX "CrmNote_restaurantId_idx" ON "CrmNote"("restaurantId");
+CREATE INDEX "CrmNote_leadId_idx" ON "CrmNote"("leadId");
+CREATE INDEX "SeasonRate_restaurantId_isActive_idx" ON "SeasonRate"("restaurantId", "isActive");
+CREATE INDEX "Customer_restaurantId_idx" ON "Customer"("restaurantId");
+CREATE INDEX "Customer_phone_idx" ON "Customer"("phone");
+
 -- AddForeignKey
 ALTER TABLE "Restaurant" ADD CONSTRAINT "Restaurant_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

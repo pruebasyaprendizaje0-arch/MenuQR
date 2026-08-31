@@ -78,6 +78,8 @@ model Restaurant {
   seasonRates    SeasonRate[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
+
+  @@index([userId])
 }
 
 model Category {
@@ -89,6 +91,8 @@ model Category {
   dishes       Dish[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+
+  @@index([restaurantId, order])
 }
 
 model Dish {
@@ -104,6 +108,9 @@ model Dish {
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+
+  @@index([categoryId])
+  @@index([restaurantId])
 }
 
 model SystemSetting {
@@ -138,6 +145,9 @@ model Order {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   items            OrderItem[]
+
+  @@index([restaurantId, createdAt])
+  @@index([status])
 }
 
 model OrderItem {
@@ -147,6 +157,8 @@ model OrderItem {
   dishName  String
   price     Float
   quantity  Int
+
+  @@index([orderId])
 }
 
 model Lead {
@@ -162,6 +174,8 @@ model Lead {
   crmNotes       CrmNote[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  @@index([phone])
 }
 
 model CrmNote {
@@ -173,6 +187,9 @@ model CrmNote {
   content      String
   author       String      @default("SuperAdmin")
   createdAt    DateTime    @default(now())
+
+  @@index([restaurantId])
+  @@index([leadId])
 }
 
 model SeasonRate {
@@ -188,6 +205,8 @@ model SeasonRate {
   isActive        Boolean    @default(true)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
+
+  @@index([restaurantId, isActive])
 }
 
 model Customer {
@@ -206,6 +225,9 @@ model Customer {
   lastOrderAt  DateTime   @default(now())
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
+
+  @@index([restaurantId])
+  @@index([phone])
 }
 
 
