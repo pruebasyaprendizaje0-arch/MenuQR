@@ -360,6 +360,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const localSchedule = formData.get("localSchedule") as string;
   const deliverySchedule = formData.get("deliverySchedule") as string;
   const blockedDates = formData.get("blockedDates") as string;
+  const deliveryRates = formData.get("deliveryRates") as string;
 
   await prisma.restaurant.update({
     where: { id: restaurantId },

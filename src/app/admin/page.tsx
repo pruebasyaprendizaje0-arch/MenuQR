@@ -106,6 +106,7 @@ export default async function AdminPage() {
     servicePercent: (restaurant as any).servicePercent ?? 10,
     deliveryCost: (restaurant as any).deliveryCost ?? 0.0,
     deliveryEnabled: (restaurant as any).deliveryEnabled ?? true,
+    deliveryRates: (restaurant as any).deliveryRates ?? null,
     bankName: (restaurant as any).bankName ?? null,
     bankAccountType: (restaurant as any).bankAccountType ?? null,
     bankAccountNumber: (restaurant as any).bankAccountNumber ?? null,
