@@ -148,9 +148,15 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
     }
 
     const totalDuration = Math.round(performance.now() - pageStartTime);
-    console.log(`[MenuPage Performance Log] FALLBACK LOCAL: Restaurante '${slug}' cargado desde PostgreSQL local (Prisma: ${prismaDuration}ms | Total Servidor: ${totalDuration}ms)`);
+    const isPlanPro = restaurant.plan === "PRO";
+    const isTrialValid = !restaurant.trialEndsAt || new Date(restaurant.trialEndsAt) >= new Date();
+    const isSubscriptionActive = isPlanPro || isTrialValid;
 
-    if (restaurant.trialEndsAt && new Date(restaurant.trialEndsAt) < new Date()) {
+    console.log(
+      `[MenuPage Subscription Log] Slug: '${slug}' | Plan: '${restaurant.plan}' | TrialEndsAt: '${restaurant.trialEndsAt}' | IsActive: ${isSubscriptionActive} | (Prisma: ${prismaDuration}ms | Total Servidor: ${totalDuration}ms)`
+    );
+
+    if (!isSubscriptionActive) {
       return (
         <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center relative overflow-hidden">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-amber-600/10 rounded-full blur-[100px] pointer-events-none"></div>

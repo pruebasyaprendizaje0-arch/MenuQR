@@ -945,6 +945,9 @@ export async function superAdminUpdateRestaurantAction(
     });
   }
 
+  const futureTrial = new Date();
+  futureTrial.setFullYear(futureTrial.getFullYear() + 1);
+
   // Update restaurant
   const updatedRestaurant = await prismaTenant.restaurant.update({
     where: { id: restaurantId },
@@ -958,6 +961,7 @@ export async function superAdminUpdateRestaurantAction(
       schedule: data.schedule || null,
       specialty: data.specialty || null,
       plan: data.plan,
+      ...(data.plan === "PRO" ? { trialEndsAt: futureTrial } : {}),
       bankName: data.bankName || null,
       bankAccountType: data.bankAccountType || null,
       bankAccountNumber: data.bankAccountNumber || null,
