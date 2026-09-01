@@ -72,7 +72,7 @@ export default function PrivacidadPage() {
           <ul className="list-disc pl-6 space-y-2 text-slate-400">
             <li>Creación y administración de la cuenta de Usuario y del menú digital QR.</li>
             <li>Enrutamiento automatizado de pedidos desde el menú público hacia el número de WhatsApp del establecimiento.</li>
-            <li>Gestión de cobro y facturación del Único Plan Premium ($5 USD/mes).</li>
+            <li>Gestión de cobro y facturación del Único Plan Premium ($10 USD/mes).</li>
             <li>Brindar soporte técnico y comunicaciones operativas del Servicio.</li>
           </ul>
         </section>

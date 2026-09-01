@@ -160,7 +160,7 @@ export default async function LandingPage() {
           </div>
         </div>
 
-        {/* Pricing Section - Único Plan Premium ($5 USD/mes) */}
+        {/* Pricing Section - Único Plan Premium ($10 USD/mes) */}
         <div className="w-full max-w-2xl bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-amber-500/30 rounded-[2.5rem] p-8 md:p-12 shadow-2xl relative overflow-hidden text-center space-y-8 my-8">
           <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
           
@@ -177,7 +177,7 @@ export default async function LandingPage() {
 
           <div className="bg-slate-950/80 p-6 rounded-3xl border border-slate-800 inline-block w-full max-w-sm mx-auto shadow-inner">
             <div className="flex items-baseline justify-center gap-1">
-              <span className="text-5xl font-black text-white">$5</span>
+              <span className="text-5xl font-black text-white">$10</span>
               <span className="text-lg font-bold text-amber-400">.00 USD</span>
               <span className="text-slate-400 text-xs ml-1">/ mes</span>
             </div>
@@ -263,7 +263,7 @@ export default async function LandingPage() {
                     "name": "¿Cuánto cuesta MenuQR Pro en Ecuador?",
                     "acceptedAnswer": {
                       "@type": "Answer",
-                      "text": "MenuQR Pro cuenta con un Único Plan Premium de $5.00 USD mensuales. Todos los usuarios nuevos reciben 30 días de prueba completa totalmente gratis.",
+                      "text": "MenuQR Pro cuenta con un Único Plan Premium de $10.00 USD mensuales. Todos los usuarios nuevos reciben 30 días de prueba completa totalmente gratis.",
                     },
                   },
                   {
@@ -305,7 +305,7 @@ export default async function LandingPage() {
             <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
               <h3 className="font-bold text-white text-sm">¿Cuánto cuesta y cómo funciona la prueba gratis?</h3>
               <p className="text-slate-400 text-xs leading-relaxed">
-                Obtienes <strong>30 días de prueba 100% gratuita</strong> al registrarte. Luego de la prueba, el servicio mantiene un valor fijo transparente de solo <strong>$5.00 USD al mes</strong>.
+                Obtienes <strong>30 días de prueba 100% gratuita</strong> al registrarte. Luego de la prueba, el servicio mantiene un valor fijo transparente de solo <strong>$10.00 USD al mes</strong>.
               </p>
             </div>
 

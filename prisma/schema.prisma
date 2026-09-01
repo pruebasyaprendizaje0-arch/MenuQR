@@ -39,6 +39,7 @@ model Restaurant {
   facebook       String?
   tiktok         String?
   address        String?
+  slogan         String?
   description    String?
   locality       String?
   schedule       String?

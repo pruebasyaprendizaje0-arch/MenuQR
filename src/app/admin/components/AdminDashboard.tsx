@@ -164,6 +164,7 @@ type Restaurant = {
   facebook: string | null;
   tiktok: string | null;
   address: string | null;
+  slogan?: string | null;
   description: string | null;
   locality: string | null;
   schedule: string | null;
@@ -1115,7 +1116,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 <span>Suscripción</span>
               </div>
               <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                $5/mes
+                $10/mes
               </span>
             </button>
           </nav>
@@ -1173,7 +1174,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold">
-                      {isPro ? "Plan Premium Activo ($5 USD/mes)" : isExpired ? "Suscripción Inactiva" : "Prueba Gratuita (30 Días)"}
+                      {isPro ? "Plan Premium Activo ($10 USD/mes)" : isExpired ? "Suscripción Inactiva" : "Prueba Gratuita (30 Días)"}
                     </span>
                     <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-950/60 border border-current">
                       {isPro ? "PRO" : `${daysRemaining}d restantes`}
@@ -1183,8 +1184,8 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                     {isPro 
                       ? `Próxima renovación: ${trialEnds.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}`
                       : isExpired 
-                        ? "Tu prueba ha finalizado. Activa el Plan Premium por solo $5 USD/mes para continuar." 
-                        : `Vence el ${trialEnds.toLocaleDateString()}. Suscríbete al Plan Premium por $5 USD/mes.`}
+                        ? "Tu prueba ha finalizado. Activa el Plan Premium por solo $10 USD/mes para continuar." 
+                        : `Vence el ${trialEnds.toLocaleDateString()}. Suscríbete al Plan Premium por $10 USD/mes.`}
                   </p>
                 </div>
               </div>
@@ -1193,7 +1194,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/10 transition-all shrink-0 flex items-center justify-center gap-1.5"
               >
                 <CreditCard className="w-3.5 h-3.5" />
-                {isPro ? "Renovar ($5/mes)" : "Activar Premium ($5/mes)"}
+                {isPro ? "Renovar ($10/mes)" : "Activar Premium ($10/mes)"}
               </button>
             </div>
           );
@@ -1681,8 +1682,19 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               </div>
 
               <div className="border-t border-slate-800/80 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Descripción del Negocio / Slogan</label>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Slogan / Frase Corta</label>
+                  <input
+                    type="text"
+                    name="slogan"
+                    defaultValue={restaurant.slogan || ""}
+                    placeholder="ej: ¡La mejor calidad, eso es todo!"
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Frase o lema corto visible en la cabecera principal.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Descripción del Negocio / Historia</label>
                   <textarea
                     name="description"
                     defaultValue={restaurant.description || ""}
@@ -1690,6 +1702,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                     placeholder="ej: Auténtica pizza napolitana al horno de leña, pastas artesanales y el mejor ambiente familiar de Manta."
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   />
+                  <p className="text-xs text-slate-500 mt-1">Texto detallado que se muestra en la sección Sobre Nosotros.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">Dirección Física</label>
@@ -4182,7 +4195,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 </div>
 
                 <div className="text-right bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                  <div className="text-3xl font-black text-white">$5.00 <span className="text-xs font-normal text-slate-400">/ mes</span></div>
+                  <div className="text-3xl font-black text-white">$10.00 <span className="text-xs font-normal text-slate-400">/ mes</span></div>
                   <span className="text-[10px] text-amber-400 font-medium">Facturación mensual en USD</span>
                 </div>
               </div>
@@ -4209,7 +4222,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
 
               {/* Benefits list */}
               <div className="space-y-3 pt-2">
-                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Incluido en el Plan Premium ($5/mes):</h3>
+                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Incluido en el Plan Premium ($10/mes):</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300">
                   <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -4248,7 +4261,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   className="w-full sm:w-auto px-8 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2"
                 >
                   <CreditCard className="w-4 h-4" />
-                  {currentPlan === "PRO" ? "Renovar Suscripción ($5/mes)" : "Activar Plan Premium ($5/mes)"}
+                  {currentPlan === "PRO" ? "Renovar Suscripción ($10/mes)" : "Activar Plan Premium ($10/mes)"}
                 </button>
               </div>
             </div>
@@ -4377,7 +4390,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
         })()}
       </aside>
 
-      {/* Modal de Pasarela de Pago Segura - Plan Premium ($5 USD/mes) */}
+      {/* Modal de Pasarela de Pago Segura - Plan Premium ($10 USD/mes) */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative space-y-6 my-8">
@@ -4394,7 +4407,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               </div>
               <h3 className="text-xl font-extrabold text-white">Pasarela de Pago Segura</h3>
               <p className="text-slate-400 text-xs">
-                Suscripción Plan Premium ($5.00 USD/mes) para <strong className="text-white">{restaurant.name}</strong>
+                Suscripción Plan Premium ($10.00 USD/mes) para <strong className="text-white">{restaurant.name}</strong>
               </p>
             </div>
 
@@ -4414,7 +4427,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               </div>
               <div className="border-t border-slate-800 pt-2.5 flex justify-between items-center">
                 <span className="font-bold text-white text-sm">Total a pagar:</span>
-                <span className="text-2xl font-black text-amber-400">$5.00 USD</span>
+                <span className="text-2xl font-black text-amber-400">$10.00 USD</span>
               </div>
             </div>
 
@@ -4522,12 +4535,12 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 {isSubmittingPayment ? (
                   <>
                     <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                    Procesando Pago de $5.00 USD...
+                    Procesando Pago de $10.00 USD...
                   </>
                 ) : (
                   <>
                     <CreditCard className="w-4 h-4" />
-                    Pagar $5.00 USD y Activar Plan
+                    Pagar $10.00 USD y Activar Plan
                   </>
                 )}
               </button>

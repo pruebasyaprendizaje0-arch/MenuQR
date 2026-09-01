@@ -278,7 +278,7 @@ export default function RegisterPage() {
             </div>
 
             <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-3 text-[10px] text-amber-400/90 leading-relaxed">
-              * Recibirás de forma gratuita una prueba completa del <strong>Plan Premium ($5 USD/mes)</strong> por un período de <strong>30 días (1 mes)</strong> a partir del registro.
+              * Recibirás de forma gratuita una prueba completa del <strong>Plan Premium ($10 USD/mes)</strong> por un período de <strong>30 días (1 mes)</strong> a partir del registro.
             </div>
 
             {(state as any)?.error && (

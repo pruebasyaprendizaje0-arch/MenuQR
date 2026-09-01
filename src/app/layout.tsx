@@ -40,7 +40,7 @@ export const metadata: Metadata = {
     default: "MenuQR Pro | Menú Digital QR para Restaurantes en Ecuador",
     template: "%s | MenuQR Pro Ecuador",
   },
-  description: "Crea el menú digital QR profesional para tu restaurante en Ecuador. Recibe pedidos completos por WhatsApp, configura mesas, IVA y servicio por solo $5 USD/mes con 30 días gratis.",
+  description: "Crea el menú digital QR profesional para tu restaurante en Ecuador. Recibe pedidos completos por WhatsApp, configura mesas, IVA y servicio por solo $10 USD/mes con 30 días gratis.",
   keywords: [
     "Menú Digital QR Ecuador",
     "Carta Digital Restaurantes Quito",
@@ -67,7 +67,7 @@ export const metadata: Metadata = {
     locale: "es_EC",
     url: siteUrl,
     title: "MenuQR Pro | Menú Digital QR para Restaurantes en Ecuador",
-    description: "Digitaliza tu restaurante en Ecuador. Códigos QR para mesas, pedidos automáticos a WhatsApp y cero comisiones por venta. $5 USD/mes.",
+    description: "Digitaliza tu restaurante en Ecuador. Códigos QR para mesas, pedidos automáticos a WhatsApp y cero comisiones por venta. $10 USD/mes.",
     siteName: "MenuQR Pro Ecuador",
     images: [
       {
@@ -116,7 +116,7 @@ export default function RootLayout({
     "applicationCategory": "BusinessApplication",
     "offers": {
       "@type": "Offer",
-      "price": "5.00",
+      "price": "10.00",
       "priceCurrency": "USD",
       "priceValidUntil": "2027-12-31",
       "availability": "https://schema.org/InStock",

@@ -299,6 +299,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const facebook = formData.get("facebook") as string;
   const tiktok = formData.get("tiktok") as string;
   const address = formData.get("address") as string;
+  const slogan = formData.get("slogan") as string;
   const description = formData.get("description") as string;
   const locality = formData.get("locality") as string;
   const schedule = formData.get("schedule") as string;
@@ -377,6 +378,8 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       facebook: facebook || null,
       tiktok: tiktok || null,
       address: address || null,
+      // @ts-ignore
+      slogan: slogan || null,
       description: description || null,
       locality: locality || null,
       schedule: schedule || null,
@@ -884,6 +887,7 @@ export async function superAdminUpdateRestaurantAction(
     whatsapp: string;
     locality?: string;
     address?: string;
+    slogan?: string;
     description?: string;
     schedule?: string;
     specialty?: string;
@@ -976,6 +980,8 @@ export async function superAdminUpdateRestaurantAction(
       whatsapp: data.whatsapp,
       locality: data.locality || null,
       address: data.address || null,
+      // @ts-ignore
+      slogan: data.slogan || null,
       description: data.description || null,
       schedule: data.schedule || null,
       specialty: data.specialty || null,
@@ -1089,13 +1095,13 @@ export async function subscribeToPremiumAction(
   }
 
   // Log simulated or real gateway transaction processing
-  console.log(`[Payment Gateway API] Processing $5.00 USD charge for restaurant ${restaurant.name} (${restaurant.id})`);
+  console.log(`[Payment Gateway API] Processing $10.00 USD charge for restaurant ${restaurant.name} (${restaurant.id})`);
   console.log(`[Payment Gateway API] SmartFields Key: ${smartFieldsKey.substring(0, 8)}... | Secret Key Present: ${Boolean(secretKey)}`);
   if (paymentData?.cardHolderName) {
     console.log(`[Payment Gateway API] Cardholder: ${paymentData.cardHolderName} | Last 4: **** ${paymentData.cardNumberLast4 || '****'}`);
   }
 
-  // Calculate subscription extension ($5 USD / 1 month)
+  // Calculate subscription extension ($10 USD / 1 month)
   const currentExpiry = restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date();
   const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
   const newExpiry = new Date(baseDate);
@@ -1117,7 +1123,7 @@ export async function subscribeToPremiumAction(
 
   return {
     success: true,
-    message: `¡Pago de $5.00 USD procesado con éxito con la tarjeta${cardSuffix}! Tu Plan Premium ha sido activado/renovado por 30 días.`,
+    message: `¡Pago de $10.00 USD procesado con éxito con la tarjeta${cardSuffix}! Tu Plan Premium ha sido activado/renovado por 30 días.`,
     plan: updatedRestaurant.plan,
     trialEndsAt: updatedRestaurant.trialEndsAt.toISOString()
   };

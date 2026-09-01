@@ -71,6 +71,7 @@ type Restaurant = {
   whatsappNumber: string;
   locality?: string | null;
   address?: string | null;
+  slogan?: string | null;
   description?: string | null;
   schedule?: string | null;
   specialty?: string | null;
@@ -122,7 +123,7 @@ const CRM_STAGES = [
   { id: "CONTACTADO", label: "Contactados", color: "bg-purple-500/10 text-purple-400 border-purple-500/30" },
   { id: "EN_DEMO", label: "Demos Activas", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" },
   { id: "NEGOCIACION", label: "En Negociación", color: "bg-amber-500/10 text-amber-400 border-amber-500/30" },
-  { id: "CLIENTE_PRO", label: "Clientes PRO ($5/mes)", color: "bg-green-500/10 text-green-400 border-green-500/30" },
+  { id: "CLIENTE_PRO", label: "Clientes PRO ($10/mes)", color: "bg-green-500/10 text-green-400 border-green-500/30" },
   { id: "EXPIRADO_INACTIVO", label: "Expirados / Inactivos", color: "bg-red-500/10 text-red-400 border-red-500/30" },
 ];
 
@@ -211,6 +212,7 @@ export function SuperAdminDashboard({
     whatsapp: "",
     locality: "",
     address: "",
+    slogan: "",
     description: "",
     schedule: "",
     specialty: "",
@@ -277,6 +279,7 @@ export function SuperAdminDashboard({
       whatsapp: res.whatsappNumber || "",
       locality: res.locality || "",
       address: res.address || "",
+      slogan: res.slogan || "",
       description: res.description || "",
       schedule: res.schedule || "",
       specialty: res.specialty || "",
@@ -397,9 +400,9 @@ export function SuperAdminDashboard({
     if (templateType === "welcome") {
       text = `Hola ${name}, bienvenido a MenuQR Pro. Soy del equipo de soporte. Vi que creaste tu negocio y queremos ayudarte gratis a subir tus platos y fotos para que tu menú digital quede 100% listo hoy. ¿Te gustaría que te ayudemos?`;
     } else if (templateType === "trial_expiry") {
-      text = `Hola ${name}, tu período de prueba en MenuQR Pro está por vencer. Para mantener activo tu menú digital e incluir pedidos por WhatsApp, puedes activar el Plan PRO por solo $5 USD al mes. ¿Deseas los datos para transferencia?`;
+      text = `Hola ${name}, tu período de prueba en MenuQR Pro está por vencer. Para mantener activo tu menú digital e incluir pedidos por WhatsApp, puedes activar el Plan PRO por solo $10 USD al mes. ¿Deseas los datos para transferencia?`;
     } else if (templateType === "pro_payment") {
-      text = `Hola ${name}, aquí tienes los datos para activar tu Plan PRO de MenuQR Pro ($5 USD/mes):\n\nBanco Pichincha - Cuenta de Ahorros\nN°: 2200XXXXXX\nTitular: MenuQR Pro\n\nPor favor envíanos el comprobante por aquí para activar tu cuenta inmediatamente.`;
+      text = `Hola ${name}, aquí tienes los datos para activar tu Plan PRO de MenuQR Pro ($10 USD/mes):\n\nBanco Pichincha - Cuenta de Ahorros\nN°: 2200XXXXXX\nTitular: MenuQR Pro\n\nPor favor envíanos el comprobante por aquí para activar tu cuenta inmediatamente.`;
     } else {
       text = `Hola ${name}, te saludamos de MenuQR Pro...`;
     }
@@ -694,7 +697,7 @@ export function SuperAdminDashboard({
                                     className="bg-slate-950 border border-slate-800 text-xs rounded-xl px-2.5 py-1 text-slate-200 focus:outline-none focus:border-amber-500 font-semibold cursor-pointer"
                                   >
                                     <option value="FREE">FREE (Prueba)</option>
-                                    <option value="PRO">PRO ($5/mes)</option>
+                                    <option value="PRO">PRO ($10/mes)</option>
                                   </select>
                                   <div className="text-[11px] text-slate-400">
                                     {isExpired ? (
@@ -1613,7 +1616,7 @@ export function SuperAdminDashboard({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
                   >
                     <option value="FREE">FREE (Demo 30 días)</option>
-                    <option value="PRO">PRO ($5/mes)</option>
+                    <option value="PRO">PRO ($10/mes)</option>
                   </select>
                 </div>
               </div>
@@ -1793,7 +1796,7 @@ export function SuperAdminDashboard({
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
                     >
                       <option value="FREE">FREE (Prueba)</option>
-                      <option value="PRO">PRO ($5/mes)</option>
+                      <option value="PRO">PRO ($10/mes)</option>
                     </select>
                   </div>
                 </div>
@@ -1844,15 +1847,27 @@ export function SuperAdminDashboard({
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-slate-300 mb-1 font-medium">Descripción Corta</label>
-                  <textarea
-                    rows={2}
-                    value={editData.description}
-                    onChange={(e) => setEditData({ ...editData, description: e.target.value })}
-                    placeholder="Breve reseña del negocio..."
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500 resize-none"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Slogan / Frase Corta</label>
+                    <input
+                      type="text"
+                      value={editData.slogan || ""}
+                      onChange={(e) => setEditData({ ...editData, slogan: e.target.value })}
+                      placeholder="ej: ¡La mejor calidad, eso es todo!"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Descripción del Negocio / Historia</label>
+                    <textarea
+                      rows={2}
+                      value={editData.description}
+                      onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                      placeholder="Breve reseña o historia del negocio..."
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500 resize-none"
+                    />
+                  </div>
                 </div>
               </div>
 

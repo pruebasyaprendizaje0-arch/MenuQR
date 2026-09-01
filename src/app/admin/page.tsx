@@ -128,6 +128,7 @@ export default async function AdminPage() {
     logoUrl: restaurant.logoUrl,
     whatsappNumber: restaurant.whatsapp,
     paymentQrUrl: restaurant.qrCobroUrl,
+    slogan: (restaurant as any).slogan ?? null,
     coverUrl: (restaurant as any).coverUrl ?? null,
     trialEndsAt: toIso(restaurant.trialEndsAt),
     tablesConfig: (restaurant as any).tablesConfig ?? "1,2,3,4,5,6,7,8,9,10",

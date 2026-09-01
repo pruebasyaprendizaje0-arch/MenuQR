@@ -64,7 +64,7 @@ export default function TerminosPage() {
           </p>
           <ul className="list-disc pl-6 space-y-2 text-slate-400">
             <li><strong>Prueba Gratuita:</strong> Al registrarse, el Usuario recibe 30 días de prueba sin costo.</li>
-            <li><strong>Único Plan Premium:</strong> Transcurrida la prueba, el costo del servicio es de <strong>$5.00 USD mensuales</strong> (dólares de los Estados Unidos de América).</li>
+            <li><strong>Único Plan Premium:</strong> Transcurrida la prueba, el costo del servicio es de <strong>$10.00 USD mensuales</strong> (dólares de los Estados Unidos de América).</li>
             <li><strong>Sin Comisiones:</strong> MenuQR Pro no cobra comisiones por pedido ni intermediación sobre las ventas del restaurante.</li>
           </ul>
         </section>

@@ -61,6 +61,7 @@ type Restaurant = {
   facebook: string | null;
   tiktok: string | null;
   address: string | null;
+  slogan: string | null;
   description: string | null;
   locality: string | null;
   schedule: string | null;
@@ -779,9 +780,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </p>
                   </div>
 
-                  {/* Description / Tagline */}
+                  {/* Slogan / Tagline */}
                   <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-xl font-normal">
-                    {restaurant.description || "Sabores incomparables preparados al instante con los mejores ingredientes y la máxima calidad."}
+                    {restaurant.slogan || "Sabores incomparables preparados al instante con los mejores ingredientes y la máxima calidad."}
                   </p>
 
                   {/* Social Media Column / Row + Action Buttons */}
