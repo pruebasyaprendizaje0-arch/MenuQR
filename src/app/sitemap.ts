@@ -25,6 +25,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.6,
     },
     {
+      url: `${baseUrl}/rastreo`,
+      lastModified: new Date(),
+      changeFrequency: "weekly",
+      priority: 0.5,
+    },
+    {
       url: `${baseUrl}/terminos`,
       lastModified: new Date(),
       changeFrequency: "yearly",
@@ -43,16 +49,25 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const restaurants = await prisma.restaurant.findMany({
       select: {
         slug: true,
+        logoUrl: true,
+        coverUrl: true,
         updatedAt: true,
       },
     });
 
-    const restaurantRoutes: MetadataRoute.Sitemap = restaurants.map((r) => ({
-      url: `${baseUrl}/${r.slug}`,
-      lastModified: r.updatedAt,
-      changeFrequency: "weekly",
-      priority: 0.9,
-    }));
+    const restaurantRoutes: MetadataRoute.Sitemap = restaurants.map((r) => {
+      const images: string[] = [];
+      if (r.logoUrl) images.push(r.logoUrl.startsWith("http") ? r.logoUrl : `${baseUrl}${r.logoUrl}`);
+      if (r.coverUrl) images.push(r.coverUrl.startsWith("http") ? r.coverUrl : `${baseUrl}${r.coverUrl}`);
+
+      return {
+        url: `${baseUrl}/${r.slug}`,
+        lastModified: r.updatedAt,
+        changeFrequency: "daily",
+        priority: 0.9,
+        images: images.length > 0 ? images : undefined,
+      };
+    });
 
     return [...staticRoutes, ...restaurantRoutes];
   } catch (error) {

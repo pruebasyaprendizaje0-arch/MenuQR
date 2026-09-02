@@ -55,9 +55,21 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return {
       title,
       description,
+      alternates: {
+        canonical: `/${slug}`,
+      },
+      keywords: [
+        `Menú digital ${restaurant.name}`,
+        `Carta ${restaurant.name}`,
+        `Pedir por WhatsApp ${restaurant.name}`,
+        restaurant.locality ? `Restaurante en ${restaurant.locality}` : "Restaurante en Ecuador",
+        restaurant.specialty || "Gastronomía",
+        "MenuQR Pro",
+      ],
       openGraph: {
         title: `${restaurant.name} | Menú Digital QR`,
         description,
+        url: `https://menuqrpro.com/${slug}`,
         images: [
           {
             url: restaurant.logoUrl || restaurant.coverUrl || "/icon.png",
@@ -70,6 +82,10 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
         title: `${restaurant.name} | Menú Digital QR`,
         description,
         images: [restaurant.logoUrl || restaurant.coverUrl || "/icon.png"],
+      },
+      other: {
+        "geo.region": "EC",
+        "geo.placename": restaurant.locality || "Ecuador",
       },
     };
   } catch {
@@ -200,8 +216,49 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       })),
     };
 
+    const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com";
+    const restaurantSchema = {
+      "@context": "https://schema.org",
+      "@type": "Restaurant",
+      "name": restaurant.name,
+      "description": restaurant.description || `Menú digital de ${restaurant.name} en Ecuador`,
+      "image": restaurant.logoUrl || restaurant.coverUrl || `${siteUrl}/icon.png`,
+      "url": `${siteUrl}/${slug}`,
+      "servesCuisine": restaurant.specialty || "Gastronomía",
+      "priceRange": "$$",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": restaurant.locality || "Ecuador",
+        "addressCountry": "EC"
+      },
+      "hasMenu": {
+        "@type": "Menu",
+        "name": `Carta Digital de ${restaurant.name}`,
+        "hasMenuSection": (restaurant.categories || []).map((cat: any) => ({
+          "@type": "MenuSection",
+          "name": cat.name,
+          "hasMenuItem": (cat.dishes || []).map((dish: any) => ({
+            "@type": "MenuItem",
+            "name": dish.name,
+            "description": dish.description || "",
+            "offers": {
+              "@type": "Offer",
+              "price": String(dish.price || 0),
+              "priceCurrency": "USD"
+            }
+          }))
+        }))
+      }
+    };
+
     return (
-      <MenuClient restaurant={serializedRestaurant as any} />
+      <>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(restaurantSchema) }}
+        />
+        <MenuClient restaurant={serializedRestaurant as any} />
+      </>
     );
   } catch (err: any) {
     console.error("[MenuPage Error] Fallo critico en Server Component:", err);

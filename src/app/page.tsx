@@ -51,8 +51,51 @@ export default async function LandingPage() {
 
   const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent("Hola, quisiera saber más información sobre MenuQR Pro")}`;
 
+  const faqSchema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "¿Cómo crear un menú digital QR gratis para mi restaurante en Ecuador?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Puedes registrar tu restaurante en MenuQR Pro en menos de 2 minutos y disfrutar de 30 días de prueba gratuita sin ingresar datos de tarjeta de crédito. Obtendrás un código QR listo para imprimir y colocar en tus mesas."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "¿Cómo funcionan los pedidos por WhatsApp en MenuQR Pro?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "El cliente escanea el código QR de su mesa, elige los platillos en la carta digital e ingresa sus notas. El pedido se envía formateado con subtotal, impuestos y número de mesa directamente al WhatsApp del restaurante."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "¿Cuánto cuesta MenuQR Pro en Ecuador?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "El plan completo de MenuQR Pro cuesta únicamente $10.00 USD mensuales por restaurante. Incluye menú interactivo ilimitado, pedidos por WhatsApp, gestión de mesas y 0% de comisiones por venta."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "¿MenuQR Pro cobra comisiones por cada pedido realizado?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No, MenuQR Pro cobra cero comisiones por venta (0%). El 100% del ingreso de tus platillos y bebidas es para tu restaurante."
+        }
+      }
+    ]
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
       <ScrollVideoBackground />
       {/* Background decoration */}
       <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-red-600/10 rounded-full blur-[150px] pointer-events-none"></div>

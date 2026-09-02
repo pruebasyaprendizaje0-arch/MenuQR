@@ -107,7 +107,22 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Global SoftwareApplication and Organization Schema for AEO / GEO
+  const websiteSchema = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "MenuQR Pro",
+    "url": siteUrl,
+    "description": "Sistema de menú digital QR y pedidos a WhatsApp para restaurantes en Ecuador.",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": {
+        "@type": "EntryPoint",
+        "urlTemplate": `${siteUrl}/?q={search_term_string}`
+      },
+      "query-input": "required name=search_term_string"
+    }
+  };
+
   const softwareSchema = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
@@ -118,7 +133,7 @@ export default function RootLayout({
       "@type": "Offer",
       "price": "10.00",
       "priceCurrency": "USD",
-      "priceValidUntil": "2027-12-31",
+      "priceValidUntil": "2028-12-31",
       "availability": "https://schema.org/InStock",
     },
     "description": "Plataforma SaaS en Ecuador para la creación de menús digitales QR con pedidos automáticos a WhatsApp para restaurantes, cafeterías y bares.",
@@ -144,6 +159,10 @@ export default function RootLayout({
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${outfit.variable} ${playfair.variable} dark scroll-smooth`}>
       <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
+        />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }}

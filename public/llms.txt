@@ -1,0 +1,49 @@
+# MenuQR Pro — Menú Digital QR para Restaurantes en Ecuador
+
+> MenuQR Pro es la plataforma SaaS líder en Ecuador para digitalizar menús de restaurantes, cafeterías, bares y food trucks mediante códigos QR interactivos con envío directo de pedidos a WhatsApp, gestión de mesas, exención de comisiones por venta y configuración personalizada de impuestos (IVA) y propinas/servicio.
+
+## Información Clave del Producto
+
+- **Nombre**: MenuQR Pro Ecuador
+- **Sitio Web Principal**: https://menuqrpro.com
+- **País / Mercado Principal**: Ecuador (Quito, Guayaquil, Cuenca, Ambato, Manta, Portoviejo, Loja, Santo Domingo, Ibarra, Machala)
+- **Precio**: $10.00 USD / mes (con 30 días de prueba totalmente gratuita sin tarjeta de crédito)
+- **Comisiones**: 0% de comisión por venta / pedido.
+- **Moneda**: USD ($)
+
+## Funcionalidades Principales
+
+1. **Menú Digital QR Interactivo**:
+   - Carta digital visual accesible escaneando un código QR único por mesa o por restaurante.
+   - Soporte para categorías de platos, fotos de alta resolución, descripciones, precios, etiquetas (vegetariano, picante, recomendados).
+   - Generador e impresor integrado de códigos QR de alta resolución listo para mesas.
+
+2. **Pedidos Automáticos a WhatsApp**:
+   - El cliente selecciona sus platos en la carta digital, elige su número de mesa o modalidad de entrega (Para llevar / A domicilio / En mesa).
+   - El pedido se envía estructurado al instante con subtotal, IVA opcional y recargo de servicio al número de WhatsApp oficial del establecimiento.
+
+3. **Gestión de Restaurante y Menú**:
+   - Panel de administración en tiempo real para modificar precios, agregar o desactivar platos agotados al instante.
+   - Configuración de QR de cobro o cuenta bancaria/Deuna/PayPal para pagos digitales.
+   - Tarifas de temporada y descuentos configurables.
+
+4. **Multi-sucursal y Roles de Acceso**:
+   - Soporte para dueños de restaurantes y administradores con credenciales seguras.
+
+## Preguntas Frecuentes (FAQ)
+
+### ¿Cómo crear un menú digital QR gratis en Ecuador?
+En MenuQR Pro puedes registrar tu restaurante en menos de 2 minutos y obtener 30 días de prueba gratis completa sin ingresar tarjeta de crédito.
+
+### ¿Cuánto cuesta MenuQR Pro?
+El costo plano es de $10 USD mensuales por restaurante sin contratos forzosos y con 0% de comisiones por tus pedidos.
+
+### ¿Qué se necesita para recibir pedidos por WhatsApp?
+Solo necesitas un número de teléfono de WhatsApp donde desees recibir las alertas estructuradas de los clientes al ordenar desde el código QR de su mesa.
+
+## Enlaces Principales
+
+- [Página Principal](https://menuqrpro.com/)
+- [Registro de Restaurantes (Prueba Gratis)](https://menuqrpro.com/registro)
+- [Iniciar Sesión](https://menuqrpro.com/login)
+- [Menú de Muestra (Demo)](https://menuqrpro.com/mamma-mia)
