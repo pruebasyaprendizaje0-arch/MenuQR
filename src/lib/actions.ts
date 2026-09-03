@@ -26,11 +26,9 @@ const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB max
 
 function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
   if (ext === "jpg" || ext === "jpeg") {
-    // JPEG magic bytes: FF D8 FF
     return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
   }
   if (ext === "png") {
-    // PNG magic bytes: 89 50 4E 47
     return (
       buffer.length >= 4 &&
       buffer[0] === 0x89 &&
@@ -40,7 +38,6 @@ function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
     );
   }
   if (ext === "gif") {
-    // GIF magic bytes: GIF8 (47 49 46 38)
     return (
       buffer.length >= 4 &&
       buffer[0] === 0x47 &&
@@ -50,7 +47,6 @@ function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
     );
   }
   if (ext === "webp") {
-    // WEBP magic bytes: RIFF (52 49 46 46) ... WEBP (57 45 42 50)
     return (
       buffer.length >= 12 &&
       buffer[0] === 0x52 &&
@@ -64,7 +60,6 @@ function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
     );
   }
   if (ext === "svg") {
-    // SVG text check: starts with <svg or <?xml
     const headerStr = buffer.slice(0, 100).toString("utf-8").toLowerCase().trim();
     return headerStr.includes("<svg") || headerStr.includes("<?xml");
   }
@@ -77,20 +72,17 @@ async function saveUploadedFile(file: File | null): Promise<string | null> {
     return null;
   }
 
-  // 1. File Size Validation (Max 5 MB)
   if (file.size > MAX_FILE_SIZE_BYTES) {
     console.warn(`[Security Upload] File size ${file.size} bytes exceeds limit of ${MAX_FILE_SIZE_BYTES} bytes.`);
     return null;
   }
 
-  // 2. Extension Validation
   const fileExt = file.name.split(".").pop()?.toLowerCase() || "";
   if (!ALLOWED_EXTENSIONS.has(fileExt)) {
     console.warn(`[Security Upload] Extension .${fileExt} is not allowed.`);
     return null;
   }
 
-  // 3. MIME Type Validation
   if (file.type && !ALLOWED_MIME_TYPES.has(file.type.toLowerCase())) {
     console.warn(`[Security Upload] MIME type ${file.type} is not in allowed list.`);
     return null;
@@ -100,7 +92,6 @@ async function saveUploadedFile(file: File | null): Promise<string | null> {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    // 4. Magic Bytes Content Inspection
     if (!validateImageMagicBytes(buffer, fileExt)) {
       console.warn(`[Security Upload] Magic bytes inspection failed for extension .${fileExt}`);
       return null;
@@ -121,6 +112,38 @@ async function saveUploadedFile(file: File | null): Promise<string | null> {
   }
 }
 
+/**
+ * Multi-tenant Authorization Helper: Verifies that the current user owns the restaurant
+ * or is logged in as a SuperAdmin.
+ */
+async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; userId?: string; error?: string }> {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (isSuperAdmin) {
+    return { authorized: true };
+  }
+
+  const session = await getUserSession();
+  if (!session || !session.userId) {
+    return { authorized: false, error: "No autenticado. Por favor inicie sesión." };
+  }
+
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { id: true, userId: true },
+  });
+
+  if (!restaurant) {
+    return { authorized: false, error: "Restaurante no encontrado." };
+  }
+
+  if (restaurant.userId !== session.userId) {
+    console.warn(`[Security Alert] User ${session.userId} attempted unauthorized action on Restaurant ${restaurantId}`);
+    return { authorized: false, error: "No tiene permisos para modificar este restaurante." };
+  }
+
+  return { authorized: true, userId: session.userId };
+}
+
 // Authentication Actions (SaaS Multi-tenant)
 export async function loginUserAction(prevState: unknown, formData: FormData) {
   try {
@@ -133,11 +156,11 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
 
     const cleanEmail = email.toLowerCase().trim();
 
-    // Autenticación en la base de datos local de Prisma / SuperAdmin
-    const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com").toLowerCase().trim();
-    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971";
+    // Check SuperAdmin login via environment variables (strictly no hardcoded fallback password)
+    const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
 
-    if (cleanEmail === superAdminEmail && (password === superAdminPassword || password === "Frhc1971*" || password === "Frhc1971")) {
+    if (superAdminEmail && superAdminPassword && cleanEmail === superAdminEmail && password === superAdminPassword) {
       await setSuperAdminSession();
       redirect("/super-admin");
     }
@@ -189,7 +212,6 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
 
     const cleanEmail = email.toLowerCase().trim();
 
-    // Check unique email
     let existingUser: any = null;
     try {
       existingUser = await prismaControl.user.findUnique({
@@ -204,14 +226,12 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
       return { error: "El correo electrónico ya está registrado." };
     }
 
-    // Hash password
     const hashedPassword = bcrypt.hashSync(password, 10);
 
-    // Generate unique slug from restaurantName
     let baseSlug = restaurantName
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "") // remove accents
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)+/g, "");
 
@@ -245,7 +265,6 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
     const trialEndsAt = new Date();
     trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
 
-    // Create User in Control DB and Restaurant in Tenant DB
     const user = await prismaControl.user.create({
       data: {
         name,
@@ -292,6 +311,9 @@ export async function logoutUserAction() {
 // Restaurant Action
 export async function updateRestaurantAction(restaurantId: string, formData: FormData) {
   await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
   const name = formData.get("name") as string;
   const slug = formData.get("slug") as string;
   const whatsappNumber = formData.get("whatsappNumber") as string;
@@ -317,8 +339,8 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const sector = formData.get("sector") as string;
   const latInput = formData.get("latitude") as string;
   const lngInput = formData.get("longitude") as string;
-  const latitude = latInput ? parseFloat(latInput) : null;
-  const longitude = lngInput ? parseFloat(lngInput) : null;
+  const latitude = latInput !== null && latInput !== "" && !isNaN(parseFloat(latInput)) ? parseFloat(latInput) : null;
+  const longitude = lngInput !== null && lngInput !== "" && !isNaN(parseFloat(lngInput)) ? parseFloat(lngInput) : null;
 
   const seoTitle = formData.get("seoTitle") as string;
   const seoDescription = formData.get("seoDescription") as string;
@@ -399,51 +421,34 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       whatsapp: whatsappNumber,
       themeColor,
       logoUrl: logoUrl || null,
-      // @ts-ignore
       coverUrl: coverUrl || null,
       qrCobroUrl: paymentQrUrl || null,
       instagram: instagram || null,
       facebook: facebook || null,
       tiktok: tiktok || null,
       address: address || null,
-      // @ts-ignore
       slogan: slogan || null,
       description: description || null,
       locality: locality || null,
       schedule: schedule || null,
-      // @ts-ignore
       localSchedule: localSchedule || null,
-      // @ts-ignore
       deliverySchedule: deliverySchedule || null,
-      // @ts-ignore
       blockedDates: blockedDates || null,
       specialty: specialty || null,
       services: services || null,
       contactNumbers: contactNumbers || null,
       ubicameUrl: ubicameUrl || null,
-      // @ts-ignore
       mapEmbedUrl: mapEmbedUrl || null,
-      // @ts-ignore
       province: province || null,
-      // @ts-ignore
       city: city || null,
-      // @ts-ignore
       parish: parish || null,
-      // @ts-ignore
       sector: sector || null,
-      // @ts-ignore
-      latitude: latitude || null,
-      // @ts-ignore
-      longitude: longitude || null,
-      // @ts-ignore
+      latitude,
+      longitude,
       seoTitle: seoTitle || null,
-      // @ts-ignore
       seoDescription: seoDescription || null,
-      // @ts-ignore
       seoKeywords: seoKeywords || null,
-      // @ts-ignore
       seoImage: seoImage || null,
-      // @ts-ignore
       customFaq: customFaq || null,
       bankName: bankName || null,
       bankAccountType: bankAccountType || null,
@@ -455,7 +460,6 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       servicePercent,
       deliveryCost,
       deliveryEnabled,
-      // @ts-ignore
       deliveryRates: deliveryRates || null,
       ivaOnTable,
       ivaOnTakeout,
@@ -480,15 +484,15 @@ export async function updateRestaurantSchedulesAction(
 ) {
   try {
     await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
     const restaurant = await prisma.restaurant.update({
       where: { id: restaurantId },
       data: {
         schedule: data.schedule || null,
-        // @ts-ignore
         localSchedule: data.localSchedule || null,
-        // @ts-ignore
         deliverySchedule: data.deliverySchedule || null,
-        // @ts-ignore
         blockedDates: data.blockedDates || null,
       },
     });
@@ -504,6 +508,9 @@ export async function updateRestaurantSchedulesAction(
 
 export async function updateLogoDirectAction(restaurantId: string, formData: FormData) {
   await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
   const logoFile = formData.get("logoFile") as File | null;
   const uploadedLogo = await saveUploadedFile(logoFile);
   
@@ -523,6 +530,9 @@ export async function updateLogoDirectAction(restaurantId: string, formData: For
 
 export async function updateCoverDirectAction(restaurantId: string, formData: FormData) {
   await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
   const coverFile = formData.get("coverFile") as File | null;
   const uploadedCover = await saveUploadedFile(coverFile);
 
@@ -533,7 +543,6 @@ export async function updateCoverDirectAction(restaurantId: string, formData: Fo
   const updated = await prisma.restaurant.update({
     where: { id: restaurantId },
     data: { 
-      // @ts-ignore
       coverUrl: uploadedCover 
     },
   });
@@ -546,10 +555,11 @@ export async function updateCoverDirectAction(restaurantId: string, formData: Fo
 // Category Actions
 export async function createCategoryAction(restaurantId: string, formData: FormData) {
   await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
-
-
 
   await prisma.category.create({
     data: {
@@ -567,10 +577,17 @@ export async function createCategoryAction(restaurantId: string, formData: FormD
 
 export async function updateCategoryAction(categoryId: string, formData: FormData) {
   await refreshUserSession();
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!category) return { error: "Categoría no encontrada." };
+
+  const auth = await verifyRestaurantOwnership(category.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
-
-
 
   const updated = await prisma.category.update({
     where: { id: categoryId },
@@ -588,8 +605,14 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
 
 export async function deleteCategoryAction(categoryId: string) {
   await refreshUserSession();
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!category) return { error: "Categoría no encontrada." };
 
-
+  const auth = await verifyRestaurantOwnership(category.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   const deleted = await prisma.category.delete({
     where: { id: categoryId },
@@ -604,6 +627,16 @@ export async function deleteCategoryAction(categoryId: string) {
 // Dish Actions
 export async function createDishAction(categoryId: string, formData: FormData) {
   await refreshUserSession();
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    include: { restaurant: true },
+  });
+
+  if (!category) return { error: "Categoría no encontrada." };
+
+  const auth = await verifyRestaurantOwnership(category.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
   const name = formData.get("name") as string;
   const description = formData.get("description") as string;
   const price = parseFloat(formData.get("price") as string || "0");
@@ -616,15 +649,6 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   if (uploadedImage) {
     imageUrl = uploadedImage;
   }
-
-
-
-  const category = await prisma.category.findUnique({
-    where: { id: categoryId },
-    include: { restaurant: true },
-  });
-
-  if (!category) return { error: "Categoría no encontrada." };
 
   await prisma.dish.create({
     data: {
@@ -645,6 +669,15 @@ export async function createDishAction(categoryId: string, formData: FormData) {
 
 export async function updateDishAction(dishId: string, formData: FormData) {
   await refreshUserSession();
+  const dish = await prisma.dish.findUnique({
+    where: { id: dishId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!dish) return { error: "Plato no encontrado." };
+
+  const auth = await verifyRestaurantOwnership(dish.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
   const name = formData.get("name") as string;
   const description = formData.get("description") as string;
   const price = parseFloat(formData.get("price") as string || "0");
@@ -657,8 +690,6 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   if (uploadedImage) {
     imageUrl = uploadedImage;
   }
-
-
 
   const updated = await prisma.dish.update({
     where: { id: dishId },
@@ -683,8 +714,14 @@ export async function updateDishAction(dishId: string, formData: FormData) {
 
 export async function deleteDishAction(dishId: string) {
   await refreshUserSession();
+  const dish = await prisma.dish.findUnique({
+    where: { id: dishId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!dish) return { error: "Plato no encontrado." };
 
-
+  const auth = await verifyRestaurantOwnership(dish.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   const deleted = await prisma.dish.delete({
     where: { id: dishId },
@@ -703,8 +740,14 @@ export async function deleteDishAction(dishId: string) {
 export async function toggleDishAvailabilityAction(dishId: string, isAvailable: boolean) {
   try {
     await refreshUserSession();
+    const dish = await prisma.dish.findUnique({
+      where: { id: dishId },
+      select: { id: true, restaurantId: true },
+    });
+    if (!dish) return { error: "El plato no existe o ya fue eliminado." };
 
-
+    const auth = await verifyRestaurantOwnership(dish.restaurantId);
+    if (!auth.authorized) return { error: auth.error };
 
     const updated = await prisma.dish.update({
       where: { id: dishId },
@@ -719,7 +762,7 @@ export async function toggleDishAvailabilityAction(dishId: string, isAvailable: 
     revalidatePath(`/${updated.category.restaurant.slug}`);
     revalidatePath("/admin");
     return { success: true };
-    } catch (error) {
+  } catch (error) {
     console.error("Error toggling dish availability:", error);
     return { error: "El plato no existe o ya fue eliminado." };
   }
@@ -730,17 +773,21 @@ export async function superAdminLoginAction(prevState: unknown, formData: FormDa
   try {
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
-    const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || "pruebasyaprendizaje0@gmail.com").toLowerCase().trim();
-    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "Frhc1971";
+    const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
+
+    if (!superAdminEmail || !superAdminPassword) {
+      console.warn("[SuperAdmin Login] Faltan variables de entorno SUPER_ADMIN_EMAIL o SUPER_ADMIN_PASSWORD.");
+      return { error: "Configuración de SuperAdmin no disponible en el servidor." };
+    }
 
     if (!email || !password) {
       return { error: "Por favor complete todos los campos." };
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const isValidPassword = password === superAdminPassword || password === "Frhc1971*" || password === "Frhc1971";
 
-    if (cleanEmail !== superAdminEmail || !isValidPassword) {
+    if (cleanEmail !== superAdminEmail || password !== superAdminPassword) {
       return { error: "Correo o contraseña incorrectos." };
     }
 
@@ -768,6 +815,11 @@ export async function superAdminLogoutAction() {
 }
 
 export async function extendTrialAction(restaurantId: string, days: number) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
   const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId }
   });
@@ -791,7 +843,7 @@ export async function extendTrialAction(restaurantId: string, days: number) {
 export async function deleteRestaurantAction(restaurantId: string) {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) {
-    return { error: "No autorizado." };
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
   }
 
   const restaurant = await prisma.restaurant.findUnique({
@@ -806,7 +858,6 @@ export async function deleteRestaurantAction(restaurantId: string) {
     where: { id: restaurantId }
   });
 
-  // Clean up user if they have no remaining restaurants
   const remainingRestaurants = await prisma.restaurant.count({
     where: { userId }
   });
@@ -841,7 +892,7 @@ export async function superAdminCreateRestaurantAction(data: {
   try {
     const isSuperAdmin = await getSuperAdminSession();
     if (!isSuperAdmin) {
-      return { error: "No autorizado." };
+      return { error: "No autorizado. Acción reservada para SuperAdmin." };
     }
 
     const cleanEmail = data.email.toLowerCase().trim();
@@ -859,7 +910,6 @@ export async function superAdminCreateRestaurantAction(data: {
       }
 
       if (existingUser) {
-        // Reuse existing user ID if found
         assignedUserId = existingUser.id;
       } else {
         const hashedPassword = bcrypt.hashSync(data.password || "123456", 10);
@@ -955,7 +1005,7 @@ export async function superAdminUpdateRestaurantAction(
 ) {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) {
-    return { error: "No autorizado." };
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
   }
 
   const restaurant = await prismaTenant.restaurant.findUnique({
@@ -973,7 +1023,6 @@ export async function superAdminUpdateRestaurantAction(
   const cleanEmail = data.email.toLowerCase().trim();
   const cleanSlug = data.slug.toLowerCase().trim();
 
-  // Check unique slug if changed
   if (cleanSlug !== restaurant.slug) {
     const existingSlug = await prismaTenant.restaurant.findUnique({
       where: { slug: cleanSlug }
@@ -985,7 +1034,6 @@ export async function superAdminUpdateRestaurantAction(
 
   let finalUserId = restaurant.userId;
 
-  // Check if owner email changed to another user
   if (cleanEmail && (!ownerUser || cleanEmail !== ownerUser.email)) {
     const targetUser = await prismaControl.user.findUnique({
       where: { email: cleanEmail }
@@ -1020,7 +1068,6 @@ export async function superAdminUpdateRestaurantAction(
   const futureTrial = new Date();
   futureTrial.setFullYear(futureTrial.getFullYear() + 1);
 
-  // Update restaurant
   const updatedRestaurant = await prismaTenant.restaurant.update({
     where: { id: restaurantId },
     data: {
@@ -1030,7 +1077,6 @@ export async function superAdminUpdateRestaurantAction(
       whatsapp: data.whatsapp,
       locality: data.locality || null,
       address: data.address || null,
-      // @ts-ignore
       slogan: data.slogan || null,
       description: data.description || null,
       schedule: data.schedule || null,
@@ -1057,7 +1103,7 @@ export async function superAdminUpdateRestaurantAction(
 
 export async function reassignRestaurantOwnerAction(restaurantId: string, ownerEmailOrUserId: string) {
   const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
   if (!ownerEmailOrUserId || !ownerEmailOrUserId.trim()) {
     return { error: "Por favor proporciona un correo o ID de usuario válido." };
@@ -1094,6 +1140,11 @@ export async function reassignRestaurantOwnerAction(restaurantId: string, ownerE
 }
 
 export async function impersonateUserAction(userId: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
   const user = await prismaControl.user.findUnique({
     where: { id: userId }
   });
@@ -1104,6 +1155,11 @@ export async function impersonateUserAction(userId: string) {
 }
 
 export async function changeUserPlanAction(restaurantId: string, plan: "FREE" | "PRO") {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
   const restaurant = await prismaTenant.restaurant.update({
     where: { id: restaurantId },
     data: { plan }
@@ -1122,17 +1178,15 @@ export async function subscribeToPremiumAction(
     cardDocId?: string;
   }
 ) {
-  const session = await getUserSession();
-  if (!session) {
-    return { error: "No autorizado. Por favor inicie sesión para continuar." };
-  }
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId }
   });
 
-  if (!restaurant || restaurant.userId !== session.userId) {
-    return { error: "Restaurante no encontrado o no tiene permisos." };
+  if (!restaurant) {
+    return { error: "Restaurante no encontrado." };
   }
 
   const apiKey = (process.env.PAYMENT_API_KEY || "").trim();
@@ -1144,14 +1198,12 @@ export async function subscribeToPremiumAction(
     return { error: "Configuración de pasarela de pagos no disponible. Por favor verifique las variables de entorno." };
   }
 
-  // Log simulated or real gateway transaction processing
   console.log(`[Payment Gateway API] Processing $10.00 USD charge for restaurant ${restaurant.name} (${restaurant.id})`);
   console.log(`[Payment Gateway API] SmartFields Key: ${smartFieldsKey.substring(0, 8)}... | Secret Key Present: ${Boolean(secretKey)}`);
   if (paymentData?.cardHolderName) {
     console.log(`[Payment Gateway API] Cardholder: ${paymentData.cardHolderName} | Last 4: **** ${paymentData.cardNumberLast4 || '****'}`);
   }
 
-  // Calculate subscription extension ($10 USD / 1 month)
   const currentExpiry = restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date();
   const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
   const newExpiry = new Date(baseDate);
@@ -1180,7 +1232,16 @@ export async function subscribeToPremiumAction(
 }
 
 export async function resetUserPasswordAction(userId: string, newPassword: string) {
-  const hashedPassword = bcrypt.hashSync(newPassword, 15); // Hashing password securely
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    return { error: "La contraseña debe tener al menos 6 caracteres." };
+  }
+
+  const hashedPassword = bcrypt.hashSync(newPassword, 10);
   await prismaControl.user.update({
     where: { id: userId },
     data: { password: hashedPassword }
@@ -1190,6 +1251,11 @@ export async function resetUserPasswordAction(userId: string, newPassword: strin
 }
 
 export async function updateSystemSettingAction(key: string, value: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
   await prismaControl.systemSetting.upsert({
     where: { key },
     update: { value },
@@ -1219,40 +1285,13 @@ export async function createOrderAction(data: {
   paymentMethod: string;
   items: { dishName: string; price: number; quantity: number }[];
 }) {
-
-
   try {
-    // Auto-heal production schema if coupon columns are missing
-    try {
-      await prisma.$executeRawUnsafe(`
-        ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "couponCode" TEXT;
-        ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "discountAmount" DOUBLE PRECISION NOT NULL DEFAULT 0.0;
-        CREATE TABLE IF NOT EXISTS "Coupon" (
-          "id" TEXT NOT NULL PRIMARY KEY,
-          "restaurantId" TEXT NOT NULL,
-          "code" TEXT NOT NULL,
-          "discountType" TEXT NOT NULL,
-          "discountValue" DOUBLE PRECISION NOT NULL,
-          "minOrder" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-          "maxUses" INTEGER,
-          "usedCount" INTEGER NOT NULL DEFAULT 0,
-          "isActive" BOOLEAN NOT NULL DEFAULT true,
-          "expiresAt" TIMESTAMP(3),
-          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-    } catch (ddlErr) {
-      // DDL failsafe ignore
-    }
-
     const order = await prisma.order.create({
       data: {
         restaurantId: data.restaurantId,
         tableName: data.tableName,
         customerName: data.customerName || null,
         customerPhone: data.customerPhone || null,
-        // @ts-ignore
         customerAddress: data.customerAddress || null,
         subtotal: data.subtotal,
         iva: data.iva,
@@ -1261,9 +1300,7 @@ export async function createOrderAction(data: {
         deliveryCost: data.deliveryCost,
         seasonRateName: data.seasonRateName || null,
         seasonRateAmount: data.seasonRateAmount || 0,
-        // @ts-ignore
         couponCode: data.couponCode || null,
-        // @ts-ignore
         discountAmount: data.discountAmount || 0,
         total: data.total,
         paymentMethod: data.paymentMethod,
@@ -1279,7 +1316,6 @@ export async function createOrderAction(data: {
 
     if (data.couponCode && data.couponCode.trim()) {
       try {
-        // @ts-ignore
         await prisma.coupon.updateMany({
           where: { restaurantId: data.restaurantId, code: data.couponCode.trim().toUpperCase() },
           data: { usedCount: { increment: 1 } },
@@ -1289,18 +1325,15 @@ export async function createOrderAction(data: {
       }
     }
 
-    // Auto-upsert into Customer CRM table
     if (data.customerPhone && data.customerPhone.trim()) {
       try {
         const rawPhone = data.customerPhone.trim();
-        // @ts-ignore
         const existing = await prisma.customer.findFirst({
           where: { restaurantId: data.restaurantId, phone: rawPhone }
         });
         if (existing) {
           const newOrdersCount = existing.totalOrders + 1;
           const newCategory = newOrdersCount >= 5 ? "VIP" : newOrdersCount >= 2 ? "FRECUENTE" : existing.category;
-          // @ts-ignore
           await prisma.customer.update({
             where: { id: existing.id },
             data: {
@@ -1313,7 +1346,6 @@ export async function createOrderAction(data: {
             }
           });
         } else {
-          // @ts-ignore
           await prisma.customer.create({
             data: {
               restaurantId: data.restaurantId,
@@ -1347,7 +1379,6 @@ export async function createOrderAction(data: {
     return { 
       success: true, 
       orderId: order.id,
-      // @ts-ignore
       orderNumber: order.orderNumber || 1 
     };
   } catch (error: any) {
@@ -1361,9 +1392,20 @@ export async function updateOrderStatusAction(
   status: string,
   driverData?: { driverName?: string; driverPhone?: string }
 ) {
-
-
   try {
+    await refreshUserSession();
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, restaurantId: true }
+    });
+
+    if (!order) {
+      return { error: "Pedido no encontrado." };
+    }
+
+    const auth = await verifyRestaurantOwnership(order.restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
     const updateData: any = { status };
     if (driverData?.driverName !== undefined) {
       updateData.driverName = driverData.driverName;
@@ -1372,16 +1414,16 @@ export async function updateOrderStatusAction(
       updateData.driverPhone = driverData.driverPhone;
     }
 
-    const order = await prisma.order.update({
+    const updatedOrder = await prisma.order.update({
       where: { id: orderId },
       data: updateData,
       include: { restaurant: { select: { slug: true } } }
     });
 
     revalidatePath(`/admin`);
-    revalidatePath(`/${order.restaurant.slug}`);
-    revalidatePath(`/${order.restaurant.slug}/rastreo`);
-    revalidatePath(`/${order.restaurant.slug}/repartidor`);
+    revalidatePath(`/${updatedOrder.restaurant.slug}`);
+    revalidatePath(`/${updatedOrder.restaurant.slug}/rastreo`);
+    revalidatePath(`/${updatedOrder.restaurant.slug}/repartidor`);
     return { success: true };
   } catch (error) {
     console.error("Error updating order status:", error);
@@ -1454,8 +1496,6 @@ export async function getOrderTrackingAction(restaurantSlug?: string | null, que
 }
 
 export async function getDeliveryOrdersAction(restaurantSlug: string) {
-
-
   try {
     const restaurant = await prisma.restaurant.findUnique({
       where: { slug: restaurantSlug },
@@ -1465,6 +1505,9 @@ export async function getDeliveryOrdersAction(restaurantSlug: string) {
     if (!restaurant) {
       return { error: "Restaurante no encontrado." };
     }
+
+    const auth = await verifyRestaurantOwnership(restaurant.id);
+    if (!auth.authorized) return { error: auth.error };
 
     const orders = await prisma.order.findMany({
       where: {
@@ -1496,6 +1539,9 @@ export async function getDeliveryOrdersAction(restaurantSlug: string) {
 export async function updateRestaurantTablesAction(restaurantId: string, tablesConfig: string) {
   try {
     await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
     const restaurant = await prisma.restaurant.update({
       where: { id: restaurantId },
       data: { tablesConfig }
@@ -1526,6 +1572,9 @@ export async function updateRestaurantChargesConfigAction(
 ) {
   try {
     await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
     const restaurant = await prisma.restaurant.update({
       where: { id: restaurantId },
       data: {
@@ -1533,7 +1582,6 @@ export async function updateRestaurantChargesConfigAction(
         servicePercent: data.servicePercent,
         deliveryCost: data.deliveryCost,
         deliveryEnabled: data.deliveryEnabled,
-        // @ts-ignore
         deliveryRates: data.deliveryRates || null,
         ivaOnTable: data.ivaOnTable,
         ivaOnTakeout: data.ivaOnTakeout,
@@ -1560,12 +1608,10 @@ export async function requestPasswordResetAction(prevState: unknown, formData: F
 
   const cleanEmail = email.toLowerCase().trim();
 
-  // Find user
   const user = await prismaControl.user.findUnique({
     where: { email: cleanEmail },
   });
 
-  // Always return success message to protect privacy
   if (!user) {
     return {
       success: true,
@@ -1574,7 +1620,7 @@ export async function requestPasswordResetAction(prevState: unknown, formData: F
   }
 
   const token = randomBytes(32).toString("hex");
-  const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+  const expiry = new Date(Date.now() + 60 * 60 * 1000);
 
   await prismaControl.user.update({
     where: { id: user.id },
@@ -1654,7 +1700,7 @@ export async function updateRestaurantLeadStatusAction(
   nextFollowUpAt?: string | null
 ) {
   const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
   await prismaTenant.restaurant.update({
     where: { id: restaurantId },
@@ -1673,7 +1719,7 @@ export async function addCrmNoteAction(
   content: string
 ) {
   const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
   if (!content.trim()) return { error: "El contenido de la nota no puede estar vacío." };
 
@@ -1699,7 +1745,7 @@ export async function createProspectLeadAction(data: {
   nextFollowUpAt?: string;
 }) {
   const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
   if (!data.name || !data.phone) {
     return { error: "El nombre del negocio y el teléfono son requeridos." };
@@ -1735,7 +1781,7 @@ export async function updateProspectLeadAction(
   }
 ) {
   const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
   await prismaControl.lead.update({
     where: { id: leadId },
@@ -1757,7 +1803,7 @@ export async function updateProspectLeadAction(
 
 export async function deleteProspectLeadAction(leadId: string) {
   const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
   await prismaControl.lead.delete({
     where: { id: leadId },
@@ -1769,7 +1815,7 @@ export async function deleteProspectLeadAction(leadId: string) {
 
 export async function convertProspectToRestaurantAction(leadId: string, password: string) {
   const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
   const lead = await prismaControl.lead.findUnique({
     where: { id: leadId },
@@ -1824,6 +1870,8 @@ export async function createSeasonRateAction(
   }
 ) {
   await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   if (!data.name || !data.startDate || !data.endDate) {
     return { error: "El nombre de la tarifa y las fechas de inicio y fin son obligatorios." };
@@ -1862,8 +1910,16 @@ export async function updateSeasonRateAction(
   }
 ) {
   await refreshUserSession();
+  const rate = await prisma.seasonRate.findUnique({
+    where: { id: rateId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!rate) return { error: "Tarifa no encontrada." };
 
-  const rate = await prisma.seasonRate.update({
+  const auth = await verifyRestaurantOwnership(rate.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  const updatedRate = await prisma.seasonRate.update({
     where: { id: rateId },
     data: {
       name: data.name.trim(),
@@ -1879,12 +1935,20 @@ export async function updateSeasonRateAction(
   });
 
   revalidatePath("/admin");
-  revalidatePath(`/${rate.restaurant.slug}`);
+  revalidatePath(`/${updatedRate.restaurant.slug}`);
   return { success: true };
 }
 
 export async function deleteSeasonRateAction(rateId: string) {
   await refreshUserSession();
+  const rate = await prisma.seasonRate.findUnique({
+    where: { id: rateId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!rate) return { error: "Tarifa no encontrada." };
+
+  const auth = await verifyRestaurantOwnership(rate.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   const deleted = await prisma.seasonRate.delete({
     where: { id: rateId },
@@ -1900,6 +1964,14 @@ export async function deleteSeasonRateAction(rateId: string) {
 
 export async function toggleSeasonRateAction(rateId: string, isActive: boolean) {
   await refreshUserSession();
+  const rate = await prisma.seasonRate.findUnique({
+    where: { id: rateId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!rate) return { error: "Tarifa no encontrada." };
+
+  const auth = await verifyRestaurantOwnership(rate.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   const updated = await prisma.seasonRate.update({
     where: { id: rateId },
@@ -1926,9 +1998,10 @@ export async function createCustomerAction(data: {
   notes?: string;
 }) {
   await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(data.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   try {
-    // @ts-ignore
     const customer = await prisma.customer.create({
       data: {
         restaurantId: data.restaurantId,
@@ -1963,10 +2036,17 @@ export async function updateCustomerAction(
   }
 ) {
   await refreshUserSession();
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!customer) return { error: "Cliente no encontrado." };
+
+  const auth = await verifyRestaurantOwnership(customer.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   try {
-    // @ts-ignore
-    const customer = await prisma.customer.update({
+    const updated = await prisma.customer.update({
       where: { id: customerId },
       data: {
         name: data.name,
@@ -1980,7 +2060,7 @@ export async function updateCustomerAction(
     });
 
     revalidatePath("/admin");
-    return { success: true, customer };
+    return { success: true, customer: updated };
   } catch (error) {
     console.error("Error updating customer:", error);
     return { error: "No se pudo actualizar el cliente." };
@@ -1989,9 +2069,16 @@ export async function updateCustomerAction(
 
 export async function deleteCustomerAction(customerId: string) {
   await refreshUserSession();
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, restaurantId: true },
+  });
+  if (!customer) return { error: "Cliente no encontrado." };
+
+  const auth = await verifyRestaurantOwnership(customer.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   try {
-    // @ts-ignore
     await prisma.customer.delete({
       where: { id: customerId },
     });
@@ -2017,6 +2104,8 @@ export async function importCustomersAction(
   }[]
 ) {
   await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
 
   let importedCount = 0;
   let updatedCount = 0;
@@ -2027,13 +2116,11 @@ export async function importCustomersAction(
       const cleanPhone = item.phone.trim();
       if (!cleanPhone) continue;
 
-      // @ts-ignore
       const existing = await prisma.customer.findFirst({
         where: { restaurantId, phone: cleanPhone },
       });
 
       if (existing) {
-        // @ts-ignore
         await prisma.customer.update({
           where: { id: existing.id },
           data: {
@@ -2046,7 +2133,6 @@ export async function importCustomersAction(
         });
         updatedCount++;
       } else {
-        // @ts-ignore
         await prisma.customer.create({
           data: {
             restaurantId,
@@ -2074,7 +2160,9 @@ export async function importCustomersAction(
 // Coupon System Server Actions
 export async function getRestaurantCouponsAction(restaurantId: string) {
   try {
-    // @ts-ignore
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { coupons: [], error: auth.error };
+
     const coupons = await prisma.coupon.findMany({
       where: { restaurantId },
       orderBy: { createdAt: "desc" },
@@ -2099,6 +2187,9 @@ export async function createCouponAction(
 ) {
   try {
     await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
     const cleanCode = data.code.trim().toUpperCase();
 
     if (!cleanCode) {
@@ -2113,7 +2204,6 @@ export async function createCouponAction(
       return { error: "El porcentaje de descuento no puede ser mayor al 100%." };
     }
 
-    // @ts-ignore
     const existing = await prisma.coupon.findFirst({
       where: {
         restaurantId,
@@ -2133,7 +2223,6 @@ export async function createCouponAction(
       }
     }
 
-    // @ts-ignore
     const coupon = await prisma.coupon.create({
       data: {
         restaurantId,
@@ -2157,7 +2246,9 @@ export async function createCouponAction(
 export async function deleteCouponAction(couponId: string, restaurantId: string) {
   try {
     await refreshUserSession();
-    // @ts-ignore
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
     await prisma.coupon.deleteMany({
       where: { id: couponId, restaurantId },
     });
@@ -2172,13 +2263,14 @@ export async function deleteCouponAction(couponId: string, restaurantId: string)
 export async function toggleCouponStatusAction(couponId: string, restaurantId: string) {
   try {
     await refreshUserSession();
-    // @ts-ignore
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
     const coupon = await prisma.coupon.findFirst({
       where: { id: couponId, restaurantId },
     });
     if (!coupon) return { error: "Cupón no encontrado." };
 
-    // @ts-ignore
     await prisma.coupon.update({
       where: { id: couponId },
       data: { isActive: !coupon.isActive },
@@ -2196,7 +2288,6 @@ export async function validateCouponAction(restaurantId: string, code: string, s
   if (!cleanCode) return { error: "Ingresa un código de cupón." };
 
   try {
-    // @ts-ignore
     const coupon = await prisma.coupon.findFirst({
       where: {
         restaurantId,
@@ -2243,6 +2334,3 @@ export async function validateCouponAction(restaurantId: string, code: string, s
     return { error: error?.message || "No se pudo validar el cupón." };
   }
 }
-
-
-

@@ -48,5 +48,5 @@ USER nextjs
 
 EXPOSE 3000
 
-# Start server with robust DB migration retry loop and foreground standalone execution
-CMD ["sh", "-c", "for i in 1 2 3 4 5; do npx prisma migrate deploy && break || sleep 3; done; exec node .next/standalone/server.js"]
+# Start server with robust DB migration retry loop and exit 1 failure guard
+CMD ["sh", "-c", "for i in 1 2 3 4 5; do if npx prisma migrate deploy; then break; fi; if [ \"$i\" -eq 5 ]; then echo \"Database migration failed after 5 attempts\"; exit 1; fi; sleep 3; done; exec node .next/standalone/server.js"]
