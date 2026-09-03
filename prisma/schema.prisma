@@ -51,10 +51,13 @@ model Restaurant {
   contactNumbers String?
   ubicameUrl     String?
   mapEmbedUrl    String?
+  country        String?    @default("Ecuador")
   province       String?
   city           String?
   parish         String?
   sector         String?
+  neighborhood   String?
+  postalCode     String?
   latitude       Float?
   longitude      Float?
   seoTitle       String?
@@ -89,10 +92,14 @@ model Restaurant {
   crmNotes       CrmNote[]
   seasonRates    SeasonRate[]
   coupons        Coupon[]
+  slugHistory    SlugHistory[]
+  analyticsEvents AnalyticsEvent[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
   @@index([userId])
+  @@index([province, city])
+  @@index([latitude, longitude])
 }
 
 model Category {
@@ -263,5 +270,29 @@ model Coupon {
   @@unique([restaurantId, code])
   @@index([restaurantId, isActive])
 }
+
+model SlugHistory {
+  id           String     @id @default(uuid())
+  oldSlug      String     @unique
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@index([oldSlug])
+  @@index([restaurantId])
+}
+
+model AnalyticsEvent {
+  id           String      @id @default(uuid())
+  eventType    String      // SEARCH, RESTAURANT_VIEW, MENU_VIEW, DISH_VIEW, QR_SCAN, WHATSAPP_CLICK, LOCATION_CLICK
+  restaurantId String?
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  metadata     String?     // JSON string
+  createdAt    DateTime    @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([restaurantId])
+}
+
 
 

@@ -9,6 +9,8 @@ import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { randomBytes } from "crypto";
 import { sendPasswordResetEmail } from "@/lib/email";
+import { recordSlugChange } from "@/lib/slugs";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -378,11 +380,22 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const blockedDates = formData.get("blockedDates") as string;
   const deliveryRates = formData.get("deliveryRates") as string;
 
+  const currentRestaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { slug: true },
+  });
+
+  const newSlug = slug.toLowerCase().trim();
+
+  if (currentRestaurant && currentRestaurant.slug !== newSlug) {
+    await recordSlugChange(restaurantId, currentRestaurant.slug, newSlug);
+  }
+
   await prisma.restaurant.update({
     where: { id: restaurantId },
     data: {
       name,
-      slug: slug.toLowerCase().trim(),
+      slug: newSlug,
       whatsapp: whatsappNumber,
       themeColor,
       logoUrl: logoUrl || null,

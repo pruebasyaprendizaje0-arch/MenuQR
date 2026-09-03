@@ -2,7 +2,10 @@ import { prisma } from "@/lib/db";
 import { MenuClient } from "./components/MenuClient";
 import { UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
+import { redirect, RedirectType } from "next/navigation";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
+import { findRestaurantBySlugOrHistory } from "@/lib/slugs";
+import { trackAnalyticsEvent } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +120,11 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
 
   const prismaStartTime = performance.now();
   try {
+    const slugCheck = await findRestaurantBySlugOrHistory(slug);
+    if (slugCheck.isRedirect && slugCheck.targetSlug) {
+      redirect(`/${slugCheck.targetSlug}`, RedirectType.replace);
+    }
+
     const restaurant = await prisma.restaurant.findUnique({
       where: { slug },
       include: {
@@ -163,6 +171,9 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
         </div>
       );
     }
+
+    // Track analytics event asynchronously
+    trackAnalyticsEvent("RESTAURANT_VIEW", restaurant.id, { slug, locality: restaurant.locality, city: restaurant.city });
 
     const totalDuration = Math.round(performance.now() - pageStartTime);
     const isPlanPro = restaurant.plan === "PRO";
