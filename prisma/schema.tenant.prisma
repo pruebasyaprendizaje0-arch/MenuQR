@@ -40,6 +40,17 @@ model Restaurant {
   contactNumbers      String?
   ubicameUrl          String?
   mapEmbedUrl         String?
+  province            String?
+  city                String?
+  parish              String?
+  sector              String?
+  latitude            Float?
+  longitude           Float?
+  seoTitle            String?
+  seoDescription      String?
+  seoKeywords         String?
+  seoImage            String?
+  customFaq           String?
   plan                Plan         @default(FREE)
   tablesConfig        String       @default("1,2,3,4,5,6,7,8,9,10")
   ivaPercent          Float        @default(15.0)
