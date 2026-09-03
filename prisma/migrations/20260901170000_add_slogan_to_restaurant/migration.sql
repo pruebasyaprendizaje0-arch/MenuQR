@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE "Restaurant" ADD COLUMN "slogan" TEXT;
+ALTER TABLE "Restaurant" ADD COLUMN IF NOT EXISTS "slogan" TEXT;

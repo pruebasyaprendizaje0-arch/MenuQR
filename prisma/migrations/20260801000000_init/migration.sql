@@ -1,8 +1,12 @@
 -- CreateEnum
-CREATE TYPE "Plan" AS ENUM ('FREE', 'PRO');
+DO $$ BEGIN
+    CREATE TYPE "Plan" AS ENUM ('FREE', 'PRO');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- CreateTable
-CREATE TABLE "User" (
+CREATE TABLE IF NOT EXISTS "User" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "password" TEXT NOT NULL,
@@ -16,7 +20,7 @@ CREATE TABLE "User" (
 );
 
 -- CreateTable
-CREATE TABLE "Restaurant" (
+CREATE TABLE IF NOT EXISTS "Restaurant" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -68,7 +72,7 @@ CREATE TABLE "Restaurant" (
 );
 
 -- CreateTable
-CREATE TABLE "Category" (
+CREATE TABLE IF NOT EXISTS "Category" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "order" INTEGER NOT NULL DEFAULT 0,
@@ -80,7 +84,7 @@ CREATE TABLE "Category" (
 );
 
 -- CreateTable
-CREATE TABLE "Dish" (
+CREATE TABLE IF NOT EXISTS "Dish" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
@@ -96,7 +100,7 @@ CREATE TABLE "Dish" (
 );
 
 -- CreateTable
-CREATE TABLE "SystemSetting" (
+CREATE TABLE IF NOT EXISTS "SystemSetting" (
     "id" TEXT NOT NULL,
     "key" TEXT NOT NULL,
     "value" TEXT NOT NULL,
@@ -107,7 +111,7 @@ CREATE TABLE "SystemSetting" (
 );
 
 -- CreateTable
-CREATE TABLE "Order" (
+CREATE TABLE IF NOT EXISTS "Order" (
     "id" TEXT NOT NULL,
     "orderNumber" SERIAL NOT NULL,
     "restaurantId" TEXT NOT NULL,
@@ -134,7 +138,7 @@ CREATE TABLE "Order" (
 );
 
 -- CreateTable
-CREATE TABLE "OrderItem" (
+CREATE TABLE IF NOT EXISTS "OrderItem" (
     "id" TEXT NOT NULL,
     "orderId" TEXT NOT NULL,
     "dishName" TEXT NOT NULL,
@@ -145,7 +149,7 @@ CREATE TABLE "OrderItem" (
 );
 
 -- CreateTable
-CREATE TABLE "Lead" (
+CREATE TABLE IF NOT EXISTS "Lead" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "ownerName" TEXT,
@@ -162,7 +166,7 @@ CREATE TABLE "Lead" (
 );
 
 -- CreateTable
-CREATE TABLE "CrmNote" (
+CREATE TABLE IF NOT EXISTS "CrmNote" (
     "id" TEXT NOT NULL,
     "restaurantId" TEXT,
     "leadId" TEXT,
@@ -174,7 +178,7 @@ CREATE TABLE "CrmNote" (
 );
 
 -- CreateTable
-CREATE TABLE "SeasonRate" (
+CREATE TABLE IF NOT EXISTS "SeasonRate" (
     "id" TEXT NOT NULL,
     "restaurantId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -191,7 +195,7 @@ CREATE TABLE "SeasonRate" (
 );
 
 -- CreateTable
-CREATE TABLE "Customer" (
+CREATE TABLE IF NOT EXISTS "Customer" (
     "id" TEXT NOT NULL,
     "restaurantId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -211,55 +215,62 @@ CREATE TABLE "Customer" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email");
+CREATE UNIQUE INDEX IF NOT EXISTS "Restaurant_slug_key" ON "Restaurant"("slug");
+CREATE UNIQUE INDEX IF NOT EXISTS "SystemSetting_key_key" ON "SystemSetting"("key");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Restaurant_slug_key" ON "Restaurant"("slug");
-
--- CreateIndex
-CREATE UNIQUE INDEX "SystemSetting_key_key" ON "SystemSetting"("key");
-
--- CreateIndex
-CREATE INDEX "Restaurant_userId_idx" ON "Restaurant"("userId");
-CREATE INDEX "Category_restaurantId_order_idx" ON "Category"("restaurantId", "order");
-CREATE INDEX "Dish_categoryId_idx" ON "Dish"("categoryId");
-CREATE INDEX "Dish_restaurantId_idx" ON "Dish"("restaurantId");
-CREATE INDEX "Order_restaurantId_createdAt_idx" ON "Order"("restaurantId", "createdAt");
-CREATE INDEX "Order_status_idx" ON "Order"("status");
-CREATE INDEX "OrderItem_orderId_idx" ON "OrderItem"("orderId");
-CREATE INDEX "Lead_phone_idx" ON "Lead"("phone");
-CREATE INDEX "CrmNote_restaurantId_idx" ON "CrmNote"("restaurantId");
-CREATE INDEX "CrmNote_leadId_idx" ON "CrmNote"("leadId");
-CREATE INDEX "SeasonRate_restaurantId_isActive_idx" ON "SeasonRate"("restaurantId", "isActive");
-CREATE INDEX "Customer_restaurantId_idx" ON "Customer"("restaurantId");
-CREATE INDEX "Customer_phone_idx" ON "Customer"("phone");
+CREATE INDEX IF NOT EXISTS "Restaurant_userId_idx" ON "Restaurant"("userId");
+CREATE INDEX IF NOT EXISTS "Category_restaurantId_order_idx" ON "Category"("restaurantId", "order");
+CREATE INDEX IF NOT EXISTS "Dish_categoryId_idx" ON "Dish"("categoryId");
+CREATE INDEX IF NOT EXISTS "Dish_restaurantId_idx" ON "Dish"("restaurantId");
+CREATE INDEX IF NOT EXISTS "Order_restaurantId_createdAt_idx" ON "Order"("restaurantId", "createdAt");
+CREATE INDEX IF NOT EXISTS "Order_status_idx" ON "Order"("status");
+CREATE INDEX IF NOT EXISTS "OrderItem_orderId_idx" ON "OrderItem"("orderId");
+CREATE INDEX IF NOT EXISTS "Lead_phone_idx" ON "Lead"("phone");
+CREATE INDEX IF NOT EXISTS "CrmNote_restaurantId_idx" ON "CrmNote"("restaurantId");
+CREATE INDEX IF NOT EXISTS "CrmNote_leadId_idx" ON "CrmNote"("leadId");
+CREATE INDEX IF NOT EXISTS "SeasonRate_restaurantId_isActive_idx" ON "SeasonRate"("restaurantId", "isActive");
+CREATE INDEX IF NOT EXISTS "Customer_restaurantId_idx" ON "Customer"("restaurantId");
+CREATE INDEX IF NOT EXISTS "Customer_phone_idx" ON "Customer"("phone");
 
 -- AddForeignKey
-ALTER TABLE "Restaurant" ADD CONSTRAINT "Restaurant_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "Restaurant" ADD CONSTRAINT "Restaurant_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "Category" ADD CONSTRAINT "Category_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "Category" ADD CONSTRAINT "Category_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "Dish" ADD CONSTRAINT "Dish_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "Dish" ADD CONSTRAINT "Dish_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "Dish" ADD CONSTRAINT "Dish_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "Dish" ADD CONSTRAINT "Dish_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "Order" ADD CONSTRAINT "Order_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "Order" ADD CONSTRAINT "Order_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "CrmNote" ADD CONSTRAINT "CrmNote_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "CrmNote" ADD CONSTRAINT "CrmNote_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "CrmNote" ADD CONSTRAINT "CrmNote_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "CrmNote" ADD CONSTRAINT "CrmNote_leadId_fkey" FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "SeasonRate" ADD CONSTRAINT "SeasonRate_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "SeasonRate" ADD CONSTRAINT "SeasonRate_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- AddForeignKey
-ALTER TABLE "Customer" ADD CONSTRAINT "Customer_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "Customer" ADD CONSTRAINT "Customer_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

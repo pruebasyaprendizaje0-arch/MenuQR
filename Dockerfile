@@ -46,5 +46,5 @@ RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma
 
 EXPOSE 3000
 
-# Start server
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss || npx prisma migrate deploy || true; node .next/standalone/server.js"]
+# Start server with safe production migration deployment
+CMD ["sh", "-c", "npx prisma migrate deploy && node .next/standalone/server.js"]
