@@ -156,11 +156,13 @@ export function generateRestaurantJsonLd(restaurant: any) {
     ],
   };
 
-  if (restaurant.latitude && restaurant.longitude) {
+  const latNum = Number(restaurant.latitude);
+  const lngNum = Number(restaurant.longitude);
+  if (restaurant.latitude !== null && restaurant.latitude !== undefined && restaurant.longitude !== null && restaurant.longitude !== undefined && !isNaN(latNum) && !isNaN(lngNum) && (latNum !== 0 || lngNum !== 0)) {
     schema["@graph"][0].geo = {
       "@type": "GeoCoordinates",
-      "latitude": Number(restaurant.latitude),
-      "longitude": Number(restaurant.longitude),
+      "latitude": latNum,
+      "longitude": lngNum,
     };
   }
 
