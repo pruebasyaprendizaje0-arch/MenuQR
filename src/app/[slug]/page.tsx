@@ -7,6 +7,7 @@ import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
+import { generateRestaurantJsonLd, getBaseUrl } from "@/lib/seo";
 
 interface PageProps {
   params: {
@@ -216,40 +217,7 @@ export default async function RestaurantMenuPage({ params }: PageProps) {
       })),
     };
 
-    const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com";
-    const restaurantSchema = {
-      "@context": "https://schema.org",
-      "@type": "Restaurant",
-      "name": restaurant.name,
-      "description": restaurant.description || `Menú digital de ${restaurant.name} en Ecuador`,
-      "image": restaurant.logoUrl || restaurant.coverUrl || `${siteUrl}/icon.png`,
-      "url": `${siteUrl}/${slug}`,
-      "servesCuisine": restaurant.specialty || "Gastronomía",
-      "priceRange": "$$",
-      "address": {
-        "@type": "PostalAddress",
-        "addressLocality": restaurant.locality || "Ecuador",
-        "addressCountry": "EC"
-      },
-      "hasMenu": {
-        "@type": "Menu",
-        "name": `Carta Digital de ${restaurant.name}`,
-        "hasMenuSection": (restaurant.categories || []).map((cat: any) => ({
-          "@type": "MenuSection",
-          "name": cat.name,
-          "hasMenuItem": (cat.dishes || []).map((dish: any) => ({
-            "@type": "MenuItem",
-            "name": dish.name,
-            "description": dish.description || "",
-            "offers": {
-              "@type": "Offer",
-              "price": String(dish.price || 0),
-              "priceCurrency": "USD"
-            }
-          }))
-        }))
-      }
-    };
+    const restaurantSchema = generateRestaurantJsonLd(restaurant);
 
     return (
       <>
