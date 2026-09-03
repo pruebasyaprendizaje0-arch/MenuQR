@@ -1,8 +1,23 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 
+function getBaseUrl(): string {
+  let url = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+  if (!url && process.env.NODE_ENV === "production") {
+    url = "https://menuqr.ubicame.cc";
+  }
+  if (!url) {
+    url = "http://localhost:3000";
+  }
+  url = url.trim().replace(/\/+$/, "");
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = `https://${url}`;
+  }
+  return url;
+}
+
 export async function sendPasswordResetEmail(email: string, token: string) {
-  const baseUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const baseUrl = getBaseUrl();
   const resetLink = `${baseUrl}/restablecer-password?token=${token}`;
 
   const resendApiKey = process.env.RESEND_API_KEY;
@@ -11,27 +26,29 @@ export async function sendPasswordResetEmail(email: string, token: string) {
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
-  // Log link in server console for local testing / fallback
+  const timestamp = new Date().toISOString();
   console.log(`\n==================================================`);
-  console.log(`[PASSWORD RESET LINK FOR ${email}]:`);
-  console.log(resetLink);
+  console.log(`[${timestamp}] [PASSWORD RESET REQUEST FOR ${email}]`);
+  console.log(`Generated Link: ${resetLink}`);
   console.log(`==================================================\n`);
 
   const htmlContent = `
     <!DOCTYPE html>
-    <html>
+    <html lang="es">
     <head>
       <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Restablecer Contraseña - MenuQR Pro</title>
       <style>
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #090d16; margin: 0; padding: 40px 20px; color: #f8fafc; }
-        .container { max-width: 560px; margin: 0 auto; background-color: #0f172a; border-radius: 16px; border: 1px solid #1e293b; padding: 40px; text-align: center; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #090d16; margin: 0; padding: 40px 20px; color: #f8fafc; }
+        .container { max-width: 560px; margin: 0 auto; background-color: #0f172a; border-radius: 16px; border: 1px solid #1e293b; padding: 40px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
         .logo-badge { width: 56px; height: 56px; background: linear-gradient(135deg, #dc2626, #f59e0b); border-radius: 14px; margin: 0 auto 20px; line-height: 56px; color: white; font-size: 24px; font-weight: bold; }
-        h1 { color: #ffffff; font-size: 24px; font-weight: 800; margin-bottom: 8px; }
+        h1 { color: #ffffff; font-size: 24px; font-weight: 800; margin-bottom: 12px; tracking-tight; }
         p { color: #94a3b8; font-size: 15px; line-height: 1.6; margin-bottom: 24px; text-align: left; }
         .btn-container { text-align: center; margin: 32px 0; }
-        .btn { display: inline-block; background: linear-gradient(90deg, #dc2626, #ea580c); color: #ffffff !important; text-decoration: none; padding: 14px 32px; border-radius: 12px; font-weight: 700; font-size: 15px; shadow: 0 4px 14px rgba(220,38,38,0.4); }
-        .footer { margin-top: 32px; padding-top: 24px; border-top: 1px solid #1e293b; font-size: 12px; color: #64748b; text-align: center; }
-        .link-box { background: #020617; padding: 12px; border-radius: 8px; font-size: 12px; color: #f59e0b; word-break: break-all; margin-top: 16px; }
+        .btn { display: inline-block; background: linear-gradient(90deg, #dc2626, #ea580c); color: #ffffff !important; text-decoration: none; padding: 14px 36px; border-radius: 12px; font-weight: 700; font-size: 15px; shadow: 0 4px 14px rgba(220,38,38,0.4); }
+        .footer { margin-top: 36px; padding-top: 24px; border-top: 1px solid #1e293b; font-size: 12px; color: #64748b; text-align: center; }
+        .link-box { background: #020617; padding: 12px; border-radius: 8px; font-size: 12px; color: #f59e0b; word-break: break-all; margin-top: 16px; border: 1px solid #1e293b; }
       </style>
     </head>
     <body>
@@ -42,27 +59,27 @@ export async function sendPasswordResetEmail(email: string, token: string) {
         <p>Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en <strong>MenuQR Pro</strong>. Haz clic en el botón a continuación para crear una nueva contraseña:</p>
         
         <div class="btn-container">
-          <a href="${resetLink}" class="btn">Restablecer mi Contraseña</a>
+          <a href="${resetLink}" target="_blank" class="btn">Restablecer mi Contraseña</a>
         </div>
 
-        <p>Este enlace expirará automáticamente en <strong>1 hora</strong> por razones de seguridad.</p>
-        <p>Si no solicitaste este cambio, puedes ignorar este correo de manera segura. Tu contraseña actual no cambiará.</p>
+        <p>Este enlace de seguridad expirará automáticamente en <strong>1 hora</strong>.</p>
+        <p>Si no solicitaste este cambio, puedes ignorar este correo de manera segura. Tu contraseña actual no sufrirá ninguna modificación.</p>
 
         <div class="footer">
-          <p>Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
+          <p>Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:</p>
           <div class="link-box">${resetLink}</div>
-          <p style="margin-top: 16px;">© MenuQR Pro — Gestión de Menús Digitales</p>
+          <p style="margin-top: 20px;">© MenuQR Pro — Sistema de Menús Digitales para Restaurantes</p>
         </div>
       </div>
     </body>
     </html>
   `;
 
-  // 1. Prioridad: Resend API
+  // 1. Envío prioritario vía Resend API
   if (resendApiKey) {
     try {
       const resend = new Resend(resendApiKey);
-      const from = process.env.RESEND_FROM || process.env.SMTP_FROM || "MenuQR Pro <onboarding@resend.dev>";
+      const from = process.env.RESEND_FROM || process.env.SMTP_FROM || '"MenuQR Pro" <no-reply@send.ubicame.cc>';
       
       const { data, error } = await resend.emails.send({
         from,
@@ -72,19 +89,19 @@ export async function sendPasswordResetEmail(email: string, token: string) {
       });
 
       if (error) {
-        console.error("[Email Service] Resend API Error:", error);
-        return { success: false, error: `Error al enviar correo vía Resend: ${error.message}` };
+        console.error(`[Email Service] [${timestamp}] Error en Resend API enviando a ${email}:`, error);
+        return { success: false, error: `Error en servicio de correo (Resend): ${error.message}` };
       }
 
-      console.log(`[Email Service] Correo enviado con éxito a ${email} mediante Resend (ID: ${data?.id})`);
+      console.log(`[Email Service] [${timestamp}] Correo de recuperación enviado con éxito a ${email} vía Resend API (ID: ${data?.id})`);
       return { success: true, mode: "resend", id: data?.id };
     } catch (error: any) {
-      console.error("[Email Service] Excepción en Resend API:", error);
-      return { success: false, error: `Excepción en servicio Resend: ${error?.message || "Error desconocido"}` };
+      console.error(`[Email Service] [${timestamp}] Excepción crítica en Resend API al enviar a ${email}:`, error);
+      return { success: false, error: `Error al enviar correo electrónico: ${error?.message || "Error inesperado en servidor de correo."}` };
     }
   }
 
-  // 2. Fallback: SMTP vía Nodemailer
+  // 2. Fallback: Servidor SMTP tradicional (Nodemailer)
   if (host && user && pass) {
     try {
       const from = process.env.SMTP_FROM || (user ? `"MenuQR Pro" <${user}>` : '"MenuQR Pro" <soporte@menuqrpro.com>');
@@ -106,17 +123,17 @@ export async function sendPasswordResetEmail(email: string, token: string) {
         html: htmlContent,
       });
 
-      console.log(`[Email Service] Correo enviado con éxito a ${email} mediante servidor SMTP (${host}:${port})`);
+      console.log(`[Email Service] [${timestamp}] Correo enviado con éxito a ${email} mediante servidor SMTP (${host}:${port})`);
       return { success: true, mode: "smtp" };
     } catch (error: any) {
-      console.error("[Email Service] Error al enviar correo vía SMTP:", error);
+      console.error(`[Email Service] [${timestamp}] Error al enviar correo vía SMTP a ${email}:`, error);
       return { success: false, error: `Error al enviar correo vía SMTP: ${error?.message || "No se pudo conectar al servidor de correo."}` };
     }
   }
 
-  // 3. Fallback: Modo Consola para Desarrollo
+  // 3. Modo consola para desarrollo local
   console.warn(
-    "[Email Service] Faltan variables RESEND_API_KEY o credenciales SMTP en el entorno (.env). El enlace se registró únicamente en la consola del servidor."
+    `[Email Service] [${timestamp}] ADVERTENCIA: Faltan variables RESEND_API_KEY o credenciales SMTP en .env. El enlace fue registrado en consola.`
   );
   return { success: true, mode: "console", resetLink };
 }
