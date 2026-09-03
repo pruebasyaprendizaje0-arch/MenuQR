@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Search, MapPin, Sparkles, UtensilsCrossed } from "lucide-react";
+import { useState, useEffect, useTransition } from "react";
+import { Search, MapPin, Sparkles, UtensilsCrossed, ArrowRight, Tag, DollarSign, RefreshCw } from "lucide-react";
 import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
 
 type RestaurantListItem = {
@@ -70,6 +70,7 @@ function renderLocalityBadge(locality: string | null) {
 
 export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem[] }) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedSpecialty, setSelectedSpecialty] = useState<string>("TODAS");
   
   // Advanced location states
@@ -78,16 +79,47 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
   const [selParroquia, setSelParroquia] = useState("TODAS");
   const [selSector, setSelSector] = useState("TODAS");
 
+  // Dynamic API search results
+  const [apiDishes, setApiDishes] = useState<any[]>([]);
+  const [apiSuggestions, setApiSuggestions] = useState<any>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Debounce effect (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchTerm.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Fetch search API when debouncedQuery changes
+  useEffect(() => {
+    if (!debouncedQuery) {
+      setApiDishes([]);
+      setApiSuggestions(null);
+      return;
+    }
+
+    setIsSearching(true);
+    fetch(`/api/public/v1/search?q=${encodeURIComponent(debouncedQuery)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          setApiDishes(data.matchedDishes || []);
+          setApiSuggestions(data.suggestions || null);
+        }
+      })
+      .catch((err) => console.warn("API Search failed:", err))
+      .finally(() => setIsSearching(false));
+  }, [debouncedQuery]);
+
   const parsedRestaurants = restaurants.map(r => ({
     ...r,
     parsedLoc: parseLocality(r.locality)
   }));
 
-  // Unique lists for cascade selector based on current selections (all Ecuador options)
   const allProvinces = Object.keys(ecuadorData).sort();
-
   const allCantons = selProvince !== "TODAS" ? (ecuadorData[selProvince] || []).sort() : [];
-
   const allParroquias = selCanton !== "TODAS"
     ? (parishData[selCanton] && parishData[selCanton].length > 0
         ? parishData[selCanton]
@@ -119,7 +151,8 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
     const matchesSearch = 
       res.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (res.specialty && res.specialty.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (res.description && res.description.toLowerCase().includes(searchTerm.toLowerCase()));
+      (res.description && res.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (res.locality && res.locality.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesProvince = selProvince === "TODAS" || res.parsedLoc.province.toLowerCase() === selProvince.toLowerCase();
     const matchesCanton = selCanton === "TODAS" || res.parsedLoc.canton.toLowerCase() === selCanton.toLowerCase();
@@ -142,18 +175,21 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
     <div className="w-full space-y-8">
       {/* Search Input Bar */}
       <form onSubmit={handleSearchSubmit} className="max-w-xl mx-auto w-full relative group">
-        {/* Glow backdrop effect */}
         <div className="absolute -inset-0.5 bg-gradient-to-r from-red-600 to-amber-500 rounded-3xl blur opacity-25 group-focus-within:opacity-50 transition duration-300"></div>
         
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-            <Search className="h-5 w-5 text-slate-400 group-focus-within:text-red-500 transition-colors duration-250" />
+            {isSearching ? (
+              <RefreshCw className="h-5 w-5 text-amber-500 animate-spin" />
+            ) : (
+              <Search className="h-5 w-5 text-slate-400 group-focus-within:text-red-500 transition-colors duration-250" />
+            )}
           </div>
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Busca comida, especialidad, bar o restaurante..."
+            placeholder="Ej: pizza en Manta, empanadas en Montañita, pasta..."
             className="w-full bg-slate-950 border border-slate-800/80 focus:border-red-500 focus:ring-1 focus:ring-red-500 block pl-12 pr-12 py-4 rounded-3xl text-white placeholder-slate-500 focus:outline-none sm:text-base shadow-2xl transition-all duration-200"
           />
           {searchTerm && (
@@ -171,7 +207,23 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
         </div>
       </form>
 
-      {/* Filtros de Ubicación Avanzados */}
+      {/* Popular Trend Badges */}
+      <div className="flex items-center justify-center flex-wrap gap-2 pt-1">
+        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mr-1 flex items-center gap-1">
+          <Sparkles className="h-3 w-3 text-amber-500" /> Búsquedas populares:
+        </span>
+        {["Pizza en Manta", "Empanadas en Montañita", "Pastas", "Mariscos", "Manta"].map((badge) => (
+          <button
+            key={badge}
+            onClick={() => setSearchTerm(badge)}
+            className="px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-[11px] font-semibold text-slate-300 hover:text-white hover:border-amber-500/50 hover:bg-slate-800 transition"
+          >
+            {badge}
+          </button>
+        ))}
+      </div>
+
+      {/* Advanced Location Filters */}
       <div className="bg-transparent border border-white/5 rounded-3xl p-6 backdrop-blur-md max-w-4xl mx-auto space-y-4 shadow-xl">
         <h4 className="text-xs uppercase font-extrabold tracking-wider text-slate-400 text-center mb-2 flex items-center justify-center gap-2">
           <MapPin className="h-4 w-4 text-red-500 animate-bounce" />
@@ -277,6 +329,37 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
         </div>
       )}
 
+      {/* Matched Dishes Results */}
+      {apiDishes.length > 0 && (
+        <div className="space-y-4 pt-4 max-w-4xl mx-auto">
+          <h4 className="text-xs uppercase font-extrabold tracking-wider text-amber-400 flex items-center gap-2">
+            <Tag className="h-4 w-4" /> Platillos Coincidentes ({apiDishes.length})
+          </h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {apiDishes.map((dish) => (
+              <a
+                key={dish.id}
+                href={`/${dish.restaurantSlug}`}
+                className="bg-slate-900/60 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-4 flex gap-4 transition group"
+              >
+                {dish.imageUrl ? (
+                  <img src={dish.imageUrl} alt={dish.name} className="h-16 w-16 rounded-xl object-cover border border-slate-800 shrink-0" />
+                ) : (
+                  <div className="h-16 w-16 rounded-xl bg-slate-800 flex items-center justify-center text-slate-500 shrink-0">
+                    <UtensilsCrossed className="h-6 w-6" />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold uppercase text-amber-500">{dish.restaurantName}</span>
+                  <h5 className="font-extrabold text-white text-sm group-hover:text-amber-400 transition">{dish.name}</h5>
+                  <p className="text-slate-400 text-xs font-bold text-emerald-400">${Number(dish.price).toFixed(2)}</p>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Business Cards Grouped Grid */}
       <div className="space-y-6 pt-4">
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-450 flex items-center justify-center gap-2">
@@ -285,9 +368,34 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
         </h3>
         
         {filtered.length === 0 ? (
-          <div className="text-center py-16 bg-slate-900/20 border border-slate-900/40 rounded-3xl p-6">
-            <UtensilsCrossed className="h-10 w-10 text-slate-700 mx-auto mb-3" />
-            <p className="text-slate-500 text-sm">No se encontraron negocios con esos filtros.</p>
+          <div className="text-center py-16 bg-slate-900/20 border border-slate-900/40 rounded-3xl p-6 max-w-xl mx-auto space-y-4">
+            <UtensilsCrossed className="h-10 w-10 text-slate-700 mx-auto mb-1" />
+            <p className="text-slate-400 text-sm font-semibold">No encontramos negocios para <span className="text-amber-400 font-bold">"{searchTerm}"</span>.</p>
+            {apiSuggestions && (
+              <div className="pt-2 space-y-2 border-t border-slate-800/80">
+                <span className="text-xs font-bold text-slate-500 block uppercase">Te recomendamos probar con:</span>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {apiSuggestions.availableCategories?.map((cat: string) => (
+                    <button
+                      key={cat}
+                      onClick={() => setSearchTerm(cat)}
+                      className="px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded-xl font-bold hover:bg-amber-500/20 transition"
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                  {apiSuggestions.availableCities?.map((city: string) => (
+                    <button
+                      key={city}
+                      onClick={() => setSearchTerm(city)}
+                      className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs rounded-xl font-bold hover:bg-emerald-500/20 transition"
+                    >
+                      {city}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
