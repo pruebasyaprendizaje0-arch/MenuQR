@@ -44,7 +44,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/standalone/.
 # Ensure persistent uploads directory permissions
 RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma /app/.next
 
+USER nextjs
+
 EXPOSE 3000
 
-# Start server with safe production migration deployment
-CMD ["sh", "-c", "npx prisma migrate deploy && node .next/standalone/server.js"]
+# Start server with robust DB migration retry loop and foreground standalone execution
+CMD ["sh", "-c", "for i in 1 2 3 4 5; do npx prisma migrate deploy && break || sleep 3; done; exec node .next/standalone/server.js"]

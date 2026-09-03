@@ -6,12 +6,23 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function getDatabaseUrl(): string {
-  return (
+  const url =
     process.env.DATABASE_URL ||
     process.env.CONTROL_DATABASE_URL ||
-    process.env.TENANT_DATABASE_URL ||
-    "postgresql://postgres:postgres@localhost:5432/menuqr_pro?schema=public"
-  );
+    process.env.TENANT_DATABASE_URL;
+
+  if (url) {
+    return url;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    console.error("[CRITICAL PRISMA ERROR] La variable DATABASE_URL es requerida en entorno de producción.");
+    throw new Error(
+      "La variable de entorno DATABASE_URL no está definida. Por favor agrégala en el panel de Coolify."
+    );
+  }
+
+  return "postgresql://postgres:postgres@localhost:5432/menuqr_pro?schema=public";
 }
 
 export const prisma =
