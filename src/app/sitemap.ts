@@ -51,33 +51,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ];
 
-  // Geographic directory routes (provinces & cities)
-  const geoRoutes: MetadataRoute.Sitemap = [];
-  Object.entries(ecuadorData).forEach(([prov, cities]) => {
-    const provSlug = normalizeSlug(prov);
-    geoRoutes.push({
-      url: `${baseUrl}/restaurantes/${provSlug}`,
-      lastModified: new Date(),
-      changeFrequency: "weekly",
-      priority: 0.85,
-    });
-
-    cities.forEach((city) => {
-      const citySlug = normalizeSlug(city);
-      geoRoutes.push({
-        url: `${baseUrl}/restaurantes/${provSlug}/${citySlug}`,
-        lastModified: new Date(),
-        changeFrequency: "weekly",
-        priority: 0.8,
-      });
-    });
-  });
-
-  // Dynamic restaurant menu routes & dish routes
+  // Dynamic restaurant menu routes & active GEO routes
   try {
     const restaurants = await prismaTenant.restaurant.findMany({
       select: {
         slug: true,
+        province: true,
+        city: true,
+        locality: true,
         logoUrl: true,
         coverUrl: true,
         updatedAt: true,
@@ -90,6 +71,68 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
           },
         },
       },
+    });
+
+    // Identify active provinces & cities with published restaurants
+    const activeProvinceSlugs = new Set<string>();
+    const activeCitySlugs = new Set<string>();
+
+    restaurants.forEach((r) => {
+      let provName = r.province;
+      let cityName = r.city;
+
+      // Fallback: parse locality string if province/city fields are empty
+      if (!provName || !cityName) {
+        if (r.locality) {
+          const parts = r.locality.split(" | ");
+          if (parts.length >= 2) {
+            provName = provName || parts[0];
+            cityName = cityName || parts[1];
+          } else {
+            const commaParts = r.locality.split(", ");
+            if (commaParts.length >= 2) {
+              cityName = cityName || commaParts[0];
+              provName = provName || commaParts[1];
+            }
+          }
+        }
+      }
+
+      if (provName) {
+        const provSlug = normalizeSlug(provName);
+        activeProvinceSlugs.add(provSlug);
+
+        if (cityName) {
+          const citySlug = normalizeSlug(cityName);
+          activeCitySlugs.add(`${provSlug}/${citySlug}`);
+        }
+      }
+    });
+
+    // Geographic directory routes: ONLY indexable if published restaurants exist!
+    const geoRoutes: MetadataRoute.Sitemap = [];
+    Object.entries(ecuadorData).forEach(([prov, cities]) => {
+      const provSlug = normalizeSlug(prov);
+      if (activeProvinceSlugs.has(provSlug)) {
+        geoRoutes.push({
+          url: `${baseUrl}/restaurantes/${provSlug}`,
+          lastModified: new Date(),
+          changeFrequency: "weekly",
+          priority: 0.85,
+        });
+      }
+
+      cities.forEach((city) => {
+        const citySlug = normalizeSlug(city);
+        if (activeCitySlugs.has(`${provSlug}/${citySlug}`)) {
+          geoRoutes.push({
+            url: `${baseUrl}/restaurantes/${provSlug}/${citySlug}`,
+            lastModified: new Date(),
+            changeFrequency: "weekly",
+            priority: 0.8,
+          });
+        }
+      });
     });
 
     const restaurantRoutes: MetadataRoute.Sitemap = [];
@@ -133,6 +176,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     return [...staticRoutes, ...geoRoutes, ...restaurantRoutes];
   } catch (error) {
     console.warn("[Sitemap Warning] Error loading restaurants for sitemap:", error);
-    return [...staticRoutes, ...geoRoutes];
+    return staticRoutes;
   }
 }

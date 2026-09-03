@@ -28,10 +28,34 @@ function findExactProvinceName(provSlug: string): string | null {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const provName = findExactProvinceName(params.provincia);
   const baseUrl = getBaseUrl();
+  const citiesInProvince = ecuadorData[provName] || [];
+
+  let count = 0;
+  try {
+    count = await prismaTenant.restaurant.count({
+      where: {
+        OR: [
+          { province: { equals: provName, mode: "insensitive" } },
+          { locality: { contains: provName, mode: "insensitive" } },
+          ...citiesInProvince.map((city) => ({
+            locality: { contains: city, mode: "insensitive" as const },
+          })),
+        ],
+      },
+    });
+  } catch (err) {
+    console.warn(`[SEO Warning] Failed to count restaurants for province ${provName}:`, err);
+  }
+
+  const isIndexable = count > 0;
 
   return {
     title: `Restaurantes y Menús Digitales en ${provName}, Ecuador | MenuQR Pro`,
     description: `Descubre los mejores restaurantes, cafeterías y bares en la provincia de ${provName}. Revisa cartas digitales QR, menús con precios y haz tu pedido por WhatsApp.`,
+    robots: {
+      index: isIndexable,
+      follow: true,
+    },
     alternates: {
       canonical: `${baseUrl}/restaurantes/${params.provincia}`,
     },

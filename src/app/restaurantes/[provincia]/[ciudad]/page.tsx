@@ -18,9 +18,31 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const provName = unslugify(params.provincia);
   const baseUrl = getBaseUrl();
 
+  let count = 0;
+  try {
+    count = await prismaTenant.restaurant.count({
+      where: {
+        OR: [
+          { city: { equals: cityName, mode: "insensitive" } },
+          { sector: { equals: cityName, mode: "insensitive" } },
+          { parish: { equals: cityName, mode: "insensitive" } },
+          { locality: { contains: cityName, mode: "insensitive" } },
+        ],
+      },
+    });
+  } catch (err) {
+    console.warn(`[SEO Warning] Failed to count restaurants for city ${cityName}:`, err);
+  }
+
+  const isIndexable = count > 0;
+
   return {
     title: `Restaurantes y Menús Digitales en ${cityName} (${provName}) | MenuQR Pro`,
     description: `Consulta el menú digital QR, la carta con precios, especialidades y haz tu pedido por WhatsApp en los mejores restaurantes de ${cityName}, ${provName}, Ecuador.`,
+    robots: {
+      index: isIndexable,
+      follow: true,
+    },
     alternates: {
       canonical: `${baseUrl}/restaurantes/${params.provincia}/${params.ciudad}`,
     },

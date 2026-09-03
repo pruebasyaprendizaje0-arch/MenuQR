@@ -20,9 +20,42 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const catName = unslugify(params.categoria);
   const baseUrl = getBaseUrl();
 
+  let count = 0;
+  try {
+    count = await prismaTenant.restaurant.count({
+      where: {
+        AND: [
+          {
+            OR: [
+              { city: { equals: cityName, mode: "insensitive" } },
+              { sector: { equals: cityName, mode: "insensitive" } },
+              { parish: { equals: cityName, mode: "insensitive" } },
+              { locality: { contains: cityName, mode: "insensitive" } },
+            ],
+          },
+          {
+            OR: [
+              { specialty: { contains: catName, mode: "insensitive" } },
+              { categories: { some: { name: { contains: catName, mode: "insensitive" } } } },
+              { dishes: { some: { name: { contains: catName, mode: "insensitive" } } } },
+            ],
+          },
+        ],
+      },
+    });
+  } catch (err) {
+    console.warn(`[SEO Warning] Failed to count restaurants for city ${cityName} category ${catName}:`, err);
+  }
+
+  const isIndexable = count > 0;
+
   return {
     title: `Restaurantes de ${catName} en ${cityName} (${provName}) | MenuQR Pro`,
     description: `¿Dónde comer ${catName} en ${cityName}? Revisa menús digitales QR, cartas con precios, platillos y realiza tu pedido directo a WhatsApp.`,
+    robots: {
+      index: isIndexable,
+      follow: true,
+    },
     alternates: {
       canonical: `${baseUrl}/restaurantes/${params.provincia}/${params.ciudad}/${params.categoria}`,
     },
