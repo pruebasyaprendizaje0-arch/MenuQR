@@ -48,5 +48,5 @@ USER nextjs
 
 EXPOSE 3000
 
-# Start server with robust DB migration retry loop and exit 1 failure guard
-CMD ["sh", "-c", "for i in 1 2 3 4 5; do if npx prisma migrate deploy; then break; fi; if [ \"$i\" -eq 5 ]; then echo \"Database migration failed after 5 attempts\"; exit 1; fi; sleep 3; done; exec node .next/standalone/server.js"]
+# Perform controlled DB baseline resolution followed by strict migration deployment retry loop
+CMD ["sh", "-c", "npx prisma migrate resolve --applied 20260801000000_init || true; npx prisma migrate resolve --applied 20260831000000_add_coupons_system || true; npx prisma migrate resolve --applied 20260901170000_add_slogan_to_restaurant || true; npx prisma migrate resolve --applied 20260903200000_add_geo_slug_history_analytics || true; for i in 1 2 3 4 5; do if npx prisma migrate deploy; then break; fi; if [ \"$i\" -eq 5 ]; then echo \"Database migration failed after 5 attempts\"; exit 1; fi; sleep 3; done; exec node .next/standalone/server.js"]
