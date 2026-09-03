@@ -1,7 +1,8 @@
 import { MetadataRoute } from "next";
+import { getBaseUrl } from "@/lib/seo";
 
 export default function robots(): MetadataRoute.Robots {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com";
+  const baseUrl = getBaseUrl();
 
   return {
     rules: [
@@ -20,7 +21,7 @@ export default function robots(): MetadataRoute.Robots {
           "Google-Extended",
           "Amazonbot",
         ],
-        allow: ["/", "/llms.txt"],
+        allow: ["/", "/llms.txt", "/restaurantes", "/faq"],
         disallow: ["/admin/", "/super-admin/", "/api/"],
       },
     ],

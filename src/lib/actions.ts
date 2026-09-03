@@ -309,6 +309,21 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const ubicameUrl = formData.get("ubicameUrl") as string;
   const mapEmbedUrl = formData.get("mapEmbedUrl") as string;
   
+  const province = formData.get("province") as string;
+  const city = formData.get("city") as string;
+  const parish = formData.get("parish") as string;
+  const sector = formData.get("sector") as string;
+  const latInput = formData.get("latitude") as string;
+  const lngInput = formData.get("longitude") as string;
+  const latitude = latInput ? parseFloat(latInput) : null;
+  const longitude = lngInput ? parseFloat(lngInput) : null;
+
+  const seoTitle = formData.get("seoTitle") as string;
+  const seoDescription = formData.get("seoDescription") as string;
+  const seoKeywords = formData.get("seoKeywords") as string;
+  const seoImage = formData.get("seoImage") as string;
+  const customFaq = formData.get("customFaq") as string;
+  
   const bankName = formData.get("bankName") as string;
   const bankAccountType = formData.get("bankAccountType") as string;
   const bankAccountNumber = formData.get("bankAccountNumber") as string;
@@ -395,6 +410,28 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       ubicameUrl: ubicameUrl || null,
       // @ts-ignore
       mapEmbedUrl: mapEmbedUrl || null,
+      // @ts-ignore
+      province: province || null,
+      // @ts-ignore
+      city: city || null,
+      // @ts-ignore
+      parish: parish || null,
+      // @ts-ignore
+      sector: sector || null,
+      // @ts-ignore
+      latitude: latitude || null,
+      // @ts-ignore
+      longitude: longitude || null,
+      // @ts-ignore
+      seoTitle: seoTitle || null,
+      // @ts-ignore
+      seoDescription: seoDescription || null,
+      // @ts-ignore
+      seoKeywords: seoKeywords || null,
+      // @ts-ignore
+      seoImage: seoImage || null,
+      // @ts-ignore
+      customFaq: customFaq || null,
       bankName: bankName || null,
       bankAccountType: bankAccountType || null,
       bankAccountNumber: bankAccountNumber || null,

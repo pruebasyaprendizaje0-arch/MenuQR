@@ -1311,6 +1311,61 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 </div>
               </div>
 
+              {/* SEO & GEO Health Score Checklist */}
+              {(() => {
+                const checks = [
+                  { label: "Slug amigable configurado", ok: !!restaurant.slug },
+                  { label: "Nombre de restaurante", ok: !!restaurant.name },
+                  { label: "Descripción / Sobre Nosotros", ok: !!restaurant.description },
+                  { label: "Logo del negocio", ok: !!restaurant.logoUrl },
+                  { label: "Imagen de portada (Cover)", ok: !!restaurant.coverUrl },
+                  { label: "Dirección física exacta", ok: !!restaurant.address },
+                  { label: "Ciudad / Cantón / Localidad", ok: !!(restaurant.city || restaurant.locality) },
+                  { label: "Provincia registrada", ok: !!restaurant.province },
+                  { label: "Número de WhatsApp para pedidos", ok: !!restaurant.whatsapp },
+                  { label: "Horario de atención", ok: !!restaurant.schedule },
+                  { label: "Categorías en carta", ok: (restaurant.categories || []).length > 0 },
+                  { label: "Platos agregados al menú", ok: (restaurant.categories || []).some((c: any) => (c.dishes || []).length > 0) },
+                ];
+                const completedCount = checks.filter((c) => c.ok).length;
+                const seoScore = Math.round((completedCount / checks.length) * 100);
+
+                return (
+                  <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                      <div>
+                        <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                          <Sparkles className="h-5 w-5 text-amber-400" />
+                          Estado de Salud SEO, GEO & AEO (Indexabilidad Google & IA)
+                        </h3>
+                        <p className="text-xs text-slate-400 mt-1">
+                          Evaluación automática de preparación para buscadores locales, ChatGPT, Gemini y Perplexity.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 shrink-0">
+                        <span className="text-xs text-slate-400 uppercase font-bold">Puntuación:</span>
+                        <span className={`text-xl font-black ${seoScore >= 80 ? "text-emerald-400" : seoScore >= 50 ? "text-amber-400" : "text-red-400"}`}>
+                          {seoScore}%
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                      {checks.map((item, idx) => (
+                        <div key={idx} className="flex items-center gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-slate-850">
+                          {item.ok ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-amber-500 shrink-0" />
+                          )}
+                          <span className={item.ok ? "text-slate-200" : "text-slate-400"}>{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Table Management Form */}
               <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
                 <div>
@@ -2137,6 +2192,79 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       name="bankAccountEmail"
                       defaultValue={restaurant.bankAccountEmail || ""}
                       placeholder="Ej. mi-correo@banco.com"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Hidden Inputs for Geo Locality */}
+              <input type="hidden" name="province" value={province} />
+              <input type="hidden" name="city" value={canton} />
+              <input type="hidden" name="parish" value={parroquia} />
+              <input type="hidden" name="sector" value={sector} />
+
+              {/* SEO & GEO Optimization Section */}
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <div>
+                  <h3 className="text-md font-bold text-white flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-amber-400" />
+                    Optimización SEO, GEO & Búsqueda IA (ChatGPT, Google, Gemini)
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Configura metadatos personalizados y coordenadas geográficas para mejorar la indexación en Google Maps y motores generativos.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Latitud GPS (Google Maps)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      name="latitude"
+                      defaultValue={restaurant.latitude || ""}
+                      placeholder="Ej: -1.831239"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Longitud GPS (Google Maps)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      name="longitude"
+                      defaultValue={restaurant.longitude || ""}
+                      placeholder="Ej: -78.183406"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">SEO Title Personalizado</label>
+                    <input
+                      type="text"
+                      name="seoTitle"
+                      defaultValue={restaurant.seoTitle || ""}
+                      placeholder="Ej: Las Empanadas de Mauro | Menú y Pedidos en Montañita"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">SEO Meta Description</label>
+                    <input
+                      type="text"
+                      name="seoDescription"
+                      defaultValue={restaurant.seoDescription || ""}
+                      placeholder="Ej: Consulta el menú digital de Las Empanadas de Mauro en Montañita."
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Palabras Clave (Keywords)</label>
+                    <input
+                      type="text"
+                      name="seoKeywords"
+                      defaultValue={restaurant.seoKeywords || ""}
+                      placeholder="Ej: empanadas montanita, comida montanita, menu digital ecuador"
                       className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                     />
                   </div>
