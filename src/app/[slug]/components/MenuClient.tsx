@@ -448,6 +448,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
     // Save order in database first
     const itemsData = cart.map((item) => ({
+      dishId: item.dish.id,
       dishName: item.dish.name,
       price: item.dish.price,
       quantity: item.quantity,
@@ -470,6 +471,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       serviceCharge,
       tip,
       deliveryCost,
+      deliveryKmRateId: selectedKmRate?.id,
       seasonRateName: activeRate ? activeRate.name : undefined,
       seasonRateAmount: seasonBonusAmount,
       couponCode: appliedCoupon ? appliedCoupon.code : undefined,

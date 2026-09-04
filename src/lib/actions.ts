@@ -1389,108 +1389,306 @@ export async function createOrderAction(data: {
   customerName?: string;
   customerPhone?: string;
   customerAddress?: string;
-  subtotal: number;
-  iva: number;
-  serviceCharge: number;
-  tip: number;
-  deliveryCost: number;
+  subtotal?: number;
+  iva?: number;
+  serviceCharge?: number;
+  tip?: number;
+  deliveryCost?: number;
+  deliveryKmRateId?: string;
   seasonRateName?: string;
   seasonRateAmount?: number;
   couponCode?: string;
   discountAmount?: number;
-  total: number;
+  total?: number;
   paymentMethod: string;
-  items: { dishName: string; price: number; quantity: number }[];
+  items: { dishId: string; dishName?: string; price?: number; quantity: number }[];
 }) {
   try {
-    const order = await prisma.order.create({
-      data: {
-        restaurantId: data.restaurantId,
-        tableName: data.tableName,
-        customerName: data.customerName || null,
-        customerPhone: data.customerPhone || null,
-        customerAddress: data.customerAddress || null,
-        subtotal: data.subtotal,
-        iva: data.iva,
-        serviceCharge: data.serviceCharge,
-        tip: data.tip,
-        deliveryCost: data.deliveryCost,
-        seasonRateName: data.seasonRateName || null,
-        seasonRateAmount: data.seasonRateAmount || 0,
-        couponCode: data.couponCode || null,
-        discountAmount: data.discountAmount || 0,
-        total: data.total,
-        paymentMethod: data.paymentMethod,
-        items: {
-          create: data.items.map((item) => ({
-            dishName: item.dishName,
-            price: item.price,
-            quantity: item.quantity,
-          })),
-        },
-      },
-    });
-
-    if (data.couponCode && data.couponCode.trim()) {
-      try {
-        await prisma.coupon.updateMany({
-          where: { restaurantId: data.restaurantId, code: data.couponCode.trim().toUpperCase() },
-          data: { usedCount: { increment: 1 } },
-        });
-      } catch (e) {
-        console.warn("Could not increment coupon usedCount:", e);
-      }
+    if (!data.restaurantId || typeof data.restaurantId !== "string") {
+      return { error: "ID de restaurante inválido." };
     }
 
-    if (data.customerPhone && data.customerPhone.trim()) {
-      try {
-        const rawPhone = data.customerPhone.trim();
-        const existing = await prisma.customer.findFirst({
-          where: { restaurantId: data.restaurantId, phone: rawPhone }
-        });
-        if (existing) {
-          const newOrdersCount = existing.totalOrders + 1;
-          const newCategory = newOrdersCount >= 5 ? "VIP" : newOrdersCount >= 2 ? "FRECUENTE" : existing.category;
-          await prisma.customer.update({
-            where: { id: existing.id },
-            data: {
-              name: data.customerName || existing.name,
-              address: data.customerAddress || existing.address,
-              totalOrders: newOrdersCount,
-              totalSpent: existing.totalSpent + data.total,
-              category: newCategory,
-              lastOrderAt: new Date(),
-            }
-          });
-        } else {
-          await prisma.customer.create({
-            data: {
-              restaurantId: data.restaurantId,
-              name: data.customerName || "Cliente",
-              phone: rawPhone,
-              address: data.customerAddress || null,
-              totalOrders: 1,
-              totalSpent: data.total,
-              category: "NUEVO",
-              lastOrderAt: new Date(),
-            }
-          });
-        }
-      } catch (e) {
-        console.warn("Error auto-updating customer in CRM:", e);
-      }
+    if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
+      return { error: "El pedido debe contener al menos un producto." };
+    }
+
+    const rawMethod = (data.paymentMethod || "").trim().toLowerCase();
+    const validMethods = ["cash", "efectivo", "qr", "deuna", "transferencia", "transfer", "tarjeta"];
+    if (!rawMethod || !validMethods.includes(rawMethod)) {
+      return { error: "Método de pago no válido." };
     }
 
     const restaurant = await prisma.restaurant.findUnique({
       where: { id: data.restaurantId },
-      select: { slug: true }
+      include: {
+        seasonRates: {
+          where: { isActive: true },
+        },
+      },
     });
 
-    if (restaurant) {
+    if (!restaurant) {
+      return { error: "Restaurante no encontrado." };
+    }
+
+    // Map & lookup dishes by dishId
+    const dishIds = Array.from(new Set(data.items.map((i) => i.dishId).filter(Boolean)));
+    if (dishIds.length === 0) {
+      return { error: "Los productos del pedido deben incluir un ID de plato válido." };
+    }
+
+    const dbDishes = await prisma.dish.findMany({
+      where: {
+        id: { in: dishIds },
+      },
+    });
+
+    const dishMap = new Map(dbDishes.map((d) => [d.id, d]));
+
+    let calculatedSubtotal = 0;
+    const verifiedOrderItems: { dishName: string; price: number; quantity: number }[] = [];
+
+    for (const item of data.items) {
+      if (
+        typeof item.quantity !== "number" ||
+        !Number.isInteger(item.quantity) ||
+        item.quantity <= 0 ||
+        item.quantity > 50 ||
+        !Number.isFinite(item.quantity)
+      ) {
+        return { error: "Cantidad inválida. Cada producto debe tener una cantidad entera entre 1 y 50." };
+      }
+
+      const dbDish = dishMap.get(item.dishId);
+      if (!dbDish) {
+        return { error: `Uno o más productos del pedido no existen.` };
+      }
+
+      // Multi-tenant protection (PASO 15)
+      if (dbDish.restaurantId !== data.restaurantId) {
+        return { error: `El producto "${dbDish.name}" no pertenece a este restaurante.` };
+      }
+
+      // Availability check (PASO 3)
+      if (!dbDish.isAvailable) {
+        return { error: `El producto "${dbDish.name}" no está disponible actualmente.` };
+      }
+
+      const serverPrice = dbDish.price;
+      calculatedSubtotal += serverPrice * item.quantity;
+
+      verifiedOrderItems.push({
+        dishName: dbDish.name,
+        price: serverPrice,
+        quantity: item.quantity,
+      });
+    }
+
+    // Coupon re-validation (PASO 10)
+    let calculatedDiscount = 0;
+    let verifiedCouponCode: string | null = null;
+
+    if (data.couponCode && data.couponCode.trim()) {
+      const cleanCode = data.couponCode.trim().toUpperCase();
+      const coupon = await prisma.coupon.findFirst({
+        where: {
+          restaurantId: data.restaurantId,
+          code: cleanCode,
+        },
+      });
+
+      if (!coupon || !coupon.isActive) {
+        return { error: "El cupón ingresado no existe o está inactivo." };
+      }
+
+      if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
+        return { error: "El cupón ha expirado." };
+      }
+
+      if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+        return { error: "El cupón ha alcanzado su límite máximo de usos." };
+      }
+
+      if (calculatedSubtotal < coupon.minOrder) {
+        return {
+          error: `Este cupón requiere un consumo mínimo de $${coupon.minOrder.toFixed(2)}. Tu subtotal real es $${calculatedSubtotal.toFixed(2)}.`,
+        };
+      }
+
+      verifiedCouponCode = coupon.code;
+      if (coupon.discountType === "PERCENTAGE") {
+        calculatedDiscount = (calculatedSubtotal * coupon.discountValue) / 100;
+      } else {
+        calculatedDiscount = Math.min(calculatedSubtotal, coupon.discountValue);
+      }
+      calculatedDiscount = Math.min(calculatedSubtotal, calculatedDiscount);
+    }
+
+    const subtotalAfterCoupon = Math.max(0, calculatedSubtotal - calculatedDiscount);
+
+    // Season rates calculation
+    const targetDateStr = new Date().toISOString().split("T")[0];
+    const activeRate = (restaurant.seasonRates || []).find((r) => {
+      const startStr = new Date(r.startDate).toISOString().split("T")[0];
+      const endStr = new Date(r.endDate).toISOString().split("T")[0];
+      return r.isActive && targetDateStr >= startStr && targetDateStr <= endStr;
+    });
+
+    let calculatedSeasonBonus = 0;
+    let calculatedSeasonName: string | null = null;
+
+    if (activeRate) {
+      calculatedSeasonName = activeRate.name;
+      calculatedSeasonBonus = (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus;
+    }
+
+    // Taxes & Service Charge (PASO 6 & 7)
+    const tableName = (data.tableName || "Llevar").trim();
+    const isTableOrder = tableName !== "" && tableName !== "Llevar" && tableName !== "Domicilio" && tableName !== "Takeout";
+    const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
+    const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
+
+    const baseForTax = subtotalAfterCoupon + calculatedSeasonBonus;
+    const calculatedIva = applyIva ? baseForTax * (restaurant.ivaPercent / 100) : 0;
+    const calculatedService = applyService ? baseForTax * (restaurant.servicePercent / 100) : 0;
+
+    // Delivery cost (PASO 8)
+    let calculatedDeliveryCost = 0;
+    if (tableName === "Domicilio") {
+      if (restaurant.deliveryRates) {
+        try {
+          const rates = JSON.parse(restaurant.deliveryRates);
+          if (Array.isArray(rates) && rates.length > 0) {
+            let selectedRate = null;
+            if (data.deliveryKmRateId) {
+              selectedRate = rates.find((r: any) => r.id === data.deliveryKmRateId);
+            }
+            if (!selectedRate) {
+              selectedRate = rates[0];
+            }
+            if (selectedRate) {
+              const minOrder = typeof selectedRate.minOrder === "number" ? selectedRate.minOrder : (typeof selectedRate.minPurchase === "number" ? selectedRate.minPurchase : 0);
+              if (calculatedSubtotal < minOrder) {
+                return { error: `Para la zona de envío seleccionada, el consumo mínimo es de $${minOrder.toFixed(2)}.` };
+              }
+              calculatedDeliveryCost = typeof selectedRate.price === "number" ? selectedRate.price : 0;
+            } else {
+              calculatedDeliveryCost = restaurant.deliveryCost;
+            }
+          } else {
+            calculatedDeliveryCost = restaurant.deliveryCost;
+          }
+        } catch (e) {
+          calculatedDeliveryCost = restaurant.deliveryCost;
+        }
+      } else {
+        calculatedDeliveryCost = restaurant.deliveryCost;
+      }
+    }
+
+    // Tip validation (PASO 9)
+    let calculatedTip = 0;
+    if (typeof data.tip === "number" && Number.isFinite(data.tip) && data.tip >= 0) {
+      calculatedTip = Math.min(data.tip, 500);
+    }
+
+    // Rounding numbers (PASO 11 & 24)
+    const round = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
+
+    const finalSubtotal = round(calculatedSubtotal);
+    const finalDiscount = round(calculatedDiscount);
+    const finalSeasonBonus = round(calculatedSeasonBonus);
+    const finalIva = round(calculatedIva);
+    const finalService = round(calculatedService);
+    const finalDelivery = round(calculatedDeliveryCost);
+    const finalTip = round(calculatedTip);
+
+    const finalTotal = round(
+      finalSubtotal - finalDiscount + finalSeasonBonus + finalIva + finalService + finalDelivery + finalTip
+    );
+
+    // Save order within transaction (PASO 23)
+    const order = await prisma.$transaction(async (tx) => {
+      const newOrder = await tx.order.create({
+        data: {
+          restaurantId: data.restaurantId,
+          tableName,
+          customerName: data.customerName?.slice(0, 200) || null,
+          customerPhone: data.customerPhone?.slice(0, 50) || null,
+          customerAddress: data.customerAddress?.slice(0, 500) || null,
+          subtotal: finalSubtotal,
+          iva: finalIva,
+          serviceCharge: finalService,
+          tip: finalTip,
+          deliveryCost: finalDelivery,
+          seasonRateName: calculatedSeasonName,
+          seasonRateAmount: finalSeasonBonus,
+          couponCode: verifiedCouponCode,
+          discountAmount: finalDiscount,
+          total: finalTotal,
+          paymentMethod: rawMethod,
+          items: {
+            create: verifiedOrderItems.map((item) => ({
+              dishName: item.dishName,
+              price: item.price,
+              quantity: item.quantity,
+            })),
+          },
+        },
+      });
+
+      if (verifiedCouponCode) {
+        await tx.coupon.updateMany({
+          where: { restaurantId: data.restaurantId, code: verifiedCouponCode },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+
+      if (data.customerPhone && data.customerPhone.trim()) {
+        const rawPhone = data.customerPhone.trim().slice(0, 50);
+        const existing = await tx.customer.findFirst({
+          where: { restaurantId: data.restaurantId, phone: rawPhone },
+        });
+        if (existing) {
+          const newOrdersCount = existing.totalOrders + 1;
+          const newCategory = newOrdersCount >= 5 ? "VIP" : newOrdersCount >= 2 ? "FRECUENTE" : existing.category;
+          await tx.customer.update({
+            where: { id: existing.id },
+            data: {
+              name: data.customerName?.slice(0, 200) || existing.name,
+              address: data.customerAddress?.slice(0, 500) || existing.address,
+              totalOrders: newOrdersCount,
+              totalSpent: existing.totalSpent + finalTotal,
+              category: newCategory,
+              lastOrderAt: new Date(),
+            },
+          });
+        } else {
+          await tx.customer.create({
+            data: {
+              restaurantId: data.restaurantId,
+              name: data.customerName?.slice(0, 200) || "Cliente",
+              phone: rawPhone,
+              address: data.customerAddress?.slice(0, 500) || null,
+              totalOrders: 1,
+              totalSpent: finalTotal,
+              category: "NUEVO",
+              lastOrderAt: new Date(),
+            },
+          });
+        }
+      }
+
+      return newOrder;
+    });
+
+    try {
       revalidatePath(`/admin`);
       revalidatePath(`/${restaurant.slug}`);
       revalidatePath(`/${restaurant.slug}/rastreo`);
       revalidatePath(`/${restaurant.slug}/repartidor`);
+    } catch {
+      // Safe fallback when executed outside Next request context
     }
 
     return { 
