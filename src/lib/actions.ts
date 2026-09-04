@@ -195,13 +195,21 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
 
     const cleanEmail = email.toLowerCase().trim();
 
-    // Check SuperAdmin login via environment variables (strictly no hardcoded fallback password)
+    // Check SuperAdmin login via environment variables
     const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
     const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
 
     if (superAdminEmail && superAdminPassword && cleanEmail === superAdminEmail && password === superAdminPassword) {
-      await setSuperAdminSession();
-      redirect("/super-admin");
+      try {
+        await setSuperAdminSession();
+        redirect("/super-admin");
+      } catch (saError: any) {
+        if (saError?.digest?.startsWith("NEXT_REDIRECT") || saError?.message?.includes("NEXT_REDIRECT")) {
+          throw saError;
+        }
+        console.error("Error en Auth (SuperAdmin Session):", saError);
+        return { error: "Error al establecer sesión de SuperAdmin." };
+      }
     }
 
     let user: any = null;
@@ -210,21 +218,40 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
         where: { email: cleanEmail },
       });
     } catch (dbErr) {
-      console.error("Database connection error during login:", dbErr);
+      console.error("Error en Auth (Base de datos Prisma):", dbErr);
       return { error: "No se pudo conectar con la base de datos. Por favor intenta nuevamente en unos momentos." };
     }
 
-    if (!user || !bcrypt.compareSync(password, user.password)) {
+    if (!user) {
+      console.warn(`[Auth Warning] Intento de login con correo no existente: ${cleanEmail}`);
       return { error: "Correo o contraseña incorrectos." };
     }
 
-    await setUserSession(user.id, user.email);
+    let passwordMatch = false;
+    try {
+      passwordMatch = bcrypt.compareSync(password, user.password);
+    } catch (bcryptErr) {
+      console.error("Error en Auth (Verificación de contraseña bcrypt):", bcryptErr);
+      return { error: "Ocurrió un error al verificar las credenciales." };
+    }
+
+    if (!passwordMatch) {
+      return { error: "Correo o contraseña incorrectos." };
+    }
+
+    try {
+      await setUserSession(user.id, user.email);
+    } catch (sessionErr) {
+      console.error("Error en Auth (Creación de sesión JWT):", sessionErr);
+      return { error: "No se pudo iniciar la sesión. Por favor reintenta." };
+    }
+
     redirect("/admin");
   } catch (error: any) {
     if (error?.digest?.startsWith("NEXT_REDIRECT") || error?.message?.includes("NEXT_REDIRECT")) {
       throw error;
     }
-    console.error("Error in loginUserAction:", error);
+    console.error("Error en Auth:", error);
     return { error: "Ocurrió un error inesperado al iniciar sesión. Por favor reintenta." };
   }
 }
@@ -906,7 +933,7 @@ export async function superAdminLoginAction(prevState: unknown, formData: FormDa
     const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
 
     if (!superAdminEmail || !superAdminPassword) {
-      console.warn("[SuperAdmin Login] Faltan variables de entorno SUPER_ADMIN_EMAIL o SUPER_ADMIN_PASSWORD.");
+      console.error("Error en Auth: Faltan variables de entorno SUPER_ADMIN_EMAIL o SUPER_ADMIN_PASSWORD en el servidor de producción.");
       return { error: "Configuración de SuperAdmin no disponible en el servidor." };
     }
 
@@ -917,16 +944,23 @@ export async function superAdminLoginAction(prevState: unknown, formData: FormDa
     const cleanEmail = email.toLowerCase().trim();
 
     if (cleanEmail !== superAdminEmail || password !== superAdminPassword) {
+      console.warn(`[Auth Warning] Intento de login SuperAdmin fallido para: ${cleanEmail}`);
       return { error: "Correo o contraseña incorrectos." };
     }
 
-    await setSuperAdminSession();
+    try {
+      await setSuperAdminSession();
+    } catch (saSessionErr) {
+      console.error("Error en Auth (Sesión SuperAdmin JWT):", saSessionErr);
+      return { error: "No se pudo crear la sesión de SuperAdmin." };
+    }
+
     redirect("/super-admin");
   } catch (error: any) {
     if (error?.digest?.startsWith("NEXT_REDIRECT") || error?.message?.includes("NEXT_REDIRECT")) {
       throw error;
     }
-    console.error("Error in superAdminLoginAction:", error);
+    console.error("Error en Auth:", error);
     return { error: "Ocurrió un error inesperado al iniciar sesión como SuperAdmin." };
   }
 }
