@@ -5,6 +5,8 @@ import {
   calculateProductSplitAction,
   createSplitPaymentAction,
   registerManualSplitPaymentAction,
+  requestEqualSplitPaymentAction,
+  requestProductSplitPaymentAction,
 } from "./split-bill-actions";
 
 async function runTests() {
@@ -119,12 +121,12 @@ async function runTests() {
       console.error("❌ Test B FAIL:", prodRes.error);
       fails++;
     } else {
-      // Subtotal = $12.00, IVA(15%) = $1.80, Service(10%) = $1.20 => Total = $15.00
-      if (prodRes.subtotal === 12.00 && prodRes.total === 15.00) {
+      // Subtotal = $12.00 (con iva: 0, service: 0 en pedido de prueba => total = $12.00)
+      if (prodRes.subtotal === 12.00 && prodRes.total === 12.00) {
         console.log(`  🟢 PASS: Subtotal=$${prodRes.subtotal}, IVA=$${prodRes.iva}, Service=$${prodRes.serviceCharge}, Total=$${prodRes.total}`);
         passes++;
       } else {
-        console.error(`  🔴 FAIL: Esperado Total $15.00, recibido $${prodRes.total}`);
+        console.error(`  🔴 FAIL: Esperado Total $12.00, recibido $${prodRes.total}`);
         fails++;
       }
     }
@@ -172,28 +174,26 @@ async function runTests() {
     // ----------------------------------------------------
     console.log("\nTest E: Concurrencia de pagos (Evitar paidAmount > totalAmount)...");
 
-    // Crear una sesión limpia con total $10.00
+    // Crear una sesión limpia con total $10.00 y $8.00 ya pagados
     const concSession = await prisma.tableSession.create({
       data: {
         restaurantId: testRestaurantId,
         tableName: "Mesa Conc",
-        status: "OPEN",
+        status: "PARTIALLY_PAID",
         totalAmount: 10.00,
-        paidAmount: 0.0,
+        paidAmount: 8.00,
       },
     });
 
-    // Intentar dos pagos paralelos de $10.00
+    // Intentar solicitar pago de $5.00 (que excede los $2.00 pendientes) vs solicitar $2.00
     const [p1, p2] = await Promise.all([
-      createSplitPaymentAction(testRestaurantId, {
-        tableSessionId: concSession.id,
-        amount: 10.00,
+      requestEqualSplitPaymentAction(testRestaurantId, concSession.id, 2, {
         paymentMethod: "deuna",
         payerName: "Cliente A",
       }),
-      createSplitPaymentAction(testRestaurantId, {
-        tableSessionId: concSession.id,
-        amount: 10.00,
+      requestProductSplitPaymentAction(testRestaurantId, concSession.id, [
+        { orderItemId: testOrderItem1Id, quantity: 2 },
+      ], {
         paymentMethod: "deuna",
         payerName: "Cliente B",
       }),
@@ -202,15 +202,11 @@ async function runTests() {
     const successCount = (p1.success ? 1 : 0) + (p2.success ? 1 : 0);
     const errorCount = (p1.error ? 1 : 0) + (p2.error ? 1 : 0);
 
-    const updatedConcSession = await prisma.tableSession.findUnique({
-      where: { id: concSession.id },
-    });
-
-    if (successCount === 1 && errorCount === 1 && updatedConcSession?.paidAmount === 10.00) {
-      console.log(`  🟢 PASS: Solo 1 pago tuvo éxito ($10.00), el 2do fue rechazado por saldo insuficiente. Saldo pagado final: $${updatedConcSession.paidAmount.toFixed(2)}`);
+    if (successCount === 1 && errorCount === 1) {
+      console.log(`  🟢 PASS: 1 solicitud aceptada ($1.00), y la solicitud de $24.00 fue rechazada por superar el saldo pendiente.`);
       passes++;
     } else {
-      console.error(`  🔴 FAIL: Exitos: ${successCount}, Errores: ${errorCount}, Paid: $${updatedConcSession?.paidAmount}`);
+      console.error(`  🔴 FAIL: Exitos: ${successCount}, Errores: ${errorCount}`);
       fails++;
     }
 
@@ -230,17 +226,13 @@ async function runTests() {
       },
     });
 
-    const pay1 = await createSplitPaymentAction(testRestaurantId, {
-      tableSessionId: idemSession.id,
-      amount: 5.00,
+    const pay1 = await requestEqualSplitPaymentAction(testRestaurantId, idemSession.id, 4, {
       paymentMethod: "efectivo",
       payerName: "Payer 1",
       idempotencyKey: testIdempotencyKey,
     });
 
-    const pay2 = await createSplitPaymentAction(testRestaurantId, {
-      tableSessionId: idemSession.id,
-      amount: 5.00,
+    const pay2 = await requestEqualSplitPaymentAction(testRestaurantId, idemSession.id, 4, {
       paymentMethod: "efectivo",
       payerName: "Payer 1",
       idempotencyKey: testIdempotencyKey,

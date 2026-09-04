@@ -43,6 +43,11 @@ interface SplitBillModalProps {
 }
 
 export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: SplitBillModalProps) {
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const [step, setStep] = useState<"SELECT_MODE" | "EQUAL_SPLIT" | "PRODUCT_SPLIT" | "SUCCESS">("SELECT_MODE");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -270,9 +275,12 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Option 1: Equal Split */}
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setStep("EQUAL_SPLIT")}
-                    className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 hover:border-amber-400/50 hover:bg-slate-800/40 text-left transition duration-200 group flex flex-col justify-between space-y-4"
+                    onKeyDown={(e) => e.key === "Enter" && setStep("EQUAL_SPLIT")}
+                    className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 hover:border-amber-400/50 hover:bg-slate-800/40 text-left transition duration-200 group flex flex-col justify-between space-y-4 cursor-pointer"
                   >
                     <div className="h-12 w-12 rounded-2xl bg-amber-400/10 text-amber-400 flex items-center justify-center border border-amber-400/20 group-hover:scale-105 transition">
                       <Users className="h-6 w-6" />
@@ -289,12 +297,15 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                       <span>Seleccionar</span>
                       <ChevronRight className="h-4 w-4" />
                     </div>
-                  </button>
+                  </div>
 
                   {/* Option 2: Product Split */}
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setStep("PRODUCT_SPLIT")}
-                    className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 hover:border-amber-400/50 hover:bg-slate-800/40 text-left transition duration-200 group flex flex-col justify-between space-y-4"
+                    onKeyDown={(e) => e.key === "Enter" && setStep("PRODUCT_SPLIT")}
+                    className="p-5 rounded-3xl bg-slate-950/80 border border-slate-800 hover:border-amber-400/50 hover:bg-slate-800/40 text-left transition duration-200 group flex flex-col justify-between space-y-4 cursor-pointer"
                   >
                     <div className="h-12 w-12 rounded-2xl bg-emerald-400/10 text-emerald-400 flex items-center justify-center border border-emerald-400/20 group-hover:scale-105 transition">
                       <Utensils className="h-6 w-6" />
@@ -311,7 +322,7 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                       <span>Seleccionar</span>
                       <ChevronRight className="h-4 w-4" />
                     </div>
-                  </button>
+                  </div>
                 </div>
               </div>
             )}

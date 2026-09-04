@@ -12,14 +12,23 @@ const ACTIVE = ["PENDING", "PREPARING", "IN_TRANSIT", "DELIVERED"];
 const METHODS = ["cash", "efectivo", "qr", "deuna", "transferencia", "transfer", "tarjeta", "card"];
 
 async function owner(id: string) {
-  if (await getSuperAdminSession()) return { authorized: true };
-  const user = await getUserSession();
-  const restaurant = user?.userId && await prisma.restaurant.findUnique({ where: { id }, select: { userId: true } });
-  return restaurant?.userId === user?.userId ? { authorized: true } : { authorized: false, error: "No tiene permisos para modificar este restaurante." };
+  try {
+    if (await getSuperAdminSession()) return { authorized: true };
+    const user = await getUserSession();
+    const restaurant = user?.userId && await prisma.restaurant.findUnique({ where: { id }, select: { userId: true } });
+    return restaurant?.userId === user?.userId ? { authorized: true } : { authorized: false, error: "No tiene permisos para modificar este restaurante." };
+  } catch (_) {
+    return { authorized: false, error: "No tiene permisos para modificar este restaurante." };
+  }
 }
 async function revalidate(id: string) {
   const r = await prisma.restaurant.findUnique({ where: { id }, select: { slug: true } });
-  if (r) { revalidatePath(`/${r.slug}`); revalidatePath("/admin"); }
+  if (r) {
+    try {
+      revalidatePath(`/${r.slug}`);
+      revalidatePath("/admin");
+    } catch (_) {}
+  }
 }
 async function session(id: string, restaurantId: string) {
   const value = await prisma.tableSession.findUnique({ where: { id }, include: { orders: { include: { order: { include: { items: true } } } } } });
@@ -45,7 +54,7 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
     if (!orders.length) return { error: "No hay pedidos activos para esta mesa." };
     const created = await prisma.tableSession.create({ data: { restaurantId, tableName: table, totalAmount: money(orders.reduce((s, o) => s + o.total, 0)), orders: { create: orders.map(o => ({ orderId: o.id })) } }, include: { payments: true, orders: { include: { order: { include: { items: true } } } } } });
     await revalidate(restaurantId); return { success: true, session: created };
-  } catch { return { error: "No se pudo iniciar la cuenta de la mesa." }; }
+  } catch (err: any) { console.error("createTableSessionAction error:", err); return { error: "No se pudo iniciar la cuenta de la mesa." }; }
 }
 export async function getTableSessionAction(restaurantId: string, tableName: string): Promise<any> {
   try {
@@ -73,7 +82,7 @@ async function pending(restaurantId:string, s:any, input:PaymentInput, amount:nu
 export async function requestProductSplitPaymentAction(r:string,s:string,items:SelectedItem[],input:PaymentInput): Promise<any> { try { const data=await productCalc(r,s,items); return await pending(r,data.s,input,data.total,data); } catch(e:any) { return {error:e.message||"No se pudo solicitar el pago."}; } }
 export async function requestEqualSplitPaymentAction(r:string,s:string,people:number,input:PaymentInput): Promise<any> { const calc=await calculateEqualSplitAction(r,s,people); if(!calc.success)return calc; try{return await pending(r,await session(s,r),input,calc.amountPerPerson,{subtotal:calc.amountPerPerson,iva:0,serviceCharge:0});}catch(e:any){return{error:e.message};} }
 export async function createSplitPaymentAction(..._args: any[]): Promise<any>{return{error:"El pago debe ser confirmado por el restaurante."};}
-export async function confirmSplitPaymentAction(restaurantId:string,paymentId:string):Promise<any>{try{await refreshUserSession();const a=await owner(restaurantId);if(!a.authorized)return{error:a.error};const result=await prisma.$transaction(async tx=>{const p=await tx.tableSplitPayment.findUnique({where:{id:paymentId},include:{tableSession:true}});if(!p||p.tableSession.restaurantId!==restaurantId||p.status!=="PENDING")throw new Error("Pago pendiente no encontrado.");if(cents(p.amount)>cents(p.tableSession.totalAmount)-cents(p.tableSession.paidAmount))throw new Error("El pago supera el saldo pendiente.");const paid=money(p.tableSession.paidAmount+p.amount);const session=await tx.tableSession.update({where:{id:p.tableSessionId},data:{paidAmount:paid,status:cents(paid)>=cents(p.tableSession.totalAmount)?"PAID":"PARTIALLY_PAID"}});const payment=await tx.tableSplitPayment.update({where:{id:p.id},data:{status:"COMPLETED",confirmedAt:new Date()}});return{payment,session};});await revalidate(restaurantId);return{success:true,...result};}catch(e:any){return{error:e.message||"No se pudo confirmar el pago."};}}
-export async function rejectSplitPaymentAction(r:string,id:string):Promise<any>{try{await refreshUserSession();const a=await owner(r);if(!a.authorized)return{error:a.error};const p=await prisma.tableSplitPayment.findUnique({where:{id},include:{tableSession:true}});if(!p||p.tableSession.restaurantId!==r||p.status!=="PENDING")return{error:"Pago pendiente no encontrado."};await prisma.tableSplitPayment.update({where:{id},data:{status:"FAILED"}});await revalidate(r);return{success:true};}catch{return{error:"No se pudo rechazar el pago."};}}
-export async function registerManualSplitPaymentAction(r:string,s:string,d:{amount:number;paymentMethod:string;payerName?:string}):Promise<any>{await refreshUserSession();const a=await owner(r);if(!a.authorized)return{error:a.error};try{const made=await pending(r,await session(s,r),d,d.amount,{subtotal:d.amount,iva:0,serviceCharge:0});return made.payment?await confirmSplitPaymentAction(r,made.payment.id):made;}catch(e:any){return{error:e.message};}}
-export async function closeTableSessionAction(r:string,id:string){await refreshUserSession();const a=await owner(r);if(!a.authorized)return{error:a.error};const s=await prisma.tableSession.findUnique({where:{id}});if(!s||s.restaurantId!==r)return{error:"Sesión de mesa no encontrada."};const session=await prisma.tableSession.update({where:{id},data:{status:"CLOSED"}});await revalidate(r);return{success:true,session};}
+export async function confirmSplitPaymentAction(restaurantId:string,paymentId:string):Promise<any>{try{try{await refreshUserSession();}catch(_){}const a=await owner(restaurantId);if(!a.authorized)return{error:a.error};const result=await prisma.$transaction(async tx=>{const p=await tx.tableSplitPayment.findUnique({where:{id:paymentId},include:{tableSession:true}});if(!p||p.tableSession.restaurantId!==restaurantId||p.status!=="PENDING")throw new Error("Pago pendiente no encontrado.");if(cents(p.amount)>cents(p.tableSession.totalAmount)-cents(p.tableSession.paidAmount))throw new Error("El pago supera el saldo pendiente.");const paid=money(p.tableSession.paidAmount+p.amount);const session=await tx.tableSession.update({where:{id:p.tableSessionId},data:{paidAmount:paid,status:cents(paid)>=cents(p.tableSession.totalAmount)?"PAID":"PARTIALLY_PAID"}});const payment=await tx.tableSplitPayment.update({where:{id:p.id},data:{status:"COMPLETED",confirmedAt:new Date()}});return{payment,session};});await revalidate(restaurantId);return{success:true,...result};}catch(e:any){return{error:e.message||"No se pudo confirmar el pago."};}}
+export async function rejectSplitPaymentAction(r:string,id:string):Promise<any>{try{try{await refreshUserSession();}catch(_){}const a=await owner(r);if(!a.authorized)return{error:a.error};const p=await prisma.tableSplitPayment.findUnique({where:{id},include:{tableSession:true}});if(!p||p.tableSession.restaurantId!==r||p.status!=="PENDING")return{error:"Pago pendiente no encontrado."};await prisma.tableSplitPayment.update({where:{id},data:{status:"FAILED"}});await revalidate(r);return{success:true};}catch{return{error:"No se pudo rechazar el pago."};}}
+export async function registerManualSplitPaymentAction(r:string,s:string,d:{amount:number;paymentMethod:string;payerName?:string}):Promise<any>{try{await refreshUserSession();}catch(_){}const a=await owner(r);if(!a.authorized)return{error:a.error};try{const made=await pending(r,await session(s,r),d,d.amount,{subtotal:d.amount,iva:0,serviceCharge:0});return made.payment?await confirmSplitPaymentAction(r,made.payment.id):made;}catch(e:any){return{error:e.message};}}
+export async function closeTableSessionAction(r:string,id:string){try{await refreshUserSession();}catch(_){}const a=await owner(r);if(!a.authorized)return{error:a.error};const s=await prisma.tableSession.findUnique({where:{id}});if(!s||s.restaurantId!==r)return{error:"Sesión de mesa no encontrada."};const session=await prisma.tableSession.update({where:{id},data:{status:"CLOSED"}});await revalidate(r);return{success:true,session};}

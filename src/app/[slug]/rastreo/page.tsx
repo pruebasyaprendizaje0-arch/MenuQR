@@ -82,6 +82,11 @@ function TrackingContent({ slug }: { slug: string }) {
   const [query, setQuery] = useState(initialOrderQuery);
   const [orders, setOrders] = useState<OrderTrack[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const [errorMsg, setErrorMsg] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -434,7 +439,7 @@ function TrackingContent({ slug }: { slug: string }) {
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500">
-        <p>MenuQR Pro &copy; {new Date().getFullYear()} - Sistema Inteligente de Pedidos y Seguimiento a Domicilio</p>
+        <p>MenuQR Pro &copy; {isMounted ? new Date().getFullYear() : "2026"} - Sistema Inteligente de Pedidos y Seguimiento a Domicilio</p>
       </footer>
     </div>
   );

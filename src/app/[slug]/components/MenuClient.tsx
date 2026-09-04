@@ -136,6 +136,11 @@ const formatPrice = (price: unknown): string => {
 };
 
 export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restaurant; centralBranchId?: string }) {
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
 
   const [activeCategory, setActiveCategory] = useState<string>("");
@@ -247,7 +252,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   };
 
   const profileUrl =
-    typeof window !== "undefined" ? `${window.location.origin}/${restaurant.slug}` : `/${restaurant.slug}`;
+    isMounted && typeof window !== "undefined" ? `${window.location.origin}/${restaurant.slug}` : `/${restaurant.slug}`;
 
   const handleShare = async () => {
     const shareData = {

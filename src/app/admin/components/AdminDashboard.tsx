@@ -230,6 +230,11 @@ type Customer = {
 import { TableSplitMonitor } from "./TableSplitMonitor";
 
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -912,7 +917,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [seasonFixedBonus, setSeasonFixedBonus] = useState("0");
   const [seasonIsHoliday, setSeasonIsHoliday] = useState(false);
 
-  const publicUrl = typeof window !== "undefined" ? `${window.location.origin}/${restaurant.slug}` : `/${restaurant.slug}`;
+  const publicUrl = isMounted && typeof window !== "undefined" ? `${window.location.origin}/${restaurant.slug}` : `/${restaurant.slug}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(publicUrl);
