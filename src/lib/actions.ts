@@ -113,7 +113,51 @@ async function saveUploadedFile(file: File | null): Promise<string | null> {
 }
 
 /**
+ * Validates external image HTTP/HTTPS URLs (strictly rejecting JavaScript, local paths, or malformed protocols)
+ */
+export async function validateExternalImageUrl(
+  url: string | null | undefined,
+  options?: { allowLegacyUploads?: boolean }
+): Promise<{ isValid: boolean; cleanUrl: string | null; error?: string }> {
+  if (!url || typeof url !== "string") {
+    return { isValid: true, cleanUrl: null };
+  }
+
+  const cleanUrl = url.trim();
+  if (!cleanUrl) {
+    return { isValid: true, cleanUrl: null };
+  }
+
+  if (options?.allowLegacyUploads && (cleanUrl.startsWith("/uploads/") || cleanUrl.startsWith("uploads/"))) {
+    return { isValid: true, cleanUrl };
+  }
+
+  if (cleanUrl.startsWith("/uploads/") || cleanUrl.startsWith("uploads/")) {
+    return {
+      isValid: false,
+      cleanUrl: null,
+      error: "Por favor ingresa una URL externa válida (ej. https://.../imagen.webp). No se permiten rutas locales /uploads/ para nuevas imágenes.",
+    };
+  }
+
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    return { isValid: false, cleanUrl: null, error: "La URL de la imagen debe comenzar con http:// o https://" };
+  }
+
+  try {
+    const parsed = new URL(cleanUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { isValid: false, cleanUrl: null, error: "Sólo se permiten protocolos HTTP y HTTPS." };
+    }
+    return { isValid: true, cleanUrl: parsed.toString() };
+  } catch {
+    return { isValid: false, cleanUrl: null, error: "El formato de la URL de la imagen es inválido." };
+  }
+}
+
+/**
  * Multi-tenant Authorization Helper: Verifies that the current user owns the restaurant
+
  * or is logged in as a SuperAdmin.
  */
 async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; userId?: string; error?: string }> {
@@ -359,31 +403,19 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   if (!logoFile || logoFile.size === 0) {
     logoFile = formData.get("logoFileCamera") as File | null;
   }
-  let logoUrl = formData.get("logoUrl") as string;
-
-  const uploadedLogo = await saveUploadedFile(logoFile);
-  if (uploadedLogo) {
-    logoUrl = uploadedLogo;
-  }
+  const logoUrlInput = formData.get("logoUrl") as string;
+  let logoUrl: string | null = null;
 
   let coverFile = formData.get("coverFile") as File | null;
   if (!coverFile || coverFile.size === 0) {
     coverFile = formData.get("coverFileCamera") as File | null;
   }
-  let coverUrl = formData.get("coverUrl") as string;
-
-  const uploadedCover = await saveUploadedFile(coverFile);
-  if (uploadedCover) {
-    coverUrl = uploadedCover;
-  }
+  const coverUrlInput = formData.get("coverUrl") as string;
+  let coverUrl: string | null = null;
 
   const paymentQrFile = formData.get("paymentQrFile") as File | null;
-  let paymentQrUrl = formData.get("paymentQrUrl") as string;
-
-  const uploadedPaymentQr = await saveUploadedFile(paymentQrFile);
-  if (uploadedPaymentQr) {
-    paymentQrUrl = uploadedPaymentQr;
-  }
+  const paymentQrUrlInput = formData.get("paymentQrUrl") as string;
+  let paymentQrUrl: string | null = null;
 
   const ivaPercentInput = formData.get("ivaPercent") as string;
   const servicePercentInput = formData.get("servicePercent") as string;
@@ -404,8 +436,54 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
 
   const currentRestaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId },
-    select: { slug: true },
+    select: { slug: true, logoUrl: true, coverUrl: true, qrCobroUrl: true, seoImage: true },
   });
+
+  const uploadedLogo = await saveUploadedFile(logoFile);
+  if (uploadedLogo) {
+    logoUrl = uploadedLogo;
+  } else if (logoUrlInput && logoUrlInput.trim() !== "") {
+    const isSameAsCurrent = logoUrlInput.trim() === currentRestaurant?.logoUrl;
+    const val = await validateExternalImageUrl(logoUrlInput, { allowLegacyUploads: isSameAsCurrent });
+    if (!val.isValid) {
+      return { error: val.error || "URL de logo inválida." };
+    }
+    logoUrl = val.cleanUrl;
+  }
+
+  const uploadedCover = await saveUploadedFile(coverFile);
+  if (uploadedCover) {
+    coverUrl = uploadedCover;
+  } else if (coverUrlInput && coverUrlInput.trim() !== "") {
+    const isSameAsCurrent = coverUrlInput.trim() === currentRestaurant?.coverUrl;
+    const val = await validateExternalImageUrl(coverUrlInput, { allowLegacyUploads: isSameAsCurrent });
+    if (!val.isValid) {
+      return { error: val.error || "URL de portada inválida." };
+    }
+    coverUrl = val.cleanUrl;
+  }
+
+  const uploadedPaymentQr = await saveUploadedFile(paymentQrFile);
+  if (uploadedPaymentQr) {
+    paymentQrUrl = uploadedPaymentQr;
+  } else if (paymentQrUrlInput && paymentQrUrlInput.trim() !== "") {
+    const isSameAsCurrent = paymentQrUrlInput.trim() === currentRestaurant?.qrCobroUrl;
+    const val = await validateExternalImageUrl(paymentQrUrlInput, { allowLegacyUploads: isSameAsCurrent });
+    if (!val.isValid) {
+      return { error: val.error || "URL de QR de pago inválida." };
+    }
+    paymentQrUrl = val.cleanUrl;
+  }
+
+  let cleanSeoImage: string | null = null;
+  if (seoImage && seoImage.trim() !== "") {
+    const isSameAsCurrent = seoImage.trim() === currentRestaurant?.seoImage;
+    const val = await validateExternalImageUrl(seoImage, { allowLegacyUploads: isSameAsCurrent });
+    if (!val.isValid) {
+      return { error: val.error || "URL de imagen SEO inválida." };
+    }
+    cleanSeoImage = val.cleanUrl;
+  }
 
   const newSlug = slug.toLowerCase().trim();
 
@@ -448,7 +526,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       seoTitle: seoTitle || null,
       seoDescription: seoDescription || null,
       seoKeywords: seoKeywords || null,
-      seoImage: seoImage || null,
+      seoImage: cleanSeoImage || null,
       customFaq: customFaq || null,
       bankName: bankName || null,
       bankAccountType: bankAccountType || null,
@@ -512,20 +590,32 @@ export async function updateLogoDirectAction(restaurantId: string, formData: For
   if (!auth.authorized) return { error: auth.error };
 
   const logoFile = formData.get("logoFile") as File | null;
+  const logoUrlInput = formData.get("logoUrl") as string;
+  let finalLogo: string | null = null;
+
   const uploadedLogo = await saveUploadedFile(logoFile);
+  if (uploadedLogo) {
+    finalLogo = uploadedLogo;
+  } else if (logoUrlInput && logoUrlInput.trim() !== "") {
+    const val = await validateExternalImageUrl(logoUrlInput);
+    if (!val.isValid) {
+      return { error: val.error || "URL de logo inválida." };
+    }
+    finalLogo = val.cleanUrl;
+  }
   
-  if (!uploadedLogo) {
-    return { error: "No se pudo guardar el archivo de logo." };
+  if (!finalLogo) {
+    return { error: "No se pudo actualizar el logo. Por favor proporciona una URL válida." };
   }
 
   const updated = await prisma.restaurant.update({
     where: { id: restaurantId },
-    data: { logoUrl: uploadedLogo },
+    data: { logoUrl: finalLogo },
   });
 
   revalidatePath("/admin");
   revalidatePath(`/${updated.slug}`);
-  return { success: true, logoUrl: uploadedLogo };
+  return { success: true, logoUrl: finalLogo };
 }
 
 export async function updateCoverDirectAction(restaurantId: string, formData: FormData) {
@@ -534,22 +624,34 @@ export async function updateCoverDirectAction(restaurantId: string, formData: Fo
   if (!auth.authorized) return { error: auth.error };
 
   const coverFile = formData.get("coverFile") as File | null;
-  const uploadedCover = await saveUploadedFile(coverFile);
+  const coverUrlInput = formData.get("coverUrl") as string;
+  let finalCover: string | null = null;
 
-  if (!uploadedCover) {
-    return { error: "No se pudo guardar el archivo de portada." };
+  const uploadedCover = await saveUploadedFile(coverFile);
+  if (uploadedCover) {
+    finalCover = uploadedCover;
+  } else if (coverUrlInput && coverUrlInput.trim() !== "") {
+    const val = await validateExternalImageUrl(coverUrlInput);
+    if (!val.isValid) {
+      return { error: val.error || "URL de portada inválida." };
+    }
+    finalCover = val.cleanUrl;
+  }
+
+  if (!finalCover) {
+    return { error: "No se pudo actualizar la portada. Por favor proporciona una URL válida." };
   }
 
   const updated = await prisma.restaurant.update({
     where: { id: restaurantId },
-    data: { 
-      coverUrl: uploadedCover 
+    data: {
+      coverUrl: finalCover
     },
   });
 
   revalidatePath("/admin");
   revalidatePath(`/${updated.slug}`);
-  return { success: true, coverUrl: uploadedCover };
+  return { success: true, coverUrl: finalCover };
 }
 
 // Category Actions
@@ -643,11 +745,18 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   const isAvailable = formData.get("isAvailable") === "true";
   
   const dishFile = formData.get("dishFile") as File | null;
-  let imageUrl = formData.get("imageUrl") as string;
+  const imageUrlInput = formData.get("imageUrl") as string;
+  let finalImageUrl: string | null = null;
 
   const uploadedImage = await saveUploadedFile(dishFile);
   if (uploadedImage) {
-    imageUrl = uploadedImage;
+    finalImageUrl = uploadedImage;
+  } else if (imageUrlInput && imageUrlInput.trim() !== "") {
+    const val = await validateExternalImageUrl(imageUrlInput);
+    if (!val.isValid) {
+      return { error: val.error || "URL de imagen inválida." };
+    }
+    finalImageUrl = val.cleanUrl;
   }
 
   await prisma.dish.create({
@@ -655,7 +764,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
       name,
       description,
       price,
-      imageUrl: imageUrl || null,
+      imageUrl: finalImageUrl || null,
       isAvailable,
       categoryId,
       restaurantId: category.restaurantId,
@@ -671,7 +780,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   await refreshUserSession();
   const dish = await prisma.dish.findUnique({
     where: { id: dishId },
-    select: { id: true, restaurantId: true },
+    select: { id: true, restaurantId: true, imageUrl: true },
   });
   if (!dish) return { error: "Plato no encontrado." };
 
@@ -684,11 +793,19 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   const isAvailable = formData.get("isAvailable") === "true";
   
   const dishFile = formData.get("dishFile") as File | null;
-  let imageUrl = formData.get("imageUrl") as string;
+  const imageUrlInput = formData.get("imageUrl") as string;
+  let finalImageUrl: string | null = null;
 
   const uploadedImage = await saveUploadedFile(dishFile);
   if (uploadedImage) {
-    imageUrl = uploadedImage;
+    finalImageUrl = uploadedImage;
+  } else if (imageUrlInput && imageUrlInput.trim() !== "") {
+    const isSameAsExisting = imageUrlInput.trim() === dish.imageUrl;
+    const val = await validateExternalImageUrl(imageUrlInput, { allowLegacyUploads: isSameAsExisting });
+    if (!val.isValid) {
+      return { error: val.error || "URL de imagen inválida." };
+    }
+    finalImageUrl = val.cleanUrl;
   }
 
   const updated = await prisma.dish.update({
@@ -697,7 +814,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
       name,
       description,
       price,
-      imageUrl: imageUrl || null,
+      imageUrl: finalImageUrl || null,
       isAvailable,
     },
     include: {

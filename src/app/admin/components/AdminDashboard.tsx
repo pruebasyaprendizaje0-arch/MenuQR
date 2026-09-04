@@ -638,6 +638,14 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
+  const [logoUrlInput, setLogoUrlInput] = useState(restaurant.logoUrl || "");
+  const [coverUrlInput, setCoverUrlInput] = useState(restaurant.coverUrl || "");
+  const [paymentQrUrlInput, setPaymentQrUrlInput] = useState(restaurant.paymentQrUrl || "");
+  const [logoHasError, setLogoHasError] = useState(false);
+  const [coverHasError, setCoverHasError] = useState(false);
+  const [paymentQrHasError, setPaymentQrHasError] = useState(false);
+  const [dishImageHasError, setDishImageHasError] = useState(false);
+
   const [logoBase64, setLogoBase64] = useState<string>("");
   const [dishBase64s, setDishBase64s] = useState<string[]>([]);
 
@@ -1969,160 +1977,190 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
 
               {/* Logo Section */}
               <div className="border-t border-slate-800/80 pt-6 space-y-4">
-                <h4 className="text-sm font-bold text-white">Imagen de Logo</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <label className="block text-xs font-semibold text-slate-400">Subir Logo (Selecciona una opción)</label>
-                    <div className="flex flex-wrap gap-3">
-                      {/* Gallery Button */}
-                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl cursor-pointer font-bold text-xs transition-all border border-white/5 active:scale-95">
-                        <Upload className="h-4 w-4 text-amber-500" />
-                        Elegir de Galería
-                        <input 
-                          type="file" 
-                          name="logoFile" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              setLogoPreview(URL.createObjectURL(e.target.files[0]));
-                            }
-                          }}
-                        />
-                      </label>
-                      
-                      {/* Camera Button */}
-                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-xl cursor-pointer font-bold text-xs transition-all shadow-lg active:scale-95">
-                        <Camera className="h-4 w-4" />
-                        Tomar Foto (Cámara)
-                        <input 
-                          type="file" 
-                          name="logoFileCamera" 
-                          accept="image/*" 
-                          capture="environment" 
-                          className="hidden" 
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              setLogoPreview(URL.createObjectURL(e.target.files[0]));
-                            }
-                          }}
-                        />
-                      </label>
-                    </div>
-                    {(logoPreview || (restaurant.logoUrl && restaurant.logoUrl.trim() !== "")) && (
-                      <div className="flex items-center gap-2 mt-2 bg-slate-900/50 p-2.5 rounded-xl border border-white/5 max-w-xs">
-                        <img 
-                          src={logoPreview || restaurant.logoUrl || ""} 
-                          alt="Logo Previsualización" 
-                          className="h-10 w-10 rounded-lg object-cover border border-slate-700" 
-                        />
-                        <span className="text-[10px] text-slate-400 font-medium truncate">
-                          {logoPreview ? "Previsualización local" : "Logo actual cargado"}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-2">O pegar URL de logo existente</label>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>🖼️ URL del Logo</span>
+                  </h4>
+                  <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-full">
+                    ✨ Recomendado: WebP, 500–800 px de ancho.
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">URL Directa del Logo (HTTPS)</label>
                     <input
                       type="text"
                       name="logoUrl"
-                      defaultValue={restaurant.logoUrl || ""}
-                      placeholder="https://..."
-                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                      value={logoUrlInput}
+                      onChange={(e) => {
+                        setLogoUrlInput(e.target.value);
+                        setLogoHasError(false);
+                      }}
+                      placeholder="https://i.postimg.cc/xxxxx/logo.webp"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-3 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
+                    <p className="text-[11px] text-slate-400">
+                      Pega la URL pública HTTPS de tu logo optimizado (ej. Postimages, Cloudinary, S3).
+                    </p>
+                    <input
+                      type="file"
+                      name="logoFile"
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    <input
+                      type="file"
+                      name="logoFileCamera"
+                      accept="image/*"
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">Vista Previa</label>
+                    <div className="h-28 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-2 relative overflow-hidden">
+                      {logoUrlInput && logoUrlInput.trim() !== "" ? (
+                        !logoHasError ? (
+                          <img
+                            src={logoUrlInput.trim()}
+                            alt="Vista previa Logo"
+                            onError={() => setLogoHasError(true)}
+                            className="max-h-full max-w-full object-contain rounded-lg shadow"
+                          />
+                        ) : (
+                          <div className="text-center p-2">
+                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar la imagen.</p>
+                            <p className="text-[10px] text-slate-400">Verifica que la URL sea directa y pública.</p>
+                          </div>
+                        )
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">Sin URL de logo</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Cover Banner Section */}
               <div className="border-t border-slate-800/80 pt-6 space-y-4">
-                <h4 className="text-sm font-bold text-white">Fondo de Portada</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <label className="block text-xs font-semibold text-slate-400">Subir Fondo de Portada (Selecciona una opción)</label>
-                    <div className="flex flex-wrap gap-3">
-                      {/* Gallery Button */}
-                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-755 text-white rounded-xl cursor-pointer font-bold text-xs transition-all border border-white/5 active:scale-95">
-                        <Upload className="h-4 w-4 text-amber-500" />
-                        Elegir de Galería
-                        <input 
-                          type="file" 
-                          name="coverFile" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              setCoverPreview(URL.createObjectURL(e.target.files[0]));
-                            }
-                          }}
-                        />
-                      </label>
-                      
-                      {/* Camera Button */}
-                      <label className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white rounded-xl cursor-pointer font-bold text-xs transition-all shadow-lg active:scale-95">
-                        <Camera className="h-4 w-4" />
-                        Tomar Foto (Cámara)
-                        <input 
-                          type="file" 
-                          name="coverFileCamera" 
-                          accept="image/*" 
-                          capture="environment" 
-                          className="hidden" 
-                          onChange={(e) => {
-                            if (e.target.files?.[0]) {
-                              setCoverPreview(URL.createObjectURL(e.target.files[0]));
-                            }
-                          }}
-                        />
-                      </label>
-                    </div>
-                    {(coverPreview || (restaurant.coverUrl && restaurant.coverUrl.trim() !== "")) && (
-                      <div className="flex items-center gap-2 mt-2 bg-slate-900/50 p-2.5 rounded-xl border border-white/5 max-w-xs">
-                        <img 
-                          src={coverPreview || restaurant.coverUrl || ""} 
-                          alt="Portada Previsualización" 
-                          className="h-10 w-16 rounded-lg object-cover border border-slate-700" 
-                        />
-                        <span className="text-[10px] text-slate-400 font-medium truncate">
-                          {coverPreview ? "Previsualización local" : "Portada actual cargada"}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-2">O pegar URL de portada existente</label>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>🌄 URL de Portada (Banner)</span>
+                  </h4>
+                  <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-full">
+                    ✨ Recomendado: WebP, 1600–2000 px de ancho.
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">URL Directa de Portada (HTTPS)</label>
                     <input
                       type="text"
                       name="coverUrl"
-                      defaultValue={restaurant.coverUrl || ""}
-                      placeholder="https://..."
-                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                      value={coverUrlInput}
+                      onChange={(e) => {
+                        setCoverUrlInput(e.target.value);
+                        setCoverHasError(false);
+                      }}
+                      placeholder="https://i.postimg.cc/xxxxx/portada.webp"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-3 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
+                    <p className="text-[11px] text-slate-400">
+                      Pega la URL pública HTTPS del banner de tu restaurante.
+                    </p>
+                    <input
+                      type="file"
+                      name="coverFile"
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    <input
+                      type="file"
+                      name="coverFileCamera"
+                      accept="image/*"
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">Vista Previa</label>
+                    <div className="h-28 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-2 relative overflow-hidden">
+                      {coverUrlInput && coverUrlInput.trim() !== "" ? (
+                        !coverHasError ? (
+                          <img
+                            src={coverUrlInput.trim()}
+                            alt="Vista previa Portada"
+                            onError={() => setCoverHasError(true)}
+                            className="w-full h-full object-cover rounded-lg shadow"
+                          />
+                        ) : (
+                          <div className="text-center p-2">
+                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar la portada.</p>
+                            <p className="text-[10px] text-slate-400">Verifica que la URL sea directa y pública.</p>
+                          </div>
+                        )
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">Sin URL de portada</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Payment QR Section */}
-              <div className="border-t border-slate-800/80 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">QR de Cobro - Deuna / Transferencia (Subir archivo)</label>
-                  <input
-                    type="file"
-                    name="paymentQrFile"
-                    accept="image/*"
-                    className="w-full text-sm text-slate-400 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-850 file:text-white hover:file:bg-slate-800 cursor-pointer"
-                  />
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>📱 URL de QR de Cobro (Deuna / Transferencia)</span>
+                  </h4>
+                  <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-full">
+                    ✨ Recomendado: WebP, formato cuadrado.
+                  </span>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">O pegar URL de QR de Cobro</label>
-                  <input
-                    type="text"
-                    name="paymentQrUrl"
-                    defaultValue={restaurant.paymentQrUrl || ""}
-                    placeholder="https://..."
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">URL Directa del Código QR (HTTPS)</label>
+                    <input
+                      type="text"
+                      name="paymentQrUrl"
+                      value={paymentQrUrlInput}
+                      onChange={(e) => {
+                        setPaymentQrUrlInput(e.target.value);
+                        setPaymentQrHasError(false);
+                      }}
+                      placeholder="https://i.postimg.cc/xxxxx/qr.webp"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-3 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                    <p className="text-[11px] text-slate-400">
+                      Pega la URL de tu código QR de cobranza digital o cuenta de transferencias.
+                    </p>
+                    <input
+                      type="file"
+                      name="paymentQrFile"
+                      accept="image/*"
+                      className="hidden"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">Vista Previa</label>
+                    <div className="h-28 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-2 relative overflow-hidden">
+                      {paymentQrUrlInput && paymentQrUrlInput.trim() !== "" ? (
+                        !paymentQrHasError ? (
+                          <img
+                            src={paymentQrUrlInput.trim()}
+                            alt="Vista previa QR"
+                            onError={() => setPaymentQrHasError(true)}
+                            className="max-h-full max-w-full object-contain rounded-lg shadow"
+                          />
+                        ) : (
+                          <div className="text-center p-2">
+                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar el QR.</p>
+                            <p className="text-[10px] text-slate-400">Verifica que la URL sea directa y pública.</p>
+                          </div>
+                        )
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">Sin URL de QR</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
  
@@ -2960,26 +2998,57 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       />
                     </div>
 
-                    <div className="border-t border-slate-800 pt-4 grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">Imagen de Plato (Subir archivo)</label>
-                        <input
-                          type="file"
-                          name="dishFile"
-                          accept="image/*"
-                          className="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-850 file:text-white hover:file:bg-slate-800 cursor-pointer"
-                        />
+                    <div className="border-t border-slate-800 pt-4 space-y-3">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <label className="block text-xs font-semibold text-slate-300">URL DE IMAGEN DEL PLATO (HTTPS)</label>
+                        <span className="text-[10px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                          ✨ WebP · máx 1200 px · 100–300 KB
+                        </span>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">O pegar URL de imagen</label>
-                        <input
-                          type="text"
-                          name="imageUrl"
-                          value={dishImageUrl}
-                          onChange={(e) => setDishImageUrl(e.target.value)}
-                          placeholder="https://..."
-                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2 rounded-xl text-white focus:outline-none"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+                        <div className="sm:col-span-2 space-y-1.5">
+                          <input
+                            type="text"
+                            name="imageUrl"
+                            value={dishImageUrl}
+                            onChange={(e) => {
+                              setDishImageUrl(e.target.value);
+                              setDishImageHasError(false);
+                            }}
+                            placeholder="https://i.postimg.cc/xxxxx/plato.webp"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none"
+                          />
+                          <p className="text-[10px] text-slate-400">
+                            Pega la URL pública de la imagen del plato.
+                          </p>
+                          <input
+                            type="file"
+                            name="dishFile"
+                            accept="image/*"
+                            className="hidden"
+                          />
+                        </div>
+                        <div>
+                          <div className="h-20 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-1.5 overflow-hidden">
+                            {dishImageUrl && dishImageUrl.trim() !== "" ? (
+                              !dishImageHasError ? (
+                                <img
+                                  src={dishImageUrl.trim()}
+                                  alt="Vista previa plato"
+                                  onError={() => setDishImageHasError(true)}
+                                  className="w-full h-full object-cover rounded-lg shadow"
+                                />
+                              ) : (
+                                <div className="text-center p-1">
+                                  <p className="text-[10px] text-red-400 font-semibold">⚠️ No se pudo cargar</p>
+                                  <p className="text-[9px] text-slate-400">Verifica la URL</p>
+                                </div>
+                              )
+                            ) : (
+                              <span className="text-[11px] text-slate-500 italic">Sin imagen</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
 
