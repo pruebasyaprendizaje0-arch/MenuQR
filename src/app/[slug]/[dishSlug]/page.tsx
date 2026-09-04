@@ -8,13 +8,14 @@ import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
 
 interface Props {
-  params: {
+  params: Promise<{
     slug: string;
     dishSlug: string;
-  };
+  }>;
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params: paramsPromise }: Props): Promise<Metadata> {
+  const params = await paramsPromise;
   const { slug, dishSlug } = params;
 
   try {
@@ -69,7 +70,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 }
 
-export default async function DishDetailPage({ params }: Props) {
+export default async function DishDetailPage({ params: paramsPromise }: Props) {
+  const params = await paramsPromise;
   const { slug, dishSlug } = params;
 
   const restaurant = await prismaTenant.restaurant.findUnique({

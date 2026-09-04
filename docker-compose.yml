@@ -27,8 +27,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/menuqr_pro?schema=public
       - NODE_ENV=production
-      - SUPER_ADMIN_PASSWORD=superadmin123
-      - JWT_SECRET=menuqr-pro-super-secret-key-12345
+      # Define these values in an untracked .env file; never use defaults for secrets.
+      - SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
     volumes:
       # Persist uploaded food/logo images
       - uploads-data:/app/public/uploads

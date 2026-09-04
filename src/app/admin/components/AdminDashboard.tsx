@@ -73,7 +73,8 @@ import {
   CalendarDays,
   Percent,
   Tag,
-  MapPin
+  MapPin,
+  Utensils
 } from "lucide-react";
 
 type SeasonRate = {
@@ -192,6 +193,17 @@ type Restaurant = {
   ivaOnTakeout: boolean;
   serviceOnTable: boolean;
   serviceOnTakeout: boolean;
+  whatsapp?: string;
+  city?: string | null;
+  province?: string | null;
+  parish?: string | null;
+  sector?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  seoKeywords?: string | null;
+  seoImage?: string | null;
   categories: Category[];
   orders: Order[];
   seasonRates?: SeasonRate[];
@@ -215,8 +227,10 @@ type Customer = {
   updatedAt: string;
 };
 
+import { TableSplitMonitor } from "./TableSplitMonitor";
+
 export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "qr" | "orders" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState("");
@@ -1094,6 +1108,17 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               Historial de Pedidos
             </button>
             <button
+              onClick={() => setActiveTab("split-bill")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "split-bill" 
+                  ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <Utensils className="h-4 w-4 text-amber-400" />
+              <span>Dividir Cuenta en Mesa</span>
+            </button>
+            <button
               onClick={() => setActiveTab("crm")}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
                 activeTab === "crm" 
@@ -1408,259 +1433,6 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   </p>
                 )}
               </div>
-
-              {/* Charge Surcharge Configuration Form */}
-              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <DollarSign className="h-5 w-5 text-red-500" />
-                    Configuración de IVA y 10% de Servicio (Recargos)
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Controla qué cargos extras se aplican y bajo qué modalidad de pedido (Para llevar / Mesa).
-                  </p>
-                </div>
-                <form onSubmit={handleSaveCharges} className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Tasa de IVA (%)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={ivaPercent}
-                        onChange={(e) => setIvaPercent(parseFloat(e.target.value) || 0)}
-                        required
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Tasa de Servicio (%)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={servicePercent}
-                        onChange={(e) => setServicePercent(parseFloat(e.target.value) || 0)}
-                        required
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Envío a Domicilio ($)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={deliveryCost}
-                        onChange={(e) => setDeliveryCost(parseFloat(e.target.value) || 0)}
-                        required
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Checkbox matrix */}
-                  <div className="border-t border-slate-800/80 pt-4 space-y-3">
-                    <span className="text-xs font-bold text-slate-350 block">Reglas de Aplicación:</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none col-span-1 sm:col-span-2 border-b border-slate-800/50 pb-2 mb-1">
-                        <input
-                          type="checkbox"
-                          checked={deliveryEnabled}
-                          onChange={(e) => setDeliveryEnabled(e.target.checked)}
-                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
-                        />
-                        <span className="font-bold text-white">Activar Envío a Domicilio</span>
-                      </label>
-
-                      {/* Tarifas de Envío por Distancia (por KM) */}
-                      {deliveryEnabled && (
-                        <div className="col-span-1 sm:col-span-2 bg-slate-950/60 border border-slate-800 p-4 rounded-xl space-y-3 my-2">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-850 pb-2">
-                            <div>
-                              <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                                <Truck className="h-4 w-4 text-amber-400" />
-                                Tarifas de Envío por Distancia (por KM)
-                              </h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">
-                                Personaliza el precio de envío según la distancia en kilómetros desde tu local al cliente.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setKmRates(prev => [
-                                  ...prev,
-                                  { id: `km-${Date.now()}`, label: `De ${prev.length * 5} a ${(prev.length + 1) * 5} KM`, price: 3.50, minOrder: 0 }
-                                ]);
-                              }}
-                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-white rounded-lg text-xs font-bold transition border border-white/5 active:scale-95 shrink-0 self-start sm:self-auto"
-                            >
-                              + Añadir Rango de KM
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                            {kmRates.map((item, index) => (
-                              <div key={item.id} className="bg-slate-900 border border-slate-800 p-3 rounded-xl space-y-2">
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    value={item.label}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setKmRates(prev => prev.map((r, i) => i === index ? { ...r, label: val } : r));
-                                    }}
-                                    placeholder="ej. Hasta 2 KM"
-                                    className="flex-1 bg-slate-950 border border-slate-800 focus:border-red-500 px-3 py-1.5 rounded-lg text-xs font-bold text-white focus:outline-none"
-                                  />
-                                  {kmRates.length > 1 && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setKmRates(prev => prev.filter((_, i) => i !== index));
-                                      }}
-                                      className="p-1 text-slate-500 hover:text-red-400 transition shrink-0"
-                                      title="Eliminar rango"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/60">
-                                  <div>
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">Precio Envío</span>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs font-bold text-slate-400">$</span>
-                                      <input
-                                        type="number"
-                                        step="0.25"
-                                        min="0"
-                                        value={item.price}
-                                        onChange={(e) => {
-                                          const val = parseFloat(e.target.value) || 0;
-                                          setKmRates(prev => prev.map((r, i) => i === index ? { ...r, price: val } : r));
-                                        }}
-                                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1 rounded-lg text-xs font-black text-white focus:outline-none text-right"
-                                      />
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <span className="text-[10px] font-bold text-amber-400/90 uppercase block mb-0.5">Mín. Compra</span>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs font-bold text-slate-400">$</span>
-                                      <input
-                                        type="number"
-                                        step="0.50"
-                                        min="0"
-                                        value={item.minOrder || 0}
-                                        onChange={(e) => {
-                                          const val = parseFloat(e.target.value) || 0;
-                                          setKmRates(prev => prev.map((r, i) => i === index ? { ...r, minOrder: val } : r));
-                                        }}
-                                        placeholder="0.00"
-                                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1 rounded-lg text-xs font-black text-amber-300 focus:outline-none text-right"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <div className="col-span-1 sm:col-span-2 border-t border-slate-800/80 pt-4 space-y-4">
-                        <span className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Modo de Aplicación de IVA:</span>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
-                            <input
-                              type="radio"
-                              name="ivaMode"
-                              checked={!ivaOnTable}
-                              onChange={() => {
-                                setIvaOnTable(false);
-                                setIvaOnTakeout(false);
-                              }}
-                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
-                            />
-                            <div>
-                              <span className="font-bold text-white block">IVA Adicional</span>
-                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Se suma el porcentaje de IVA al subtotal al finalizar la compra.</span>
-                            </div>
-                          </label>
-
-                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
-                            <input
-                              type="radio"
-                              name="ivaMode"
-                              checked={ivaOnTable}
-                              onChange={() => {
-                                setIvaOnTable(true);
-                                setIvaOnTakeout(true);
-                              }}
-                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
-                            />
-                            <div>
-                              <span className="font-bold text-white block">IVA Incluido en el precio</span>
-                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Los precios publicados de los productos ya contienen IVA.</span>
-                            </div>
-                          </label>
-                        </div>
-
-                        <span className="text-xs font-bold text-slate-300 block uppercase tracking-wider pt-2">Modo de Aplicación de Servicio (10%):</span>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
-                            <input
-                              type="radio"
-                              name="serviceMode"
-                              checked={!serviceOnTable}
-                              onChange={() => {
-                                setServiceOnTable(false);
-                                setServiceOnTakeout(false);
-                              }}
-                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
-                            />
-                            <div>
-                              <span className="font-bold text-white block">Servicio Adicional</span>
-                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Se suma el porcentaje de servicio al subtotal al finalizar la compra.</span>
-                            </div>
-                          </label>
-
-                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
-                            <input
-                              type="radio"
-                              name="serviceMode"
-                              checked={serviceOnTable}
-                              onChange={() => {
-                                setServiceOnTable(true);
-                                setServiceOnTakeout(true);
-                              }}
-                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
-                            />
-                            <div>
-                              <span className="font-bold text-white block">Servicio Incluido en el precio</span>
-                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">El servicio ya está incluido en los precios de los productos.</span>
-                            </div>
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2">
-                    <button
-                      type="submit"
-                      disabled={savingCharges}
-                      className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 bg-red-600 hover:bg-red-500"
-                    >
-                      {savingCharges ? "Guardando..." : "Guardar Recargos"}
-                    </button>
-                    {chargesMessage && (
-                      <p className={`text-xs ${chargesMessage.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
-                        {chargesMessage}
-                      </p>
-                    )}
-                  </div>
-                </form>
-              </div>
             </div>
           );
         })()}
@@ -1670,7 +1442,260 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
           <div className="space-y-6">
             <div>
               <h2 className="text-2xl font-bold text-white">Configuración del Restaurante</h2>
-              <p className="text-slate-400 text-sm">Edita la información de tu marca, colores del tema y WhatsApp para pedidos.</p>
+              <p className="text-slate-400 text-sm">Edita la información de tu marca, colores del tema, recargos y WhatsApp para pedidos.</p>
+            </div>
+
+            {/* Charge Surcharge Configuration Form */}
+            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4 backdrop-blur-md">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-red-500" />
+                  Configuración de IVA y 10% de Servicio (Recargos)
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Controla qué cargos extras se aplican y bajo qué modalidad de pedido (Para llevar / Mesa).
+                </p>
+              </div>
+              <form onSubmit={handleSaveCharges} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Tasa de IVA (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={ivaPercent}
+                      onChange={(e) => setIvaPercent(parseFloat(e.target.value) || 0)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Tasa de Servicio (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={servicePercent}
+                      onChange={(e) => setServicePercent(parseFloat(e.target.value) || 0)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Envío a Domicilio ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={deliveryCost}
+                      onChange={(e) => setDeliveryCost(parseFloat(e.target.value) || 0)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
+                    />
+                  </div>
+                </div>
+
+                {/* Checkbox matrix */}
+                <div className="border-t border-slate-800/80 pt-4 space-y-3">
+                  <span className="text-xs font-bold text-slate-350 block">Reglas de Aplicación:</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none col-span-1 sm:col-span-2 border-b border-slate-800/50 pb-2 mb-1">
+                      <input
+                        type="checkbox"
+                        checked={deliveryEnabled}
+                        onChange={(e) => setDeliveryEnabled(e.target.checked)}
+                        className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
+                      />
+                      <span className="font-bold text-white">Activar Envío a Domicilio</span>
+                    </label>
+
+                    {/* Tarifas de Envío por Distancia (por KM) */}
+                    {deliveryEnabled && (
+                      <div className="col-span-1 sm:col-span-2 bg-slate-950/60 border border-slate-800 p-4 rounded-xl space-y-3 my-2">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-850 pb-2">
+                          <div>
+                            <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                              <Truck className="h-4 w-4 text-amber-400" />
+                              Tarifas de Envío por Distancia (por KM)
+                            </h4>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              Personaliza el precio de envío según la distancia en kilómetros desde tu local al cliente.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setKmRates(prev => [
+                                ...prev,
+                                { id: `km-${Date.now()}`, label: `De ${prev.length * 5} a ${(prev.length + 1) * 5} KM`, price: 3.50, minOrder: 0 }
+                              ]);
+                            }}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-750 text-white rounded-lg text-xs font-bold transition border border-white/5 active:scale-95 shrink-0 self-start sm:self-auto"
+                          >
+                            + Añadir Rango de KM
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          {kmRates.map((item, index) => (
+                            <div key={item.id} className="bg-slate-900 border border-slate-800 p-3 rounded-xl space-y-2">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={item.label}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setKmRates(prev => prev.map((r, i) => i === index ? { ...r, label: val } : r));
+                                  }}
+                                  placeholder="ej. Hasta 2 KM"
+                                  className="flex-1 bg-slate-950 border border-slate-800 focus:border-red-500 px-3 py-1.5 rounded-lg text-xs font-bold text-white focus:outline-none"
+                                />
+                                {kmRates.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setKmRates(prev => prev.filter((_, i) => i !== index));
+                                    }}
+                                    className="p-1 text-slate-500 hover:text-red-400 transition shrink-0"
+                                    title="Eliminar rango"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/60">
+                                <div>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">Precio Envío</span>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs font-bold text-slate-400">$</span>
+                                    <input
+                                      type="number"
+                                      step="0.25"
+                                      min="0"
+                                      value={item.price}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setKmRates(prev => prev.map((r, i) => i === index ? { ...r, price: val } : r));
+                                      }}
+                                      className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1 rounded-lg text-xs font-black text-white focus:outline-none text-right"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] font-bold text-amber-400/90 uppercase block mb-0.5">Mín. Compra</span>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs font-bold text-slate-400">$</span>
+                                    <input
+                                      type="number"
+                                      step="0.50"
+                                      min="0"
+                                      value={item.minOrder || 0}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setKmRates(prev => prev.map((r, i) => i === index ? { ...r, minOrder: val } : r));
+                                      }}
+                                      placeholder="0.00"
+                                      className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 px-2 py-1 rounded-lg text-xs font-black text-amber-300 focus:outline-none text-right"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="col-span-1 sm:col-span-2 border-t border-slate-800/80 pt-4 space-y-4">
+                      <span className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Modo de Aplicación de IVA:</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                          <input
+                            type="radio"
+                            name="ivaMode"
+                            checked={!ivaOnTable}
+                            onChange={() => {
+                              setIvaOnTable(false);
+                              setIvaOnTakeout(false);
+                            }}
+                            className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                          />
+                          <div>
+                            <span className="font-bold text-white block">IVA Adicional</span>
+                            <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Se suma el porcentaje de IVA al subtotal al finalizar la compra.</span>
+                          </div>
+                        </label>
+
+                        <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                          <input
+                            type="radio"
+                            name="ivaMode"
+                            checked={ivaOnTable}
+                            onChange={() => {
+                              setIvaOnTable(true);
+                              setIvaOnTakeout(true);
+                            }}
+                            className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                          />
+                          <div>
+                            <span className="font-bold text-white block">IVA Incluido en el precio</span>
+                            <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Los precios publicados de los productos ya contienen IVA.</span>
+                          </div>
+                        </label>
+                      </div>
+
+                      <span className="text-xs font-bold text-slate-300 block uppercase tracking-wider pt-2">Modo de Aplicación de Servicio (10%):</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                          <input
+                            type="radio"
+                            name="serviceMode"
+                            checked={!serviceOnTable}
+                            onChange={() => {
+                              setServiceOnTable(false);
+                              setServiceOnTakeout(false);
+                            }}
+                            className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                          />
+                          <div>
+                            <span className="font-bold text-white block">Servicio Adicional</span>
+                            <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Se suma el porcentaje de servicio al subtotal al finalizar la compra.</span>
+                          </div>
+                        </label>
+
+                        <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                          <input
+                            type="radio"
+                            name="serviceMode"
+                            checked={serviceOnTable}
+                            onChange={() => {
+                              setServiceOnTable(true);
+                              setServiceOnTakeout(true);
+                            }}
+                            className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                          />
+                          <div>
+                            <span className="font-bold text-white block">Servicio Incluido en el precio</span>
+                            <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">El servicio ya está incluido en los precios de los productos.</span>
+                          </div>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    type="submit"
+                    disabled={savingCharges}
+                    className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 bg-red-600 hover:bg-red-500"
+                  >
+                    {savingCharges ? "Guardando..." : "Guardar Recargos"}
+                  </button>
+                  {chargesMessage && (
+                    <p className={`text-xs ${chargesMessage.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
+                      {chargesMessage}
+                    </p>
+                  )}
+                </div>
+              </form>
             </div>
             
             <form 
@@ -1733,53 +1758,6 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                       className="w-full bg-slate-950/60 border border-slate-850 block px-4 py-3 rounded-xl text-slate-400 focus:outline-none cursor-not-allowed"
                     />
                   </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Porcentaje de IVA (%)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    name="ivaPercent"
-                    defaultValue={restaurant.ivaPercent}
-                    required
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Configura a 0 si los precios ya incluyen IVA o no aplica.</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Porcentaje de Servicio (%)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    name="servicePercent"
-                    defaultValue={restaurant.servicePercent}
-                    required
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Estándar de restaurante (ej: 10%). Pon 0 para desactivar.</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Costo de Envío a Domicilio ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    name="deliveryCost"
-                    defaultValue={restaurant.deliveryCost}
-                    required
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Costo de envío a domicilio. Pon 0 para desactivar.</p>
-                </div>
-                <div className="flex flex-col justify-end pb-3">
-                  <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      name="deliveryEnabled"
-                      defaultChecked={restaurant.deliveryEnabled}
-                      className="h-5 w-5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
-                    />
-                    <span className="text-sm font-medium text-slate-300">Ofrecer Envío a Domicilio</span>
-                  </label>
                 </div>
               </div>
 
@@ -3973,6 +3951,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Dividir Cuenta Tab */}
+        {activeTab === "split-bill" && (
+          <TableSplitMonitor restaurantId={restaurant.id} tablesConfig={restaurant.tablesConfig} />
         )}
 
         {/* CRM Clientes Tab */}

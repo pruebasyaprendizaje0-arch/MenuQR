@@ -27,10 +27,6 @@ export async function sendPasswordResetEmail(email: string, token: string) {
   const pass = process.env.SMTP_PASS;
 
   const timestamp = new Date().toISOString();
-  console.log(`\n==================================================`);
-  console.log(`[${timestamp}] [PASSWORD RESET REQUEST FOR ${email}]`);
-  console.log(`Generated Link: ${resetLink}`);
-  console.log(`==================================================\n`);
 
   const htmlContent = `
     <!DOCTYPE html>
@@ -93,7 +89,7 @@ export async function sendPasswordResetEmail(email: string, token: string) {
         return { success: false, error: `Error en servicio de correo (Resend): ${error.message}` };
       }
 
-      console.log(`[Email Service] [${timestamp}] Correo de recuperación enviado con éxito a ${email} vía Resend API (ID: ${data?.id})`);
+      console.log(`[Email Service] [${timestamp}] Correo de recuperación enviado vía Resend API (ID: ${data?.id})`);
       return { success: true, mode: "resend", id: data?.id };
     } catch (error: any) {
       console.error(`[Email Service] [${timestamp}] Excepción crítica en Resend API al enviar a ${email}:`, error);
@@ -123,7 +119,7 @@ export async function sendPasswordResetEmail(email: string, token: string) {
         html: htmlContent,
       });
 
-      console.log(`[Email Service] [${timestamp}] Correo enviado con éxito a ${email} mediante servidor SMTP (${host}:${port})`);
+      console.log(`[Email Service] [${timestamp}] Correo de recuperación enviado mediante SMTP.`);
       return { success: true, mode: "smtp" };
     } catch (error: any) {
       console.error(`[Email Service] [${timestamp}] Error al enviar correo vía SMTP a ${email}:`, error);
@@ -131,9 +127,13 @@ export async function sendPasswordResetEmail(email: string, token: string) {
     }
   }
 
-  // 3. Modo consola para desarrollo local
-  console.warn(
-    `[Email Service] [${timestamp}] ADVERTENCIA: Faltan variables RESEND_API_KEY o credenciales SMTP en .env. El enlace fue registrado en consola.`
-  );
-  return { success: true, mode: "console", resetLink };
+  // In production, never expose a reset token through logs or a response.
+  if (process.env.NODE_ENV === "production") {
+    console.error(`[Email Service] [${timestamp}] No hay proveedor de correo configurado.`);
+    return { success: false, error: "El servicio de correo no está configurado." };
+  }
+
+  // Local development only: returning the link makes password-reset UI testable.
+  console.warn(`[Email Service] [${timestamp}] Correo no configurado; enlace disponible solo para desarrollo local.`);
+  return { success: true, mode: "development", resetLink };
 }

@@ -3,7 +3,7 @@ import { prismaTenant } from "@/lib/db";
 import { getBaseUrl, normalizeSlug } from "@/lib/seo";
 import { ecuadorData } from "@/lib/ecuador";
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+export default async function sitemap(): Promise<any> {
   const baseUrl = getBaseUrl();
 
   const staticRoutes: MetadataRoute.Sitemap = [
@@ -135,7 +135,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       });
     });
 
-    const restaurantRoutes: MetadataRoute.Sitemap = [];
+    const restaurantRoutes: any[] = [];
 
     restaurants.forEach((r) => {
       const images: string[] = [];
@@ -173,7 +173,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       });
     });
 
-    return [...staticRoutes, ...geoRoutes, ...restaurantRoutes];
+    return [...staticRoutes, ...geoRoutes, ...restaurantRoutes] as any;
   } catch (error) {
     console.warn("[Sitemap Warning] Error loading restaurants for sitemap:", error);
     return staticRoutes;

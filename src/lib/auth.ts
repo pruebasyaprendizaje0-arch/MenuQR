@@ -3,7 +3,7 @@ import { verifyToken, signToken } from "./jwt";
 
 // User session (SaaS Multi-tenant)
 export async function getUserSession() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get("session_token")?.value;
   if (!token) return null;
   return verifyToken(token);
@@ -11,7 +11,7 @@ export async function getUserSession() {
 
 export async function setUserSession(userId: string, email: string) {
   const token = signToken({ userId, email });
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.set("session_token", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -22,14 +22,14 @@ export async function setUserSession(userId: string, email: string) {
 }
 
 export async function clearUserSession() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.delete("session_token");
 }
 
 // Re-issue the session cookie from the current valid token.
 // Only callable inside Server Actions / Route Handlers (never in Server Component render).
 export async function refreshUserSession() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get("session_token")?.value;
   if (!token) return;
   const payload = verifyToken(token);
@@ -46,14 +46,15 @@ export async function refreshUserSession() {
 
 // Super Admin Session
 export async function getSuperAdminSession() {
-  const cookieStore = cookies();
-  const session = cookieStore.get("super_admin_session");
-  return session?.value === "authenticated";
+  const cookieStore = await cookies();
+  const token = cookieStore.get("super_admin_session")?.value;
+  return Boolean(token && verifyToken(token)?.role === "superadmin");
 }
 
 export async function setSuperAdminSession() {
-  const cookieStore = cookies();
-  cookieStore.set("super_admin_session", "authenticated", {
+  const token = signToken({ userId: "superadmin", email: "superadmin@local", role: "superadmin" });
+  const cookieStore = await cookies();
+  cookieStore.set("super_admin_session", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
@@ -63,6 +64,6 @@ export async function setSuperAdminSession() {
 }
 
 export async function clearSuperAdminSession() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   cookieStore.delete("super_admin_session");
 }

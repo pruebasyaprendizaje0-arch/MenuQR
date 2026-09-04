@@ -18,10 +18,9 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/png",
   "image/webp",
   "image/gif",
-  "image/svg+xml",
 ]);
 
-const ALLOWED_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif", "svg"]);
+const ALLOWED_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB max
 
 function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
@@ -58,10 +57,6 @@ function validateImageMagicBytes(buffer: Buffer, ext: string): boolean {
       buffer[10] === 0x42 &&
       buffer[11] === 0x50
     );
-  }
-  if (ext === "svg") {
-    const headerStr = buffer.slice(0, 100).toString("utf-8").toLowerCase().trim();
-    return headerStr.includes("<svg") || headerStr.includes("<?xml");
   }
   return false;
 }
@@ -362,7 +357,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const slug = formData.get("slug") as string;
   const whatsappNumber = formData.get("whatsappNumber") as string;
   const themeColor = formData.get("themeColor") as string;
-  
+
   const instagram = formData.get("instagram") as string;
   const facebook = formData.get("facebook") as string;
   const tiktok = formData.get("tiktok") as string;
@@ -376,7 +371,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const contactNumbers = formData.get("contactNumbers") as string;
   const ubicameUrl = formData.get("ubicameUrl") as string;
   const mapEmbedUrl = formData.get("mapEmbedUrl") as string;
-  
+
   const province = formData.get("province") as string;
   const city = formData.get("city") as string;
   const parish = formData.get("parish") as string;
@@ -391,7 +386,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const seoKeywords = formData.get("seoKeywords") as string;
   const seoImage = formData.get("seoImage") as string;
   const customFaq = formData.get("customFaq") as string;
-  
+
   const bankName = formData.get("bankName") as string;
   const bankAccountType = formData.get("bankAccountType") as string;
   const bankAccountNumber = formData.get("bankAccountNumber") as string;
@@ -417,27 +412,44 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const paymentQrUrlInput = formData.get("paymentQrUrl") as string;
   let paymentQrUrl: string | null = null;
 
+  const currentRestaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { 
+      slug: true, 
+      logoUrl: true, 
+      coverUrl: true, 
+      qrCobroUrl: true, 
+      seoImage: true,
+      ivaPercent: true,
+      servicePercent: true,
+      deliveryCost: true,
+      deliveryEnabled: true,
+      ivaOnTable: true,
+      ivaOnTakeout: true,
+      serviceOnTable: true,
+      serviceOnTakeout: true,
+      deliveryRates: true
+    },
+  });
+
   const ivaPercentInput = formData.get("ivaPercent") as string;
   const servicePercentInput = formData.get("servicePercent") as string;
   const deliveryCostInput = formData.get("deliveryCost") as string;
-  const ivaPercent = ivaPercentInput ? parseFloat(ivaPercentInput) : 15.0;
-  const servicePercent = servicePercentInput ? parseFloat(servicePercentInput) : 10.0;
-  const deliveryCost = deliveryCostInput ? parseFloat(deliveryCostInput) : 0.0;
+  const ivaPercent = ivaPercentInput ? parseFloat(ivaPercentInput) : (currentRestaurant?.ivaPercent ?? 15.0);
+  const servicePercent = servicePercentInput ? parseFloat(servicePercentInput) : (currentRestaurant?.servicePercent ?? 10.0);
+  const deliveryCost = deliveryCostInput ? parseFloat(deliveryCostInput) : (currentRestaurant?.deliveryCost ?? 0.0);
 
-  const ivaOnTable = formData.get("ivaOnTable") === "true";
-  const ivaOnTakeout = formData.get("ivaOnTakeout") === "true";
-  const serviceOnTable = formData.get("serviceOnTable") === "true";
-  const serviceOnTakeout = formData.get("serviceOnTakeout") === "true";
-  const deliveryEnabled = formData.get("deliveryEnabled") === "true" || formData.get("deliveryEnabled") === "on";
+  const ivaOnTable = formData.has("ivaOnTable") ? formData.get("ivaOnTable") === "true" : (currentRestaurant?.ivaOnTable ?? false);
+  const ivaOnTakeout = formData.has("ivaOnTakeout") ? formData.get("ivaOnTakeout") === "true" : (currentRestaurant?.ivaOnTakeout ?? false);
+  const serviceOnTable = formData.has("serviceOnTable") ? formData.get("serviceOnTable") === "true" : (currentRestaurant?.serviceOnTable ?? false);
+  const serviceOnTakeout = formData.has("serviceOnTakeout") ? formData.get("serviceOnTakeout") === "true" : (currentRestaurant?.serviceOnTakeout ?? false);
+  const deliveryEnabled = formData.has("deliveryEnabled") 
+    ? (formData.get("deliveryEnabled") === "true" || formData.get("deliveryEnabled") === "on") 
+    : (currentRestaurant?.deliveryEnabled ?? false);
   const localSchedule = formData.get("localSchedule") as string;
   const deliverySchedule = formData.get("deliverySchedule") as string;
   const blockedDates = formData.get("blockedDates") as string;
-  const deliveryRates = formData.get("deliveryRates") as string;
-
-  const currentRestaurant = await prisma.restaurant.findUnique({
-    where: { id: restaurantId },
-    select: { slug: true, logoUrl: true, coverUrl: true, qrCobroUrl: true, seoImage: true },
-  });
+  const deliveryRates = formData.has("deliveryRates") ? (formData.get("deliveryRates") as string) : (currentRestaurant?.deliveryRates || null);
 
   const uploadedLogo = await saveUploadedFile(logoFile);
   if (uploadedLogo) {
@@ -603,7 +615,7 @@ export async function updateLogoDirectAction(restaurantId: string, formData: For
     }
     finalLogo = val.cleanUrl;
   }
-  
+
   if (!finalLogo) {
     return { error: "No se pudo actualizar el logo. Por favor proporciona una URL válida." };
   }
@@ -743,7 +755,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   const description = formData.get("description") as string;
   const price = parseFloat(formData.get("price") as string || "0");
   const isAvailable = formData.get("isAvailable") === "true";
-  
+
   const dishFile = formData.get("dishFile") as File | null;
   const imageUrlInput = formData.get("imageUrl") as string;
   let finalImageUrl: string | null = null;
@@ -791,7 +803,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   const description = formData.get("description") as string;
   const price = parseFloat(formData.get("price") as string || "0");
   const isAvailable = formData.get("isAvailable") === "true";
-  
+
   const dishFile = formData.get("dishFile") as File | null;
   const imageUrlInput = formData.get("imageUrl") as string;
   let finalImageUrl: string | null = null;
@@ -1250,9 +1262,9 @@ export async function reassignRestaurantOwnerAction(restaurantId: string, ownerE
   revalidatePath(`/${updatedRestaurant.slug}`);
   revalidatePath("/admin");
 
-  return { 
-    success: true, 
-    message: `Negocio "${updatedRestaurant.name}" adjudicado con éxito al usuario ${targetUser.email} (${targetUser.name}).` 
+  return {
+    success: true,
+    message: `Negocio "${updatedRestaurant.name}" adjudicado con éxito al usuario ${targetUser.email} (${targetUser.name}).`
   };
 }
 
@@ -1315,8 +1327,8 @@ export async function subscribeToPremiumAction(
     return { error: "Configuración de pasarela de pagos no disponible. Por favor verifique las variables de entorno." };
   }
 
-  console.log(`[Payment Gateway API] Processing $10.00 USD charge for restaurant ${restaurant.name} (${restaurant.id})`);
-  console.log(`[Payment Gateway API] SmartFields Key: ${smartFieldsKey.substring(0, 8)}... | Secret Key Present: ${Boolean(secretKey)}`);
+  console.log(`[Payment Gateway API] Processing subscription charge for restaurant ${restaurant.id}`);
+  console.log(`[Payment Gateway API] Payment credentials configured: ${Boolean(smartFieldsKey && secretKey)}`);
   if (paymentData?.cardHolderName) {
     console.log(`[Payment Gateway API] Cardholder: ${paymentData.cardHolderName} | Last 4: **** ${paymentData.cardNumberLast4 || '****'}`);
   }
@@ -1649,6 +1661,19 @@ export async function createOrderAction(data: {
         },
       });
 
+      // An open table bill is a visit snapshot. New orders are explicitly linked
+      // so they are included without mixing an earlier closed visit at the same table.
+      if (rawTableName !== "Domicilio") {
+        const openSession = await tx.tableSession.findFirst({
+          where: { restaurantId: data.restaurantId, tableName: rawTableName, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+          orderBy: { createdAt: "desc" },
+        });
+        if (openSession) {
+          await tx.tableSessionOrder.create({ data: { tableSessionId: openSession.id, orderId: newOrder.id } });
+          await tx.tableSession.update({ where: { id: openSession.id }, data: { totalAmount: openSession.totalAmount + finalTotal } });
+        }
+      }
+
       if (verifiedCouponCode) {
         await tx.coupon.updateMany({
           where: { restaurantId: data.restaurantId, code: verifiedCouponCode },
@@ -1703,10 +1728,10 @@ export async function createOrderAction(data: {
       // Safe fallback when executed outside Next request context
     }
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       orderId: order.id,
-      orderNumber: order.orderNumber || 1 
+      orderNumber: order.orderNumber || 1
     };
   } catch (error: any) {
     console.error("Error creating order:", error);
@@ -1715,7 +1740,7 @@ export async function createOrderAction(data: {
 }
 
 export async function updateOrderStatusAction(
-  orderId: string, 
+  orderId: string,
   status: string,
   driverData?: { driverName?: string; driverPhone?: string }
 ) {

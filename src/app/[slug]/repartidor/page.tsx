@@ -59,8 +59,8 @@ type RestaurantInfo = {
   themeColor: string;
 };
 
-export default function DeliveryDriverPanelPage({ params }: { params: { slug: string } }) {
-  const slug = params.slug;
+export default function DeliveryDriverPanelPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
 
   const [restaurant, setRestaurant] = useState<RestaurantInfo | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);

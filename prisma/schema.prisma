@@ -94,6 +94,7 @@ model Restaurant {
   coupons        Coupon[]
   slugHistory    SlugHistory[]
   analyticsEvents AnalyticsEvent[]
+  tableSessions  TableSession[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -167,6 +168,7 @@ model Order {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   items            OrderItem[]
+  tableSessions    TableSessionOrder[]
 
   @@index([restaurantId, createdAt])
   @@index([status])
@@ -176,6 +178,7 @@ model OrderItem {
   id        String   @id @default(uuid())
   orderId   String
   order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  splitAllocations TableSplitAllocation[]
   dishName  String
   price     Float
   quantity  Int
@@ -292,6 +295,77 @@ model AnalyticsEvent {
 
   @@index([eventType, createdAt])
   @@index([restaurantId])
+}
+
+model TableSession {
+  id           String              @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  tableName    String
+  status       String              @default("OPEN") // OPEN, PARTIALLY_PAID, PAID, CLOSED
+  totalAmount  Float               @default(0.0)
+  paidAmount   Float               @default(0.0)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  payments     TableSplitPayment[]
+  orders       TableSessionOrder[]
+
+  @@index([restaurantId, tableName, status])
+}
+
+model TableSplitPayment {
+  id             String       @id @default(uuid())
+  tableSessionId String
+  tableSession   TableSession @relation(fields: [tableSessionId], references: [id], onDelete: Cascade)
+  payerName      String?
+  amount         Float
+  subtotalPart   Float        @default(0.0)
+  ivaPart        Float        @default(0.0)
+  servicePart    Float        @default(0.0)
+  paymentMethod  String
+  status         String       @default("COMPLETED") // PENDING, COMPLETED, FAILED
+  idempotencyKey String?      @unique
+  confirmedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  allocations    TableSplitAllocation[]
+
+  @@index([tableSessionId])
+}
+
+// An immutable snapshot of the orders that belong to one visit at a table.
+// It prevents a later visit at the same table from being mixed into a closed bill.
+model TableSessionOrder {
+  id             String       @id @default(uuid())
+  tableSessionId String
+  tableSession   TableSession @relation(fields: [tableSessionId], references: [id], onDelete: Cascade)
+  orderId        String
+  order          Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([tableSessionId, orderId])
+  @@index([orderId])
+}
+
+// V1 deliberately assigns complete units only. A product cannot be allocated
+// twice while a payment request is pending or confirmed.
+model TableSplitAllocation {
+  id                  String            @id @default(uuid())
+  tableSplitPaymentId String
+  tableSplitPayment   TableSplitPayment @relation(fields: [tableSplitPaymentId], references: [id], onDelete: Cascade)
+  orderItemId         String
+  orderItem           OrderItem         @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  quantity            Int
+  subtotalPart        Float             @default(0.0)
+  discountPart        Float             @default(0.0)
+  ivaPart             Float             @default(0.0)
+  servicePart         Float             @default(0.0)
+  seasonRatePart      Float             @default(0.0)
+  tipPart             Float             @default(0.0)
+  totalPart           Float             @default(0.0)
+  createdAt           DateTime          @default(now())
+
+  @@index([orderItemId])
+  @@index([tableSplitPaymentId])
 }
 
 

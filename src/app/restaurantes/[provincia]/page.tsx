@@ -9,9 +9,9 @@ import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
 
 interface Props {
-  params: {
+  params: Promise<{
     provincia: string;
-  };
+  }>;
 }
 
 function findExactProvinceName(provSlug: string): string | null {
@@ -25,7 +25,8 @@ function findExactProvinceName(provSlug: string): string | null {
   return unslugify(provSlug);
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params: paramsPromise }: Props): Promise<Metadata> {
+  const params = await paramsPromise;
   const provName = findExactProvinceName(params.provincia);
   const baseUrl = getBaseUrl();
   const citiesInProvince = ecuadorData[provName] || [];
@@ -67,7 +68,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function ProvinceDirectoryPage({ params }: Props) {
+export default async function ProvinceDirectoryPage({ params: paramsPromise }: Props) {
+  const params = await paramsPromise;
   const provName = findExactProvinceName(params.provincia);
   const baseUrl = getBaseUrl();
 

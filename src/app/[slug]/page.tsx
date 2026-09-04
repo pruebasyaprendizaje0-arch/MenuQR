@@ -13,9 +13,9 @@ import type { Metadata } from "next";
 import { generateRestaurantJsonLd, getBaseUrl } from "@/lib/seo";
 
 interface PageProps {
-  params: {
+  params: Promise<{
     slug: string;
-  };
+  }>;
 }
 
 const IGNORED_STATIC_SLUGS = [
@@ -27,7 +27,8 @@ const IGNORED_STATIC_SLUGS = [
   "manifest.json",
 ];
 
-export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+export async function generateMetadata({ params: paramsPromise }: PageProps): Promise<Metadata> {
+  const params = await paramsPromise;
   const slug = params.slug.toLowerCase().trim();
 
   if (IGNORED_STATIC_SLUGS.includes(slug)) {
@@ -110,7 +111,8 @@ function toIso(val: any): string {
   }
 }
 
-export default async function RestaurantMenuPage({ params }: PageProps) {
+export default async function RestaurantMenuPage({ params: paramsPromise }: PageProps) {
+  const params = await paramsPromise;
   const pageStartTime = performance.now();
   const slug = params.slug.toLowerCase().trim();
 

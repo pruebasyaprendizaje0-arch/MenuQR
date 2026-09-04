@@ -30,6 +30,7 @@ import {
   Loader2,
   Tag
 } from "lucide-react";
+import { SplitBillModal } from "./SplitBillModal";
 
 type Dish = {
   id: string;
@@ -152,6 +153,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
+  const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
@@ -1171,13 +1173,24 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   </p>
                 </div>
               </div>
-              <button 
-                onClick={() => setIsTableModalOpen(true)}
-                className="px-4 py-2 rounded-xl text-xs font-black text-white hover:brightness-110 transition active:scale-95 duration-200"
-                style={{ backgroundColor: restaurant.themeColor }}
-              >
-                Cambiar
-              </button>
+              <div className="flex items-center gap-2">
+                {selectedTable && selectedTable !== "Domicilio" && (
+                  <button
+                    onClick={() => setIsSplitModalOpen(true)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-black text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition active:scale-95 duration-200 flex items-center gap-1.5"
+                  >
+                    <span>💳</span>
+                    <span>Dividir Cuenta</span>
+                  </button>
+                )}
+                <button 
+                  onClick={() => setIsTableModalOpen(true)}
+                  className="px-4 py-2 rounded-xl text-xs font-black text-white hover:brightness-110 transition active:scale-95 duration-200"
+                  style={{ backgroundColor: restaurant.themeColor }}
+                >
+                  Cambiar
+                </button>
+              </div>
             </div>
 
             {/* Popular Dishes Slider */}
@@ -2303,6 +2316,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           </a>
         );
       })()}
+
+      {/* Split Bill Modal */}
+      {selectedTable && selectedTable !== "Domicilio" && (
+        <SplitBillModal
+          restaurant={restaurant}
+          tableName={selectedTable}
+          isOpen={isSplitModalOpen}
+          onClose={() => setIsSplitModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

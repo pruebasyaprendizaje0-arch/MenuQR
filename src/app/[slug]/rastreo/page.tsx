@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, use } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { getOrderTrackingAction } from "@/lib/actions";
@@ -59,8 +59,8 @@ type OrderTrack = {
   };
 };
 
-export default function CustomerOrderTrackingPage({ params }: { params: { slug: string } }) {
-  const slug = params.slug;
+export default function CustomerOrderTrackingPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">

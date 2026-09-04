@@ -7,14 +7,15 @@ import { getBaseUrl, unslugify, generateBreadcrumbJsonLd, generateCityCategoryJs
 export const dynamic = "force-dynamic";
 
 interface Props {
-  params: {
+  params: Promise<{
     provincia: string;
     ciudad: string;
     categoria: string;
-  };
+  }>;
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params: paramsPromise }: Props): Promise<Metadata> {
+  const params = await paramsPromise;
   const cityName = unslugify(params.ciudad);
   const provName = unslugify(params.provincia);
   const catName = unslugify(params.categoria);
@@ -67,7 +68,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function CityCategoryDirectoryPage({ params }: Props) {
+export default async function CityCategoryDirectoryPage({ params: paramsPromise }: Props) {
+  const params = await paramsPromise;
   const cityName = unslugify(params.ciudad);
   const provName = unslugify(params.provincia);
   const catName = unslugify(params.categoria);

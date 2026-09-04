@@ -28,20 +28,6 @@ export default async function AdminPage() {
     redirect("/login");
   }
 
-  // Fallback a Prisma local
-  try {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    await prisma.order.deleteMany({
-      where: {
-        createdAt: {
-          lt: twentyFourHoursAgo,
-        },
-      },
-    });
-  } catch (err) {
-    console.error("Error cleaning up old orders:", err);
-  }
-
   let restaurant: any = null;
   try {
     restaurant = await prisma.restaurant.findFirst({
@@ -111,8 +97,9 @@ export default async function AdminPage() {
       });
     } catch (err) {
       console.error("Error creating default restaurant:", err);
-      // Emergency fallback to any restaurant owned by user or first restaurant
+      // Never fall back to another tenant's restaurant.
       restaurant = await prisma.restaurant.findFirst({
+        where: { userId: session.userId },
         include: {
           categories: { orderBy: { order: "asc" }, include: { dishes: { orderBy: { createdAt: "desc" } } } },
           orders: { orderBy: { createdAt: "desc" }, include: { items: true } },
