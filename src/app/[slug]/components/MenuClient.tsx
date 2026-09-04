@@ -409,8 +409,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
     const isTableOrder = selectedTable !== "" && selectedTable !== "Domicilio";
     const isDeliveryOrder = selectedTable === "Domicilio";
-    const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
-    const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
+    
+    const ivaPercent = restaurant.ivaPercent || 0;
+    const servicePercent = restaurant.servicePercent || 0;
+    const ivaIncluded = restaurant.ivaOnTable ?? false;
+    const serviceIncluded = restaurant.serviceOnTable ?? false;
 
     const subtotal = cartTotal;
     const couponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
@@ -425,8 +428,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       ? (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
       : 0;
 
-    const iva = applyIva ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
-    const serviceCharge = applyService ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
+    const iva = (ivaPercent > 0 && !ivaIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100) : 0;
+    const serviceCharge = (servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
     const tip = subtotalAfterCoupon * (tipPercentage / 100);
     const deliveryCost = isDeliveryOrder ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
     const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
@@ -522,8 +525,21 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       message += `*Ajuste ${activeRate.isHoliday ? "Festivo" : "Temporada"} (${activeRate.name}):* ${seasonBonusAmount > 0 ? "+" : ""}$${seasonBonusAmount.toFixed(2)}\n`;
     }
 
-    message += `*IVA (${restaurant.ivaPercent}%):* $${iva.toFixed(2)}\n`;
-    message += `*Servicio (${restaurant.servicePercent}%):* $${serviceCharge.toFixed(2)}\n`;
+    if (restaurant.ivaPercent > 0) {
+      if (ivaIncluded) {
+        message += `*IVA (${restaurant.ivaPercent}%):* Incluido en el precio\n`;
+      } else {
+        message += `*IVA (${restaurant.ivaPercent}%):* $${iva.toFixed(2)}\n`;
+      }
+    }
+
+    if (restaurant.servicePercent > 0) {
+      if (serviceIncluded) {
+        message += `*Servicio (${restaurant.servicePercent}%):* Incluido en el precio\n`;
+      } else {
+        message += `*Servicio (${restaurant.servicePercent}%):* $${serviceCharge.toFixed(2)}\n`;
+      }
+    }
     if (selectedTable === "Domicilio" && deliveryCost > 0) {
       message += `*Costo de Envío (${selectedKmRate?.label || "Domicilio"}):* $${deliveryCost.toFixed(2)}\n`;
     }
@@ -1913,8 +1929,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             {(() => {
               const isTableOrder = selectedTable !== "" && selectedTable !== "Domicilio";
               const isDelivery = selectedTable === "Domicilio";
-              const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
-              const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
+              
+              const ivaPercent = restaurant.ivaPercent || 0;
+              const servicePercent = restaurant.servicePercent || 0;
+              const ivaIncluded = restaurant.ivaOnTable ?? false;
+              const serviceIncluded = restaurant.serviceOnTable ?? false;
 
               const subtotal = cartTotal;
               const couponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
@@ -1929,8 +1948,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 ? (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
                 : 0;
 
-              const iva = applyIva ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.ivaPercent / 100) : 0;
-              const serviceCharge = applyService ? (subtotalAfterCoupon + seasonBonusAmount) * (restaurant.servicePercent / 100) : 0;
+              const iva = (ivaPercent > 0 && !ivaIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100) : 0;
+              const serviceCharge = (servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
               const tip = subtotalAfterCoupon * (tipPercentage / 100);
               const deliveryCost = isDelivery ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
               const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
@@ -1956,14 +1975,24 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </div>
                   )}
 
-                  <div className="flex justify-between text-slate-400">
-                    <span>IVA ({restaurant.ivaPercent}%):</span>
-                    <span className="font-bold text-slate-350">${iva.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-400">
-                    <span>Servicio ({restaurant.servicePercent}%):</span>
-                    <span className="font-bold text-slate-350">${serviceCharge.toFixed(2)}</span>
-                  </div>
+                  {ivaPercent > 0 && (
+                    <div className="flex justify-between text-slate-400">
+                      <span>IVA ({ivaPercent}%):</span>
+                      <span className="font-bold text-slate-350">
+                        {ivaIncluded ? "Incluido en el precio" : `$${iva.toFixed(2)}`}
+                      </span>
+                    </div>
+                  )}
+
+                  {servicePercent > 0 && (
+                    <div className="flex justify-between text-slate-400">
+                      <span>Servicio ({servicePercent}%):</span>
+                      <span className="font-bold text-slate-350">
+                        {serviceIncluded ? "Incluido en el precio" : `$${serviceCharge.toFixed(2)}`}
+                      </span>
+                    </div>
+                  )}
+
                   {isDelivery && deliveryCost > 0 && (
                     <div className="flex justify-between text-slate-400">
                       <span>Costo de Envío ({selectedKmRate?.label || "Domicilio"}):</span>

@@ -1567,42 +1567,81 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                           </div>
                         </div>
                       )}
-                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={ivaOnTable}
-                          onChange={(e) => setIvaOnTable(e.target.checked)}
-                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
-                        />
-                        Aplica IVA en pedidos en Mesa
-                      </label>
-                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={ivaOnTakeout}
-                          onChange={(e) => setIvaOnTakeout(e.target.checked)}
-                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
-                        />
-                        Aplica IVA en pedidos Para Llevar
-                      </label>
-                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={serviceOnTable}
-                          onChange={(e) => setServiceOnTable(e.target.checked)}
-                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
-                        />
-                        Aplica Servicio en pedidos en Mesa
-                      </label>
-                      <label className="flex items-center gap-2.5 text-slate-300 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={serviceOnTakeout}
-                          onChange={(e) => setServiceOnTakeout(e.target.checked)}
-                          className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
-                        />
-                        Aplica Servicio en pedidos Para Llevar
-                      </label>
+                      <div className="col-span-1 sm:col-span-2 border-t border-slate-800/80 pt-4 space-y-4">
+                        <span className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Modo de Aplicación de IVA:</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                            <input
+                              type="radio"
+                              name="ivaMode"
+                              checked={!ivaOnTable}
+                              onChange={() => {
+                                setIvaOnTable(false);
+                                setIvaOnTakeout(false);
+                              }}
+                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                            />
+                            <div>
+                              <span className="font-bold text-white block">IVA Adicional</span>
+                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Se suma el porcentaje de IVA al subtotal al finalizar la compra.</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                            <input
+                              type="radio"
+                              name="ivaMode"
+                              checked={ivaOnTable}
+                              onChange={() => {
+                                setIvaOnTable(true);
+                                setIvaOnTakeout(true);
+                              }}
+                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                            />
+                            <div>
+                              <span className="font-bold text-white block">IVA Incluido en el precio</span>
+                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Los precios publicados de los productos ya contienen IVA.</span>
+                            </div>
+                          </label>
+                        </div>
+
+                        <span className="text-xs font-bold text-slate-300 block uppercase tracking-wider pt-2">Modo de Aplicación de Servicio (10%):</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                            <input
+                              type="radio"
+                              name="serviceMode"
+                              checked={!serviceOnTable}
+                              onChange={() => {
+                                setServiceOnTable(false);
+                                setServiceOnTakeout(false);
+                              }}
+                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                            />
+                            <div>
+                              <span className="font-bold text-white block">Servicio Adicional</span>
+                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">Se suma el porcentaje de servicio al subtotal al finalizar la compra.</span>
+                            </div>
+                          </label>
+
+                          <label className="flex items-start gap-2.5 p-3 rounded-xl border bg-slate-950/60 cursor-pointer select-none border-slate-800 hover:border-slate-700">
+                            <input
+                              type="radio"
+                              name="serviceMode"
+                              checked={serviceOnTable}
+                              onChange={() => {
+                                setServiceOnTable(true);
+                                setServiceOnTakeout(true);
+                              }}
+                              className="h-4 w-4 mt-0.5 text-red-600 focus:ring-red-500 cursor-pointer shrink-0"
+                            />
+                            <div>
+                              <span className="font-bold text-white block">Servicio Incluido en el precio</span>
+                              <span className="text-[11px] text-slate-400 leading-normal block mt-0.5">El servicio ya está incluido en los precios de los productos.</span>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   </div>
 

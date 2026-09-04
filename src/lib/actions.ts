@@ -1542,19 +1542,31 @@ export async function createOrderAction(data: {
       calculatedSeasonBonus = (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus;
     }
 
-    // Taxes & Service Charge (PASO 6 & 7)
-    const tableName = (data.tableName || "Llevar").trim();
-    const isTableOrder = tableName !== "" && tableName !== "Llevar" && tableName !== "Domicilio" && tableName !== "Takeout";
-    const applyIva = isTableOrder ? restaurant.ivaOnTable : restaurant.ivaOnTakeout;
-    const applyService = isTableOrder ? restaurant.serviceOnTable : restaurant.serviceOnTakeout;
-
+    // Taxes & Service Charge (PASO 6 & 7 - Global Business Rules)
     const baseForTax = subtotalAfterCoupon + calculatedSeasonBonus;
-    const calculatedIva = applyIva ? baseForTax * (restaurant.ivaPercent / 100) : 0;
-    const calculatedService = applyService ? baseForTax * (restaurant.servicePercent / 100) : 0;
+
+    const ivaPercent = restaurant.ivaPercent || 0;
+    const servicePercent = restaurant.servicePercent || 0;
+
+    // ivaOnTable represents if IVA is INCLUDED in dish prices (true = included, false = additional)
+    const ivaIncluded = restaurant.ivaOnTable ?? false;
+    // serviceOnTable represents if Service is INCLUDED in dish prices (true = included, false = additional)
+    const serviceIncluded = restaurant.serviceOnTable ?? false;
+
+    // IVA is added to checkout ONLY IF ivaPercent > 0 AND IVA is NOT included in prices
+    const calculatedIva = (ivaPercent > 0 && !ivaIncluded)
+      ? baseForTax * (ivaPercent / 100)
+      : 0;
+
+    // SERVICIO is added to checkout ONLY IF servicePercent > 0 AND Service is NOT included in prices
+    const calculatedService = (servicePercent > 0 && !serviceIncluded)
+      ? baseForTax * (servicePercent / 100)
+      : 0;
 
     // Delivery cost (PASO 8)
+    const rawTableName = (data.tableName || "Mesa Sin Número").trim();
     let calculatedDeliveryCost = 0;
-    if (tableName === "Domicilio") {
+    if (rawTableName === "Domicilio") {
       if (restaurant.deliveryRates) {
         try {
           const rates = JSON.parse(restaurant.deliveryRates);
@@ -1612,7 +1624,7 @@ export async function createOrderAction(data: {
       const newOrder = await tx.order.create({
         data: {
           restaurantId: data.restaurantId,
-          tableName,
+          tableName: rawTableName,
           customerName: data.customerName?.slice(0, 200) || null,
           customerPhone: data.customerPhone?.slice(0, 50) || null,
           customerAddress: data.customerAddress?.slice(0, 500) || null,
