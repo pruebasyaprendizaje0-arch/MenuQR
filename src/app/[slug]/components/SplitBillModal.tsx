@@ -72,6 +72,13 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
   // Fetch session data on open
   useEffect(() => {
     if (isOpen && tableName) {
+      setStep("SELECT_MODE");
+      setSessionData(null);
+      setError(null);
+      setSelectedProductQtys({});
+      setEqualCalculation(null);
+      setProductCalculation(null);
+      setCompletedPayment(null);
       loadSession();
     }
   }, [isOpen, tableName]);
@@ -205,7 +212,7 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
     }
   };
 
-  if (!isMounted || !isOpen) return null;
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in" style={{ fontFamily: "var(--font-outfit)" }}>
@@ -235,8 +242,8 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
           </button>
         </div>
 
-        {/* Error Alert */}
-        {error && (
+        {/* Error Alert (Shown when sessionData exists and an action fails) */}
+        {error && sessionData && (
           <div className="mb-4 p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-semibold flex items-center gap-2 shrink-0">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
@@ -248,6 +255,28 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
           <div className="py-12 flex flex-col items-center justify-center text-slate-400 gap-3">
             <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
             <span className="text-xs font-bold">Cargando detalles de la mesa...</span>
+          </div>
+        )}
+
+        {/* Empty State / No Active Orders View */}
+        {!sessionData && !loading && (
+          <div className="py-10 flex flex-col items-center justify-center text-center space-y-4">
+            <div className="h-16 w-16 bg-amber-400/10 text-amber-400 rounded-full flex items-center justify-center border border-amber-400/20">
+              <Utensils className="h-8 w-8" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-white">Sin pedidos activos en esta mesa</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+                {error || "Aún no hay consumos o comandas enviadas para dividir la cuenta."}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="px-6 py-3 rounded-2xl text-xs font-black uppercase text-white shadow-lg transition active:scale-95"
+              style={{ backgroundColor: restaurant.themeColor }}
+            >
+              Entendido / Volver al Menú
+            </button>
           </div>
         )}
 
@@ -472,7 +501,7 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                   </label>
 
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                    {sessionData.orders?.flatMap((o: any) => o.items)?.map((item: any) => {
+                    {(sessionData?.orders || []).flatMap((o: any) => o?.items || []).map((item: any) => {
                       const selectedQty = selectedProductQtys[item.id] || 0;
                       return (
                         <div
