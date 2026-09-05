@@ -61,9 +61,21 @@ function safe(value: any) {
   });
 
   // Filter ONLY active orders in course (PENDING, PREPARING, IN_TRANSIT)
-  const activeSessionOrders = (value.orders || []).filter((x: any) =>
+  const allActiveSessionOrders = (value.orders || []).filter((x: any) =>
     ACTIVE_STATUSES.includes(x.order?.status)
   );
+
+  // Isolate to the CURRENT visit (orders within 2 hours of the latest active order for this table)
+  let activeSessionOrders: any[] = [];
+  if (allActiveSessionOrders.length > 0) {
+    const latestOrderTime = Math.max(
+      ...allActiveSessionOrders.map((x: any) => new Date(x.order.createdAt).getTime())
+    );
+    const visitWindowStart = latestOrderTime - 2 * 60 * 60 * 1000; // 2 hour visit window
+    activeSessionOrders = allActiveSessionOrders.filter(
+      (x: any) => new Date(x.order.createdAt).getTime() >= visitWindowStart
+    );
+  }
 
   const orders = activeSessionOrders.map((x: any) => ({
     id: x.order.id,
@@ -84,7 +96,7 @@ function safe(value: any) {
     })
   }));
 
-  // Strict active total amount (matching 1:1 with Cocina pending orders)
+  // Strict active total amount for current visit (matching 1:1 with Cocina pending orders)
   const activeTotal = money(
     activeSessionOrders.reduce((sum: number, x: any) => sum + (x.order?.total || 0), 0)
   );
