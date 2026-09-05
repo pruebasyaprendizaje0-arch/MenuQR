@@ -42,6 +42,8 @@ async function session(id: string, restaurantId: string) {
   return value;
 }
 
+const ACTIVE_STATUSES = ["PENDING", "PREPARING", "IN_TRANSIT"];
+
 function safe(value: any) {
   const paidInDb = money(value.paidAmount);
 
@@ -58,8 +60,14 @@ function safe(value: any) {
     }
   });
 
-  const orders = (value.orders || []).map((x: any) => ({
+  // Filter ONLY active orders in course (PENDING, PREPARING, IN_TRANSIT)
+  const activeSessionOrders = (value.orders || []).filter((x: any) =>
+    ACTIVE_STATUSES.includes(x.order?.status)
+  );
+
+  const orders = activeSessionOrders.map((x: any) => ({
     id: x.order.id,
+    status: x.order.status,
     items: (x.order.items || []).map((i: any) => {
       const allocated = allocatedMap.get(i.id) || 0;
       const remainingQuantity = Math.max(0, i.quantity - allocated);
@@ -76,11 +84,16 @@ function safe(value: any) {
     })
   }));
 
-  const effectivePaid = Math.max(paidInDb, money(allocatedItemsTotal));
-  const effectivePending = Math.max(0, money(value.totalAmount - effectivePaid));
+  // Strict active total amount (matching 1:1 with Cocina pending orders)
+  const activeTotal = money(
+    activeSessionOrders.reduce((sum: number, x: any) => sum + (x.order?.total || 0), 0)
+  );
+
+  const effectivePaid = Math.min(activeTotal, Math.max(paidInDb, money(allocatedItemsTotal)));
+  const effectivePending = Math.max(0, money(activeTotal - effectivePaid));
 
   return {
-    session: { id: value.id, status: value.status, totalAmount: money(value.totalAmount), paidAmount: effectivePaid },
+    session: { id: value.id, status: value.status, totalAmount: activeTotal, paidAmount: effectivePaid },
     orders,
     payments: (value.payments || []).map((p: any) => ({
       id: p.id,
@@ -90,7 +103,7 @@ function safe(value: any) {
       status: p.status,
       createdAt: p.createdAt
     })),
-    totalAmount: money(value.totalAmount),
+    totalAmount: activeTotal,
     paidAmount: effectivePaid,
     pendingAmount: effectivePending,
     status: effectivePending === 0 ? "PAID" : value.status
@@ -139,7 +152,7 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
       where: {
         restaurantId,
         tableName: table,
-        status: { in: ACTIVE },
+        status: { in: ACTIVE_STATUSES },
         createdAt: { gte: fourHoursAgo },
         ...(last ? { createdAt: { gt: last.updatedAt } } : {}),
         tableSessions: { none: {} }
@@ -211,18 +224,68 @@ export async function getTableSessionAction(restaurantId: string, tableName: str
     return { error: "No se pudo consultar la cuenta." };
   }
 }
+
 export async function calculateEqualSplitAction(restaurantId: string, tableSessionId: string, people: number): Promise<any> {
-  try { const s = await session(tableSessionId, restaurantId); if (!Number.isInteger(people) || people < 2 || people > 50) return { error: "El número de personas debe estar entre 2 y 50." }; const pending = cents(s.totalAmount) - cents(s.paidAmount); if (pending <= 0) return { error: "La cuenta ya está pagada." }; const base = Math.floor(pending / people), rem = pending % people, parts = Array.from({ length: people }, (_, i) => (base + (i < rem ? 1 : 0)) / 100); return { success: true, parts, amountPerPerson: parts[0], totalPending: pending / 100, exactSumMatches: true }; } catch (e: any) { return { error: e.message }; }
+  try {
+    const s = await session(tableSessionId, restaurantId);
+    if (!Number.isInteger(people) || people < 2 || people > 50) return { error: "El número de personas debe estar entre 2 y 50." };
+    const safeData = safe(s);
+    const pending = cents(safeData.pendingAmount);
+    if (pending <= 0) return { error: "La cuenta ya está pagada." };
+    const base = Math.floor(pending / people);
+    const rem = pending % people;
+    const parts = Array.from({ length: people }, (_, i) => (base + (i < rem ? 1 : 0)) / 100);
+    return { success: true, parts, amountPerPerson: parts[0], totalPending: pending / 100, exactSumMatches: true };
+  } catch (e: any) {
+    return { error: e.message };
+  }
 }
+
 async function productCalc(restaurantId: string, tableSessionId: string, selections: SelectedItem[]) {
-  const s = await session(tableSessionId, restaurantId); if (!selections?.length) throw new Error("Debes seleccionar al menos un producto.");
-  const allocations = await prisma.tableSplitAllocation.findMany({ where: { tableSplitPayment: { tableSessionId, status: { in: ["PENDING", "COMPLETED"] } } }, select: { orderItemId: true, quantity: true } });
-  const used = new Map<string, number>(); allocations.forEach(a => used.set(a.orderItemId, (used.get(a.orderItemId) || 0) + a.quantity));
-  const lookup: Map<string, any> = new Map(s.orders.flatMap((x: any) => x.order.items.map((i: any) => [i.id, { i, o: x.order }] as [string, any])));
-  let subtotal=0, discount=0, iva=0, serviceCharge=0, seasonRate=0, tip=0, total=0; const verifiedItems: any[]=[];
-  for (const pick of selections) { const found = lookup.get(pick.orderItemId); if (!found || !Number.isInteger(pick.quantity) || pick.quantity < 1) throw new Error("Producto inválido."); if (pick.quantity > found.i.quantity - (used.get(pick.orderItemId) || 0)) throw new Error(`No quedan suficientes unidades de ${found.i.dishName}.`); const ratio=(found.i.price*pick.quantity)/(found.o.subtotal||1); const part={ subtotal:money(found.i.price*pick.quantity), discount:money(found.o.discountAmount*ratio), iva:money(found.o.iva*ratio), service:money(found.o.serviceCharge*ratio), seasonRate:money(found.o.seasonRateAmount*ratio), tip:money(found.o.tip*ratio), total:money(found.o.total*ratio) }; subtotal+=part.subtotal; discount+=part.discount; iva+=part.iva; serviceCharge+=part.service; seasonRate+=part.seasonRate; tip+=part.tip; total+=part.total; verifiedItems.push({ orderItemId:found.i.id, quantity:pick.quantity, ...part }); }
-  total=money(total); if (cents(total)>cents(s.totalAmount)-cents(s.paidAmount)) throw new Error("La selección supera el saldo pendiente."); return { s, subtotal:money(subtotal), discount:money(discount), iva:money(iva), serviceCharge:money(serviceCharge), seasonRate:money(seasonRate), tip:money(tip), total, verifiedItems };
+  const s = await session(tableSessionId, restaurantId);
+  if (!selections?.length) throw new Error("Debes seleccionar al menos un producto.");
+  const safeData = safe(s);
+  const allocations = await prisma.tableSplitAllocation.findMany({
+    where: { tableSplitPayment: { tableSessionId, status: { in: ["PENDING", "COMPLETED"] } } },
+    select: { orderItemId: true, quantity: true }
+  });
+  const used = new Map<string, number>();
+  allocations.forEach(a => used.set(a.orderItemId, (used.get(a.orderItemId) || 0) + a.quantity));
+
+  const activeSessionOrders = (s.orders || []).filter((x: any) => ACTIVE_STATUSES.includes(x.order?.status));
+  const lookup: Map<string, any> = new Map(activeSessionOrders.flatMap((x: any) => x.order.items.map((i: any) => [i.id, { i, o: x.order }] as [string, any])));
+  let subtotal = 0, discount = 0, iva = 0, serviceCharge = 0, seasonRate = 0, tip = 0, total = 0;
+  const verifiedItems: any[] = [];
+
+  for (const pick of selections) {
+    const found = lookup.get(pick.orderItemId);
+    if (!found || !Number.isInteger(pick.quantity) || pick.quantity < 1) throw new Error("Producto inválido.");
+    if (pick.quantity > found.i.quantity - (used.get(pick.orderItemId) || 0)) throw new Error(`No quedan suficientes unidades de ${found.i.dishName}.`);
+    const ratio = (found.i.price * pick.quantity) / (found.o.subtotal || 1);
+    const part = {
+      subtotal: money(found.i.price * pick.quantity),
+      discount: money(found.o.discountAmount * ratio),
+      iva: money(found.o.iva * ratio),
+      service: money(found.o.serviceCharge * ratio),
+      seasonRate: money(found.o.seasonRateAmount * ratio),
+      tip: money(found.o.tip * ratio),
+      total: money(found.o.total * ratio)
+    };
+    subtotal += part.subtotal;
+    discount += part.discount;
+    iva += part.iva;
+    serviceCharge += part.service;
+    seasonRate += part.seasonRate;
+    tip += part.tip;
+    total += part.total;
+    verifiedItems.push({ orderItemId: found.i.id, quantity: pick.quantity, ...part });
+  }
+
+  total = money(total);
+  if (cents(total) > cents(safeData.pendingAmount)) throw new Error("La selección supera el saldo pendiente.");
+  return { s, subtotal: money(subtotal), discount: money(discount), iva: money(iva), serviceCharge: money(serviceCharge), seasonRate: money(seasonRate), tip: money(tip), total, verifiedItems };
 }
+
 export async function calculateProductSplitAction(r: string, s: string, items: SelectedItem[]): Promise<any> { try { return { success:true, ...(await productCalc(r,s,items)) }; } catch(e:any) { return { error:e.message }; } }
 async function pending(restaurantId:string, s:any, input:PaymentInput, amount:number, data:any) {
   const method=input.paymentMethod?.trim().toLowerCase(); if (!METHODS.includes(method)) throw new Error("Método de pago no válido."); const key=input.idempotencyKey?.trim(); if(key) { const old=await prisma.tableSplitPayment.findUnique({where:{idempotencyKey:key}}); if(old) return {success:true,payment:old,isDuplicate:true}; }
