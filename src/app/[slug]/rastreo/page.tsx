@@ -441,6 +441,7 @@ function TrackingContent({ slug }: { slug: string }) {
                         </div>
                       </div>
                     </div>
+                  </div>
                   {/* Payment Info Section — shown for QR/transfer orders */}
                   {(() => {
                     const method = order.paymentMethod?.toLowerCase() || "";
