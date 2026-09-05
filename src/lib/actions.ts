@@ -1698,8 +1698,14 @@ export async function createOrderAction(data: {
       // An open table bill is a visit snapshot. New orders are explicitly linked
       // so they are included without mixing an earlier closed visit at the same table.
       if (rawTableName !== "Domicilio") {
+        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
         const openSession = await tx.tableSession.findFirst({
-          where: { restaurantId: data.restaurantId, tableName: rawTableName, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+          where: {
+            restaurantId: data.restaurantId,
+            tableName: rawTableName,
+            status: { in: ["OPEN", "PARTIALLY_PAID"] },
+            createdAt: { gte: fourHoursAgo }
+          },
           orderBy: { createdAt: "desc" },
         });
         if (openSession) {

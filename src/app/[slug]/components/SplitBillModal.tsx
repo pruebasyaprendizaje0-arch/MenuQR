@@ -389,14 +389,30 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                 </div>
 
                 {equalCalculation && (
-                  <div className="bg-slate-950/80 border border-slate-800 p-5 rounded-3xl space-y-3">
+                  <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-3xl space-y-3">
                     <div className="flex justify-between items-center text-xs text-slate-300">
-                      <span>Monto por persona:</span>
-                      <span className="text-2xl font-black text-white" style={{ color: restaurant.themeColor }}>
+                      <span>Monto sugerido por persona:</span>
+                      <span className="text-xl font-black text-white" style={{ color: restaurant.themeColor }}>
                         ${equalCalculation.amountPerPerson.toFixed(2)}
                       </span>
                     </div>
-                    <p className="text-[10px] text-slate-400 leading-normal">
+                    
+                    {/* Per-client Breakdown List */}
+                    <div className="space-y-1.5 pt-2 border-t border-slate-800/80">
+                      <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider block mb-1">
+                        Sugerencia de Distribución ({peopleCount} comensales):
+                      </span>
+                      <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                        {(equalCalculation.parts || []).map((partAmount: number, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center text-xs py-1.5 px-3 rounded-xl bg-slate-900/60 border border-slate-800/60">
+                            <span className="text-slate-300 font-bold">Cliente / Comensal #{idx + 1}</span>
+                            <span className="font-extrabold text-white">${partAmount.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-slate-400 leading-normal pt-1">
                       Suma exacta verificada en servidor. Distribución libre de diferencias por redondeo.
                     </p>
                   </div>
@@ -503,31 +519,55 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                     {(sessionData?.orders || []).flatMap((o: any) => o?.items || []).map((item: any) => {
                       const selectedQty = selectedProductQtys[item.id] || 0;
+                      const maxAvailable = typeof item.remainingQuantity === "number" ? item.remainingQuantity : item.quantity;
+                      const isPaid = item.isFullyPaid || maxAvailable <= 0;
+
                       return (
                         <div
                           key={item.id}
-                          className="bg-slate-950/60 border border-slate-800 p-3 rounded-2xl flex items-center justify-between"
+                          className={`p-3 rounded-2xl flex items-center justify-between transition border ${
+                            isPaid
+                              ? "bg-slate-950/30 border-slate-900 opacity-60"
+                              : selectedQty > 0
+                                ? "bg-amber-500/10 border-amber-500/40"
+                                : "bg-slate-950/60 border-slate-800"
+                          }`}
                         >
                           <div>
-                            <h4 className="font-bold text-white text-xs">{item.dishName}</h4>
-                            <span className="text-[11px] text-slate-400">${item.price.toFixed(2)} c/u (Disp: {item.quantity})</span>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-bold text-white text-xs">{item.dishName}</h4>
+                              {isPaid && (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-black uppercase">
+                                  Pagado
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-slate-400 block mt-0.5">
+                              ${item.price.toFixed(2)} c/u {isPaid ? "(Agotado / Pagado)" : `(Disponible: ${maxAvailable})`}
+                            </span>
                           </div>
 
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleQtyChange(item.id, item.quantity, -1)}
-                              className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
-                            >
-                              <Minus className="h-3.5 w-3.5" />
-                            </button>
-                            <span className="text-xs font-bold text-white w-5 text-center">{selectedQty}</span>
-                            <button
-                              onClick={() => handleQtyChange(item.id, item.quantity, 1)}
-                              className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
+                          {!isPaid ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleQtyChange(item.id, maxAvailable, -1)}
+                                disabled={selectedQty <= 0}
+                                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white disabled:opacity-30"
+                              >
+                                <Minus className="h-3.5 w-3.5" />
+                              </button>
+                              <span className="text-xs font-bold text-white w-5 text-center">{selectedQty}</span>
+                              <button
+                                onClick={() => handleQtyChange(item.id, maxAvailable, 1)}
+                                disabled={selectedQty >= maxAvailable}
+                                className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white disabled:opacity-30"
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] font-bold text-emerald-400 italic">Completado</span>
+                          )}
                         </div>
                       );
                     })}

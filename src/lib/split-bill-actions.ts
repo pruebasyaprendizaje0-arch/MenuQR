@@ -31,16 +31,64 @@ async function revalidate(id: string) {
   }
 }
 async function session(id: string, restaurantId: string) {
-  const value = await prisma.tableSession.findUnique({ where: { id }, include: { orders: { include: { order: { include: { items: true } } } } } });
+  const value = await prisma.tableSession.findUnique({
+    where: { id },
+    include: {
+      payments: { include: { allocations: true } },
+      orders: { include: { order: { include: { items: true } } } }
+    }
+  });
   if (!value || value.restaurantId !== restaurantId) throw new Error("Sesión de mesa no encontrada.");
   return value;
 }
+
 function safe(value: any) {
   const paid = money(value.paidAmount);
-  return { session: { id: value.id, status: value.status, totalAmount: money(value.totalAmount), paidAmount: paid },
-    orders: value.orders.map((x: any) => ({ id: x.order.id, items: x.order.items.map((i: any) => ({ id: i.id, dishName: i.dishName, price: i.price, quantity: i.quantity })) })),
-    payments: value.payments.map((p: any) => ({ id: p.id, payerName: p.payerName, amount: p.amount, paymentMethod: p.paymentMethod, status: p.status, createdAt: p.createdAt })),
-    totalAmount: money(value.totalAmount), paidAmount: paid, pendingAmount: Math.max(0, money(value.totalAmount - paid)), status: value.status };
+
+  // Map allocations from completed or pending split payments
+  const allocatedMap = new Map<string, number>();
+  (value.payments || []).forEach((p: any) => {
+    if (p.status === "COMPLETED" || p.status === "PENDING") {
+      (p.allocations || []).forEach((a: any) => {
+        allocatedMap.set(a.orderItemId, (allocatedMap.get(a.orderItemId) || 0) + a.quantity);
+      });
+    }
+  });
+
+  const orders = (value.orders || []).map((x: any) => ({
+    id: x.order.id,
+    items: (x.order.items || []).map((i: any) => {
+      const allocated = allocatedMap.get(i.id) || 0;
+      const remainingQuantity = Math.max(0, i.quantity - allocated);
+      return {
+        id: i.id,
+        dishName: i.dishName,
+        price: i.price,
+        totalQuantity: i.quantity,
+        allocatedQuantity: allocated,
+        remainingQuantity,
+        quantity: remainingQuantity, // for backwards compat
+        isFullyPaid: remainingQuantity === 0
+      };
+    })
+  }));
+
+  return {
+    session: { id: value.id, status: value.status, totalAmount: money(value.totalAmount), paidAmount: paid },
+    orders,
+    payments: (value.payments || []).map((p: any) => ({
+      id: p.id,
+      payerName: p.payerName,
+      amount: p.amount,
+      paymentMethod: p.paymentMethod,
+      status: p.status,
+      createdAt: p.createdAt
+    })),
+    totalAmount: money(value.totalAmount),
+    paidAmount: paid,
+    pendingAmount: Math.max(0, money(value.totalAmount - paid)),
+    status: value.status
+  };
 }
 
 export async function createTableSessionAction(restaurantId: string, tableName: string) {
@@ -48,10 +96,31 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
     const table = tableName?.trim();
     if (!restaurantId || !table || table === "Domicilio") return { error: "Mesa inválida." };
 
+    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
+
+    // Auto-close stale sessions older than 4 hours
+    await prisma.tableSession.updateMany({
+      where: {
+        restaurantId,
+        tableName: table,
+        status: { in: ["OPEN", "PARTIALLY_PAID"] },
+        createdAt: { lt: fourHoursAgo }
+      },
+      data: { status: "CLOSED" }
+    });
+
     const existing = await prisma.tableSession.findFirst({
-      where: { restaurantId, tableName: table, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+      where: {
+        restaurantId,
+        tableName: table,
+        status: { in: ["OPEN", "PARTIALLY_PAID"] },
+        createdAt: { gte: fourHoursAgo }
+      },
       orderBy: { createdAt: "desc" },
-      include: { payments: true, orders: { include: { order: { include: { items: true } } } } }
+      include: {
+        payments: { include: { allocations: true } },
+        orders: { include: { order: { include: { items: true } } } }
+      }
     });
     if (existing) return { success: true, session: existing };
 
@@ -65,6 +134,7 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
         restaurantId,
         tableName: table,
         status: { in: ACTIVE },
+        createdAt: { gte: fourHoursAgo },
         ...(last ? { createdAt: { gt: last.updatedAt } } : {}),
         tableSessions: { none: {} }
       },
@@ -80,7 +150,10 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
         totalAmount: money(orders.reduce((s, o) => s + o.total, 0)),
         orders: { create: orders.map(o => ({ orderId: o.id })) }
       },
-      include: { payments: true, orders: { include: { order: { include: { items: true } } } } }
+      include: {
+        payments: { include: { allocations: true } },
+        orders: { include: { order: { include: { items: true } } } }
+      }
     });
     await revalidate(restaurantId);
     return { success: true, session: created };
@@ -93,10 +166,31 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
 export async function getTableSessionAction(restaurantId: string, tableName: string): Promise<any> {
   try {
     const table = tableName?.trim();
+    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
+
+    // Auto-close stale sessions older than 4 hours
+    await prisma.tableSession.updateMany({
+      where: {
+        restaurantId,
+        tableName: table,
+        status: { in: ["OPEN", "PARTIALLY_PAID"] },
+        createdAt: { lt: fourHoursAgo }
+      },
+      data: { status: "CLOSED" }
+    });
+
     const value = await prisma.tableSession.findFirst({
-      where: { restaurantId, tableName: table, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+      where: {
+        restaurantId,
+        tableName: table,
+        status: { in: ["OPEN", "PARTIALLY_PAID"] },
+        createdAt: { gte: fourHoursAgo }
+      },
       orderBy: { createdAt: "desc" },
-      include: { payments: { orderBy: { createdAt: "asc" } }, orders: { include: { order: { include: { items: true } } } } }
+      include: {
+        payments: { orderBy: { createdAt: "asc" }, include: { allocations: true } },
+        orders: { include: { order: { include: { items: true } } } }
+      }
     });
 
     if (value) return { success: true, ...safe(value) };
