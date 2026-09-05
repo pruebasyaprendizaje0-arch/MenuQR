@@ -47,20 +47,69 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
   try {
     const table = tableName?.trim();
     if (!restaurantId || !table || table === "Domicilio") return { error: "Mesa inválida." };
-    const existing = await prisma.tableSession.findFirst({ where: { restaurantId, tableName: table, status: { in: ["OPEN", "PARTIALLY_PAID", "PAID"] } }, orderBy: { createdAt: "desc" }, include: { payments: true, orders: { include: { order: { include: { items: true } } } } } });
+
+    const existing = await prisma.tableSession.findFirst({
+      where: { restaurantId, tableName: table, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+      orderBy: { createdAt: "desc" },
+      include: { payments: true, orders: { include: { order: { include: { items: true } } } } }
+    });
     if (existing) return { success: true, session: existing };
-    const last = await prisma.tableSession.findFirst({ where: { restaurantId, tableName: table, status: "CLOSED" }, orderBy: { updatedAt: "desc" } });
-    const orders = await prisma.order.findMany({ where: { restaurantId, tableName: table, status: { in: ACTIVE }, ...(last ? { createdAt: { gt: last.updatedAt } } : {}) }, include: { items: true } });
+
+    const last = await prisma.tableSession.findFirst({
+      where: { restaurantId, tableName: table, status: { in: ["CLOSED", "PAID"] } },
+      orderBy: { updatedAt: "desc" }
+    });
+
+    const orders = await prisma.order.findMany({
+      where: {
+        restaurantId,
+        tableName: table,
+        status: { in: ACTIVE },
+        ...(last ? { createdAt: { gt: last.updatedAt } } : {}),
+        tableSessions: { none: {} }
+      },
+      include: { items: true }
+    });
+
     if (!orders.length) return { error: "No hay pedidos activos para esta mesa." };
-    const created = await prisma.tableSession.create({ data: { restaurantId, tableName: table, totalAmount: money(orders.reduce((s, o) => s + o.total, 0)), orders: { create: orders.map(o => ({ orderId: o.id })) } }, include: { payments: true, orders: { include: { order: { include: { items: true } } } } } });
-    await revalidate(restaurantId); return { success: true, session: created };
-  } catch (err: any) { console.error("createTableSessionAction error:", err); return { error: "No se pudo iniciar la cuenta de la mesa." }; }
+
+    const created = await prisma.tableSession.create({
+      data: {
+        restaurantId,
+        tableName: table,
+        totalAmount: money(orders.reduce((s, o) => s + o.total, 0)),
+        orders: { create: orders.map(o => ({ orderId: o.id })) }
+      },
+      include: { payments: true, orders: { include: { order: { include: { items: true } } } } }
+    });
+    await revalidate(restaurantId);
+    return { success: true, session: created };
+  } catch (err: any) {
+    console.error("createTableSessionAction error:", err);
+    return { error: "No se pudo iniciar la cuenta de la mesa." };
+  }
 }
+
 export async function getTableSessionAction(restaurantId: string, tableName: string): Promise<any> {
   try {
-    const value = await prisma.tableSession.findFirst({ where: { restaurantId, tableName: tableName?.trim(), status: { in: ["OPEN", "PARTIALLY_PAID", "PAID"] } }, orderBy: { createdAt: "desc" }, include: { payments: { orderBy: { createdAt: "asc" } }, orders: { include: { order: { include: { items: true } } } } } });
-    return value ? { success: true, ...safe(value) } : { error: "Aún no hay una cuenta abierta para esta mesa." };
-  } catch { return { error: "No se pudo consultar la cuenta." }; }
+    const table = tableName?.trim();
+    const value = await prisma.tableSession.findFirst({
+      where: { restaurantId, tableName: table, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+      orderBy: { createdAt: "desc" },
+      include: { payments: { orderBy: { createdAt: "asc" } }, orders: { include: { order: { include: { items: true } } } } }
+    });
+
+    if (value) return { success: true, ...safe(value) };
+
+    const created = await createTableSessionAction(restaurantId, tableName);
+    if (created.success && created.session) {
+      return { success: true, ...safe(created.session) };
+    }
+
+    return { error: created.error || "Aún no hay una cuenta abierta para esta mesa." };
+  } catch {
+    return { error: "No se pudo consultar la cuenta." };
+  }
 }
 export async function calculateEqualSplitAction(restaurantId: string, tableSessionId: string, people: number): Promise<any> {
   try { const s = await session(tableSessionId, restaurantId); if (!Number.isInteger(people) || people < 2 || people > 50) return { error: "El número de personas debe estar entre 2 y 50." }; const pending = cents(s.totalAmount) - cents(s.paidAmount); if (pending <= 0) return { error: "La cuenta ya está pagada." }; const base = Math.floor(pending / people), rem = pending % people, parts = Array.from({ length: people }, (_, i) => (base + (i < rem ? 1 : 0)) / 100); return { success: true, parts, amountPerPerson: parts[0], totalPending: pending / 100, exactSumMatches: true }; } catch (e: any) { return { error: e.message }; }
