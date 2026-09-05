@@ -45,21 +45,6 @@ async function session(id: string, restaurantId: string) {
 const ACTIVE_STATUSES = ["PENDING", "PREPARING", "IN_TRANSIT"];
 
 function safe(value: any) {
-  const paidInDb = money(value.paidAmount);
-
-  // Map allocations from completed or pending split payments
-  const allocatedMap = new Map<string, number>();
-  let allocatedItemsTotal = 0;
-
-  (value.payments || []).forEach((p: any) => {
-    if (p.status === "COMPLETED" || p.status === "PENDING") {
-      (p.allocations || []).forEach((a: any) => {
-        allocatedMap.set(a.orderItemId, (allocatedMap.get(a.orderItemId) || 0) + a.quantity);
-        allocatedItemsTotal += typeof a.totalPart === "number" ? a.totalPart : (a.subtotalPart || 0);
-      });
-    }
-  });
-
   // Filter ONLY active orders in course (PENDING, PREPARING, IN_TRANSIT)
   const allActiveSessionOrders = (value.orders || []).filter((x: any) =>
     ACTIVE_STATUSES.includes(x.order?.status)
@@ -76,6 +61,29 @@ function safe(value: any) {
       (x: any) => new Date(x.order.createdAt).getTime() >= visitWindowStart
     );
   }
+
+  // Build a Set of item IDs that belong ONLY to active orders in current visit.
+  // Allocations from older/paid orders must NOT count against the current pending balance.
+  const activeItemIds = new Set<string>(
+    activeSessionOrders.flatMap((x: any) => (x.order.items || []).map((i: any) => i.id))
+  );
+
+  // Map allocations — only COMPLETED payments reduce the pending balance.
+  // PENDING payments are intentionally excluded so concurrent diners can
+  // each submit their own payment without being blocked by a peer's unconfirmed request.
+  const allocatedMap = new Map<string, number>();
+  let allocatedItemsTotal = 0;
+
+  (value.payments || []).forEach((p: any) => {
+    if (p.status === "COMPLETED") {
+      (p.allocations || []).forEach((a: any) => {
+        // Only account for allocations tied to items in the CURRENT active order set
+        if (!activeItemIds.has(a.orderItemId)) return;
+        allocatedMap.set(a.orderItemId, (allocatedMap.get(a.orderItemId) || 0) + a.quantity);
+        allocatedItemsTotal += typeof a.totalPart === "number" ? a.totalPart : (a.subtotalPart || 0);
+      });
+    }
+  });
 
   const orders = activeSessionOrders.map((x: any) => ({
     id: x.order.id,
@@ -101,7 +109,8 @@ function safe(value: any) {
     activeSessionOrders.reduce((sum: number, x: any) => sum + (x.order?.total || 0), 0)
   );
 
-  const effectivePaid = Math.min(activeTotal, Math.max(paidInDb, money(allocatedItemsTotal)));
+  // effectivePaid: only what has actually been paid FOR THIS active visit's items
+  const effectivePaid = Math.min(activeTotal, money(allocatedItemsTotal));
   const effectivePending = Math.max(0, money(activeTotal - effectivePaid));
 
   return {
@@ -257,8 +266,9 @@ async function productCalc(restaurantId: string, tableSessionId: string, selecti
   const s = await session(tableSessionId, restaurantId);
   if (!selections?.length) throw new Error("Debes seleccionar al menos un producto.");
   const safeData = safe(s);
+  // Only COMPLETED allocations block item quantities — PENDING payments do not reserve items.
   const allocations = await prisma.tableSplitAllocation.findMany({
-    where: { tableSplitPayment: { tableSessionId, status: { in: ["PENDING", "COMPLETED"] } } },
+    where: { tableSplitPayment: { tableSessionId, status: "COMPLETED" } },
     select: { orderItemId: true, quantity: true }
   });
   const used = new Map<string, number>();

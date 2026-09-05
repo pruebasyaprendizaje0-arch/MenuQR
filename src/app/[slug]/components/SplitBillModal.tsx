@@ -302,6 +302,28 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                   ¿Cómo deseas dividir el pago con tus acompañantes?
                 </p>
 
+                {/* Pending payments notice */}
+                {(sessionData?.payments || []).some((p: any) => p.status === "PENDING") && (
+                  <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 shrink-0" />
+                      <span className="font-black">Pagos en espera de confirmación:</span>
+                    </div>
+                    <ul className="pl-6 space-y-0.5">
+                      {(sessionData?.payments || [])
+                        .filter((p: any) => p.status === "PENDING")
+                        .map((p: any) => (
+                          <li key={p.id} className="text-amber-200/80">
+                            {p.payerName} — ${p.amount.toFixed(2)} ({p.paymentMethod})
+                          </li>
+                        ))}
+                    </ul>
+                    <p className="text-amber-300/60 text-[10px] pt-1">
+                      El restaurante debe confirmar estos pagos. Aún puedes registrar el tuyo.
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Option 1: Equal Split */}
                   <div
@@ -662,7 +684,7 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                 </div>
 
                 <button
-                  disabled={submittingPayment || !productCalculation}
+                  disabled={submittingPayment || !productCalculation || !productCalculation.total}
                   onClick={handleConfirmProductPayment}
                   className="w-full py-4 rounded-2xl text-xs font-black uppercase text-white shadow-xl flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50"
                   style={{ backgroundColor: restaurant.themeColor }}
@@ -675,7 +697,11 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                   ) : (
                     <>
                       <Check className="h-4 w-4" />
-                      <span>Confirmar Pago de ${productCalculation?.total.toFixed(2)}</span>
+                      <span>
+                        {productCalculation?.total
+                          ? `Confirmar Pago de $${productCalculation.total.toFixed(2)}`
+                          : "Selecciona productos para pagar"}
+                      </span>
                     </>
                   )}
                 </button>

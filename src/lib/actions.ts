@@ -1871,6 +1871,13 @@ export async function getOrderTrackingAction(restaurantSlug?: string | null, que
             whatsapp: true,
             themeColor: true,
             address: true,
+            qrCobroUrl: true,
+            bankName: true,
+            bankAccountType: true,
+            bankAccountNumber: true,
+            bankAccountName: true,
+            bankAccountDocument: true,
+            bankAccountEmail: true,
           }
         }
       }

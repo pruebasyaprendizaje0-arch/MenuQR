@@ -18,7 +18,12 @@ import {
   RefreshCw,
   AlertCircle,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  Wallet,
+  Copy,
+  QrCode,
+  CreditCard,
+  CheckCheck,
 } from "lucide-react";
 
 type OrderItem = {
@@ -56,6 +61,13 @@ type OrderTrack = {
     whatsapp: string;
     themeColor: string;
     address?: string | null;
+    qrCobroUrl?: string | null;
+    bankName?: string | null;
+    bankAccountType?: string | null;
+    bankAccountNumber?: string | null;
+    bankAccountName?: string | null;
+    bankAccountDocument?: string | null;
+    bankAccountEmail?: string | null;
   };
 };
 
@@ -429,7 +441,21 @@ function TrackingContent({ slug }: { slug: string }) {
                         </div>
                       </div>
                     </div>
-                  </div>
+                  {/* Payment Info Section — shown for QR/transfer orders */}
+                  {(() => {
+                    const method = order.paymentMethod?.toLowerCase() || "";
+                    const isQrOrTransfer = method === "qr" || method === "deuna" || method === "transferencia" || method === "transfer";
+                    const hasQr = !!order.restaurant.qrCobroUrl;
+                    const hasBank = !!(order.restaurant.bankName || order.restaurant.bankAccountNumber);
+                    if (!isQrOrTransfer || (!hasQr && !hasBank)) return null;
+                    return (
+                      <PaymentInfoSection
+                        restaurant={order.restaurant}
+                        total={order.total}
+                        orderNumber={order.orderNumber || 0}
+                      />
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -441,6 +467,128 @@ function TrackingContent({ slug }: { slug: string }) {
       <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500">
         <p>MenuQR Pro &copy; {isMounted ? new Date().getFullYear() : "2026"} - Sistema Inteligente de Pedidos y Seguimiento a Domicilio</p>
       </footer>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PaymentInfoSection — QR + Bank transfer details block
+───────────────────────────────────────────────────────────── */
+function PaymentInfoSection({
+  restaurant,
+  total,
+  orderNumber,
+}: {
+  restaurant: OrderTrack["restaurant"];
+  total: number;
+  orderNumber: number;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copyAccount = () => {
+    if (!restaurant.bankAccountNumber) return;
+    navigator.clipboard.writeText(restaurant.bankAccountNumber).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const qrUrl = restaurant.qrCobroUrl
+    ? restaurant.qrCobroUrl.startsWith("http")
+      ? restaurant.qrCobroUrl
+      : `${typeof window !== "undefined" ? window.location.origin : ""}${restaurant.qrCobroUrl}`
+    : null;
+
+  return (
+    <div className="mt-6 border-t border-slate-800/60 pt-6 space-y-5">
+      {/* Section Header */}
+      <div className="flex items-center gap-2">
+        <Wallet className="h-5 w-5 text-amber-400" />
+        <h4 className="font-extrabold text-white text-sm">Datos para tu Pago</h4>
+        <span className="ml-auto px-3 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase border border-emerald-500/20">
+          Total: ${total.toFixed(2)}
+        </span>
+      </div>
+
+      {/* QR Code Block */}
+      {qrUrl && (
+        <div className="bg-slate-950/60 border border-amber-500/20 rounded-2xl p-5 space-y-3 text-center">
+          <div className="flex items-center justify-center gap-2 text-amber-400 text-xs font-black uppercase tracking-wider">
+            <QrCode className="h-4 w-4" />
+            <span>Pago Móvil o Transferencia Bancaria</span>
+          </div>
+          <p className="text-xs text-slate-400">
+            Escanea este código con tu app de <strong className="text-white">Deuna</strong> o banca móvil preferida para pagar:
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={qrUrl}
+            alt="Código QR de pago"
+            className="mx-auto max-w-[220px] w-full rounded-2xl border border-slate-700 shadow-lg"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
+        </div>
+      )}
+
+      {/* Bank Transfer Block */}
+      {(restaurant.bankName || restaurant.bankAccountNumber) && (
+        <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center gap-2 text-slate-300 text-xs font-black uppercase tracking-wider border-b border-slate-800/80 pb-3">
+            <CreditCard className="h-4 w-4 text-slate-400" />
+            <span>Datos para Transferencia Bancaria</span>
+          </div>
+          <dl className="space-y-2 text-xs">
+            {restaurant.bankName && (
+              <div className="flex justify-between">
+                <dt className="text-slate-400">Banco:</dt>
+                <dd className="font-bold text-white">{restaurant.bankName}</dd>
+              </div>
+            )}
+            {restaurant.bankAccountType && (
+              <div className="flex justify-between">
+                <dt className="text-slate-400">Tipo:</dt>
+                <dd className="font-bold text-white">{restaurant.bankAccountType}</dd>
+              </div>
+            )}
+            {restaurant.bankAccountNumber && (
+              <div className="flex justify-between items-center">
+                <dt className="text-slate-400">Nro. Cuenta:</dt>
+                <dd className="flex items-center gap-2">
+                  <span className="font-black text-amber-400 font-mono">{restaurant.bankAccountNumber}</span>
+                  <button
+                    onClick={copyAccount}
+                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+                    title="Copiar número"
+                  >
+                    {copied ? <CheckCheck className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                </dd>
+              </div>
+            )}
+            {restaurant.bankAccountName && (
+              <div className="flex justify-between">
+                <dt className="text-slate-400">Beneficiario:</dt>
+                <dd className="font-bold text-white">{restaurant.bankAccountName}</dd>
+              </div>
+            )}
+            {restaurant.bankAccountDocument && (
+              <div className="flex justify-between">
+                <dt className="text-slate-400">CI / RUC:</dt>
+                <dd className="font-bold text-white">{restaurant.bankAccountDocument}</dd>
+              </div>
+            )}
+            {restaurant.bankAccountEmail && (
+              <div className="flex justify-between">
+                <dt className="text-slate-400">Correo:</dt>
+                <dd className="font-bold text-white">{restaurant.bankAccountEmail}</dd>
+              </div>
+            )}
+          </dl>
+          <p className="text-[10px] text-slate-500 leading-relaxed pt-1 border-t border-slate-800/60">
+            Recuerda tomar una captura de pantalla del comprobante de transferencia o pago y adjuntarla en el chat de WhatsApp al enviar tu orden.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
