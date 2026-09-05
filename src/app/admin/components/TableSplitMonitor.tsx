@@ -29,6 +29,11 @@ interface TableSplitMonitorProps {
 }
 
 export function TableSplitMonitor({ restaurantId, tablesConfig }: TableSplitMonitorProps) {
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   const [loading, setLoading] = useState(false);
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedTable, setSelectedTable] = useState<string>("");
@@ -315,6 +320,7 @@ export function TableSplitMonitor({ restaurantId, tablesConfig }: TableSplitMoni
                       <th className="p-3">Importe</th>
                       <th className="p-3">Método</th>
                       <th className="p-3">Estado</th>
+                      <th className="p-3">Acciones</th>
                       <th className="p-3">Hora</th>
                     </tr>
                   </thead>
@@ -338,7 +344,7 @@ export function TableSplitMonitor({ restaurantId, tablesConfig }: TableSplitMoni
                           )}
                         </td>
                         <td className="p-3 text-slate-400">
-                          {new Date(p.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          {isMounted && p.createdAt ? new Date(p.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--"}
                         </td>
                       </tr>
                     ))}

@@ -205,7 +205,7 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
     }
   };
 
-  if (!isOpen) return null;
+  if (!isMounted || !isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in" style={{ fontFamily: "var(--font-outfit)" }}>
