@@ -43,14 +43,17 @@ async function session(id: string, restaurantId: string) {
 }
 
 function safe(value: any) {
-  const paid = money(value.paidAmount);
+  const paidInDb = money(value.paidAmount);
 
   // Map allocations from completed or pending split payments
   const allocatedMap = new Map<string, number>();
+  let allocatedItemsTotal = 0;
+
   (value.payments || []).forEach((p: any) => {
     if (p.status === "COMPLETED" || p.status === "PENDING") {
       (p.allocations || []).forEach((a: any) => {
         allocatedMap.set(a.orderItemId, (allocatedMap.get(a.orderItemId) || 0) + a.quantity);
+        allocatedItemsTotal += typeof a.totalPart === "number" ? a.totalPart : (a.subtotalPart || 0);
       });
     }
   });
@@ -63,7 +66,7 @@ function safe(value: any) {
       return {
         id: i.id,
         dishName: i.dishName,
-        price: i.price,
+        price: money(i.price),
         totalQuantity: i.quantity,
         allocatedQuantity: allocated,
         remainingQuantity,
@@ -73,8 +76,11 @@ function safe(value: any) {
     })
   }));
 
+  const effectivePaid = Math.max(paidInDb, money(allocatedItemsTotal));
+  const effectivePending = Math.max(0, money(value.totalAmount - effectivePaid));
+
   return {
-    session: { id: value.id, status: value.status, totalAmount: money(value.totalAmount), paidAmount: paid },
+    session: { id: value.id, status: value.status, totalAmount: money(value.totalAmount), paidAmount: effectivePaid },
     orders,
     payments: (value.payments || []).map((p: any) => ({
       id: p.id,
@@ -85,9 +91,9 @@ function safe(value: any) {
       createdAt: p.createdAt
     })),
     totalAmount: money(value.totalAmount),
-    paidAmount: paid,
-    pendingAmount: Math.max(0, money(value.totalAmount - paid)),
-    status: value.status
+    paidAmount: effectivePaid,
+    pendingAmount: effectivePending,
+    status: effectivePending === 0 ? "PAID" : value.status
   };
 }
 
