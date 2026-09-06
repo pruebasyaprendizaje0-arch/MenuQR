@@ -142,7 +142,7 @@ export default async function LandingPage() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center w-full max-w-sm pt-2">
             <Link 
-              href="/mamma-mia"
+              href="/pigro"
               className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 shadow-xl shadow-red-950/20 transform hover:scale-[1.02] transition-all duration-200"
             >
               Ver Menú de Demo

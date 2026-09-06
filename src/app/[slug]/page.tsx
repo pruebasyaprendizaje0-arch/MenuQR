@@ -186,8 +186,8 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
               <Link href="/admin" className="px-6 py-3 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-sm shadow-lg transition-all">
                 Ir al Panel Admin
               </Link>
-              <Link href="/mamma-mia" className="text-xs text-slate-500 hover:text-slate-400 underline transition">
-                Ver menú de muestra (Mamma Mia)
+              <Link href="/pigro" className="text-xs text-slate-500 hover:text-slate-400 underline transition">
+                Ver menú de muestra (Pigro)
               </Link>
             </div>
           </div>

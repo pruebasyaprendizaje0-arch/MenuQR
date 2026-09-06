@@ -22,6 +22,51 @@ export function getBaseUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://menuqr.ubicame.cc";
 }
 
+/**
+ * Validates and formats image URLs safely for Schema.org JSON-LD structured data.
+ * Accepts:
+ *  - Full HTTP / HTTPS URLs (e.g., https://example.com/image.jpg)
+ *  - Valid relative paths (e.g., /uploads/image.jpg or uploads/image.jpg), converting them to absolute URLs using getBaseUrl()
+ * Rejects:
+ *  - data: URIs (e.g. data:image/jpeg;base64,...)
+ *  - javascript: URIs
+ *  - Empty / null / non-string values
+ *  - Malformed protocols or invalid formats
+ */
+export function resolvePublicImageUrl(rawUrl?: string | null): string | undefined {
+  if (!rawUrl || typeof rawUrl !== "string") return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return undefined;
+
+  // Reject forbidden protocols / prefixes immediately
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("data:") || lower.startsWith("javascript:") || lower.startsWith("vbscript:")) {
+    return undefined;
+  }
+
+  // Handle absolute HTTP/HTTPS URLs
+  if (lower.startsWith("http://") || lower.startsWith("https://")) {
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        return parsed.toString();
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // Handle relative paths (must not contain scheme separators)
+  if (trimmed.includes(":") && !trimmed.startsWith("/")) {
+    return undefined;
+  }
+
+  const baseUrl = getBaseUrl();
+  const cleanPath = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return `${baseUrl}${cleanPath}`;
+}
+
 const DAY_MAP: Record<string, string> = {
   monday: "Monday",
   tuesday: "Tuesday",
@@ -143,6 +188,7 @@ export interface RestaurantMinimalData {
   tiktok?: string | null;
   ubicameUrl?: string | null;
   logoUrl?: string | null;
+  coverUrl?: string | null;
   priceRange?: string | null;
   structuredSchedule?: string | null;
   latitude?: number | string | null;
@@ -214,22 +260,26 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
   const menuSections = categories.map((cat) => ({
     "@type": "MenuSection",
     name: cat.name,
-    hasMenuItem: (cat.dishes || []).map((dish) => ({
-      "@type": "MenuItem",
-      name: dish.name,
-      description: dish.description || `${dish.name} disponible en ${restaurant.name}`,
-      image: dish.imageUrl?.startsWith("http") 
-        ? dish.imageUrl 
-        : dish.imageUrl 
-          ? `${baseUrl}${dish.imageUrl}` 
-          : undefined,
-      offers: {
-        "@type": "Offer",
-        price: String(dish.price || 0),
-        priceCurrency: "USD",
-        availability: dish.isAvailable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-      },
-    })),
+    hasMenuItem: (cat.dishes || []).map((dish) => {
+      const dishImage = resolvePublicImageUrl(dish.imageUrl);
+      const menuItemObj: Record<string, unknown> = {
+        "@type": "MenuItem",
+        name: dish.name,
+        description: dish.description || `${dish.name} disponible en ${restaurant.name}`,
+        offers: {
+          "@type": "Offer",
+          price: String(dish.price || 0),
+          priceCurrency: "USD",
+          availability: dish.isAvailable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+        },
+      };
+
+      if (dishImage) {
+        menuItemObj.image = dishImage;
+      }
+
+      return menuItemObj;
+    }),
   }));
 
   const sameAs: string[] = [];
@@ -278,7 +328,7 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
     description: string;
     url: string;
     telephone?: string;
-    image: string;
+    image?: string;
     servesCuisine: string;
     priceRange: string;
     address: PostalAddressSchema;
@@ -293,6 +343,8 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
     geo?: GeoCoordinatesSchema;
   }
 
+  const resolvedMainImage = resolvePublicImageUrl(restaurant.logoUrl) || resolvePublicImageUrl(restaurant.coverUrl);
+
   const restaurantEntity: RestaurantGraphItem = {
     "@type": ["Restaurant", "LocalBusiness"],
     "@id": `${siteUrl}#restaurant`,
@@ -300,7 +352,6 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
     description: restaurant.description || `Menú digital, carta, precios y pedidos por WhatsApp de ${restaurant.name} en ${cityOrLocality}, Ecuador.`,
     url: siteUrl,
     telephone: restaurant.whatsapp ? `+${restaurant.whatsapp.replace(/\D/g, "")}` : undefined,
-    image: restaurant.logoUrl ? (restaurant.logoUrl.startsWith("http") ? restaurant.logoUrl : `${baseUrl}${restaurant.logoUrl}`) : `${baseUrl}/icon.png`,
     servesCuisine: restaurant.specialty || "Gastronomía",
     priceRange: restaurant.priceRange || "$$",
     address: postalAddress,
@@ -313,6 +364,10 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
       hasMenuSection: menuSections,
     },
   };
+
+  if (resolvedMainImage) {
+    restaurantEntity.image = resolvedMainImage;
+  }
 
   const latNum = Number(restaurant.latitude);
   const lngNum = Number(restaurant.longitude);

@@ -5,7 +5,7 @@
 ## Información Clave del Producto
 
 - **Nombre**: MenuQR Pro Ecuador
-- **Sitio Web Principal**: https://menuqrpro.com
+- **Sitio Web Principal**: https://menuqr.ubicame.cc
 - **País / Mercado Principal**: Ecuador (Quito, Guayaquil, Cuenca, Ambato, Manta, Portoviejo, Loja, Santo Domingo, Ibarra, Machala)
 - **Precio**: $10.00 USD / mes (con 30 días de prueba totalmente gratuita sin tarjeta de crédito)
 - **Comisiones**: 0% de comisión por venta / pedido.
@@ -46,4 +46,5 @@ Solo necesitas un número de teléfono de WhatsApp donde desees recibir las aler
 - [Página Principal](https://menuqr.ubicame.cc/)
 - [Registro de Restaurantes (Prueba Gratis)](https://menuqr.ubicame.cc/registro)
 - [Iniciar Sesión](https://menuqr.ubicame.cc/login)
-- [Menú de Muestra (Demo)](https://menuqr.ubicame.cc/mamma-mia)
+- [Menú Digital Restaurante Pigro](https://menuqr.ubicame.cc/pigro)
+- [Menú Digital Las Empanadas de Mauro](https://menuqr.ubicame.cc/las-empanadas-de-mauro)
