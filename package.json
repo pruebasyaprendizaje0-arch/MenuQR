@@ -7,11 +7,7 @@
     "build": "prisma generate && next build",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
-    "prisma:control:generate": "prisma generate --schema=prisma/schema.control.prisma",
-    "prisma:control:migrate": "prisma migrate dev --schema=prisma/schema.control.prisma",
-    "prisma:control:deploy": "prisma migrate deploy --schema=prisma/schema.control.prisma",
-    "prisma:tenant:generate": "prisma generate --schema=prisma/schema.tenant.prisma",
-    "prisma:tenant:deploy": "prisma migrate deploy --schema=prisma/schema.tenant.prisma"
+    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/seo-geo.test.ts && npx tsx src/lib/split-bill.test.ts"
   },
   "engines": {
     "node": ">=20.9.0",

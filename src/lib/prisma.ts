@@ -38,8 +38,8 @@ export const prisma =
 
 globalForPrisma.prismaMain = prisma;
 
-export const prismaControl = prisma as any;
-export const prismaTenant = prisma as any;
+export const prismaControl = prisma;
+export const prismaTenant = prisma;
 
 if (!globalForPrisma.tenantCache) {
   globalForPrisma.tenantCache = new Map<string, PrismaClient>();

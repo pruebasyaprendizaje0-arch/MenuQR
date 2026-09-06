@@ -132,6 +132,7 @@ model Dish {
 
   @@index([categoryId])
   @@index([restaurantId])
+  @@index([restaurantId, isAvailable])
 }
 
 model SystemSetting {
@@ -171,6 +172,7 @@ model Order {
   tableSessions    TableSessionOrder[]
 
   @@index([restaurantId, createdAt])
+  @@index([restaurantId, status])
   @@index([status])
 }
 
@@ -253,6 +255,7 @@ model Customer {
 
   @@index([restaurantId])
   @@index([phone])
+  @@index([restaurantId, phone])
 }
 
 model Coupon {
@@ -295,6 +298,7 @@ model AnalyticsEvent {
 
   @@index([eventType, createdAt])
   @@index([restaurantId])
+  @@index([restaurantId, eventType])
 }
 
 model TableSession {

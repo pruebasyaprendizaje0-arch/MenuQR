@@ -9,11 +9,16 @@ function getJwtSecret(): string {
 
   if (secret) return secret;
 
+  if (process.env.NODE_ENV === "production") {
+    console.error("[CRITICAL AUTH ERROR] La variable JWT_SECRET es obligatoria en entorno de producción.");
+    throw new Error("JWT_SECRET no definida. Por favor agrégala en el panel de Coolify.");
+  }
+
   console.warn(
-    "[Auth Warning] Ni JWT_SECRET ni NEXTAUTH_SECRET están definidos en las variables de entorno. Utilizando clave de respaldo segura de producción."
+    "[Auth Warning] JWT_SECRET no está definida. Utilizando clave de respaldo únicamente para desarrollo local."
   );
 
-  return "menuqr-pro-production-secure-jwt-fallback-secret-2026-vultr-coolify";
+  return "menuqr-pro-dev-fallback-secret-key-local-only";
 }
 
 export interface UserSessionPayload {

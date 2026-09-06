@@ -4,7 +4,6 @@ import { UtensilsCrossed, MapPin, ArrowRight, Sparkles, ChevronRight } from "luc
 import type { Metadata } from "next";
 import { getBaseUrl, unslugify, generateBreadcrumbJsonLd } from "@/lib/seo";
 import { ecuadorData } from "@/lib/ecuador";
-import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -36,8 +35,8 @@ export async function generateMetadata({ params: paramsPromise }: Props): Promis
     count = await prismaTenant.restaurant.count({
       where: {
         OR: [
-          { province: { equals: provName, mode: "insensitive" } },
-          { locality: { contains: provName, mode: "insensitive" } },
+          { province: { equals: provName, mode: "insensitive" as const } },
+          { locality: { contains: provName, mode: "insensitive" as const } },
           ...citiesInProvince.map((city) => ({
             locality: { contains: city, mode: "insensitive" as const },
           })),
@@ -72,8 +71,6 @@ export default async function ProvinceDirectoryPage({ params: paramsPromise }: P
   const params = await paramsPromise;
   const provName = findExactProvinceName(params.provincia);
   const baseUrl = getBaseUrl();
-
-  // Get cities/cantons for this province from ecuadorData
   const citiesInProvince = ecuadorData[provName] || [];
 
   let restaurants: any[] = [];
@@ -81,13 +78,13 @@ export default async function ProvinceDirectoryPage({ params: paramsPromise }: P
     restaurants = await prismaTenant.restaurant.findMany({
       where: {
         OR: [
-          { province: { equals: provName, mode: "insensitive" } },
-          { locality: { contains: provName, mode: "insensitive" } },
+          { province: { equals: provName, mode: "insensitive" as const } },
+          { locality: { contains: provName, mode: "insensitive" as const } },
           ...citiesInProvince.map((city) => ({
-            locality: { contains: city, mode: "insensitive" },
+            locality: { contains: city, mode: "insensitive" as const },
           })),
           ...citiesInProvince.map((city) => ({
-            city: { equals: city, mode: "insensitive" },
+            city: { equals: city, mode: "insensitive" as const },
           })),
         ],
       },
