@@ -1,6 +1,6 @@
 import { MetadataRoute } from "next";
 import { prismaTenant } from "@/lib/db";
-import { getBaseUrl, normalizeSlug } from "@/lib/seo";
+import { getBaseUrl, normalizeSlug, resolvePublicImageUrl } from "@/lib/seo";
 import { ecuadorData } from "@/lib/ecuador";
 
 export default async function sitemap(): Promise<any> {
@@ -139,8 +139,10 @@ export default async function sitemap(): Promise<any> {
 
     restaurants.forEach((r) => {
       const images: string[] = [];
-      if (r.logoUrl) images.push(r.logoUrl.startsWith("http") ? r.logoUrl : `${baseUrl}${r.logoUrl}`);
-      if (r.coverUrl) images.push(r.coverUrl.startsWith("http") ? r.coverUrl : `${baseUrl}${r.coverUrl}`);
+      const logo = resolvePublicImageUrl(r.logoUrl);
+      const cover = resolvePublicImageUrl(r.coverUrl);
+      if (logo) images.push(logo);
+      if (cover) images.push(cover);
 
       restaurantRoutes.push({
         url: `${baseUrl}/${r.slug}`,
@@ -157,11 +159,11 @@ export default async function sitemap(): Promise<any> {
         priority: 0.85,
       });
 
-      // Include dishes that have images
+      // Include dishes that have valid public images
       (r.dishes || []).forEach((dish: any) => {
-        if (dish.imageUrl) {
+        const dishImage = resolvePublicImageUrl(dish.imageUrl);
+        if (dishImage) {
           const dishSlug = normalizeSlug(dish.name);
-          const dishImage = dish.imageUrl.startsWith("http") ? dish.imageUrl : `${baseUrl}${dish.imageUrl}`;
           restaurantRoutes.push({
             url: `${baseUrl}/${r.slug}/${dishSlug}`,
             lastModified: dish.updatedAt,

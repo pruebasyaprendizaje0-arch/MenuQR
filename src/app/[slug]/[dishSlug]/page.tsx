@@ -2,7 +2,7 @@ import { prismaTenant } from "@/lib/db";
 import Link from "next/link";
 import { UtensilsCrossed, MapPin, ArrowLeft, MessageSquare, Check, Sparkles, ChevronRight } from "lucide-react";
 import type { Metadata } from "next";
-import { getBaseUrl, normalizeSlug, generateBreadcrumbJsonLd } from "@/lib/seo";
+import { getBaseUrl, normalizeSlug, generateBreadcrumbJsonLd, resolvePublicImageUrl } from "@/lib/seo";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +42,10 @@ export async function generateMetadata({ params: paramsPromise }: Props): Promis
 
     const baseUrl = getBaseUrl();
     const url = `${baseUrl}/${slug}/${dishSlug}`;
-    const imageUrl = dish.imageUrl 
-      ? (dish.imageUrl.startsWith("http") ? dish.imageUrl : `${baseUrl}${dish.imageUrl}`)
-      : (restaurant.logoUrl ? (restaurant.logoUrl.startsWith("http") ? restaurant.logoUrl : `${baseUrl}${restaurant.logoUrl}`) : `${baseUrl}/icon.png`);
+    const imageUrl =
+      resolvePublicImageUrl(dish.imageUrl) ||
+      resolvePublicImageUrl(restaurant.logoUrl) ||
+      `${baseUrl}/icon.png`;
 
     return {
       title,
@@ -119,13 +120,14 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
   ];
 
   const breadcrumbSchema = generateBreadcrumbJsonLd(breadcrumbs);
+  const sanitizedDishImage = resolvePublicImageUrl(dish.imageUrl);
 
   const menuItemSchema = {
     "@context": "https://schema.org",
     "@type": "MenuItem",
     "name": dish.name,
     "description": dish.description || `${dish.name} en ${restaurant.name}`,
-    "image": dish.imageUrl ? (dish.imageUrl.startsWith("http") ? dish.imageUrl : `${baseUrl}${dish.imageUrl}`) : undefined,
+    "image": sanitizedDishImage || undefined,
     "offers": {
       "@type": "Offer",
       "price": String(dish.price || 0),

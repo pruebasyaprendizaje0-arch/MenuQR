@@ -73,10 +73,26 @@ async function runTests() {
     assert(resolvePublicImageUrl("http://example.com/photo.jpg") === "http://example.com/photo.jpg", "resolvePublicImageUrl debe conservar URL HTTP válida");
     assert(resolvePublicImageUrl("/uploads/dish.webp") === `${getBaseUrl()}/uploads/dish.webp`, "resolvePublicImageUrl debe convertir ruta relativa en absoluta con dominio canónico");
     assert(resolvePublicImageUrl("uploads/dish.webp") === `${getBaseUrl()}/uploads/dish.webp`, "resolvePublicImageUrl debe convertir ruta relativa sin slash en absoluta");
-    assert(resolvePublicImageUrl("data:image/jpeg;base64,/9j/4AAQSkZJRg...") === undefined, "resolvePublicImageUrl debe rechazar cadenas data:image");
+    assert(resolvePublicImageUrl("data:image/jpeg;base64,abc==") === undefined, "resolvePublicImageUrl debe rechazar cadenas data:image");
     assert(resolvePublicImageUrl("javascript:alert(1)") === undefined, "resolvePublicImageUrl debe rechazar esquemas javascript:");
     assert(resolvePublicImageUrl("") === undefined, "resolvePublicImageUrl debe retornar undefined para cadenas vacías");
     assert(resolvePublicImageUrl(null) === undefined, "resolvePublicImageUrl debe retornar undefined para valores nulos");
+
+    // TEST 3C: Static Audit & Image Sanitization Rules for Sitemap & Dish Detail Page
+    const testDataUri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    assert(resolvePublicImageUrl(testDataUri) === undefined, "resolvePublicImageUrl jamás debe transformar un data:URI en URL pública ni string concatenado");
+
+    const sitemapCode = fs.readFileSync(path.join(process.cwd(), "src/app/sitemap.ts"), "utf-8");
+    const dishPageCode = fs.readFileSync(path.join(process.cwd(), "src/app/[slug]/[dishSlug]/page.tsx"), "utf-8");
+
+    assert(sitemapCode.includes("resolvePublicImageUrl"), "src/app/sitemap.ts debe importar y utilizar resolvePublicImageUrl");
+    assert(dishPageCode.includes("resolvePublicImageUrl"), "src/app/[slug]/[dishSlug]/page.tsx debe importar y utilizar resolvePublicImageUrl");
+
+    assert(!/\$\{baseUrl\}\s*\$\{\s*r\.logoUrl\s*\}/.test(sitemapCode), "sitemap.ts no debe concatenar baseUrl con r.logoUrl sin sanitizar");
+    assert(!/\$\{baseUrl\}\s*\$\{\s*r\.coverUrl\s*\}/.test(sitemapCode), "sitemap.ts no debe concatenar baseUrl con r.coverUrl sin sanitizar");
+    assert(!/\$\{baseUrl\}\s*\$\{\s*dish\.imageUrl\s*\}/.test(sitemapCode), "sitemap.ts no debe concatenar baseUrl con dish.imageUrl sin sanitizar");
+    assert(!/\$\{baseUrl\}\s*\$\{\s*dish\.imageUrl\s*\}/.test(dishPageCode), "page.tsx de plato no debe concatenar baseUrl con dish.imageUrl sin sanitizar");
+    assert(!/\$\{baseUrl\}\s*\$\{\s*restaurant\.logoUrl\s*\}/.test(dishPageCode), "page.tsx de plato no debe concatenar baseUrl con restaurant.logoUrl sin sanitizar");
 
     // TEST 3B: Legacy locality must never be exposed as one malformed locality.
     const legacyLocation = resolveRestaurantLocation({
