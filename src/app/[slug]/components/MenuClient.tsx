@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction, validateCouponAction } from "@/lib/actions";
-import { isRestaurantOpen } from "@/lib/schedule";
+import { isRestaurantOpen, WeeklySchedule } from "@/lib/schedule";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -74,6 +74,9 @@ type Restaurant = {
   priceRange?: string | null;
   googleBusinessUrl?: string | null;
   structuredSchedule?: string | null;
+  localSchedule?: string | null;
+  deliverySchedule?: string | null;
+  blockedDates?: string | null;
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
