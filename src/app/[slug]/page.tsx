@@ -6,11 +6,10 @@ import { redirect, RedirectType } from "next/navigation";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { findRestaurantBySlugOrHistory } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
-
-export const dynamic = "force-dynamic";
-
 import type { Metadata } from "next";
 import { generateRestaurantJsonLd, getBaseUrl } from "@/lib/seo";
+
+export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{
@@ -42,9 +41,14 @@ export async function generateMetadata({ params: paramsPromise }: PageProps): Pr
         name: true,
         specialty: true,
         locality: true,
+        city: true,
         description: true,
         logoUrl: true,
         coverUrl: true,
+        seoTitle: true,
+        seoDescription: true,
+        seoKeywords: true,
+        seoImage: true,
       },
     });
 
@@ -54,43 +58,60 @@ export async function generateMetadata({ params: paramsPromise }: PageProps): Pr
       };
     }
 
-    const title = `Menú Digital de ${restaurant.name} ${restaurant.locality ? `(${restaurant.locality})` : "en Ecuador"}`;
-    const description = restaurant.description || `Escanea el código QR y consulta la carta digital completa de ${restaurant.name}. Especialidad: ${restaurant.specialty || "Gastronomía"}. Haz tu pedido directo a WhatsApp.`;
+    const baseUrl = getBaseUrl();
+    const cityOrLocality = restaurant.city || restaurant.locality || "Ecuador";
+    const title = restaurant.seoTitle || `Menú Digital de ${restaurant.name} (${cityOrLocality})`;
+    const description =
+      restaurant.seoDescription ||
+      restaurant.description ||
+      `Escanea el código QR y consulta la carta digital completa de ${restaurant.name}. Especialidad: ${restaurant.specialty || "Gastronomía"}. Haz tu pedido directo a WhatsApp.`;
+
+    const rawImageUrl = restaurant.seoImage || restaurant.logoUrl || restaurant.coverUrl || "/icon.png";
+    const imageUrl = rawImageUrl.startsWith("http") ? rawImageUrl : `${baseUrl}${rawImageUrl.startsWith("/") ? "" : "/"}${rawImageUrl}`;
+
+    const defaultKeywords = [
+      `Menú digital ${restaurant.name}`,
+      `Carta ${restaurant.name}`,
+      `Pedir por WhatsApp ${restaurant.name}`,
+      `Restaurante en ${cityOrLocality}`,
+      restaurant.specialty || "Gastronomía",
+      "MenuQR Pro",
+    ];
+
+    const keywords = restaurant.seoKeywords
+      ? restaurant.seoKeywords.split(",").map((k) => k.trim()).concat(defaultKeywords)
+      : defaultKeywords;
+
+    const canonicalUrl = `${baseUrl}/${slug}`;
 
     return {
+      metadataBase: new URL(baseUrl),
       title,
       description,
       alternates: {
-        canonical: `/${slug}`,
+        canonical: canonicalUrl,
       },
-      keywords: [
-        `Menú digital ${restaurant.name}`,
-        `Carta ${restaurant.name}`,
-        `Pedir por WhatsApp ${restaurant.name}`,
-        restaurant.locality ? `Restaurante en ${restaurant.locality}` : "Restaurante en Ecuador",
-        restaurant.specialty || "Gastronomía",
-        "MenuQR Pro",
-      ],
+      keywords,
       openGraph: {
-        title: `${restaurant.name} | Menú Digital QR`,
+        title,
         description,
-        url: `https://menuqrpro.com/${slug}`,
+        url: canonicalUrl,
         images: [
           {
-            url: restaurant.logoUrl || restaurant.coverUrl || "/icon.png",
-            alt: `Logo de ${restaurant.name}`,
+            url: imageUrl,
+            alt: `Imagen de ${restaurant.name}`,
           },
         ],
       },
       twitter: {
         card: "summary_large_image",
-        title: `${restaurant.name} | Menú Digital QR`,
+        title,
         description,
-        images: [restaurant.logoUrl || restaurant.coverUrl || "/icon.png"],
+        images: [imageUrl],
       },
       other: {
         "geo.region": "EC",
-        "geo.placename": restaurant.locality || "Ecuador",
+        "geo.placename": cityOrLocality,
       },
     };
   } catch {

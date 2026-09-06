@@ -21,7 +21,63 @@ export function unslugify(slug: string): string {
 }
 
 export function getBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || "https://menuqr.ubicame.cc";
+  return process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://menuqr.ubicame.cc";
+}
+
+const DAY_MAP: Record<string, string> = {
+  monday: "Monday",
+  tuesday: "Tuesday",
+  wednesday: "Wednesday",
+  thursday: "Thursday",
+  friday: "Friday",
+  saturday: "Saturday",
+  sunday: "Sunday",
+  lunes: "Monday",
+  martes: "Tuesday",
+  miercoles: "Wednesday",
+  jueves: "Thursday",
+  viernes: "Friday",
+  sabado: "Saturday",
+  domingo: "Sunday",
+};
+
+export function parseOpeningHoursSpecification(structuredScheduleStr?: string | null) {
+  if (!structuredScheduleStr) return undefined;
+  try {
+    const data = typeof structuredScheduleStr === "string" ? JSON.parse(structuredScheduleStr) : structuredScheduleStr;
+    const specs: any[] = [];
+
+    if (Array.isArray(data)) {
+      for (const item of data) {
+        if (item.closed) continue;
+        const day = DAY_MAP[String(item.dayOfWeek || item.day || "").toLowerCase()] || item.dayOfWeek;
+        if (day && item.opens && item.closes) {
+          specs.push({
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": day,
+            "opens": item.opens,
+            "closes": item.closes,
+          });
+        }
+      }
+    } else if (typeof data === "object" && data !== null) {
+      for (const [key, val] of Object.entries(data)) {
+        const day = DAY_MAP[key.toLowerCase()];
+        const v = val as any;
+        if (day && v && !v.closed && (v.open || v.opens) && (v.close || v.closes)) {
+          specs.push({
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": day,
+            "opens": v.open || v.opens,
+            "closes": v.close || v.closes,
+          });
+        }
+      }
+    }
+    return specs.length > 0 ? specs : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface BreadcrumbItem {
@@ -48,7 +104,7 @@ export function generateRestaurantFaqs(restaurant: any) {
   const faqs = [
     {
       question: `¿Dónde está ubicado ${restaurant.name}?`,
-      answer: `${restaurant.name} se encuentra ubicado en ${restaurant.address ? `${restaurant.address}, ` : ""}${cityOrLocality}, Ecuador.${restaurant.mapEmbedUrl ? " Puedes ver su ubicación en Google Maps a través de su menú digital." : ""}`,
+      answer: `${restaurant.name} se encuentra ubicado en ${restaurant.address ? `${restaurant.address}, ` : ""}${cityOrLocality}, Ecuador.${restaurant.mapEmbedUrl || restaurant.googleBusinessUrl ? " Puedes ver su ubicación en Google Maps a través de su menú digital." : ""}`,
     },
     {
       question: `¿Qué tipo de comida ofrece ${restaurant.name}?`,
@@ -120,16 +176,22 @@ export function generateRestaurantJsonLd(restaurant: any) {
   if (restaurant.facebook) sameAs.push(restaurant.facebook.startsWith("http") ? restaurant.facebook : `https://facebook.com/${restaurant.facebook}`);
   if (restaurant.tiktok) sameAs.push(restaurant.tiktok.startsWith("http") ? restaurant.tiktok : `https://tiktok.com/@${restaurant.tiktok.replace("@", "")}`);
   if (restaurant.ubicameUrl) sameAs.push(restaurant.ubicameUrl);
+  if (restaurant.googleBusinessUrl) sameAs.push(restaurant.googleBusinessUrl);
 
   const postalAddress: any = {
     "@type": "PostalAddress",
     "addressLocality": cityOrLocality,
     "addressRegion": province,
-    "addressCountry": "EC",
+    "addressCountry": restaurant.country || "EC",
   };
   if (restaurant.address) {
     postalAddress.streetAddress = restaurant.address;
   }
+  if (restaurant.postalCode) {
+    postalAddress.postalCode = restaurant.postalCode;
+  }
+
+  const openingHoursSpec = parseOpeningHoursSpecification(restaurant.structuredSchedule);
 
   const schema: any = {
     "@context": "https://schema.org",
@@ -143,8 +205,9 @@ export function generateRestaurantJsonLd(restaurant: any) {
         "telephone": restaurant.whatsapp ? `+${restaurant.whatsapp.replace(/\D/g, "")}` : undefined,
         "image": restaurant.logoUrl ? (restaurant.logoUrl.startsWith("http") ? restaurant.logoUrl : `${baseUrl}${restaurant.logoUrl}`) : `${baseUrl}/icon.png`,
         "servesCuisine": restaurant.specialty || "Gastronomía",
-        "priceRange": "$$",
+        "priceRange": restaurant.priceRange || "$$",
         "address": postalAddress,
+        "openingHoursSpecification": openingHoursSpec,
         "sameAs": sameAs.length > 0 ? sameAs : undefined,
         "hasMenu": {
           "@type": "Menu",

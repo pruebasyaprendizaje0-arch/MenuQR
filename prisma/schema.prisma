@@ -60,6 +60,9 @@ model Restaurant {
   postalCode     String?
   latitude       Float?
   longitude      Float?
+  structuredSchedule String?
+  priceRange     String?    @default("$$")
+  googleBusinessUrl String?
   seoTitle       String?
   seoDescription String?
   seoKeywords    String?

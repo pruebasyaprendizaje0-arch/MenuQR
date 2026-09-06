@@ -313,6 +313,10 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const latitude = latInput !== null && latInput !== "" && !isNaN(parseFloat(latInput)) ? parseFloat(latInput) : null;
   const longitude = lngInput !== null && lngInput !== "" && !isNaN(parseFloat(lngInput)) ? parseFloat(lngInput) : null;
 
+  const structuredSchedule = formData.get("structuredSchedule") as string;
+  const priceRange = formData.get("priceRange") as string;
+  const googleBusinessUrl = formData.get("googleBusinessUrl") as string;
+
   const seoTitle = formData.get("seoTitle") as string;
   const seoDescription = formData.get("seoDescription") as string;
   const seoKeywords = formData.get("seoKeywords") as string;
@@ -467,6 +471,9 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       sector: sector || null,
       latitude,
       longitude,
+      structuredSchedule: structuredSchedule || null,
+      priceRange: priceRange || "$$",
+      googleBusinessUrl: googleBusinessUrl || null,
       seoTitle: seoTitle || null,
       seoDescription: seoDescription || null,
       seoKeywords: seoKeywords || null,

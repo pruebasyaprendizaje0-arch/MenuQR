@@ -177,6 +177,9 @@ type Restaurant = {
   contactNumbers: string | null;
   ubicameUrl: string | null;
   mapEmbedUrl?: string | null;
+  googleBusinessUrl?: string | null;
+  priceRange?: string | null;
+  structuredSchedule?: string | null;
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
@@ -1993,6 +1996,48 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   />
                   <p className="text-[11px] text-slate-500 mt-1.5">
                     💡 Si no ingresas un enlace de mapa embed pero ingresas la Dirección Física, el sistema generará automáticamente la vista de mapa en tu menú público.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Perfil de Google Business / Google Maps (URL)</label>
+                    <input
+                      type="text"
+                      name="googleBusinessUrl"
+                      defaultValue={restaurant.googleBusinessUrl || ""}
+                      placeholder="https://g.page/r/xyz... o enlace a ficha de Google Maps"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Rango de Precios (Nivel Comercial)</label>
+                    <select
+                      name="priceRange"
+                      defaultValue={restaurant.priceRange || "$$"}
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    >
+                      <option value="$">$ - Económico (Menos de $5 por persona)</option>
+                      <option value="$$">$$ - Moderado ($5 a $15 por persona)</option>
+                      <option value="$$$">$$$ - Alto ($15 a $30 por persona)</option>
+                      <option value="$$$$">$$$$ - Exclusivo (Más de $30 por persona)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    Horario Estructurado por Día (JSON para SEO Local / Google Schema)
+                  </label>
+                  <textarea
+                    name="structuredSchedule"
+                    defaultValue={restaurant.structuredSchedule || ""}
+                    rows={3}
+                    placeholder='{"monday":{"open":"09:00","close":"22:00","closed":false},"tuesday":{"open":"09:00","close":"22:00","closed":false}}'
+                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    💡 Formato JSON opcional para indexación en Google Maps. Si está vacío, se usará automáticamente el texto del horario habitual.
                   </p>
                 </div>
               </div>
