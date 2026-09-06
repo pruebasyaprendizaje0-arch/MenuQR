@@ -168,6 +168,7 @@ export interface RestaurantMinimalData {
   name: string;
   address?: string | null;
   city?: string | null;
+  parish?: string | null;
   sector?: string | null;
   locality?: string | null;
   province?: string | null;
@@ -206,12 +207,50 @@ export interface RestaurantMinimalData {
   }>;
 }
 
+interface RestaurantLocation {
+  province?: string;
+  city?: string;
+  parish?: string;
+  sector?: string;
+  addressLocality: string;
+  directoryLocality: string;
+}
+
+/**
+ * Normalizes both current geo fields and legacy "Province | City | Parish | Sector"
+ * locality values. This keeps structured data readable while existing profiles are
+ * completed in the admin panel.
+ */
+export function resolveRestaurantLocation(restaurant: RestaurantMinimalData): RestaurantLocation {
+  const clean = (value?: string | null) => value?.trim() || undefined;
+  const legacyParts = (clean(restaurant.locality) || "")
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const province = clean(restaurant.province) || legacyParts[0];
+  const city = clean(restaurant.city) || legacyParts[1];
+  const parish = clean(restaurant.parish) || legacyParts[2];
+  const sector = clean(restaurant.sector) || legacyParts[3];
+  const legacyLocality = legacyParts.length === 1 ? legacyParts[0] : undefined;
+  const addressLocality = sector || parish || city || legacyLocality || "Ecuador";
+
+  return {
+    province,
+    city,
+    parish,
+    sector,
+    addressLocality,
+    directoryLocality: city || parish || sector || legacyLocality || "Ecuador",
+  };
+}
+
 export function generateRestaurantFaqs(restaurant: RestaurantMinimalData) {
-  const cityOrLocality = restaurant.city || restaurant.sector || restaurant.locality || "Ecuador";
+  const { addressLocality } = resolveRestaurantLocation(restaurant);
   const faqs = [
     {
       question: `¿Dónde está ubicado ${restaurant.name}?`,
-      answer: `${restaurant.name} se encuentra ubicado en ${restaurant.address ? `${restaurant.address}, ` : ""}${cityOrLocality}, Ecuador.${restaurant.mapEmbedUrl || restaurant.googleBusinessUrl ? " Puedes ver su ubicación en Google Maps a través de su menú digital." : ""}`,
+      answer: `${restaurant.name} se encuentra ubicado en ${restaurant.address ? `${restaurant.address}, ` : ""}${addressLocality}, Ecuador.${restaurant.mapEmbedUrl || restaurant.googleBusinessUrl ? " Puedes ver su ubicación en Google Maps a través de su menú digital." : ""}`,
     },
     {
       question: `¿Qué tipo de comida ofrece ${restaurant.name}?`,
@@ -225,7 +264,7 @@ export function generateRestaurantFaqs(restaurant: RestaurantMinimalData) {
       question: `¿Cuál es el horario de atención de ${restaurant.name}?`,
       answer: restaurant.schedule || restaurant.localSchedule 
         ? `El horario registrado de atención es: ${restaurant.schedule || restaurant.localSchedule}.`
-        : `Atiende en horarios habituales en ${cityOrLocality}. Te recomendamos verificar la disponibilidad en su WhatsApp.`,
+        : `Atiende en horarios habituales en ${addressLocality}. Te recomendamos verificar la disponibilidad en su WhatsApp.`,
     },
     {
       question: `¿${restaurant.name} ofrece servicio a domicilio o para llevar?`,
@@ -253,8 +292,9 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
   const baseUrl = getBaseUrl();
   const slug = restaurant.slug;
   const siteUrl = `${baseUrl}/${slug}`;
-  const cityOrLocality = restaurant.city || restaurant.sector || restaurant.locality || "Ecuador";
-  const province = restaurant.province || "Ecuador";
+  const location = resolveRestaurantLocation(restaurant);
+  const cityOrLocality = location.addressLocality;
+  const province = location.province || "Ecuador";
 
   const categories = restaurant.categories || [];
   const menuSections = categories.map((cat) => ({
@@ -401,17 +441,17 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
     { name: "Inicio", url: "/" },
     { name: "Restaurantes", url: "/restaurantes" },
   ];
-  if (restaurant.province) {
+  if (location.province) {
     breadcrumbItems.push({
-      name: restaurant.province,
-      url: `/restaurantes/${normalizeSlug(restaurant.province)}`,
+      name: location.province,
+      url: `/restaurantes/${normalizeSlug(location.province)}`,
     });
   }
-  if (cityOrLocality) {
-    const provSlug = restaurant.province ? normalizeSlug(restaurant.province) : "ecuador";
+  if (location.directoryLocality) {
+    const provSlug = location.province ? normalizeSlug(location.province) : "ecuador";
     breadcrumbItems.push({
-      name: cityOrLocality,
-      url: `/restaurantes/${provSlug}/${normalizeSlug(cityOrLocality)}`,
+      name: location.directoryLocality,
+      url: `/restaurantes/${provSlug}/${normalizeSlug(location.directoryLocality)}`,
     });
   }
   breadcrumbItems.push({ name: restaurant.name, url: `/${slug}` });

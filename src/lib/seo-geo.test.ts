@@ -1,5 +1,5 @@
 import { prismaTenant } from "@/lib/db";
-import { generateRestaurantJsonLd, normalizeSlug, unslugify, getBaseUrl, resolvePublicImageUrl } from "@/lib/seo";
+import { generateRestaurantJsonLd, normalizeSlug, unslugify, getBaseUrl, resolvePublicImageUrl, resolveRestaurantLocation } from "@/lib/seo";
 import { calculateRestaurantCompleteness } from "@/lib/completeness";
 
 async function runTests() {
@@ -77,6 +77,43 @@ async function runTests() {
     assert(resolvePublicImageUrl("javascript:alert(1)") === undefined, "resolvePublicImageUrl debe rechazar esquemas javascript:");
     assert(resolvePublicImageUrl("") === undefined, "resolvePublicImageUrl debe retornar undefined para cadenas vacías");
     assert(resolvePublicImageUrl(null) === undefined, "resolvePublicImageUrl debe retornar undefined para valores nulos");
+
+    // TEST 3B: Legacy locality must never be exposed as one malformed locality.
+    const legacyLocation = resolveRestaurantLocation({
+      name: "Pigro",
+      slug: "pigro",
+      locality: "Santa Elena | Santa Elena | Manglaralto | Olón",
+    });
+    assert(legacyLocation.province === "Santa Elena", "La provincia debe recuperarse desde una localidad heredada");
+    assert(legacyLocation.addressLocality === "Olón", "La localidad Schema.org debe usar el sector más específico, no la cadena heredada");
+    assert(legacyLocation.directoryLocality === "Santa Elena", "La miga de pan debe conservar el cantón de la ubicación heredada");
+
+    const legacyJsonLd = generateRestaurantJsonLd({
+      name: "Pigro",
+      slug: "pigro",
+      locality: "Santa Elena | Santa Elena | Manglaralto | Olón",
+    });
+    const legacyGraph = legacyJsonLd["@graph"] as Array<Record<string, unknown>>;
+    const legacyRestaurant = legacyGraph.find((item) => {
+      const types = item["@type"];
+      return Array.isArray(types) && types.includes("Restaurant");
+    });
+    const legacyAddress = legacyRestaurant?.address as Record<string, unknown> | undefined;
+    const legacyBreadcrumb = legacyGraph.find((item) => item["@type"] === "BreadcrumbList");
+    const legacyBreadcrumbItems = legacyBreadcrumb?.itemListElement as Array<Record<string, unknown>> | undefined;
+    assert(legacyAddress?.addressLocality === "Olón" && legacyAddress.addressRegion === "Santa Elena", "El JSON-LD final debe publicar Olón y Santa Elena como dirección estructurada");
+    assert(legacyBreadcrumbItems?.[3]?.name === "Santa Elena", "El BreadcrumbList final debe conservar el cantón sin exponer la cadena heredada");
+
+    const explicitLocation = resolveRestaurantLocation({
+      name: "Pigro",
+      slug: "pigro",
+      locality: "Santa Elena | Santa Elena | Manglaralto | Olón",
+      province: "Santa Elena",
+      city: "Santa Elena",
+      parish: "Manglaralto",
+      sector: "Curía",
+    });
+    assert(explicitLocation.addressLocality === "Curía", "Los campos geográficos estructurados deben tener prioridad sobre datos heredados");
 
     // TEST 4: Schema.org JSON-LD (image filtering, openingHoursSpecification, priceRange, sameAs filtering, custom metadata)
     if (mammaMia) {
