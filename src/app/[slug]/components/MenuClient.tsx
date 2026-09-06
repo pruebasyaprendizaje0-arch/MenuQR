@@ -145,6 +145,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   }, []);
 
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
 
   const [activeCategory, setActiveCategory] = useState<string>("");
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -994,8 +995,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               </div>
             )}
 
-            {/* Quick Specs Grid (Especialidad y Horario) */}
-            {(restaurant.specialty || restaurant.schedule) && (
+            {/* Quick Specs Grid (Especialidad y Horario Desplegable) */}
+            {(restaurant.specialty || restaurant.schedule || restaurant.localSchedule || restaurant.structuredSchedule) && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 {restaurant.specialty && (
                   <div className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] backdrop-blur-xl flex items-start gap-4 transition-all duration-300 hover:border-amber-500/30">
@@ -1008,17 +1009,134 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </div>
                   </div>
                 )}
-                {restaurant.schedule && (
-                  <div className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] backdrop-blur-xl flex items-start gap-4 transition-all duration-300 hover:border-amber-500/30">
-                    <div className="h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      <Clock className="h-6 w-6" />
+
+                {/* Acordeón Desplegable de Horarios */}
+                {(restaurant.schedule || restaurant.localSchedule || restaurant.structuredSchedule) && (() => {
+                  const scheduleStatus = isRestaurantOpen(restaurant);
+                  const isExpanded = isScheduleOpen;
+
+                  // Parse Structured Schedule
+                  let daysList: { name: string; time: string; active: boolean; isToday: boolean }[] = [];
+                  const rawScheduleStr = restaurant.structuredSchedule || restaurant.localSchedule;
+
+                  if (rawScheduleStr) {
+                    try {
+                      const parsed = JSON.parse(rawScheduleStr);
+                      const dayKeysOrder: { key: keyof WeeklySchedule; label: string; index: number }[] = [
+                        { key: "monday", label: "Lunes", index: 1 },
+                        { key: "tuesday", label: "Martes", index: 2 },
+                        { key: "wednesday", label: "Miércoles", index: 3 },
+                        { key: "thursday", label: "Jueves", index: 4 },
+                        { key: "friday", label: "Viernes", index: 5 },
+                        { key: "saturday", label: "Sábado", index: 6 },
+                        { key: "sunday", label: "Domingo", index: 0 },
+                      ];
+                      const todayIndex = new Date().getDay();
+
+                      daysList = dayKeysOrder.map(({ key, label, index }) => {
+                        const dayData = parsed[key];
+                        const isClosed = dayData ? (dayData.closed === true || dayData.active === false) : false;
+                        const openTime = dayData?.open || "08:00";
+                        const closeTime = dayData?.close || "22:00";
+
+                        return {
+                          name: label,
+                          time: isClosed ? "Cerrado" : `${openTime} - ${closeTime}`,
+                          active: !isClosed,
+                          isToday: index === todayIndex
+                        };
+                      });
+                    } catch (e) {
+                      daysList = [];
+                    }
+                  }
+
+                  return (
+                    <div className={`bg-slate-900/50 border rounded-[2.5rem] backdrop-blur-xl transition-all duration-300 overflow-hidden ${
+                      isExpanded ? "border-amber-500/40 ring-1 ring-amber-500/20" : "border-white/10 hover:border-amber-500/30"
+                    }`}>
+                      {/* Cabecera Clicable del Desplegable */}
+                      <button
+                        type="button"
+                        onClick={() => setIsScheduleOpen(!isScheduleOpen)}
+                        className="w-full p-6 flex items-start justify-between gap-3 text-left focus:outline-none"
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className="h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            <Clock className="h-6 w-6" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Horario de Atención</span>
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${
+                                scheduleStatus.isOpen ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-red-500/20 text-red-300 border-red-500/30"
+                              }`}>
+                                {scheduleStatus.isOpen ? "🟢 Abierto hoy" : "🔴 Cerrado"}
+                              </span>
+                            </div>
+                            <p className="text-sm text-white font-black mt-1 leading-snug line-clamp-2">
+                              {restaurant.schedule || (daysList.length > 0 ? "Ver horario completo de la semana" : "Horario habitual")}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-amber-400 shrink-0 mt-1 transition-transform duration-200">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className={`transform transition-transform duration-300 ${isExpanded ? "rotate-180" : "rotate-0"}`}
+                          >
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                          </svg>
+                        </div>
+                      </button>
+
+                      {/* Cuerpo Expandible con Horario Día por Día */}
+                      {isExpanded && (
+                        <div className="px-6 pb-6 pt-2 border-t border-slate-850/80 space-y-2 animate-slide-in">
+                          <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-widest block mb-3">
+                            📅 Desglose Semanal de Atención
+                          </span>
+
+                          {daysList.length > 0 ? (
+                            <div className="space-y-1.5">
+                              {daysList.map((d) => (
+                                <div
+                                  key={d.name}
+                                  className={`flex items-center justify-between py-2 px-3 rounded-xl text-xs transition duration-200 ${
+                                    d.isToday
+                                      ? "bg-amber-500/15 border border-amber-500/40 text-amber-200 font-extrabold"
+                                      : "bg-slate-950/60 border border-slate-900 text-slate-300"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className={`h-2 w-2 rounded-full ${d.active ? "bg-emerald-400" : "bg-slate-600"}`}></span>
+                                    <span>{d.name}</span>
+                                    {d.isToday && <span className="text-[9px] bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded font-black uppercase">Hoy</span>}
+                                  </div>
+                                  <span className={`font-mono font-bold ${d.active ? (d.isToday ? "text-amber-300" : "text-white") : "text-slate-500"}`}>
+                                    {d.time}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-3 bg-slate-950 rounded-xl text-xs text-slate-300 leading-relaxed font-medium">
+                              {restaurant.schedule || "Consulte nuestros horarios por WhatsApp."}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Horario de Atención</span>
-                      <p className="text-base text-white font-black mt-1 leading-snug">{restaurant.schedule}</p>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             )}
 
