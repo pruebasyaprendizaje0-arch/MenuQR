@@ -1,5 +1,3 @@
-import { ecuadorData, parishData, communeData } from "./ecuador";
-
 export function normalizeSlug(text: string): string {
   if (!text) return "";
   return text
@@ -41,35 +39,57 @@ const DAY_MAP: Record<string, string> = {
   domingo: "Sunday",
 };
 
-export function parseOpeningHoursSpecification(structuredScheduleStr?: string | null) {
+interface ScheduleItem {
+  dayOfWeek?: string;
+  day?: string;
+  open?: string;
+  opens?: string;
+  close?: string;
+  closes?: string;
+  closed?: boolean;
+}
+
+interface SchemaOpeningHoursSpec {
+  "@type": "OpeningHoursSpecification";
+  dayOfWeek: string;
+  opens: string;
+  closes: string;
+}
+
+export function parseOpeningHoursSpecification(structuredScheduleStr?: string | null): SchemaOpeningHoursSpec[] | undefined {
   if (!structuredScheduleStr) return undefined;
   try {
     const data = typeof structuredScheduleStr === "string" ? JSON.parse(structuredScheduleStr) : structuredScheduleStr;
-    const specs: any[] = [];
+    const specs: SchemaOpeningHoursSpec[] = [];
 
     if (Array.isArray(data)) {
-      for (const item of data) {
+      for (const item of data as ScheduleItem[]) {
         if (item.closed) continue;
-        const day = DAY_MAP[String(item.dayOfWeek || item.day || "").toLowerCase()] || item.dayOfWeek;
-        if (day && item.opens && item.closes) {
+        const dayKey = String(item.dayOfWeek || item.day || "").toLowerCase();
+        const day = DAY_MAP[dayKey] || item.dayOfWeek;
+        const opens = item.opens || item.open;
+        const closes = item.closes || item.close;
+        if (day && opens && closes) {
           specs.push({
             "@type": "OpeningHoursSpecification",
-            "dayOfWeek": day,
-            "opens": item.opens,
-            "closes": item.closes,
+            dayOfWeek: day,
+            opens,
+            closes,
           });
         }
       }
     } else if (typeof data === "object" && data !== null) {
-      for (const [key, val] of Object.entries(data)) {
+      for (const [key, val] of Object.entries(data as Record<string, ScheduleItem>)) {
         const day = DAY_MAP[key.toLowerCase()];
-        const v = val as any;
-        if (day && v && !v.closed && (v.open || v.opens) && (v.close || v.closes)) {
+        const v = val;
+        const opens = v?.open || v?.opens;
+        const closes = v?.close || v?.closes;
+        if (day && v && !v.closed && opens && closes) {
           specs.push({
             "@type": "OpeningHoursSpecification",
-            "dayOfWeek": day,
-            "opens": v.open || v.opens,
-            "closes": v.close || v.closes,
+            dayOfWeek: day,
+            opens,
+            closes,
           });
         }
       }
@@ -90,16 +110,57 @@ export function generateBreadcrumbJsonLd(items: BreadcrumbItem[]) {
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
-    "itemListElement": items.map((item, index) => ({
+    itemListElement: items.map((item, index) => ({
       "@type": "ListItem",
-      "position": index + 1,
-      "name": item.name,
-      "item": item.url.startsWith("http") ? item.url : `${baseUrl}${item.url.startsWith("/") ? "" : "/"}${item.url}`,
+      position: index + 1,
+      name: item.name,
+      item: item.url.startsWith("http") ? item.url : `${baseUrl}${item.url.startsWith("/") ? "" : "/"}${item.url}`,
     })),
   };
 }
 
-export function generateRestaurantFaqs(restaurant: any) {
+export interface RestaurantMinimalData {
+  name: string;
+  address?: string | null;
+  city?: string | null;
+  sector?: string | null;
+  locality?: string | null;
+  province?: string | null;
+  country?: string | null;
+  postalCode?: string | null;
+  specialty?: string | null;
+  description?: string | null;
+  whatsapp?: string | null;
+  schedule?: string | null;
+  localSchedule?: string | null;
+  deliveryEnabled?: boolean | null;
+  deliveryCost?: number | string | null;
+  customFaq?: string | unknown[] | null;
+  mapEmbedUrl?: string | null;
+  googleBusinessUrl?: string | null;
+  instagram?: string | null;
+  facebook?: string | null;
+  tiktok?: string | null;
+  ubicameUrl?: string | null;
+  logoUrl?: string | null;
+  priceRange?: string | null;
+  structuredSchedule?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  slug: string;
+  categories?: Array<{
+    name: string;
+    dishes?: Array<{
+      name: string;
+      description?: string | null;
+      imageUrl?: string | null;
+      price?: number | string | null;
+      isAvailable?: boolean | null;
+    }>;
+  }>;
+}
+
+export function generateRestaurantFaqs(restaurant: RestaurantMinimalData) {
   const cityOrLocality = restaurant.city || restaurant.sector || restaurant.locality || "Ecuador";
   const faqs = [
     {
@@ -142,7 +203,7 @@ export function generateRestaurantFaqs(restaurant: any) {
   return faqs;
 }
 
-export function generateRestaurantJsonLd(restaurant: any) {
+export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
   const baseUrl = getBaseUrl();
   const slug = restaurant.slug;
   const siteUrl = `${baseUrl}/${slug}`;
@@ -150,23 +211,23 @@ export function generateRestaurantJsonLd(restaurant: any) {
   const province = restaurant.province || "Ecuador";
 
   const categories = restaurant.categories || [];
-  const menuSections = categories.map((cat: any) => ({
+  const menuSections = categories.map((cat) => ({
     "@type": "MenuSection",
-    "name": cat.name,
-    "hasMenuItem": (cat.dishes || []).map((dish: any) => ({
+    name: cat.name,
+    hasMenuItem: (cat.dishes || []).map((dish) => ({
       "@type": "MenuItem",
-      "name": dish.name,
-      "description": dish.description || `${dish.name} disponible en ${restaurant.name}`,
-      "image": dish.imageUrl?.startsWith("http") 
+      name: dish.name,
+      description: dish.description || `${dish.name} disponible en ${restaurant.name}`,
+      image: dish.imageUrl?.startsWith("http") 
         ? dish.imageUrl 
         : dish.imageUrl 
           ? `${baseUrl}${dish.imageUrl}` 
           : undefined,
-      "offers": {
+      offers: {
         "@type": "Offer",
-        "price": String(dish.price || 0),
-        "priceCurrency": "USD",
-        "availability": dish.isAvailable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+        price: String(dish.price || 0),
+        priceCurrency: "USD",
+        availability: dish.isAvailable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
       },
     })),
   }));
@@ -176,13 +237,24 @@ export function generateRestaurantJsonLd(restaurant: any) {
   if (restaurant.facebook) sameAs.push(restaurant.facebook.startsWith("http") ? restaurant.facebook : `https://facebook.com/${restaurant.facebook}`);
   if (restaurant.tiktok) sameAs.push(restaurant.tiktok.startsWith("http") ? restaurant.tiktok : `https://tiktok.com/@${restaurant.tiktok.replace("@", "")}`);
   if (restaurant.ubicameUrl) sameAs.push(restaurant.ubicameUrl);
-  if (restaurant.googleBusinessUrl) sameAs.push(restaurant.googleBusinessUrl);
+  if (restaurant.googleBusinessUrl && restaurant.googleBusinessUrl.startsWith("http")) {
+    sameAs.push(restaurant.googleBusinessUrl);
+  }
 
-  const postalAddress: any = {
+  interface PostalAddressSchema {
+    "@type": "PostalAddress";
+    addressLocality: string;
+    addressRegion: string;
+    addressCountry: string;
+    streetAddress?: string;
+    postalCode?: string;
+  }
+
+  const postalAddress: PostalAddressSchema = {
     "@type": "PostalAddress",
-    "addressLocality": cityOrLocality,
-    "addressRegion": province,
-    "addressCountry": restaurant.country || "EC",
+    addressLocality: cityOrLocality,
+    addressRegion: province,
+    addressCountry: restaurant.country || "EC",
   };
   if (restaurant.address) {
     postalAddress.streetAddress = restaurant.address;
@@ -193,53 +265,78 @@ export function generateRestaurantJsonLd(restaurant: any) {
 
   const openingHoursSpec = parseOpeningHoursSpecification(restaurant.structuredSchedule);
 
-  const schema: any = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": ["Restaurant", "LocalBusiness"],
-        "@id": `${siteUrl}#restaurant`,
-        "name": restaurant.name,
-        "description": restaurant.description || `Menú digital, carta, precios y pedidos por WhatsApp de ${restaurant.name} en ${cityOrLocality}, Ecuador.`,
-        "url": siteUrl,
-        "telephone": restaurant.whatsapp ? `+${restaurant.whatsapp.replace(/\D/g, "")}` : undefined,
-        "image": restaurant.logoUrl ? (restaurant.logoUrl.startsWith("http") ? restaurant.logoUrl : `${baseUrl}${restaurant.logoUrl}`) : `${baseUrl}/icon.png`,
-        "servesCuisine": restaurant.specialty || "Gastronomía",
-        "priceRange": restaurant.priceRange || "$$",
-        "address": postalAddress,
-        "openingHoursSpecification": openingHoursSpec,
-        "sameAs": sameAs.length > 0 ? sameAs : undefined,
-        "hasMenu": {
-          "@type": "Menu",
-          "name": `Carta Digital de ${restaurant.name}`,
-          "url": siteUrl,
-          "hasMenuSection": menuSections,
-        },
-      },
-    ],
+  interface GeoCoordinatesSchema {
+    "@type": "GeoCoordinates";
+    latitude: number;
+    longitude: number;
+  }
+
+  interface RestaurantGraphItem {
+    "@type": string[];
+    "@id": string;
+    name: string;
+    description: string;
+    url: string;
+    telephone?: string;
+    image: string;
+    servesCuisine: string;
+    priceRange: string;
+    address: PostalAddressSchema;
+    openingHoursSpecification?: SchemaOpeningHoursSpec[];
+    sameAs?: string[];
+    hasMenu: {
+      "@type": "Menu";
+      name: string;
+      url: string;
+      hasMenuSection: typeof menuSections;
+    };
+    geo?: GeoCoordinatesSchema;
+  }
+
+  const restaurantEntity: RestaurantGraphItem = {
+    "@type": ["Restaurant", "LocalBusiness"],
+    "@id": `${siteUrl}#restaurant`,
+    name: restaurant.name,
+    description: restaurant.description || `Menú digital, carta, precios y pedidos por WhatsApp de ${restaurant.name} en ${cityOrLocality}, Ecuador.`,
+    url: siteUrl,
+    telephone: restaurant.whatsapp ? `+${restaurant.whatsapp.replace(/\D/g, "")}` : undefined,
+    image: restaurant.logoUrl ? (restaurant.logoUrl.startsWith("http") ? restaurant.logoUrl : `${baseUrl}${restaurant.logoUrl}`) : `${baseUrl}/icon.png`,
+    servesCuisine: restaurant.specialty || "Gastronomía",
+    priceRange: restaurant.priceRange || "$$",
+    address: postalAddress,
+    openingHoursSpecification: openingHoursSpec,
+    sameAs: sameAs.length > 0 ? sameAs : undefined,
+    hasMenu: {
+      "@type": "Menu",
+      name: `Carta Digital de ${restaurant.name}`,
+      url: siteUrl,
+      hasMenuSection: menuSections,
+    },
   };
 
   const latNum = Number(restaurant.latitude);
   const lngNum = Number(restaurant.longitude);
   if (restaurant.latitude !== null && restaurant.latitude !== undefined && restaurant.longitude !== null && restaurant.longitude !== undefined && !isNaN(latNum) && !isNaN(lngNum) && (latNum !== 0 || lngNum !== 0)) {
-    schema["@graph"][0].geo = {
+    restaurantEntity.geo = {
       "@type": "GeoCoordinates",
-      "latitude": latNum,
-      "longitude": lngNum,
+      latitude: latNum,
+      longitude: lngNum,
     };
   }
 
+  const graphList: unknown[] = [restaurantEntity];
+
   // FAQs
   const faqs = generateRestaurantFaqs(restaurant);
-  schema["@graph"].push({
+  graphList.push({
     "@type": "FAQPage",
     "@id": `${siteUrl}#faq`,
-    "mainEntity": faqs.map((faq) => ({
+    mainEntity: faqs.map((faq) => ({
       "@type": "Question",
-      "name": faq.question,
-      "acceptedAnswer": {
+      name: faq.question,
+      acceptedAnswer: {
         "@type": "Answer",
-        "text": faq.answer,
+        text: faq.answer,
       },
     })),
   });
@@ -264,15 +361,18 @@ export function generateRestaurantJsonLd(restaurant: any) {
   }
   breadcrumbItems.push({ name: restaurant.name, url: `/${slug}` });
 
-  schema["@graph"].push(generateBreadcrumbJsonLd(breadcrumbItems));
+  graphList.push(generateBreadcrumbJsonLd(breadcrumbItems));
 
-  return schema;
+  return {
+    "@context": "https://schema.org",
+    "@graph": graphList,
+  };
 }
 
 export function generateCityCategoryJsonLd(
   cityName: string,
   categoryName: string | null,
-  restaurants: any[]
+  restaurants: Array<{ slug: string; name: string; description?: string | null }>
 ) {
   const baseUrl = getBaseUrl();
   const title = categoryName 
@@ -282,13 +382,13 @@ export function generateCityCategoryJsonLd(
   const itemList = {
     "@context": "https://schema.org",
     "@type": "ItemList",
-    "name": title,
-    "itemListElement": restaurants.map((r, index) => ({
+    name: title,
+    itemListElement: restaurants.map((r, index) => ({
       "@type": "ListItem",
-      "position": index + 1,
-      "url": `${baseUrl}/${r.slug}`,
-      "name": r.name,
-      "description": r.description || `Menú digital de ${r.name} en ${cityName}`,
+      position: index + 1,
+      url: `${baseUrl}/${r.slug}`,
+      name: r.name,
+      description: r.description || `Menú digital de ${r.name} en ${cityName}`,
     })),
   };
 

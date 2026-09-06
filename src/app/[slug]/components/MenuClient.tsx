@@ -71,6 +71,9 @@ type Restaurant = {
   contactNumbers: string | null;
   ubicameUrl: string | null;
   mapEmbedUrl?: string | null;
+  priceRange?: string | null;
+  googleBusinessUrl?: string | null;
+  structuredSchedule?: string | null;
   tablesConfig: string;
   ivaPercent: number;
   servicePercent: number;
@@ -1116,11 +1119,27 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </div>
 
                     <div className="flex items-center gap-3 flex-wrap">
+                      {restaurant.priceRange && (
+                        <div className="px-3.5 py-1.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs font-black text-amber-400 flex items-center gap-1 shadow-inner">
+                          <span>Precios:</span>
+                          <span className="tracking-widest">{restaurant.priceRange}</span>
+                        </div>
+                      )}
                       {restaurant.address && (
                         <div className="px-4 py-2 rounded-2xl bg-slate-950 border border-white/10 text-xs font-bold text-slate-300 flex items-center gap-2 shadow-inner max-w-xs truncate">
                           <span className="text-amber-400">🌐</span>
                           <span className="truncate">{restaurant.address}</span>
                         </div>
+                      )}
+                      {restaurant.googleBusinessUrl && (
+                        <a
+                          href={restaurant.googleBusinessUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-4 py-2 rounded-2xl bg-blue-600/20 border border-blue-500/40 hover:bg-blue-600/30 text-blue-300 text-xs font-bold flex items-center gap-2 shadow-md transition-all hover:scale-105 active:scale-95 shrink-0"
+                        >
+                          <span className="text-blue-400">🔍</span> Google Business ↗
+                        </a>
                       )}
                       {gpsUrl && (
                         <a

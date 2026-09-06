@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Outfit, Playfair_Display } from "next/font/google";
+import { getBaseUrl } from "@/lib/seo";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -26,7 +27,7 @@ const playfair = Playfair_Display({
   display: "swap",
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_APP_URL || "https://menuqrpro.com";
+const siteUrl = getBaseUrl();
 
 export const viewport: Viewport = {
   themeColor: "#0f172a",

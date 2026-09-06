@@ -1,5 +1,6 @@
-const { PrismaClient } = require("@prisma/client");
-const bcrypt = require("bcryptjs");
+import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+
 const prisma = new PrismaClient();
 
 async function main() {
@@ -41,7 +42,7 @@ async function main() {
       seoTitle: "Mamma Mia | Pizzería & Pasta Artesanal en Manta, Manabí",
       seoDescription: "Disfruta de auténtica pizza napolitana al horno de leña y pastas artesanales en Av. Barbasquillo, Manta. Menú digital y pedidos por WhatsApp.",
       priceRange: "$$",
-      googleBusinessUrl: "https://maps.google.com/?cid=1234567890",
+      googleBusinessUrl: null,
       structuredSchedule: JSON.stringify({
         monday: { open: "12:00", close: "23:00", closed: false },
         tuesday: { open: "12:00", close: "23:00", closed: false },
@@ -186,7 +187,7 @@ async function main() {
         seoTitle: "Las Empanadas de Mauro | Empanadas Gigantes en Montañita, Santa Elena",
         seoDescription: "Empanadas gigantes gourmet de carne, queso y mariscos en Montañita, Santa Elena. Menú digital interactivo y pedidos por WhatsApp.",
         priceRange: "$",
-        googleBusinessUrl: "https://maps.google.com/?cid=9876543210",
+        googleBusinessUrl: null,
         structuredSchedule: JSON.stringify({
           monday: { open: "16:00", close: "02:00", closed: false },
           tuesday: { open: "16:00", close: "02:00", closed: false },

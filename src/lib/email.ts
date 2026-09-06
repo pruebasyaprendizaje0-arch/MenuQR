@@ -1,20 +1,6 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
-
-function getBaseUrl(): string {
-  let url = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  if (!url && process.env.NODE_ENV === "production") {
-    url = "https://menuqr.ubicame.cc";
-  }
-  if (!url) {
-    url = "http://localhost:3000";
-  }
-  url = url.trim().replace(/\/+$/, "");
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    url = `https://${url}`;
-  }
-  return url;
-}
+import { getBaseUrl } from "./seo";
 
 export async function sendPasswordResetEmail(email: string, token: string) {
   const baseUrl = getBaseUrl();

@@ -43,7 +43,7 @@ Solo necesitas un número de teléfono de WhatsApp donde desees recibir las aler
 
 ## Enlaces Principales
 
-- [Página Principal](https://menuqrpro.com/)
-- [Registro de Restaurantes (Prueba Gratis)](https://menuqrpro.com/registro)
-- [Iniciar Sesión](https://menuqrpro.com/login)
-- [Menú de Muestra (Demo)](https://menuqrpro.com/mamma-mia)
+- [Página Principal](https://menuqr.ubicame.cc/)
+- [Registro de Restaurantes (Prueba Gratis)](https://menuqr.ubicame.cc/registro)
+- [Iniciar Sesión](https://menuqr.ubicame.cc/login)
+- [Menú de Muestra (Demo)](https://menuqr.ubicame.cc/mamma-mia)

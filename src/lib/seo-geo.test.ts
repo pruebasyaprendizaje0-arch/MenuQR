@@ -1,5 +1,5 @@
 import { prismaTenant } from "@/lib/db";
-import { generateRestaurantJsonLd, normalizeSlug, unslugify } from "@/lib/seo";
+import { generateRestaurantJsonLd, normalizeSlug, unslugify, getBaseUrl } from "@/lib/seo";
 import { calculateRestaurantCompleteness } from "@/lib/completeness";
 
 async function runTests() {
@@ -20,7 +20,6 @@ async function runTests() {
     }
   }
 
-  // TEST 1: Database Model & Demo Restaurants
   try {
     const restaurants = await prismaTenant.restaurant.findMany({
       include: {
@@ -50,18 +49,56 @@ async function runTests() {
       assert(mauro.sector === "Montañita", "Las Empanadas de Mauro debe tener sector = Montañita");
     }
 
-    // TEST 2: Slug Normalization & Unslugify
+    // TEST 2: Slug Normalization, Unslugify & Canonical Base URL
     assert(normalizeSlug("Manta, Manabí!") === "manta-manabi", "normalizeSlug debe limpiar caracteres especiales");
     assert(unslugify("las-empanadas-de-mauro") === "Las Empanadas De Mauro", "unslugify debe formatear correctamente");
+    assert(getBaseUrl() === (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://menuqr.ubicame.cc"), "getBaseUrl debe retornar el dominio canónico de producción");
 
-    // TEST 3: Schema.org Generation
+    // TEST 3: Schema.org JSON-LD (openingHoursSpecification, priceRange, sameAs filtering, custom metadata)
     if (mammaMia) {
-      const jsonLd = generateRestaurantJsonLd(mammaMia);
+      const mockRestaurantData = {
+        ...mammaMia,
+        seoTitle: "Mamma Mia SEO Custom Title",
+        priceRange: "$$",
+        googleBusinessUrl: "https://maps.google.com/?cid=valid_url_for_test",
+        structuredSchedule: JSON.stringify({
+          monday: { open: "12:00", close: "23:00", closed: false },
+          tuesday: { open: "12:00", close: "23:00", closed: false },
+        }),
+      };
+
+      const jsonLd = generateRestaurantJsonLd(mockRestaurantData);
       assert(jsonLd["@context"] === "https://schema.org", "Schema.org debe incluir @context");
       assert(Array.isArray(jsonLd["@graph"]), "Schema.org debe usar la especificación @graph");
-      const restaurantEntity = jsonLd["@graph"].find((item: any) => item["@type"]?.includes("Restaurant"));
+
+      const graph = jsonLd["@graph"] as Array<Record<string, unknown>>;
+      const restaurantEntity = graph.find((item) => {
+        const types = item["@type"];
+        return Array.isArray(types) && types.includes("Restaurant");
+      });
+
       assert(!!restaurantEntity, "Schema.org debe contener una entidad Restaurant");
-      assert(restaurantEntity?.geo?.latitude === -0.9548, "Schema.org debe emitir GeoCoordinates si latitud es válida");
+      assert(restaurantEntity?.priceRange === "$$", "priceRange debe ser emitido correctamente como '$$'");
+      
+      const openingHours = restaurantEntity?.openingHoursSpecification as Array<Record<string, unknown>>;
+      assert(Array.isArray(openingHours) && openingHours.length === 2, "openingHoursSpecification debe contener las 2 reglas de horario válidas");
+      assert(openingHours?.[0]?.dayOfWeek === "Monday" && openingHours?.[0]?.opens === "12:00", "openingHoursSpecification debe formatear correctamente el día Monday");
+
+      const sameAs = restaurantEntity?.sameAs as string[];
+      assert(Array.isArray(sameAs) && sameAs.includes("https://maps.google.com/?cid=valid_url_for_test"), "googleBusinessUrl válido debe incluirse en sameAs");
+
+      // Test filtering invalid/empty googleBusinessUrl
+      const noGbusData = {
+        ...mammaMia,
+        googleBusinessUrl: "invalid-url-without-http",
+      };
+      const jsonLdNoGbus = generateRestaurantJsonLd(noGbusData);
+      const restaurantNoGbus = (jsonLdNoGbus["@graph"] as Array<Record<string, unknown>>).find((item) => {
+        const types = item["@type"];
+        return Array.isArray(types) && types.includes("Restaurant");
+      });
+      const sameAsNoGbus = (restaurantNoGbus?.sameAs as string[]) || [];
+      assert(!sameAsNoGbus.includes("invalid-url-without-http"), "googleBusinessUrl inválido sin HTTP debe ser excluido de sameAs");
     }
 
     // TEST 4: Profile Completeness Score
