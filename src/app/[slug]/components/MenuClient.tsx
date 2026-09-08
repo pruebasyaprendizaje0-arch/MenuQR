@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction, validateCouponAction } from "@/lib/actions";
-import { isRestaurantOpen, WeeklySchedule } from "@/lib/schedule";
+import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -1018,13 +1018,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   const scheduleStatus = isRestaurantOpen(restaurant);
                   const isExpanded = isScheduleOpen;
 
-                  // Parse Structured Schedule
+                  // Parse Schedule
                   let daysList: { name: string; time: string; active: boolean; isToday: boolean }[] = [];
-                  const rawScheduleStr = restaurant.structuredSchedule || restaurant.localSchedule;
+                  const rawScheduleStr = restaurant.localSchedule || restaurant.structuredSchedule;
 
                   if (rawScheduleStr) {
                     try {
-                      const parsed = JSON.parse(rawScheduleStr);
+                      const weeklySchedule = parseWeeklySchedule(rawScheduleStr);
                       const dayKeysOrder: { key: keyof WeeklySchedule; label: string; index: number }[] = [
                         { key: "monday", label: "Lunes", index: 1 },
                         { key: "tuesday", label: "Martes", index: 2 },
@@ -1037,8 +1037,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                       const todayIndex = new Date().getDay();
 
                       daysList = dayKeysOrder.map(({ key, label, index }) => {
-                        const dayData = parsed[key];
-                        const isClosed = dayData ? (dayData.closed === true || dayData.active === false) : false;
+                        const dayData = weeklySchedule[key];
+                        const isClosed = !dayData || !dayData.active;
                         const openTime = dayData?.open || "08:00";
                         const closeTime = dayData?.close || "22:00";
 

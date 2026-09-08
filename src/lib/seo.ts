@@ -92,6 +92,7 @@ interface ScheduleItem {
   close?: string;
   closes?: string;
   closed?: boolean;
+  active?: boolean;
 }
 
 interface SchemaOpeningHoursSpec {
@@ -129,7 +130,8 @@ export function parseOpeningHoursSpecification(structuredScheduleStr?: string | 
         const v = val;
         const opens = v?.open || v?.opens;
         const closes = v?.close || v?.closes;
-        if (day && v && !v.closed && opens && closes) {
+        const isClosed = v.closed === true || v.active === false;
+        if (day && v && !isClosed && opens && closes) {
           specs.push({
             "@type": "OpeningHoursSpecification",
             dayOfWeek: day,

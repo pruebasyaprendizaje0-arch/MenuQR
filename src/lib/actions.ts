@@ -297,7 +297,6 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const slogan = formData.get("slogan") as string;
   const description = formData.get("description") as string;
   const locality = formData.get("locality") as string;
-  const schedule = formData.get("schedule") as string;
   const specialty = formData.get("specialty") as string;
   const services = formData.get("services") as string;
   const contactNumbers = formData.get("contactNumbers") as string;
@@ -313,7 +312,6 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const latitude = latInput !== null && latInput !== "" && !isNaN(parseFloat(latInput)) ? parseFloat(latInput) : null;
   const longitude = lngInput !== null && lngInput !== "" && !isNaN(parseFloat(lngInput)) ? parseFloat(lngInput) : null;
 
-  const structuredSchedule = formData.get("structuredSchedule") as string;
   const priceRange = formData.get("priceRange") as string;
   const googleBusinessUrl = formData.get("googleBusinessUrl") as string;
 
@@ -364,7 +362,12 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       ivaOnTakeout: true,
       serviceOnTable: true,
       serviceOnTakeout: true,
-      deliveryRates: true
+      deliveryRates: true,
+      schedule: true,
+      localSchedule: true,
+      deliverySchedule: true,
+      blockedDates: true,
+      structuredSchedule: true,
     },
   });
 
@@ -382,9 +385,18 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const deliveryEnabled = formData.has("deliveryEnabled") 
     ? (formData.get("deliveryEnabled") === "true" || formData.get("deliveryEnabled") === "on") 
     : (currentRestaurant?.deliveryEnabled ?? false);
-  const localSchedule = formData.get("localSchedule") as string;
-  const deliverySchedule = formData.get("deliverySchedule") as string;
-  const blockedDates = formData.get("blockedDates") as string;
+
+  const scheduleInput = formData.get("schedule") as string;
+  const localScheduleInput = formData.get("localSchedule") as string;
+  const deliveryScheduleInput = formData.get("deliverySchedule") as string;
+  const blockedDatesInput = formData.get("blockedDates") as string;
+  const structuredScheduleInput = formData.get("structuredSchedule") as string;
+
+  const schedule = formData.has("schedule") ? (scheduleInput || null) : (currentRestaurant?.schedule || null);
+  const localSchedule = formData.has("localSchedule") ? (localScheduleInput || null) : (currentRestaurant?.localSchedule || null);
+  const deliverySchedule = formData.has("deliverySchedule") ? (deliveryScheduleInput || null) : (currentRestaurant?.deliverySchedule || null);
+  const blockedDates = formData.has("blockedDates") ? (blockedDatesInput || null) : (currentRestaurant?.blockedDates || null);
+  const structuredSchedule = formData.has("structuredSchedule") ? (structuredScheduleInput || null) : (currentRestaurant?.structuredSchedule || null);
   const deliveryRates = formData.has("deliveryRates") ? (formData.get("deliveryRates") as string) : (currentRestaurant?.deliveryRates || null);
 
   const uploadedLogo = await saveUploadedFile(logoFile);
@@ -519,8 +531,9 @@ export async function updateRestaurantSchedulesAction(
     const restaurant = await prisma.restaurant.update({
       where: { id: restaurantId },
       data: {
-        schedule: data.schedule || null,
+        ...(data.schedule !== undefined ? { schedule: data.schedule } : {}),
         localSchedule: data.localSchedule || null,
+        structuredSchedule: data.localSchedule || null,
         deliverySchedule: data.deliverySchedule || null,
         blockedDates: data.blockedDates || null,
       },
