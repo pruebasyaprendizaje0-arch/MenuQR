@@ -28,9 +28,12 @@ import {
   Camera,
   Upload,
   Loader2,
-  Tag
+  Tag,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
+import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 
 type Dish = {
   id: string;
@@ -112,15 +115,9 @@ interface CartItem {
 }
 
 function getMapIframeSrc(mapEmbedUrl?: string | null, address?: string | null, ubicameUrl?: string | null): string | null {
-  if (mapEmbedUrl && mapEmbedUrl.trim()) {
-    const raw = mapEmbedUrl.trim();
-    const srcMatch = raw.match(/src=["']([^"']+)["']/i);
-    if (srcMatch && srcMatch[1]) {
-      return srcMatch[1];
-    }
-    if (raw.startsWith("http://") || raw.startsWith("https://")) {
-      return raw;
-    }
+  const sanitized = sanitizeMapEmbedUrl(mapEmbedUrl);
+  if (sanitized) {
+    return sanitized;
   }
 
   if (address && address.trim()) {
@@ -140,6 +137,55 @@ const formatPrice = (price: unknown): string => {
   const numericPrice = Number(price);
   return Number.isFinite(numericPrice) ? numericPrice.toFixed(2) : "0.00";
 };
+
+function ExpandableDescription({
+  description,
+  defaultText = "Nuestra receta clásica seleccionada.",
+  className = "text-slate-400 text-xs mt-1.5 leading-relaxed",
+  themeColor,
+  threshold = 60,
+}: {
+  description?: string | null;
+  defaultText?: string;
+  className?: string;
+  themeColor?: string;
+  threshold?: number;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const text = description || defaultText;
+  const isLong = text.length > threshold;
+
+  if (!isLong) {
+    return <p className={className}>{text}</p>;
+  }
+
+  return (
+    <div className="mt-1">
+      <p className={`${className} ${!isExpanded ? "line-clamp-2" : ""}`}>
+        {text}
+      </p>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsExpanded((prev) => !prev);
+        }}
+        className="text-[11px] font-bold mt-1 inline-flex items-center gap-0.5 hover:underline focus:outline-none transition-colors cursor-pointer"
+        style={{ color: themeColor || "#f59e0b" }}
+      >
+        {isExpanded ? (
+          <>
+            Ver menos <ChevronUp className="h-3 w-3 inline shrink-0" />
+          </>
+        ) : (
+          <>
+            Ver más <ChevronDown className="h-3 w-3 inline shrink-0" />
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
 
 export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restaurant; centralBranchId?: string }) {
   const [isMounted, setIsMounted] = useState(false);
@@ -1383,7 +1429,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         <div className="flex-1 flex flex-col justify-between min-w-0">
                           <div>
                             <h3 className="font-extrabold text-white text-xs truncate group-hover:text-red-400 transition-colors">{dish.name}</h3>
-                            <p className="text-[10px] text-slate-450 mt-1 line-clamp-1 leading-normal">{dish.description || "Receta clásica."}</p>
+                            <ExpandableDescription
+                              description={dish.description}
+                              defaultText="Receta clásica."
+                              className="text-[10px] text-slate-450 mt-1 leading-normal"
+                              themeColor={restaurant.themeColor}
+                              threshold={45}
+                            />
                           </div>
                           <div className="flex items-center justify-between pt-2">
                             <span className="text-xs font-black text-white" style={{ color: restaurant.themeColor }}>
@@ -1459,7 +1511,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             <div className="flex-1 flex flex-col justify-between py-0.5 min-w-0">
                               <div>
                                 <h3 className="font-extrabold text-white text-base group-hover:text-amber-400 transition-colors truncate">{dish.name}</h3>
-                                <p className="text-slate-400 text-xs mt-1.5 leading-relaxed line-clamp-3">{dish.description || "Pack especial seleccionado."}</p>
+                                <ExpandableDescription
+                                  description={dish.description}
+                                  defaultText="Pack especial seleccionado."
+                                  className="text-slate-400 text-xs mt-1.5 leading-relaxed"
+                                  themeColor="#f59e0b"
+                                  threshold={65}
+                                />
                               </div>
                               <div className="flex items-center justify-between pt-2">
                                 <span className="text-base font-black text-amber-400">${formatPrice(dish.price)}</span>
@@ -1508,7 +1566,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
                             <div>
                               <h3 className="font-extrabold text-white text-sm group-hover:text-red-400 transition-colors truncate">{dish.name}</h3>
-                              <p className="text-slate-400 text-xs mt-1.5 leading-relaxed line-clamp-2">{dish.description || "Nuestra receta clásica seleccionada."}</p>
+                              <ExpandableDescription
+                                description={dish.description}
+                                defaultText="Nuestra receta clásica seleccionada."
+                                className="text-slate-400 text-xs mt-1.5 leading-relaxed"
+                                themeColor={restaurant.themeColor}
+                                threshold={65}
+                              />
                             </div>
                             <div className="flex items-center justify-between pt-1">
                               <span className="text-sm font-black text-white" style={{ color: restaurant.themeColor }}>${formatPrice(dish.price)}</span>

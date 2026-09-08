@@ -11,6 +11,7 @@ import { sendPasswordResetEmail } from "@/lib/email";
 import { recordSlugChange } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { saveUploadedFile } from "@/lib/storage";
+import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 
 /**
  * Validates external image HTTP/HTTPS URLs (strictly rejecting JavaScript, local paths, or malformed protocols)
@@ -476,7 +477,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       services: services || null,
       contactNumbers: contactNumbers || null,
       ubicameUrl: ubicameUrl || null,
-      mapEmbedUrl: mapEmbedUrl || null,
+      mapEmbedUrl: sanitizeMapEmbedUrl(mapEmbedUrl),
       province: province || null,
       city: city || null,
       parish: parish || null,
