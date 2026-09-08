@@ -199,9 +199,12 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
     trackAnalyticsEvent("RESTAURANT_VIEW", restaurant.id, { slug, locality: restaurant.locality, city: restaurant.city });
 
     const totalDuration = Math.round(performance.now() - pageStartTime);
-    const isPlanPro = restaurant.plan === "PRO";
     const isTrialValid = !restaurant.trialEndsAt || new Date(restaurant.trialEndsAt) >= new Date();
-    const isSubscriptionActive = isPlanPro || isTrialValid;
+    // PRO access is time-bound by the manually approved subscription period.
+    // FREE accounts remain available when no trial end date is configured.
+    const isSubscriptionActive = restaurant.plan === "PRO"
+      ? Boolean(restaurant.trialEndsAt) && isTrialValid
+      : isTrialValid;
 
     console.log(
       `[MenuPage Subscription Log] Slug: '${slug}' | Plan: '${restaurant.plan}' | TrialEndsAt: '${restaurant.trialEndsAt}' | IsActive: ${isSubscriptionActive} | (Prisma: ${prismaDuration}ms | Total Servidor: ${totalDuration}ms)`

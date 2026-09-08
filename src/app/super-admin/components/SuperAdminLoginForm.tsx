@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { useEffect } from "react";
 import { superAdminLoginAction } from "@/lib/actions";
 import { ShieldAlert, KeyRound, Mail } from "lucide-react";
@@ -20,7 +21,7 @@ function SubmitButton() {
 }
 
 export function SuperAdminLoginForm() {
-  const [state, formAction] = useFormState(superAdminLoginAction, null);
+  const [state, formAction] = useActionState(superAdminLoginAction, null);
 
   useEffect(() => {
     if ((state as any)?.success) {

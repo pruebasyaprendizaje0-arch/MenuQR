@@ -18,6 +18,9 @@ import {
   deleteProspectLeadAction,
   convertProspectToRestaurantAction,
   reassignRestaurantOwnerAction
+  ,createManualSubscriptionPaymentAction,
+  approveManualSubscriptionPaymentAction,
+  rejectManualSubscriptionPaymentAction
 } from "@/lib/actions";
 import { 
   Building, 
@@ -133,22 +136,69 @@ type UserOption = {
   email: string;
 };
 
+type ManualPayment = {
+  id: string;
+  restaurantId: string;
+  amount: number;
+  currency: string;
+  method: string;
+  reference?: string | null;
+  receiptUrl?: string | null;
+  status: string;
+  notes?: string | null;
+  createdAt: string;
+  expiresAt?: string | null;
+  restaurant: { id: string; name: string; slug: string };
+};
+
 export function SuperAdminDashboard({ 
   restaurants,
   leads = [],
   metrics,
   whatsappSupport,
-  allUsers = []
+  subscriptionPaymentQrUrl,
+  subscriptionBankName,
+  subscriptionBankAccountType,
+  subscriptionBankAccountNumber,
+  subscriptionBankAccountName,
+  subscriptionBankAccountDocument,
+  subscriptionDeunaPhone,
+  allUsers = [],
+  manualPayments = []
 }: { 
   restaurants: Restaurant[]; 
   leads?: ProspectLead[];
   metrics: Metrics; 
   whatsappSupport: string;
+  subscriptionPaymentQrUrl: string;
+  subscriptionBankName: string;
+  subscriptionBankAccountType: string;
+  subscriptionBankAccountNumber: string;
+  subscriptionBankAccountName: string;
+  subscriptionBankAccountDocument: string;
+  subscriptionDeunaPhone: string;
   allUsers?: UserOption[];
+  manualPayments?: ManualPayment[];
 }) {
   const [activeTab, setActiveTab] = useState<"directory" | "kanban" | "prospects" | "reminders">("directory");
   const [searchTerm, setSearchTerm] = useState("");
   const [waSupport, setWaSupport] = useState(whatsappSupport);
+  const [subscriptionQrUrl, setSubscriptionQrUrl] = useState(subscriptionPaymentQrUrl);
+  const [subscriptionBank, setSubscriptionBank] = useState({
+    name: subscriptionBankName,
+    accountType: subscriptionBankAccountType,
+    accountNumber: subscriptionBankAccountNumber,
+    accountName: subscriptionBankAccountName,
+    document: subscriptionBankAccountDocument,
+    deunaPhone: subscriptionDeunaPhone,
+  });
+  const [paymentList, setPaymentList] = useState<ManualPayment[]>(manualPayments);
+  const [paymentRestaurantId, setPaymentRestaurantId] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("10");
+  const [paymentMethod, setPaymentMethod] = useState<"transferencia" | "deuna">("transferencia");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [paymentReceiptUrl, setPaymentReceiptUrl] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
 
   // Reassign / Adjudicate Modal State
   const [reassignModalTarget, setReassignModalTarget] = useState<Restaurant | null>(null);
@@ -513,11 +563,31 @@ export function SuperAdminDashboard({
               <form 
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  await updateSystemSettingAction("whatsapp_support", waSupport);
-                  alert("Configuración de WhatsApp de soporte actualizada con éxito.");
+                  const [whatsappResult, qrResult] = await Promise.all([
+                    updateSystemSettingAction("whatsapp_support", waSupport),
+                    updateSystemSettingAction("subscription_payment_qr_url", subscriptionQrUrl),
+                  ]);
+                  const bankingEntries = [
+                    ["subscription_bank_name", subscriptionBank.name],
+                    ["subscription_bank_account_type", subscriptionBank.accountType],
+                    ["subscription_bank_account_number", subscriptionBank.accountNumber],
+                    ["subscription_bank_account_name", subscriptionBank.accountName],
+                    ["subscription_bank_account_document", subscriptionBank.document],
+                    ["subscription_deuna_phone", subscriptionBank.deunaPhone],
+                  ] as const;
+                  const bankingResults = await Promise.all(
+                    bankingEntries.map(([key, value]) => updateSystemSettingAction(key, value))
+                  );
+                  const firstError = [whatsappResult, qrResult, ...bankingResults].find((result) => result?.error);
+                  if (firstError?.error) {
+                    alert(firstError.error);
+                    return;
+                  }
+                  alert("Configuración de cobros manuales actualizada con éxito.");
                 }}
-                className="flex flex-col sm:flex-row gap-4 items-end max-w-xl"
+                className="flex flex-col gap-4 max-w-2xl"
               >
+                <div className="flex flex-col sm:flex-row gap-4 items-end w-full">
                 <div className="flex-1 space-y-1.5 w-full">
                   <label className="text-xs font-semibold text-slate-350 block">WhatsApp de Soporte Comercial (Código de país + número, sin &quot;+&quot;)</label>
                   <input
@@ -535,7 +605,74 @@ export function SuperAdminDashboard({
                 >
                   Guardar Configuración
                 </button>
+                </div>
+                <div className="space-y-1.5 w-full">
+                  <label className="text-xs font-semibold text-slate-350 block">URL HTTPS del QR de Deuna para suscripciones</label>
+                  <input
+                    type="url"
+                    name="subscription_payment_qr_url"
+                    value={subscriptionQrUrl}
+                    onChange={(e) => setSubscriptionQrUrl(e.target.value)}
+                    placeholder="https://tu-dominio.com/qr-deuna.webp"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <p className="text-[11px] text-slate-400">Debe ser una URL pública HTTPS que apunte directamente a la imagen del QR.</p>
+                </div>
+                <div className="border-t border-slate-800/80 pt-4 space-y-3 w-full">
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Datos bancarios para suscripciones</h3>
+                    <p className="text-[11px] text-slate-400">Información privada para mostrar en las instrucciones de pago de MenuQR Pro.</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input aria-label="Banco de suscripciones" value={subscriptionBank.name} onChange={(e) => setSubscriptionBank({ ...subscriptionBank, name: e.target.value })} placeholder="Banco" className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-white text-sm" />
+                    <input aria-label="Tipo de cuenta de suscripciones" value={subscriptionBank.accountType} onChange={(e) => setSubscriptionBank({ ...subscriptionBank, accountType: e.target.value })} placeholder="Tipo de cuenta" className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-white text-sm" />
+                    <input aria-label="Número de cuenta de suscripciones" value={subscriptionBank.accountNumber} onChange={(e) => setSubscriptionBank({ ...subscriptionBank, accountNumber: e.target.value.replace(/[^0-9-]/g, "") })} placeholder="Número de cuenta" inputMode="numeric" className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-white text-sm" />
+                    <input aria-label="Titular de cuenta de suscripciones" value={subscriptionBank.accountName} onChange={(e) => setSubscriptionBank({ ...subscriptionBank, accountName: e.target.value })} placeholder="Titular de la cuenta" className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-white text-sm" />
+                    <input aria-label="Identificación de cuenta de suscripciones" value={subscriptionBank.document} onChange={(e) => setSubscriptionBank({ ...subscriptionBank, document: e.target.value.replace(/[^0-9-]/g, "") })} placeholder="Cédula / RUC (opcional)" inputMode="numeric" className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-white text-sm" />
+                    <input aria-label="Teléfono Deuna de suscripciones" value={subscriptionBank.deunaPhone} onChange={(e) => setSubscriptionBank({ ...subscriptionBank, deunaPhone: e.target.value.replace(/[^0-9+ -]/g, "") })} placeholder="Teléfono Deuna" inputMode="tel" className="w-full bg-slate-950 border border-slate-800 px-3 py-2.5 rounded-xl text-white text-sm" />
+                  </div>
+                </div>
               </form>
+            </div>
+
+            {/* Manual subscription payments */}
+            <div className="bg-slate-900/40 border border-emerald-500/20 p-6 rounded-2xl space-y-4">
+              <div>
+                <h2 className="text-base font-extrabold text-white">Pagos manuales de suscripciones</h2>
+                <p className="text-xs text-slate-400">Registra transferencias o Deuna y aprueba solo después de verificar el comprobante.</p>
+              </div>
+              <form className="grid grid-cols-1 md:grid-cols-3 gap-3" onSubmit={async (e) => {
+                e.preventDefault();
+                const result = await createManualSubscriptionPaymentAction({
+                  restaurantId: paymentRestaurantId,
+                  amount: Number(paymentAmount),
+                  method: paymentMethod,
+                  reference: paymentReference,
+                  receiptUrl: paymentReceiptUrl,
+                  notes: paymentNotes,
+                });
+                if (result.error) { alert(result.error); return; }
+                alert("Pago manual registrado como pendiente.");
+                window.location.reload();
+              }}>
+                <select aria-label="Restaurante del pago" required value={paymentRestaurantId} onChange={(e) => setPaymentRestaurantId(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-sm">
+                  <option value="">Selecciona restaurante</option>
+                  {restaurants.map((restaurant) => <option key={restaurant.id} value={restaurant.id}>{restaurant.name}</option>)}
+                </select>
+                <input aria-label="Importe del pago" type="number" min="0.01" step="0.01" required value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} placeholder="Importe USD" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-sm" />
+                <select aria-label="Método del pago" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "transferencia" | "deuna")} className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-sm"><option value="transferencia">Transferencia</option><option value="deuna">Deuna</option></select>
+                <input aria-label="Referencia del pago" value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="Referencia / comprobante" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-sm" />
+                <input aria-label="URL del comprobante" type="url" value={paymentReceiptUrl} onChange={(e) => setPaymentReceiptUrl(e.target.value)} placeholder="URL HTTPS del comprobante (opcional)" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-sm" />
+                <input aria-label="Notas del pago" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} placeholder="Notas" className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white text-sm" />
+                <button type="submit" className="md:col-span-3 px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500">Registrar pago pendiente</button>
+              </form>
+              <div className="space-y-2">
+                {paymentList.filter((payment) => payment.status === "PENDING").map((payment) => <div key={payment.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs">
+                  <div><strong className="text-white">{payment.restaurant.name}</strong><span className="text-slate-400"> · ${payment.amount.toFixed(2)} · {payment.method} · {payment.reference || "sin referencia"}</span>{payment.receiptUrl && <a className="text-amber-400 ml-2 underline" href={payment.receiptUrl} target="_blank" rel="noreferrer">Comprobante</a>}</div>
+                  <div className="flex gap-2"><button type="button" onClick={async () => { const result = await approveManualSubscriptionPaymentAction(payment.id); if (result.error) alert(result.error); else window.location.reload(); }} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold">Aprobar</button><button type="button" onClick={async () => { const result = await rejectManualSubscriptionPaymentAction(payment.id); if (result.error) alert(result.error); else window.location.reload(); }} className="px-3 py-1.5 rounded-lg bg-red-600/80 text-white font-bold">Rechazar</button></div>
+                </div>)}
+                {paymentList.filter((payment) => payment.status === "PENDING").length === 0 && <p className="text-xs text-slate-500">No hay pagos pendientes.</p>}
+              </div>
             </div>
 
             {/* Metrics Grid */}

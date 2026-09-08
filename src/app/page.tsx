@@ -227,6 +227,9 @@ export default async function LandingPage() {
             <p className="text-[11px] text-emerald-400 font-semibold mt-2">
               ✨ Incluye 30 Días de Prueba 100% Gratuita
             </p>
+            <p className="text-[11px] text-slate-400 mt-2">
+              Pago por transferencia o Deuna · Activación manual el mismo día
+            </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left text-xs text-slate-300 max-w-lg mx-auto">
@@ -256,6 +259,15 @@ export default async function LandingPage() {
               Comenzar Prueba Gratis de 30 Días
               <ArrowRight className="w-4 h-4" />
             </Link>
+            <a
+              href={waUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center justify-center gap-2 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition"
+            >
+              <MessageSquare className="w-4 h-4" />
+              ¿Quieres hablar antes de registrarte? Escríbenos por WhatsApp
+            </a>
           </div>
         </div>
 

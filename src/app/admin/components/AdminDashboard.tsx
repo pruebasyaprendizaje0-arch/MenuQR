@@ -14,7 +14,7 @@ import {
   updateOrderStatusAction,
   updateRestaurantTablesAction,
   updateRestaurantChargesConfigAction,
-  subscribeToPremiumAction,
+  createManualSubscriptionPaymentAction,
   createSeasonRateAction,
   updateSeasonRateAction,
   deleteSeasonRateAction,
@@ -214,6 +214,16 @@ type Restaurant = {
   customers?: Customer[];
 };
 
+type SubscriptionPaymentDetails = {
+  qrUrl: string;
+  bankName: string;
+  accountType: string;
+  accountNumber: string;
+  accountName: string;
+  document: string;
+  deunaPhone: string;
+};
+
 type Customer = {
   id: string;
   name: string;
@@ -232,7 +242,7 @@ type Customer = {
 
 import { TableSplitMonitor } from "./TableSplitMonitor";
 
-export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
+export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { restaurant: Restaurant; subscriptionPaymentDetails?: SubscriptionPaymentDetails }) {
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
     setIsMounted(true);
@@ -246,60 +256,38 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
   const [currentTrialEndsAt, setCurrentTrialEndsAt] = useState<Date>(
     restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date()
   );
+  // Legacy card-form state is kept only because the hidden migration block below still type-checks.
   const [cardHolderName, setCardHolderName] = useState("");
   const [cardNumber, setCardNumber] = useState("");
   const [cardExpiry, setCardExpiry] = useState("");
   const [cardCvc, setCardCvc] = useState("");
   const [cardDocId, setCardDocId] = useState("");
-
-  const handleSubscribePremium = async (e: React.FormEvent) => {
+  const [manualPaymentMethod, setManualPaymentMethod] = useState<"transferencia" | "deuna">("transferencia");
+  const [manualPaymentReference, setManualPaymentReference] = useState("");
+  const [manualPaymentReceiptUrl, setManualPaymentReceiptUrl] = useState("");
+  const handleSubscribePremium = (e: React.FormEvent) => {
     e.preventDefault();
+    alert("El pago con tarjeta está deshabilitado. Usa transferencia o Deuna.");
+  };
 
-    if (!cardHolderName.trim()) {
-      alert("Por favor ingrese el Nombre del Titular impreso en la tarjeta.");
-      return;
-    }
-    if (cardNumber.replace(/\s/g, "").length < 15) {
-      alert("Por favor ingrese un Número de Tarjeta válido (16 dígitos).");
-      return;
-    }
-    if (!cardExpiry.trim()) {
-      alert("Por favor ingrese la Fecha de Expiración (MM/AA).");
-      return;
-    }
-    if (!cardCvc.trim() || cardCvc.length < 3) {
-      alert("Por favor ingrese el Código de Seguridad (CVC / CVV).");
-      return;
-    }
-
+  const handleManualSubscriptionPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
     setIsSubmittingPayment(true);
-    setPaymentSuccessMsg("");
-
-    const res = await subscribeToPremiumAction(restaurant.id, {
-      cardHolderName,
-      cardNumberLast4: cardNumber.replace(/\s/g, "").slice(-4),
-      cardDocId,
+    const result = await createManualSubscriptionPaymentAction({
+      restaurantId: restaurant.id,
+      amount: 10,
+      method: manualPaymentMethod,
+      reference: manualPaymentReference,
+      receiptUrl: manualPaymentReceiptUrl,
     });
-
     setIsSubmittingPayment(false);
-    if (res.error) {
-      alert(res.error);
-    } else {
-      setPaymentSuccessMsg(res.message || "¡Pago procesado con éxito! Suscripción al Plan Premium activada.");
-      setCurrentPlan("PRO");
-      if (res.trialEndsAt) {
-        setCurrentTrialEndsAt(new Date(res.trialEndsAt));
-      }
-      setTimeout(() => {
-        setShowPaymentModal(false);
-        setPaymentSuccessMsg("");
-        setCardHolderName("");
-        setCardNumber("");
-        setCardExpiry("");
-        setCardCvc("");
-        setCardDocId("");
-      }, 3000);
+    if (result.error) {
+      alert(result.error);
+      return;
     }
+    setPaymentSuccessMsg("Solicitud enviada. Verificaremos tu pago y activaremos el plan cuando sea aprobado.");
+    setManualPaymentReference("");
+    setManualPaymentReceiptUrl("");
   };
   const [copied, setCopied] = useState(false);
   const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
@@ -793,7 +781,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
           const thumbSize = 64;
           const gap = 12;
           const totalWidth = (dishBase64s.length * thumbSize) + ((dishBase64s.length - 1) * gap);
-          let startX = (400 - totalWidth) / 2;
+          const startX = (400 - totalWidth) / 2;
           
           dishBase64s.forEach((base64, idx) => {
             const img = new Image();
@@ -1197,10 +1185,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
           const isExpired = trialEnds < now;
           const daysRemaining = Math.max(0, Math.ceil((trialEnds.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
           const isPro = currentPlan === "PRO";
+          const isProActive = isPro && !isExpired;
 
           return (
             <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-sm ${
-              isPro
+              isProActive
                 ? "bg-gradient-to-r from-emerald-950/40 to-slate-900 border-emerald-500/30 text-emerald-300"
                 : isExpired 
                   ? "bg-red-500/10 border-red-500/30 text-red-400" 
@@ -1208,22 +1197,22 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
             }`}>
               <div className="flex items-center gap-3">
                 <div className={`p-2.5 rounded-xl border ${
-                  isPro ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" : "bg-amber-500/20 border-amber-500/30 text-amber-400"
+                  isProActive ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" : "bg-amber-500/20 border-amber-500/30 text-amber-400"
                 }`}>
                   <Crown className="w-5 h-5" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold">
-                      {isPro ? "Plan Premium Activo ($10 USD/mes)" : isExpired ? "Suscripción Inactiva" : "Prueba Gratuita (30 Días)"}
+                      {isProActive ? "Plan Premium Activo ($10 USD/mes)" : isExpired ? "Suscripción Vencida" : "Prueba Gratuita (30 Días)"}
                     </span>
                     <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-950/60 border border-current">
-                      {isPro ? "PRO" : `${daysRemaining}d restantes`}
+                      {isProActive ? "PRO" : isPro ? "VENCIDO" : `${daysRemaining}d restantes`}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {isPro 
-                      ? `Próxima renovación: ${trialEnds.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}`
+                    {isProActive
+                      ? `Vencimiento: ${trialEnds.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}`
                       : isExpired 
                         ? "Tu prueba ha finalizado. Activa el Plan Premium por solo $10 USD/mes para continuar." 
                         : `Vence el ${trialEnds.toLocaleDateString()}. Suscríbete al Plan Premium por $10 USD/mes.`}
@@ -1235,7 +1224,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/10 transition-all shrink-0 flex items-center justify-center gap-1.5"
               >
                 <CreditCard className="w-3.5 h-3.5" />
-                {isPro ? "Renovar ($10/mes)" : "Activar Premium ($10/mes)"}
+                {isProActive ? "Renovar ($10/mes)" : "Activar Premium ($10/mes)"}
               </button>
             </div>
           );
@@ -4474,15 +4463,15 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                 <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-2">
                   <span className="text-xs text-slate-400 font-medium">Estado del Plan</span>
                   <div className="flex items-center gap-2">
-                    <span className={`h-3 w-3 rounded-full ${currentPlan === "PRO" ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                    <span className={`h-3 w-3 rounded-full ${currentPlan === "PRO" && currentTrialEndsAt > new Date() ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
                     <span className="font-bold text-white text-base">
-                      {currentPlan === "PRO" ? "Plan Premium Activo" : "Prueba Gratuita"}
+                      {currentPlan === "PRO" && currentTrialEndsAt > new Date() ? "Plan Premium Activo" : currentPlan === "PRO" ? "Suscripción Vencida" : "Prueba Gratuita"}
                     </span>
                   </div>
                 </div>
 
                 <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-2">
-                  <span className="text-xs text-slate-400 font-medium">Próxima Fecha de Vencimiento / Renovación</span>
+                  <span className="text-xs text-slate-400 font-medium">Fecha de Vencimiento</span>
                   <div className="font-bold text-slate-200 text-base">
                     {currentTrialEndsAt.toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
                   </div>
@@ -4523,14 +4512,14 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               {/* Action Button */}
               <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-800">
                 <div className="text-xs text-slate-400">
-                  Transacción procesada de forma segura con Pasarela de Pagos API.
+                  Pagos por transferencia o Deuna verificados manualmente.
                 </div>
                 <button
                   onClick={() => setShowPaymentModal(true)}
                   className="w-full sm:w-auto px-8 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2"
                 >
                   <CreditCard className="w-4 h-4" />
-                  {currentPlan === "PRO" ? "Renovar Suscripción ($10/mes)" : "Activar Plan Premium ($10/mes)"}
+                  {currentPlan === "PRO" && currentTrialEndsAt > new Date() ? "Renovar Suscripción ($10/mes)" : "Activar Plan Premium ($10/mes)"}
                 </button>
               </div>
             </div>
@@ -4577,7 +4566,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                                   ? "🛵 Domicilio" 
                                   : `🪑 Mesa #${order.tableName}`}
                             </span>
-                            <p className="text-[9px] text-slate-500 mt-1">{new Date(order.createdAt).toLocaleTimeString()}</p>
+                            <p className="text-[9px] text-slate-500 mt-1">{isMounted ? new Date(order.createdAt).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }) : "--:--"}</p>
                           </div>
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
                             order.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" : "bg-blue-500/10 text-blue-500"
@@ -4659,7 +4648,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
         })()}
       </aside>
 
-      {/* Modal de Pasarela de Pago Segura - Plan Premium ($10 USD/mes) */}
+      {/* Modal de solicitud de pago manual - Plan Premium ($10 USD/mes) */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative space-y-6 my-8">
@@ -4674,7 +4663,7 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               <div className="h-12 w-12 bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
                 <Crown className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-extrabold text-white">Pasarela de Pago Segura</h3>
+              <h3 className="text-xl font-extrabold text-white">Solicitud de pago manual</h3>
               <p className="text-slate-400 text-xs">
                 Suscripción Plan Premium ($10.00 USD/mes) para <strong className="text-white">{restaurant.name}</strong>
               </p>
@@ -4688,11 +4677,11 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               </div>
               <div className="flex justify-between items-center text-slate-300">
                 <span>Período:</span>
-                <span>30 Días (Renovación Automática)</span>
+                <span>30 días (activación tras verificación)</span>
               </div>
               <div className="flex justify-between items-center text-slate-300">
-                <span>Cifrado:</span>
-                <span className="text-emerald-400 font-medium">SSL 256-Bit SmartFields</span>
+                <span>Método:</span>
+                <span className="text-amber-300 font-medium">Transferencia o Deuna</span>
               </div>
               <div className="border-t border-slate-800 pt-2.5 flex justify-between items-center">
                 <span className="font-bold text-white text-sm">Total a pagar:</span>
@@ -4700,8 +4689,8 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
               </div>
             </div>
 
-            {/* Credit Card Payment Form */}
-            <form onSubmit={handleSubscribePremium} className="space-y-4">
+            {/* Legacy card form retained for migration compatibility but never rendered. */}
+            {false && (<form onSubmit={handleSubscribePremium} className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-300 block">
                   Nombre en la Tarjeta <span className="text-red-400">*</span>
@@ -4813,10 +4802,27 @@ export function AdminDashboard({ restaurant }: { restaurant: Restaurant }) {
                   </>
                 )}
               </button>
+            </form>)}
+
+            <form onSubmit={handleManualSubscriptionPayment} className="space-y-4">
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200">
+                Selecciona un método, realiza el pago y envía la referencia. El plan se activará después de la verificación manual.
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setManualPaymentMethod("transferencia")} className={`rounded-xl border px-3 py-3 text-xs font-bold ${manualPaymentMethod === "transferencia" ? "border-amber-400 bg-amber-400/10 text-amber-300" : "border-slate-700 text-slate-400"}`}>Transferencia</button>
+                <button type="button" onClick={() => setManualPaymentMethod("deuna")} className={`rounded-xl border px-3 py-3 text-xs font-bold ${manualPaymentMethod === "deuna" ? "border-amber-400 bg-amber-400/10 text-amber-300" : "border-slate-700 text-slate-400"}`}>Deuna</button>
+              </div>
+              {manualPaymentMethod === "deuna" && subscriptionPaymentDetails?.qrUrl && <div className="rounded-2xl bg-white p-3 mx-auto max-w-[220px]"><img src={subscriptionPaymentDetails.qrUrl} alt="QR de Deuna para suscripción" className="w-full aspect-square object-contain" /></div>}
+              {manualPaymentMethod === "transferencia" && subscriptionPaymentDetails && <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 text-xs space-y-1.5"><p><span className="text-slate-400">Banco:</span> {subscriptionPaymentDetails.bankName}</p><p><span className="text-slate-400">Tipo:</span> {subscriptionPaymentDetails.accountType}</p><p><span className="text-slate-400">Cuenta:</span> {subscriptionPaymentDetails.accountNumber}</p><p><span className="text-slate-400">Titular:</span> {subscriptionPaymentDetails.accountName}</p></div>}
+              {manualPaymentMethod === "deuna" && subscriptionPaymentDetails?.deunaPhone && <p className="text-center text-xs text-slate-400">Teléfono Deuna: <strong className="text-white">{subscriptionPaymentDetails.deunaPhone}</strong></p>}
+              <input required aria-label="Referencia de pago" value={manualPaymentReference} onChange={(e) => setManualPaymentReference(e.target.value)} placeholder="Número de operación o referencia" className="w-full bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-xl text-white text-xs" />
+              <input type="url" aria-label="URL del comprobante" value={manualPaymentReceiptUrl} onChange={(e) => setManualPaymentReceiptUrl(e.target.value)} placeholder="URL HTTPS del comprobante (opcional)" className="w-full bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-xl text-white text-xs" />
+              {paymentSuccessMsg && <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs rounded-2xl text-center font-bold"><CheckCircle2 className="w-4 h-4 inline mr-2" />{paymentSuccessMsg}</div>}
+              <button type="submit" disabled={isSubmittingPayment} className="w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 disabled:opacity-50">{isSubmittingPayment ? "Enviando solicitud..." : "Enviar solicitud de pago"}</button>
             </form>
 
             <p className="text-[10px] text-center text-slate-500 leading-normal">
-              🔒 Transacción segura procesada mediante clave SmartFields API con cifrado bancario SSL 256-bit.
+              La activación se realiza manualmente después de verificar el comprobante de pago.
             </p>
           </div>
         </div>

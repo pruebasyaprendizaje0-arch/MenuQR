@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { registerUserAction } from "@/lib/actions";
 import { KeyRound, UtensilsCrossed, Mail, User, Building, MapPin } from "lucide-react";
 import Link from "next/link";
@@ -22,7 +23,7 @@ function SubmitButton() {
 }
 
 export default function RegisterPage() {
-  const [state, formAction] = useFormState(registerUserAction, null);
+  const [state, formAction] = useActionState(registerUserAction, null);
   const [province, setProvince] = useState("");
   const [canton, setCanton] = useState("");
   const [parroquia, setParroquia] = useState("");

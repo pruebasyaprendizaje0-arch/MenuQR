@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { requestPasswordResetAction } from "@/lib/actions";
 import { UtensilsCrossed, Mail, ArrowLeft, CheckCircle2, AlertCircle } from "lucide-react";
 import Link from "next/link";
@@ -20,7 +21,7 @@ function SubmitButton() {
 }
 
 export default function RecuperarPasswordPage() {
-  const [state, formAction] = useFormState(requestPasswordResetAction, null);
+  const [state, formAction] = useActionState(requestPasswordResetAction, null);
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">

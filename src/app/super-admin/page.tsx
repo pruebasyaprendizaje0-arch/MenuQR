@@ -43,6 +43,17 @@ export default async function SuperAdminPage() {
     console.error("Error loading restaurants in SuperAdminPage:", err);
   }
 
+  let manualPayments: any[] = [];
+  try {
+    manualPayments = await prismaTenant.manualSubscriptionPayment.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: { restaurant: { select: { id: true, name: true, slug: true } } },
+    });
+  } catch (err) {
+    console.error("Error loading manual subscription payments:", err);
+  }
+
   // Load all registered users
   let allUsers: any[] = [];
   try {
@@ -121,13 +132,44 @@ export default async function SuperAdminPage() {
     createdAt: toIso(l.createdAt),
     updatedAt: toIso(l.updatedAt),
   }));
+  const serializedManualPayments = manualPayments.map((payment: any) => ({
+    ...payment,
+    createdAt: toIso(payment.createdAt),
+    approvedAt: payment.approvedAt ? toIso(payment.approvedAt) : null,
+    startsAt: payment.startsAt ? toIso(payment.startsAt) : null,
+    expiresAt: payment.expiresAt ? toIso(payment.expiresAt) : null,
+  }));
 
   let whatsappSupport = "";
+  let subscriptionPaymentQrUrl = "";
+  let subscriptionBankName = "";
+  let subscriptionBankAccountType = "";
+  let subscriptionBankAccountNumber = "";
+  let subscriptionBankAccountName = "";
+  let subscriptionBankAccountDocument = "";
+  let subscriptionDeunaPhone = "";
   try {
-    const whatsappSupportSetting = await prismaControl.systemSetting.findUnique({
-      where: { key: "whatsapp_support" }
+    const settings = await prismaControl.systemSetting.findMany({
+      where: { key: { in: [
+        "whatsapp_support",
+        "subscription_payment_qr_url",
+        "subscription_bank_name",
+        "subscription_bank_account_type",
+        "subscription_bank_account_number",
+        "subscription_bank_account_name",
+        "subscription_bank_account_document",
+        "subscription_deuna_phone",
+      ] } },
     });
-    whatsappSupport = whatsappSupportSetting?.value || "";
+    const settingValue = (key: string) => settings.find((setting) => setting.key === key)?.value || "";
+    whatsappSupport = settingValue("whatsapp_support");
+    subscriptionPaymentQrUrl = settingValue("subscription_payment_qr_url");
+    subscriptionBankName = settingValue("subscription_bank_name");
+    subscriptionBankAccountType = settingValue("subscription_bank_account_type");
+    subscriptionBankAccountNumber = settingValue("subscription_bank_account_number");
+    subscriptionBankAccountName = settingValue("subscription_bank_account_name");
+    subscriptionBankAccountDocument = settingValue("subscription_bank_account_document");
+    subscriptionDeunaPhone = settingValue("subscription_deuna_phone");
   } catch (error) {
     console.warn("WARNING: SystemSetting table is missing or not migrated yet.", error);
   }
@@ -138,7 +180,15 @@ export default async function SuperAdminPage() {
       leads={serializedLeads}
       metrics={metrics} 
       whatsappSupport={whatsappSupport}
+      subscriptionPaymentQrUrl={subscriptionPaymentQrUrl}
+      subscriptionBankName={subscriptionBankName}
+      subscriptionBankAccountType={subscriptionBankAccountType}
+      subscriptionBankAccountNumber={subscriptionBankAccountNumber}
+      subscriptionBankAccountName={subscriptionBankAccountName}
+      subscriptionBankAccountDocument={subscriptionBankAccountDocument}
+      subscriptionDeunaPhone={subscriptionDeunaPhone}
       allUsers={allUsers}
+      manualPayments={serializedManualPayments}
     />
   );
 }

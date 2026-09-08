@@ -163,5 +163,40 @@ export default async function AdminPage() {
     }))
   };
 
-  return <AdminDashboard restaurant={serializedRestaurant as unknown as Parameters<typeof AdminDashboard>[0]["restaurant"]} />;
+  let subscriptionPaymentDetails = {
+    qrUrl: "",
+    bankName: "",
+    accountType: "",
+    accountNumber: "",
+    accountName: "",
+    document: "",
+    deunaPhone: "",
+  };
+  try {
+    const settings = await prisma.systemSetting.findMany({
+      where: { key: { in: [
+        "subscription_payment_qr_url",
+        "subscription_bank_name",
+        "subscription_bank_account_type",
+        "subscription_bank_account_number",
+        "subscription_bank_account_name",
+        "subscription_bank_account_document",
+        "subscription_deuna_phone",
+      ] } },
+    });
+    const value = (key: string) => settings.find((setting) => setting.key === key)?.value || "";
+    subscriptionPaymentDetails = {
+      qrUrl: value("subscription_payment_qr_url"),
+      bankName: value("subscription_bank_name"),
+      accountType: value("subscription_bank_account_type"),
+      accountNumber: value("subscription_bank_account_number"),
+      accountName: value("subscription_bank_account_name"),
+      document: value("subscription_bank_account_document"),
+      deunaPhone: value("subscription_deuna_phone"),
+    };
+  } catch (error) {
+    console.warn("No se pudo cargar la configuración de pago de suscripciones.", error);
+  }
+
+  return <AdminDashboard restaurant={serializedRestaurant as unknown as Parameters<typeof AdminDashboard>[0]["restaurant"]} subscriptionPaymentDetails={subscriptionPaymentDetails} />;
 }

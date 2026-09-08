@@ -1,7 +1,8 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { resetPasswordAction } from "@/lib/actions";
 import { UtensilsCrossed, KeyRound, CheckCircle2, AlertCircle, ArrowLeft } from "lucide-react";
@@ -25,7 +26,7 @@ function RestablecerPasswordForm() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") || "";
 
-  const [state, formAction] = useFormState(resetPasswordAction, null);
+  const [state, formAction] = useActionState(resetPasswordAction, null);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [validationError, setValidationError] = useState("");

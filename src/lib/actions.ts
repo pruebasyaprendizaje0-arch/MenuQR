@@ -1186,7 +1186,7 @@ export async function reassignRestaurantOwnerAction(restaurantId: string, ownerE
 
   const cleanTarget = ownerEmailOrUserId.trim();
 
-  let targetUser = await prismaControl.user.findFirst({
+  const targetUser = await prismaControl.user.findFirst({
     where: {
       OR: [
         { id: cleanTarget },
@@ -1245,6 +1245,78 @@ export async function changeUserPlanAction(restaurantId: string, plan: "FREE" | 
   return { success: true };
 }
 
+export async function createManualSubscriptionPaymentAction(input: {
+  restaurantId: string;
+  amount: number;
+  method: "transferencia" | "deuna";
+  reference?: string;
+  receiptUrl?: string;
+  notes?: string;
+}) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    const auth = await verifyRestaurantOwnership(input.restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+  }
+  if (!input.restaurantId || !Number.isFinite(input.amount) || input.amount <= 0) {
+    return { error: "Restaurante e importe válido son obligatorios." };
+  }
+  const restaurant = await prismaTenant.restaurant.findUnique({ where: { id: input.restaurantId }, select: { id: true } });
+  if (!restaurant) return { error: "Restaurante no encontrado." };
+
+  const payment = await prismaTenant.manualSubscriptionPayment.create({
+    data: {
+      restaurantId: input.restaurantId,
+      amount: Math.round(input.amount * 100) / 100,
+      method: input.method,
+      reference: input.reference?.trim() || null,
+      receiptUrl: input.receiptUrl?.trim() || null,
+      notes: input.notes?.trim() || null,
+    },
+  });
+  revalidatePath("/super-admin");
+  return { success: true, paymentId: payment.id };
+}
+
+export async function approveManualSubscriptionPaymentAction(paymentId: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+  if (!paymentId) return { error: "Pago inválido." };
+
+  const approvedBy = "superadmin";
+  const result = await prismaTenant.$transaction(async (tx) => {
+    const payment = await tx.manualSubscriptionPayment.findUnique({ where: { id: paymentId } });
+    if (!payment) throw new Error("Pago no encontrado.");
+    if (payment.status !== "PENDING") throw new Error("Este pago ya fue procesado.");
+    const restaurant = await tx.restaurant.findUnique({ where: { id: payment.restaurantId }, select: { id: true, slug: true, trialEndsAt: true } });
+    if (!restaurant) throw new Error("Restaurante no encontrado.");
+    const baseDate = restaurant.trialEndsAt && restaurant.trialEndsAt > new Date() ? restaurant.trialEndsAt : new Date();
+    const expiresAt = new Date(baseDate);
+    expiresAt.setDate(expiresAt.getDate() + 30);
+    await tx.manualSubscriptionPayment.update({
+      where: { id: payment.id },
+      data: { status: "APPROVED", approvedBy, approvedAt: new Date(), startsAt: baseDate, expiresAt },
+    });
+    await tx.restaurant.update({ where: { id: restaurant.id }, data: { plan: "PRO", trialEndsAt: expiresAt } });
+    return { slug: restaurant.slug, expiresAt };
+  });
+  revalidatePath("/super-admin");
+  revalidatePath(`/admin`);
+  revalidatePath(`/${result.slug}`);
+  return { success: true, expiresAt: result.expiresAt.toISOString() };
+}
+
+export async function rejectManualSubscriptionPaymentAction(paymentId: string, notes?: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) return { error: "No autorizado." };
+  const payment = await prismaTenant.manualSubscriptionPayment.findUnique({ where: { id: paymentId }, select: { status: true } });
+  if (!payment) return { error: "Pago no encontrado." };
+  if (payment.status !== "PENDING") return { error: "Este pago ya fue procesado." };
+  await prismaTenant.manualSubscriptionPayment.update({ where: { id: paymentId }, data: { status: "REJECTED", notes: notes?.trim() || null } });
+  revalidatePath("/super-admin");
+  return { success: true };
+}
+
 export async function subscribeToPremiumAction(
   restaurantId: string,
   paymentData?: {
@@ -1253,56 +1325,13 @@ export async function subscribeToPremiumAction(
     cardDocId?: string;
   }
 ) {
-  const auth = await verifyRestaurantOwnership(restaurantId);
-  if (!auth.authorized) return { error: auth.error };
-
-  const restaurant = await prisma.restaurant.findUnique({
-    where: { id: restaurantId }
-  });
-
-  if (!restaurant) {
-    return { error: "Restaurante no encontrado." };
-  }
-
-  const apiKey = (process.env.PAYMENT_API_KEY || "").trim();
-  const secretKey = (process.env.PAYMENT_SECRET_KEY || "").trim();
-  const smartFieldsKey = (process.env.SMARTFIELDS_API_KEY || "").trim();
-
-  if (!apiKey) {
-    console.error("[subscribeToPremiumAction] Missing PAYMENT_API_KEY in process.env");
-    return { error: "Configuración de pasarela de pagos no disponible. Por favor verifique las variables de entorno." };
-  }
-
-  console.log(`[Payment Gateway API] Processing subscription charge for restaurant ${restaurant.id}`);
-  console.log(`[Payment Gateway API] Payment credentials configured: ${Boolean(smartFieldsKey && secretKey)}`);
-  if (paymentData?.cardHolderName) {
-    console.log(`[Payment Gateway API] Cardholder: ${paymentData.cardHolderName} | Last 4: **** ${paymentData.cardNumberLast4 || '****'}`);
-  }
-
-  const currentExpiry = restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date();
-  const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
-  const newExpiry = new Date(baseDate);
-  newExpiry.setMonth(newExpiry.getMonth() + 1);
-
-  const updatedRestaurant = await prisma.restaurant.update({
-    where: { id: restaurantId },
-    data: {
-      plan: "PRO",
-      trialEndsAt: newExpiry
-    }
-  });
-
-  revalidatePath("/admin");
-  revalidatePath("/super-admin");
-  revalidatePath(`/${updatedRestaurant.slug}`);
-
-  const cardSuffix = paymentData?.cardNumberLast4 ? ` finalizada en **** ${paymentData.cardNumberLast4}` : "";
-
+  void restaurantId;
+  void paymentData;
   return {
-    success: true,
-    message: `¡Pago de $10.00 USD procesado con éxito con la tarjeta${cardSuffix}! Tu Plan Premium ha sido activado/renovado por 30 días.`,
-    plan: updatedRestaurant.plan,
-    trialEndsAt: updatedRestaurant.trialEndsAt.toISOString()
+    error: "El pago con tarjeta está deshabilitado mientras se integra dLocal. Usa transferencia o Deuna y solicita la verificación manual.",
+    message: undefined,
+    plan: "FREE" as const,
+    trialEndsAt: null,
   };
 }
 
@@ -1329,6 +1358,17 @@ export async function updateSystemSettingAction(key: string, value: string) {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) {
     return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  if (key === "subscription_payment_qr_url" && value.trim()) {
+    try {
+      const parsed = new URL(value.trim());
+      if (parsed.protocol !== "https:") {
+        return { error: "La URL del QR de suscripciones debe usar HTTPS." };
+      }
+    } catch {
+      return { error: "La URL del QR de suscripciones no es válida." };
+    }
   }
 
   await prismaControl.systemSetting.upsert({
@@ -1745,7 +1785,7 @@ export async function getOrderTrackingAction(restaurantSlug?: string | null, que
     const isNumeric = /^\d+$/.test(cleanQuery);
     const parsedNumber = isNumeric ? parseInt(cleanQuery, 10) : null;
 
-    let whereClause: any = {};
+    const whereClause: any = {};
 
     if (restaurantSlug) {
       const restaurant = await prisma.restaurant.findUnique({

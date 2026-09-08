@@ -9,5 +9,8 @@ export default defineConfig([
     "**/.next/**",
     "node_modules/**",
     "prisma/generated/**",
+    // The repository contains a separate Git submodule with its own toolchain.
+    // Lint it from that submodule instead of mixing it into the root app report.
+    "MenuQR/**",
   ]),
 ]);
