@@ -74,6 +74,8 @@ type Restaurant = {
   contactNumbers: string | null;
   ubicameUrl: string | null;
   mapEmbedUrl?: string | null;
+  city?: string | null;
+  province?: string | null;
   priceRange?: string | null;
   googleBusinessUrl?: string | null;
   structuredSchedule?: string | null;
@@ -114,20 +116,35 @@ interface CartItem {
   quantity: number;
 }
 
-function getMapIframeSrc(mapEmbedUrl?: string | null, address?: string | null, ubicameUrl?: string | null): string | null {
+function getMapIframeSrc(
+  mapEmbedUrl?: string | null, 
+  address?: string | null, 
+  ubicameUrl?: string | null,
+  restaurantName?: string | null,
+  city?: string | null,
+  province?: string | null
+): string | null {
   const sanitized = sanitizeMapEmbedUrl(mapEmbedUrl);
   if (sanitized) {
     return sanitized;
   }
 
-  if (address && address.trim()) {
-    return `https://maps.google.com/maps?q=${encodeURIComponent(address.trim())}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  if (ubicameUrl && ubicameUrl.trim()) {
+    const sanitizedUbicame = sanitizeMapEmbedUrl(ubicameUrl);
+    if (sanitizedUbicame) return sanitizedUbicame;
   }
 
-  if (ubicameUrl && ubicameUrl.trim()) {
-    if (ubicameUrl.includes("maps.google.com") || ubicameUrl.includes("goo.gl") || ubicameUrl.includes("maps.app.goo.gl") || ubicameUrl.includes("google.com/maps")) {
-      return `https://maps.google.com/maps?q=${encodeURIComponent(ubicameUrl.trim())}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
-    }
+  if (address && address.trim()) {
+    const queryParts = [address.trim()];
+    if (city && !address.toLowerCase().includes(city.toLowerCase())) queryParts.push(city);
+    if (province && !address.toLowerCase().includes(province.toLowerCase())) queryParts.push(province);
+    queryParts.push("Ecuador");
+    return `https://maps.google.com/maps?q=${encodeURIComponent(queryParts.join(", "))}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  if (restaurantName && (city || province)) {
+    const queryParts = [restaurantName, city, province, "Ecuador"].filter(Boolean);
+    return `https://maps.google.com/maps?q=${encodeURIComponent(queryParts.join(", "))}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
   }
 
   return null;
@@ -1261,7 +1278,14 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
             {/* Ubicación y Cómo Llegar (Mapa Embed) */}
             {(() => {
-              const mapIframeSrc = getMapIframeSrc(restaurant.mapEmbedUrl, restaurant.address, restaurant.ubicameUrl);
+              const mapIframeSrc = getMapIframeSrc(
+                restaurant.mapEmbedUrl, 
+                restaurant.address, 
+                restaurant.ubicameUrl,
+                restaurant.name,
+                restaurant.city,
+                restaurant.province
+              );
               const hasLocation = restaurant.address || restaurant.ubicameUrl || mapIframeSrc;
 
               if (!hasLocation) return null;

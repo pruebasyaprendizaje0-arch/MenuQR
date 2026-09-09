@@ -6,14 +6,14 @@ import {
   updateRestaurantAction, 
   createCategoryAction, 
   updateCategoryAction, 
-  deleteCategoryAction,
-  createDishAction,
-  updateDishAction,
-  deleteDishAction,
-  toggleDishAvailabilityAction,
-  updateOrderStatusAction,
-  updateRestaurantTablesAction,
-  updateRestaurantChargesConfigAction,
+  deleteCategoryAction, 
+  createDishAction, 
+  updateDishAction, 
+  deleteDishAction, 
+  toggleDishAvailabilityAction, 
+  updateOrderStatusAction, 
+  updateRestaurantTablesAction, 
+  updateRestaurantChargesConfigAction, 
   createManualSubscriptionPaymentAction,
   createSeasonRateAction,
   updateSeasonRateAction,
@@ -37,6 +37,7 @@ import {
   DAY_LABELS, 
   DEFAULT_WEEKLY_SCHEDULE 
 } from "@/lib/schedule";
+import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { 
   Store, 
   FolderHeart, 
@@ -47,34 +48,34 @@ import {
   Edit2, 
   Trash2, 
   Save, 
-  ExternalLink,
-  Check,
-  AlertCircle,
-  Eye,
-  EyeOff,
-  LineChart,
-  ShoppingBag,
-  TrendingUp,
-  Users,
-  CheckCircle2,
-  XCircle,
-  DollarSign,
-  Camera,
-  Truck,
-  Upload,
-  CreditCard,
-  Crown,
-  Sparkles,
-  Search,
-  FileSpreadsheet,
-  UserCheck,
-  Heart,
-  MessageSquare,
-  CalendarDays,
-  Percent,
-  Tag,
-  MapPin,
-  Utensils
+  ExternalLink, 
+  Check, 
+  AlertCircle, 
+  Eye, 
+  EyeOff, 
+  LineChart, 
+  ShoppingBag, 
+  TrendingUp, 
+  Users, 
+  CheckCircle2, 
+  XCircle, 
+  DollarSign, 
+  Camera, 
+  Truck, 
+  Upload, 
+  CreditCard, 
+  Crown, 
+  Sparkles, 
+  Search, 
+  FileSpreadsheet, 
+  UserCheck, 
+  Heart, 
+  MessageSquare, 
+  CalendarDays, 
+  Percent, 
+  Tag, 
+  MapPin, 
+  Utensils 
 } from "lucide-react";
 
 type SeasonRate = {
@@ -239,6 +240,90 @@ type Customer = {
   createdAt: string;
   updatedAt: string;
 };
+
+function MapEmbedConfigField({ 
+  initialValue, 
+  address, 
+  cityName 
+}: { 
+  initialValue?: string | null; 
+  address?: string | null; 
+  cityName?: string | null;
+}) {
+  const [val, setVal] = useState(initialValue || "");
+  const [showPreview, setShowPreview] = useState(false);
+  
+  const previewSrc = sanitizeMapEmbedUrl(val) || (address ? sanitizeMapEmbedUrl(`${address}${cityName ? `, ${cityName}` : ""}, Ecuador`) : null);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-xs font-semibold text-slate-400">
+            URL de Iframe de Google Maps, enlace normal o Código Embed (`&lt;iframe src="..."&gt;&lt;/iframe&gt;`)
+          </label>
+          {previewSrc && (
+            <button
+              type="button"
+              onClick={() => setShowPreview(!showPreview)}
+              className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-colors"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              {showPreview ? "Ocultar Vista Previa" : "Ver Vista Previa del Mapa"}
+            </button>
+          )}
+        </div>
+        <textarea
+          name="mapEmbedUrl"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          rows={2}
+          placeholder='Pega cualquier formato: <iframe> completo, link de compartir de Maps, o https://www.google.com/maps/embed?pb=...'
+          className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-red-500"
+        />
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          {val.trim() && sanitizeMapEmbedUrl(val) ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Mapa detectado y validado automáticamente (sin errores de pb)
+            </span>
+          ) : !val.trim() && address ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[11px] font-medium">
+              <MapPin className="w-3.5 h-3.5" />
+              Se usará la dirección física automáticamente para el mapa público
+            </span>
+          ) : null}
+        </div>
+        <p className="text-[11px] text-slate-500 mt-1.5">
+          💡 Acepta: código `&lt;iframe&gt;` de Google Maps, enlaces cortos `maps.app.goo.gl`, enlaces `/maps/place/`, coordenadas (`lat, lng`) o URLs con `pb=`. El sistema lo sanitiza y repara automáticamente para evitar el error &quot;Invalid pb parameter&quot;.
+        </p>
+      </div>
+
+      {showPreview && previewSrc && (
+        <div className="border border-white/10 rounded-2xl overflow-hidden bg-slate-950 shadow-xl p-3 space-y-2">
+          <div className="flex items-center justify-between px-1 text-xs text-slate-400">
+            <span className="font-semibold flex items-center gap-1.5 text-white">
+              <MapPin className="w-3.5 h-3.5 text-red-500" />
+              Vista Previa en Vivo del Mapa
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono truncate max-w-xs">{previewSrc}</span>
+          </div>
+          <div className="w-full h-48 rounded-xl overflow-hidden border border-slate-800">
+            <iframe
+              src={previewSrc}
+              width="100%"
+              height="100%"
+              style={{ border: 0 }}
+              allowFullScreen
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 import { TableSplitMonitor } from "./TableSplitMonitor";
 
@@ -1973,15 +2058,10 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                   </span>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                    URL de Iframe de Google Maps o Código Embed completo (`&lt;iframe src="..."&gt;&lt;/iframe&gt;`)
-                  </label>
-                  <textarea
-                    name="mapEmbedUrl"
-                    defaultValue={restaurant.mapEmbedUrl || ""}
-                    rows={2}
-                    placeholder='ej: https://www.google.com/maps/embed?pb=... o pega el código <iframe> completo de Google Maps -> Compartir -> Incorporar mapa'
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-red-500"
+                  <MapEmbedConfigField 
+                    initialValue={restaurant.mapEmbedUrl} 
+                    address={restaurant.address} 
+                    cityName={restaurant.city} 
                   />
                   <p className="text-[11px] text-slate-500 mt-1.5">
                     💡 Si no ingresas un enlace de mapa embed pero ingresas la Dirección Física, el sistema generará automáticamente la vista de mapa en tu menú público.

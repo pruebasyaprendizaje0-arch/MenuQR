@@ -1,10 +1,12 @@
 /**
- * Sanitiza y limpia URLs o bloques <iframe> de Google Maps Embed.
- * Soluciona errores como:
- * 1. HTTP 400 Bad Request por strings 'pb' truncados, incompletos o finalizados en '…'.
- * 2. Error 'Invalid pb parameter' por entidades HTML (&amp; en lugar de &).
- * 3. Concatenación accidental de clave de API (&key=...) en URLs pb gratuitas.
- * 4. URLs de Google Maps de tipo /maps/place/ o enlaces cortos (maps.app.goo.gl).
+ * Sanitiza, repara y convierte cualquier formato de URL, iframe o dirección
+ * de Google Maps en una URL de iframe (Embed) 100% válida y funcional.
+ * 
+ * Previene de raíz los siguientes errores:
+ * 1. "Invalid 'pb' parameter" por PB cortados, dañados, hashes obsoletos o entidades HTML.
+ * 2. HTTP 400 Bad Request por PB incompletos o finalizados en '…'.
+ * 3. Enlaces estándar de Google Maps (/maps/place/..., maps.app.goo.gl, etc.).
+ * 4. Coordenadas sueltas o direcciones directas.
  */
 export function sanitizeMapEmbedUrl(rawInput?: string | null): string | null {
   if (!rawInput || !rawInput.trim()) return null;
@@ -24,17 +26,26 @@ export function sanitizeMapEmbedUrl(rawInput?: string | null): string | null {
     cleaned = srcMatch[1];
   }
 
-  // Limpiar residuos finales de comillas o etiquetas HTML
+  // Limpiar residuos finales de comillas, etiquetas HTML o espacios
   cleaned = cleaned.replace(/["']>.*$/, "").trim();
   cleaned = cleaned.replace(/&amp;/g, "&");
 
-  // 3. Manejo de URLs de Google Maps de tipo /maps/place/ o enlaces compartidos (maps.app.goo.gl)
-  if (cleaned.includes("/maps/place/") || cleaned.includes("maps.app.goo.gl") || cleaned.includes("goo.gl/maps")) {
-    const coordMatch = cleaned.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-    if (coordMatch && coordMatch[1] && coordMatch[2]) {
-      return `https://maps.google.com/maps?q=${coordMatch[1]},${coordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-    }
-    return `https://maps.google.com/maps?q=${encodeURIComponent(cleaned)}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  // 3. Extraer coordenadas en cualquier formato común
+  // - Coordenadas en formato PB de Google Maps: !3d-1.9284!2d-80.7516 o !2d-80.7516!3d-1.9284
+  const pbLatMatch = cleaned.match(/!3d(-?\d+(?:\.\d+)?)/);
+  const pbLngMatch = cleaned.match(/!2d(-?\d+(?:\.\d+)?)/);
+  
+  // - Coordenadas en formato @lat,lng
+  const atCoordMatch = cleaned.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  
+  // - Coordenadas en parámetros q=lat,lng o ll=lat,lng o query=lat,lng
+  const paramCoordMatch = cleaned.match(/[?&](?:q|ll|query|center)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+
+  // - Coordenadas puras sueltas: "-1.9284, -80.7516"
+  const rawCoordMatch = cleaned.match(/^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$/);
+
+  if (rawCoordMatch) {
+    return `https://maps.google.com/maps?q=${rawCoordMatch[1]},${rawCoordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
   }
 
   // 4. Manejo de URLs embebidas con parámetro pb (/maps/embed?pb=...)
@@ -42,19 +53,20 @@ export function sanitizeMapEmbedUrl(rawInput?: string | null): string | null {
     // Eliminar parámetro &key= accidental si existe
     cleaned = cleaned.replace(/([?&])key=[^&]*&?/g, "$1").replace(/[?&]$/, "");
 
-    // Extraer coordenadas latitud (!3d) y longitud (!2d) si están en el string pb
-    const latMatch = cleaned.match(/!3d(-?\d+\.\d+)/);
-    const lngMatch = cleaned.match(/!2d(-?\d+\.\d+)/);
-    
-    // Verificar si el pb está truncado o le falta la metadata del lugar (!1m2! o !3m2! o !5e! o termina en puntos suspensivos)
-    const isTruncatedOrIncomplete = 
-      cleaned.endsWith("…") || 
-      cleaned.endsWith("...") || 
-      (!cleaned.includes("!1m2!") && !cleaned.includes("!3m2!") && !cleaned.includes("!5e"));
+    // Si el PB está incompleto, sospechoso de recorte o le faltan bloques mínimos:
+    const isPotentiallyBrokenPb =
+      cleaned.endsWith("…") ||
+      cleaned.endsWith("...") ||
+      cleaned.length < 160 || // Un PB de embed válido completo de Maps mide > 180 chars
+      !cleaned.includes("!2m3!") ||
+      !cleaned.includes("!4f13.1") ||
+      cleaned.includes(" ");
 
-    // Si el pb está corrompido o truncado pero recuperamos las coordenadas, usamos el endpoint universal embed 200 OK
-    if (isTruncatedOrIncomplete && latMatch && lngMatch) {
-      return `https://maps.google.com/maps?q=${latMatch[1]},${lngMatch[1]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+    // Si detectamos coordenadas dentro del pb y el pb está dañado/sospechoso, usamos el embed universal limpio
+    if (pbLatMatch && pbLngMatch) {
+      if (isPotentiallyBrokenPb) {
+        return `https://maps.google.com/maps?q=${pbLatMatch[1]},${pbLngMatch[1]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+      }
     }
 
     // Asegurar protocolo completo HTTP/HTTPS
@@ -70,7 +82,33 @@ export function sanitizeMapEmbedUrl(rawInput?: string | null): string | null {
     return cleaned;
   }
 
-  // 5. Si es una URL o dirección directa
+  // 5. Manejo de URLs de Google Maps con coordenadas @lat,lng o q=lat,lng
+  if (atCoordMatch && atCoordMatch[1] && atCoordMatch[2]) {
+    return `https://maps.google.com/maps?q=${atCoordMatch[1]},${atCoordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  if (paramCoordMatch && paramCoordMatch[1] && paramCoordMatch[2]) {
+    return `https://maps.google.com/maps?q=${paramCoordMatch[1]},${paramCoordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  // 6. Manejo de URLs de tipo /maps/place/Nombre+Del+Lugar
+  if (cleaned.includes("/maps/place/")) {
+    const placeMatch = cleaned.match(/\/maps\/place\/([^/@?#]+)/);
+    if (placeMatch && placeMatch[1]) {
+      const placeName = decodeURIComponent(placeMatch[1].replace(/\+/g, " "));
+      return `https://maps.google.com/maps?q=${encodeURIComponent(placeName)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+    }
+  }
+
+  // 7. Si ya es una URL con output=embed
+  if (cleaned.includes("output=embed")) {
+    if (!cleaned.startsWith("http://") && !cleaned.startsWith("https://")) {
+      return `https://${cleaned}`;
+    }
+    return cleaned;
+  }
+
+  // 8. Si es una URL o dirección directa
   if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
     return `https://maps.google.com/maps?q=${encodeURIComponent(cleaned)}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
   }
