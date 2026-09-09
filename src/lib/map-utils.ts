@@ -82,22 +82,24 @@ export function sanitizeMapEmbedUrl(rawInput?: string | null): string | null {
     return cleaned;
   }
 
-  // 5. Manejo de URLs de Google Maps con coordenadas @lat,lng o q=lat,lng
-  if (atCoordMatch && atCoordMatch[1] && atCoordMatch[2]) {
-    return `https://maps.google.com/maps?q=${atCoordMatch[1]},${atCoordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-  }
-
-  if (paramCoordMatch && paramCoordMatch[1] && paramCoordMatch[2]) {
-    return `https://maps.google.com/maps?q=${paramCoordMatch[1]},${paramCoordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
-  }
-
-  // 6. Manejo de URLs de tipo /maps/place/Nombre+Del+Lugar
+  // 5. Una URL de ficha debe conservar el nombre del negocio antes de usar
+  // sus coordenadas de vista (@lat,lng). Estas últimas suelen ser solo el
+  // centro del mapa y no identifican al comercio.
   if (cleaned.includes("/maps/place/")) {
     const placeMatch = cleaned.match(/\/maps\/place\/([^/@?#]+)/);
     if (placeMatch && placeMatch[1]) {
       const placeName = decodeURIComponent(placeMatch[1].replace(/\+/g, " "));
       return `https://maps.google.com/maps?q=${encodeURIComponent(placeName)}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
     }
+  }
+
+  // 6. Manejo de URLs de Google Maps con coordenadas @lat,lng o q=lat,lng
+  if (atCoordMatch && atCoordMatch[1] && atCoordMatch[2]) {
+    return `https://maps.google.com/maps?q=${atCoordMatch[1]},${atCoordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  if (paramCoordMatch && paramCoordMatch[1] && paramCoordMatch[2]) {
+    return `https://maps.google.com/maps?q=${paramCoordMatch[1]},${paramCoordMatch[2]}&t=&z=16&ie=UTF8&iwloc=&output=embed`;
   }
 
   // 7. Si ya es una URL con output=embed

@@ -260,7 +260,7 @@ function MapEmbedConfigField({
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <label className="block text-xs font-semibold text-slate-400">
-            URL de Iframe de Google Maps, enlace normal o Código Embed (`&lt;iframe src="..."&gt;&lt;/iframe&gt;`)
+            URL de iframe de Google Maps o código Embed (`&lt;iframe src="..."&gt;&lt;/iframe&gt;`)
           </label>
           {previewSrc && (
             <button
@@ -278,7 +278,7 @@ function MapEmbedConfigField({
           value={val}
           onChange={(e) => setVal(e.target.value)}
           rows={2}
-          placeholder='Pega cualquier formato: <iframe> completo, link de compartir de Maps, o https://www.google.com/maps/embed?pb=...'
+          placeholder='Para la ficha exacta: pega el código de “Insertar un mapa” de Google Maps'
           className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-red-500"
         />
         <div className="flex flex-wrap items-center gap-2 mt-2">
@@ -295,7 +295,7 @@ function MapEmbedConfigField({
           ) : null}
         </div>
         <p className="text-[11px] text-slate-500 mt-1.5">
-          💡 Acepta: código `&lt;iframe&gt;` de Google Maps, enlaces cortos `maps.app.goo.gl`, enlaces `/maps/place/`, coordenadas (`lat, lng`) o URLs con `pb=`. El sistema lo sanitiza y repara automáticamente para evitar el error &quot;Invalid pb parameter&quot;.
+          💡 Para que el mapa muestre la tarjeta del negocio y su pin sea clicable, usa en Google Maps: Compartir → Insertar un mapa → Copiar HTML. Un enlace de dirección o coordenadas solo centra el mapa y puede llevar a un punto cercano.
         </p>
       </div>
 
@@ -2064,13 +2064,13 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     cityName={restaurant.city} 
                   />
                   <p className="text-[11px] text-slate-500 mt-1.5">
-                    💡 Si no ingresas un enlace de mapa embed pero ingresas la Dirección Física, el sistema generará automáticamente la vista de mapa en tu menú público.
+                    💡 Sin un iframe de “Insertar un mapa”, el sistema solo puede centrar el mapa usando la dirección física; Google podría ubicar un punto cercano en vez de la ficha del negocio.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">Perfil de Google Business / Google Maps (URL)</label>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Ficha exacta de Google Business / Google Maps (URL)</label>
                     <input
                       type="text"
                       name="googleBusinessUrl"
@@ -2078,6 +2078,9 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                       placeholder="https://g.page/r/xyz... o enlace a ficha de Google Maps"
                       className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                     />
+                    <p className="text-[11px] text-slate-500 mt-1.5">
+                      Este enlace será el destino de “Abrir GPS”. Pega aquí el enlace compartido de la ficha real del negocio, no una dirección escrita.
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-2">Rango de Precios (Nivel Comercial)</label>

@@ -120,6 +120,7 @@ function getMapIframeSrc(
   mapEmbedUrl?: string | null, 
   address?: string | null, 
   ubicameUrl?: string | null,
+  googleBusinessUrl?: string | null,
   restaurantName?: string | null,
   city?: string | null,
   province?: string | null
@@ -127,6 +128,13 @@ function getMapIframeSrc(
   const sanitized = sanitizeMapEmbedUrl(mapEmbedUrl);
   if (sanitized) {
     return sanitized;
+  }
+
+  // Una ficha de Google Maps aporta el nombre del comercio, por lo que es
+  // más fiable que convertir una dirección textual en un punto del mapa.
+  const sanitizedGoogleBusiness = sanitizeMapEmbedUrl(googleBusinessUrl);
+  if (sanitizedGoogleBusiness) {
+    return sanitizedGoogleBusiness;
   }
 
   if (ubicameUrl && ubicameUrl.trim()) {
@@ -1282,6 +1290,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 restaurant.mapEmbedUrl, 
                 restaurant.address, 
                 restaurant.ubicameUrl,
+                restaurant.googleBusinessUrl,
                 restaurant.name,
                 restaurant.city,
                 restaurant.province
@@ -1290,9 +1299,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
               if (!hasLocation) return null;
 
-              const gpsUrl = restaurant.ubicameUrl 
+              // La ficha de Google Business es la fuente más precisa para abrir
+              // navegación: una dirección textual puede resolverse en un punto cercano.
+              const gpsUrl = restaurant.googleBusinessUrl
+                ? (restaurant.googleBusinessUrl.startsWith("http") ? restaurant.googleBusinessUrl : `https://${restaurant.googleBusinessUrl}`)
+                : restaurant.ubicameUrl
                 ? (restaurant.ubicameUrl.startsWith("http") ? restaurant.ubicameUrl : `https://${restaurant.ubicameUrl}`)
-                : restaurant.address 
+                : restaurant.address
                   ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(restaurant.address)}`
                   : null;
 
