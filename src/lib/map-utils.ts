@@ -21,9 +21,12 @@ export function sanitizeMapEmbedUrl(rawInput?: string | null): string | null {
     .replace(/\\"/g, '"');
 
   // 2. Extraer el atributo src si fue pegado el bloque <iframe> completo
-  const srcMatch = cleaned.match(/src=["']([^"']+)["']/i);
-  if (srcMatch && srcMatch[1]) {
-    cleaned = srcMatch[1];
+  // Usa la misma comilla de apertura y cierre. El nombre de un negocio puede
+  // contener apóstrofos (por ejemplo, "Rose's Burger") dentro de un src con
+  // comillas dobles; tratar ambas comillas como equivalentes corta el pb.
+  const srcMatch = cleaned.match(/\bsrc\s*=\s*(["'])([\s\S]*?)\1/i);
+  if (srcMatch && srcMatch[2]) {
+    cleaned = srcMatch[2];
   }
 
   // Limpiar residuos finales de comillas, etiquetas HTML o espacios
