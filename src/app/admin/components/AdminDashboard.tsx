@@ -177,6 +177,7 @@ type Restaurant = {
   services: string | null;
   contactNumbers: string | null;
   ubicameUrl: string | null;
+  reservationUrl?: string | null;
   mapEmbedUrl?: string | null;
   googleBusinessUrl?: string | null;
   priceRange?: string | null;
@@ -2042,6 +2043,21 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     defaultValue={restaurant.ubicameUrl || ""}
                     placeholder="ej: https://maps.app.goo.gl/xyz... o https://ubicame.info/mi-negocio"
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                  />
+                </div>
+                <div className="md:col-span-2 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent p-4 rounded-2xl border border-amber-500/30">
+                  <label className="block text-sm font-bold text-amber-400 mb-1 flex items-center gap-1.5">
+                    <span>📅 Enlace de Reservaciones (Botón "Reservar Ahora")</span>
+                  </label>
+                  <p className="text-xs text-slate-400 mb-3">
+                    Configura el link al que serán dirigidos tus clientes al pulsar <strong>"Reservar Ahora"</strong> en el Perfil Comercial de tu menú. Por defecto: <code className="text-amber-300">https://reservaciones.ubicame.cc</code>
+                  </p>
+                  <input
+                    type="text"
+                    name="reservationUrl"
+                    defaultValue={restaurant.reservationUrl || "https://reservaciones.ubicame.cc"}
+                    placeholder="https://reservaciones.ubicame.cc o tu enlace de reservas"
+                    className="w-full bg-slate-950 border border-amber-500/40 focus:border-amber-400 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-amber-400 placeholder:text-slate-600"
                   />
                 </div>
               </div>

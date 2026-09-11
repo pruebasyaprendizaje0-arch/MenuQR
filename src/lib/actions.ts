@@ -302,6 +302,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const services = formData.get("services") as string;
   const contactNumbers = formData.get("contactNumbers") as string;
   const ubicameUrl = formData.get("ubicameUrl") as string;
+  const reservationUrl = formData.get("reservationUrl") as string;
   const mapEmbedUrl = formData.get("mapEmbedUrl") as string;
 
   const province = formData.get("province") as string;
@@ -477,6 +478,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       services: services || null,
       contactNumbers: contactNumbers || null,
       ubicameUrl: ubicameUrl || null,
+      reservationUrl: reservationUrl?.trim() || "https://reservaciones.ubicame.cc",
       mapEmbedUrl: sanitizeMapEmbedUrl(mapEmbedUrl),
       province: province || null,
       city: city || null,
@@ -1090,6 +1092,7 @@ export async function superAdminUpdateRestaurantAction(
     instagram?: string;
     facebook?: string;
     tiktok?: string;
+    reservationUrl?: string;
   }
 ) {
   const isSuperAdmin = await getSuperAdminSession();
@@ -1181,6 +1184,7 @@ export async function superAdminUpdateRestaurantAction(
       instagram: data.instagram || null,
       facebook: data.facebook || null,
       tiktok: data.tiktok || null,
+      reservationUrl: data.reservationUrl?.trim() || "https://reservaciones.ubicame.cc",
     }
   });
 

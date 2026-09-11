@@ -30,7 +30,8 @@ import {
   Loader2,
   Tag,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  CalendarCheck
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -73,6 +74,7 @@ type Restaurant = {
   services: string | null;
   contactNumbers: string | null;
   ubicameUrl: string | null;
+  reservationUrl?: string | null;
   mapEmbedUrl?: string | null;
   city?: string | null;
   province?: string | null;
@@ -953,28 +955,45 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   </div>
 
                   {/* Primary CTA Buttons */}
-                  <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
                     <button
                       onClick={() => setCurrentTab("menu")}
-                      className="px-8 py-4 rounded-2xl text-sm font-black text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 shadow-xl relative overflow-hidden group flex items-center justify-center gap-2.5"
+                      className="px-7 py-3.5 rounded-2xl text-xs sm:text-sm font-black text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 shadow-xl relative overflow-hidden group flex items-center justify-center gap-2.5"
                       style={{ 
                         backgroundColor: restaurant.themeColor,
                         boxShadow: `0 12px 30px -5px ${restaurant.themeColor}55`
                       }}
                     >
                       <div className="absolute inset-0 w-1/2 h-full bg-white/15 skew-x-[-25deg] -translate-x-full group-hover:animate-shimmer"></div>
-                      <Utensils className="h-5 w-5 transition-transform group-hover:rotate-12 duration-300" />
+                      <Utensils className="h-4.5 w-4.5 transition-transform group-hover:rotate-12 duration-300" />
                       <span>Ver Menú Digital</span>
                     </button>
 
+                    {(() => {
+                      const resUrl = restaurant.reservationUrl?.trim() || "https://reservaciones.ubicame.cc";
+                      const finalResUrl = resUrl.startsWith("http") ? resUrl : `https://${resUrl}`;
+                      return (
+                        <a
+                          href={finalResUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-6 py-3.5 rounded-2xl text-xs sm:text-sm font-black text-amber-300 hover:text-amber-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-600/20 backdrop-blur-md shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2 group hover:border-amber-400 hover:shadow-amber-500/20"
+                          title="Reservar Ahora"
+                        >
+                          <CalendarCheck className="h-4.5 w-4.5 text-amber-400 group-hover:scale-110 transition-transform duration-200" />
+                          <span>Reservar Ahora</span>
+                        </a>
+                      );
+                    })()}
+
                     <button
                       onClick={handleShare}
-                      className="px-6 py-4 rounded-2xl text-sm font-bold text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2"
+                      className="px-5 py-3.5 rounded-2xl text-xs sm:text-sm font-bold text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2"
                     >
                       {shareCopied ? (
                         <>
                           <Check className="h-4.5 w-4.5 text-green-400" />
-                          <span className="text-green-400">¡Enlace Copiado!</span>
+                          <span className="text-green-400">¡Copiado!</span>
                         </>
                       ) : (
                         <>
@@ -1214,8 +1233,42 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               </div>
             )}
 
-            {/* Contact Information Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            {/* Contact & Actions Information Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Online Reservations Card */}
+              {(() => {
+                const resUrl = restaurant.reservationUrl?.trim() || "https://reservaciones.ubicame.cc";
+                const finalResUrl = resUrl.startsWith("http") ? resUrl : `https://${resUrl}`;
+                let displayDomain = "reservaciones.ubicame.cc";
+                try {
+                  const urlObj = new URL(finalResUrl);
+                  displayDomain = urlObj.hostname + (urlObj.pathname !== "/" ? urlObj.pathname : "");
+                } catch {
+                  displayDomain = resUrl.replace(/^https?:\/\//, "");
+                }
+
+                return (
+                  <a
+                    href={finalResUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-slate-900/50 border border-amber-500/30 p-6 rounded-[2.5rem] flex items-center gap-5 hover:bg-slate-900/90 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/10 transition-all duration-300 group"
+                  >
+                    <div className="h-14 w-14 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center shrink-0 border border-amber-500/20 group-hover:scale-110 group-hover:bg-amber-500/20 transition duration-300">
+                      <CalendarCheck className="h-6 w-6" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-[0.2em] block">Mesa y Experiencia</span>
+                      <p className="text-sm text-white font-black mt-0.5 flex items-center gap-1.5">
+                        <span>Reservar Ahora</span>
+                        <span className="text-xs text-amber-400 font-normal">↗</span>
+                      </p>
+                      <span className="text-xs text-slate-400 mt-0.5 block truncate max-w-[180px]">{displayDomain}</span>
+                    </div>
+                  </a>
+                );
+              })()}
+
               {restaurant.whatsappNumber && (
                 <a
                   href={`https://wa.me/${restaurant.whatsappNumber.replace(/\D/g, "")}`}
@@ -1229,13 +1282,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   <div>
                     <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Atención por WhatsApp</span>
                     <p className="text-sm text-white font-black mt-0.5">Enviar mensaje directo</p>
-                    <span className="text-xs text-slate-400 mt-0.5 block">Hacer consultas y pedidos en línea</span>
+                    <span className="text-xs text-slate-400 mt-0.5 block">Hacer consultas y pedidos</span>
                   </div>
                 </a>
               )}
 
               {restaurant.address && (
-                <div className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] flex items-center gap-5 transition-all duration-300">
+                <div className={`bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] flex items-center gap-5 transition-all duration-300 ${!restaurant.whatsappNumber ? 'sm:col-span-2' : ''}`}>
                   <div className="h-14 w-14 bg-red-500/10 text-red-400 rounded-2xl flex items-center justify-center shrink-0 border border-red-500/20">
                     <MapPin className="h-6 w-6" />
                   </div>

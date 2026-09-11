@@ -93,6 +93,7 @@ type Restaurant = {
   instagram?: string | null;
   facebook?: string | null;
   tiktok?: string | null;
+  reservationUrl?: string | null;
   _count: {
     categories: number;
   };
@@ -275,7 +276,8 @@ export function SuperAdminDashboard({
     bankAccountEmail: "",
     instagram: "",
     facebook: "",
-    tiktok: ""
+    tiktok: "",
+    reservationUrl: ""
   });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
@@ -342,7 +344,8 @@ export function SuperAdminDashboard({
       bankAccountEmail: res.bankAccountEmail || "",
       instagram: res.instagram || "",
       facebook: res.facebook || "",
-      tiktok: res.tiktok || ""
+      tiktok: res.tiktok || "",
+      reservationUrl: res.reservationUrl || "https://reservaciones.ubicame.cc"
     });
     setEditError("");
     setIsEditModalOpen(true);
@@ -2104,6 +2107,16 @@ export function SuperAdminDashboard({
                       onChange={(e) => setEditData({ ...editData, tiktok: e.target.value })}
                       placeholder="@usuario"
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label className="block text-amber-400 mb-1 font-bold">📅 Enlace de Reservaciones (Botón "Reservar Ahora")</label>
+                    <input
+                      type="text"
+                      value={editData.reservationUrl}
+                      onChange={(e) => setEditData({ ...editData, reservationUrl: e.target.value })}
+                      placeholder="https://reservaciones.ubicame.cc"
+                      className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-400"
                     />
                   </div>
                 </div>

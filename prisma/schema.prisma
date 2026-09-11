@@ -50,6 +50,7 @@ model Restaurant {
   services       String?
   contactNumbers String?
   ubicameUrl     String?
+  reservationUrl String?    @default("https://reservaciones.ubicame.cc")
   mapEmbedUrl    String?
   country        String?    @default("Ecuador")
   province       String?
@@ -397,6 +398,3 @@ model TableSplitAllocation {
   @@index([orderItemId])
   @@index([tableSplitPaymentId])
 }
-
-
-
