@@ -986,6 +986,23 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                       );
                     })()}
 
+                    {(() => {
+                      const ubiUrl = restaurant.ubicameUrl?.trim() || "https://ubicame.info";
+                      const finalUbiUrl = ubiUrl.startsWith("http") ? ubiUrl : `https://${ubiUrl}`;
+                      return (
+                        <a
+                          href={finalUbiUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-6 py-3.5 rounded-2xl text-xs sm:text-sm font-black text-sky-300 hover:text-sky-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-sky-500/40 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-blue-600/20 backdrop-blur-md shadow-lg shadow-sky-500/10 flex items-center justify-center gap-2 group hover:border-sky-400 hover:shadow-sky-500/20"
+                          title="Ubicame.info"
+                        >
+                          <Globe className="h-4.5 w-4.5 text-sky-400 group-hover:scale-110 transition-transform duration-200" />
+                          <span>Ubicame.info</span>
+                        </a>
+                      );
+                    })()}
+
                     <button
                       onClick={handleShare}
                       className="px-5 py-3.5 rounded-2xl text-xs sm:text-sm font-bold text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2"
@@ -1234,7 +1251,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             )}
 
             {/* Contact & Actions Information Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               {/* Online Reservations Card */}
               {(() => {
                 const resUrl = restaurant.reservationUrl?.trim() || "https://reservaciones.ubicame.cc";
@@ -1262,6 +1279,40 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                       <p className="text-sm text-white font-black mt-0.5 flex items-center gap-1.5">
                         <span>Reservar Ahora</span>
                         <span className="text-xs text-amber-400 font-normal">↗</span>
+                      </p>
+                      <span className="text-xs text-slate-400 mt-0.5 block truncate max-w-[180px]">{displayDomain}</span>
+                    </div>
+                  </a>
+                );
+              })()}
+
+              {/* Ubicame.info Business Profile Card */}
+              {(() => {
+                const ubiUrl = restaurant.ubicameUrl?.trim() || "https://ubicame.info";
+                const finalUbiUrl = ubiUrl.startsWith("http") ? ubiUrl : `https://${ubiUrl}`;
+                let displayDomain = "ubicame.info";
+                try {
+                  const urlObj = new URL(finalUbiUrl);
+                  displayDomain = urlObj.hostname + (urlObj.pathname !== "/" ? urlObj.pathname : "");
+                } catch {
+                  displayDomain = ubiUrl.replace(/^https?:\/\//, "");
+                }
+
+                return (
+                  <a
+                    href={finalUbiUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-slate-900/50 border border-sky-500/30 p-6 rounded-[2.5rem] flex items-center gap-5 hover:bg-slate-900/90 hover:border-sky-400 hover:shadow-lg hover:shadow-sky-500/10 transition-all duration-300 group"
+                  >
+                    <div className="h-14 w-14 bg-sky-500/10 text-sky-400 rounded-2xl flex items-center justify-center shrink-0 border border-sky-500/20 group-hover:scale-110 group-hover:bg-sky-500/20 transition duration-300">
+                      <Globe className="h-6 w-6" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[10px] text-sky-400 font-extrabold uppercase tracking-[0.2em] block">Perfil Comercial</span>
+                      <p className="text-sm text-white font-black mt-0.5 flex items-center gap-1.5">
+                        <span>Ubicame.info</span>
+                        <span className="text-xs text-sky-400 font-normal">↗</span>
                       </p>
                       <span className="text-xs text-slate-400 mt-0.5 block truncate max-w-[180px]">{displayDomain}</span>
                     </div>

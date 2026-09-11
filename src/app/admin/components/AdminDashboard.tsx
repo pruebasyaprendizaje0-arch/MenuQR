@@ -75,7 +75,8 @@ import {
   Percent, 
   Tag, 
   MapPin, 
-  Utensils 
+  Utensils,
+  Globe 
 } from "lucide-react";
 
 type SeasonRate = {
@@ -2035,14 +2036,20 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Enlace GPS / Google Maps (Botón "Abrir GPS")</label>
+                <div className="md:col-span-2 bg-gradient-to-r from-sky-500/10 via-sky-500/5 to-transparent p-4 rounded-2xl border border-sky-500/30">
+                  <label className="block text-sm font-bold text-sky-400 mb-1 flex items-center gap-1.5">
+                    <Globe className="h-4 w-4 text-sky-400" />
+                    <span>📍 Enlace de Ubicame.info (Botón "Ubicame.info")</span>
+                  </label>
+                  <p className="text-xs text-slate-400 mb-3">
+                    Configura el link al que serán dirigidos tus clientes al pulsar <strong>"Ubicame.info"</strong> en tu Perfil de Negocio. Por defecto: <code className="text-sky-300">https://ubicame.info</code>
+                  </p>
                   <input
                     type="text"
                     name="ubicameUrl"
-                    defaultValue={restaurant.ubicameUrl || ""}
-                    placeholder="ej: https://maps.app.goo.gl/xyz... o https://ubicame.info/mi-negocio"
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                    defaultValue={restaurant.ubicameUrl || "https://ubicame.info"}
+                    placeholder="https://ubicame.info o tu enlace de perfil en ubicame"
+                    className="w-full bg-slate-950 border border-sky-500/40 focus:border-sky-400 block px-4 py-3 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-sky-400 placeholder:text-slate-600"
                   />
                 </div>
                 <div className="md:col-span-2 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent p-4 rounded-2xl border border-amber-500/30">

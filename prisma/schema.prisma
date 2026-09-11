@@ -49,7 +49,7 @@ model Restaurant {
   specialty      String?
   services       String?
   contactNumbers String?
-  ubicameUrl     String?
+  ubicameUrl     String?    @default("https://ubicame.info")
   reservationUrl String?    @default("https://reservaciones.ubicame.cc")
   mapEmbedUrl    String?
   country        String?    @default("Ecuador")

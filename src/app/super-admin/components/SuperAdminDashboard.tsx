@@ -93,6 +93,7 @@ type Restaurant = {
   instagram?: string | null;
   facebook?: string | null;
   tiktok?: string | null;
+  ubicameUrl?: string | null;
   reservationUrl?: string | null;
   _count: {
     categories: number;
@@ -277,6 +278,7 @@ export function SuperAdminDashboard({
     instagram: "",
     facebook: "",
     tiktok: "",
+    ubicameUrl: "",
     reservationUrl: ""
   });
   const [editLoading, setEditLoading] = useState(false);
@@ -345,6 +347,7 @@ export function SuperAdminDashboard({
       instagram: res.instagram || "",
       facebook: res.facebook || "",
       tiktok: res.tiktok || "",
+      ubicameUrl: res.ubicameUrl || "https://ubicame.info",
       reservationUrl: res.reservationUrl || "https://reservaciones.ubicame.cc"
     });
     setEditError("");
@@ -2107,6 +2110,16 @@ export function SuperAdminDashboard({
                       onChange={(e) => setEditData({ ...editData, tiktok: e.target.value })}
                       placeholder="@usuario"
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <label className="block text-sky-400 mb-1 font-bold">📍 Enlace de Ubicame.info (Botón "Ubicame.info")</label>
+                    <input
+                      type="text"
+                      value={editData.ubicameUrl}
+                      onChange={(e) => setEditData({ ...editData, ubicameUrl: e.target.value })}
+                      placeholder="https://ubicame.info"
+                      className="w-full bg-slate-900 border border-sky-500/40 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-400"
                     />
                   </div>
                   <div className="sm:col-span-3">

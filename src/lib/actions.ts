@@ -477,7 +477,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       specialty: specialty || null,
       services: services || null,
       contactNumbers: contactNumbers || null,
-      ubicameUrl: ubicameUrl || null,
+      ubicameUrl: ubicameUrl?.trim() || "https://ubicame.info",
       reservationUrl: reservationUrl?.trim() || "https://reservaciones.ubicame.cc",
       mapEmbedUrl: sanitizeMapEmbedUrl(mapEmbedUrl),
       province: province || null,
@@ -1092,6 +1092,7 @@ export async function superAdminUpdateRestaurantAction(
     instagram?: string;
     facebook?: string;
     tiktok?: string;
+    ubicameUrl?: string;
     reservationUrl?: string;
   }
 ) {
@@ -1184,6 +1185,7 @@ export async function superAdminUpdateRestaurantAction(
       instagram: data.instagram || null,
       facebook: data.facebook || null,
       tiktok: data.tiktok || null,
+      ubicameUrl: data.ubicameUrl?.trim() || "https://ubicame.info",
       reservationUrl: data.reservationUrl?.trim() || "https://reservaciones.ubicame.cc",
     }
   });
