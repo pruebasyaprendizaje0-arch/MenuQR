@@ -758,6 +758,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   const description = formData.get("description") as string;
   const price = parseFloat(formData.get("price") as string || "0");
   const isAvailable = formData.get("isAvailable") === "true";
+  const categoryId = formData.get("categoryId") as string;
 
   const dishFile = formData.get("dishFile") as File | null;
   const imageUrlInput = formData.get("imageUrl") as string;
@@ -775,15 +776,33 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     finalImageUrl = val.cleanUrl;
   }
 
+  const updateData: {
+    name: string;
+    description: string;
+    price: number;
+    imageUrl: string | null;
+    isAvailable: boolean;
+    categoryId?: string;
+  } = {
+    name,
+    description,
+    price,
+    imageUrl: finalImageUrl || null,
+    isAvailable,
+  };
+
+  if (categoryId) {
+    const category = await prisma.category.findFirst({
+      where: { id: categoryId, restaurantId: dish.restaurantId },
+    });
+    if (category) {
+      updateData.categoryId = categoryId;
+    }
+  }
+
   const updated = await prisma.dish.update({
     where: { id: dishId },
-    data: {
-      name,
-      description,
-      price,
-      imageUrl: finalImageUrl || null,
-      isAvailable,
-    },
+    data: updateData,
     include: {
       category: {
         include: { restaurant: true },

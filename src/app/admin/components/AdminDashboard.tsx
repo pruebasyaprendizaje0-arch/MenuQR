@@ -1004,7 +1004,12 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
   };
 
   const handleToggleDish = async (dishId: string, currentStatus: boolean) => {
-    await toggleDishAvailabilityAction(dishId, !currentStatus);
+    const res = await toggleDishAvailabilityAction(dishId, !currentStatus);
+    if (res && 'error' in res && res.error) {
+      alert(res.error);
+    } else {
+      window.location.reload();
+    }
   };
 
   const handleUpdateStatus = async (orderId: string, newStatus: string) => {
@@ -2853,8 +2858,13 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                           <button
                             onClick={async () => {
                               if (confirm(`¿Estás seguro de eliminar la categoría "${cat.name}"? Se borrarán todos sus platos.`)) {
-                                await deleteCategoryAction(cat.id);
-                                alert(`¡Categoría "${cat.name}" eliminada con éxito!`);
+                                const res = await deleteCategoryAction(cat.id);
+                                if (res && 'error' in res && res.error) {
+                                  alert(res.error);
+                                } else {
+                                  alert(`¡Categoría "${cat.name}" eliminada con éxito!`);
+                                  window.location.reload();
+                                }
                               }
                             }}
                             className="inline-flex p-2 text-red-500/80 hover:text-red-400 bg-red-950/20 hover:bg-red-950/40 rounded-lg border border-red-900/20 transition-all"
@@ -2879,13 +2889,22 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                   <form
                     action={async (formData) => {
                       if (editingCategory) {
-                        await updateCategoryAction(editingCategory.id, formData);
+                        const res = await updateCategoryAction(editingCategory.id, formData);
+                        if (res && 'error' in res && res.error) {
+                          alert(res.error);
+                          return;
+                        }
                         alert("¡Categoría guardada con éxito!");
                       } else {
-                        await createCategoryAction(restaurant.id, formData);
+                        const res = await createCategoryAction(restaurant.id, formData);
+                        if (res && 'error' in res && res.error) {
+                          alert(res.error);
+                          return;
+                        }
                         alert("¡Categoría creada con éxito!");
                       }
                       setIsCategoryModalOpen(false);
+                      window.location.reload();
                     }}
                     className="space-y-4"
                   >
@@ -2918,9 +2937,14 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                           type="button"
                           onClick={async () => {
                             if (confirm(`¿Estás seguro de eliminar la categoría "${editingCategory.name}"? Se borrarán todos sus platos.`)) {
-                              await deleteCategoryAction(editingCategory.id);
-                              setIsCategoryModalOpen(false);
-                              alert(`¡Categoría "${editingCategory.name}" eliminada con éxito!`);
+                              const res = await deleteCategoryAction(editingCategory.id);
+                              if (res && 'error' in res && res.error) {
+                                alert(res.error);
+                              } else {
+                                setIsCategoryModalOpen(false);
+                                alert(`¡Categoría "${editingCategory.name}" eliminada con éxito!`);
+                                window.location.reload();
+                              }
                             }
                           }}
                           className="px-3.5 py-2 rounded-xl text-xs font-bold text-red-400 bg-red-950/40 hover:bg-red-900/50 border border-red-800/40 transition flex items-center gap-1.5"
@@ -3063,8 +3087,13 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                                   <button
                                     onClick={async () => {
                                       if (confirm(`¿Estás seguro de eliminar el plato "${dish.name}"?`)) {
-                                        await deleteDishAction(dish.id);
-                                        alert(`¡Plato "${dish.name}" eliminado con éxito!`);
+                                        const res = await deleteDishAction(dish.id);
+                                        if (res && 'error' in res && res.error) {
+                                          alert(res.error);
+                                        } else {
+                                          alert(`¡Plato "${dish.name}" eliminado con éxito!`);
+                                          window.location.reload();
+                                        }
                                       }
                                     }}
                                     className="p-1.5 text-red-400/80 hover:text-red-400 bg-red-950/20 border border-red-900/20 rounded-lg hover:bg-red-950/40 transition"
@@ -3096,13 +3125,22 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                       formData.append("isAvailable", dishAvailable.toString());
                       
                       if (editingDish) {
-                        await updateDishAction(editingDish.id, formData);
+                        const res = await updateDishAction(editingDish.id, formData);
+                        if (res && 'error' in res && res.error) {
+                          alert(res.error);
+                          return;
+                        }
                         alert("¡Plato guardado con éxito!");
                       } else {
-                        await createDishAction(dishCatId, formData);
+                        const res = await createDishAction(dishCatId, formData);
+                        if (res && 'error' in res && res.error) {
+                          alert(res.error);
+                          return;
+                        }
                         alert("¡Plato creado con éxito!");
                       }
                       setIsDishModalOpen(false);
+                      window.location.reload();
                     }}
                     className="space-y-4"
                   >
@@ -3233,9 +3271,14 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                           type="button"
                           onClick={async () => {
                             if (confirm(`¿Estás seguro de eliminar el plato "${editingDish.name}"?`)) {
-                              await deleteDishAction(editingDish.id);
-                              setIsDishModalOpen(false);
-                              alert(`¡Plato "${editingDish.name}" eliminado con éxito!`);
+                              const res = await deleteDishAction(editingDish.id);
+                              if (res && 'error' in res && res.error) {
+                                alert(res.error);
+                              } else {
+                                setIsDishModalOpen(false);
+                                alert(`¡Plato "${editingDish.name}" eliminado con éxito!`);
+                                window.location.reload();
+                              }
                             }
                           }}
                           className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-red-400 bg-red-950/40 hover:bg-red-900/50 border border-red-800/40 transition flex items-center gap-1.5"
