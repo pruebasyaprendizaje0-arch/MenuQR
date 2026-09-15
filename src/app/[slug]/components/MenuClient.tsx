@@ -553,8 +553,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const result = await createOrderAction({
       restaurantId: restaurant.id,
       tableName: selectedTable || "Llevar",
-      customerName: isDeliveryOrder ? customerName : undefined,
-      customerPhone: isDeliveryOrder ? customerPhone : undefined,
+      customerName: customerName.trim() || undefined,
+      customerPhone: customerPhone.trim() || undefined,
       customerAddress: fullCustomerAddress,
       subtotal,
       iva,
@@ -589,19 +589,31 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     if (selectedTable === "Domicilio") {
       message += `*Método de Entrega:* Envío a Domicilio 🛵\n`;
       if (customerName.trim()) {
-        message += `*Cliente:* ${customerName.trim()}\n`;
+        message += `*Cliente / Alias:* ${customerName.trim()}\n`;
       }
       if (customerPhone.trim()) {
-        message += `*WhatsApp Cliente:* ${customerPhone.trim()}\n`;
+        message += `*WhatsApp / Teléfono:* ${customerPhone.trim()}\n`;
       }
       message += `*Dirección de Envío:* ${deliveryAddress}\n`;
       if (deliveryReference.trim()) {
         message += `*Referencia:* ${deliveryReference.trim()}\n`;
       }
     } else if (selectedTable) {
-      message += `*Mesa:* #${selectedTable}\n`;
+      message += `*Mesa:* #${selectedTable} 🍽️\n`;
+      if (customerName.trim()) {
+        message += `*Cliente / Alias:* ${customerName.trim()}\n`;
+      }
+      if (customerPhone.trim()) {
+        message += `*WhatsApp / Teléfono:* ${customerPhone.trim()}\n`;
+      }
     } else {
-      message += `*Mesa:* Para llevar / Llevar a casa\n`;
+      message += `*Modalidad:* Para llevar / Retirar 🛍️\n`;
+      if (customerName.trim()) {
+        message += `*Cliente / Alias:* ${customerName.trim()}\n`;
+      }
+      if (customerPhone.trim()) {
+        message += `*WhatsApp / Teléfono:* ${customerPhone.trim()}\n`;
+      }
     }
     if (appliedCoupon) {
       message += `*Cupón Aplicado:* ${appliedCoupon.code} (-$${couponDiscount.toFixed(2)})\n`;
@@ -955,17 +967,17 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   </div>
 
                   {/* Primary CTA Buttons */}
-                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 w-full max-w-xl">
                     <button
                       onClick={() => setCurrentTab("menu")}
-                      className="px-7 py-3.5 rounded-2xl text-xs sm:text-sm font-black text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 shadow-xl relative overflow-hidden group flex items-center justify-center gap-2.5"
+                      className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 shadow-xl relative overflow-hidden group flex items-center justify-center gap-2.5"
                       style={{ 
                         backgroundColor: restaurant.themeColor,
                         boxShadow: `0 12px 30px -5px ${restaurant.themeColor}55`
                       }}
                     >
                       <div className="absolute inset-0 w-1/2 h-full bg-white/15 skew-x-[-25deg] -translate-x-full group-hover:animate-shimmer"></div>
-                      <Utensils className="h-4.5 w-4.5 transition-transform group-hover:rotate-12 duration-300" />
+                      <Utensils className="h-4.5 w-4.5 shrink-0 transition-transform group-hover:rotate-12 duration-300" />
                       <span>Ver Menú Digital</span>
                     </button>
 
@@ -977,10 +989,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           href={finalResUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-6 py-3.5 rounded-2xl text-xs sm:text-sm font-black text-amber-300 hover:text-amber-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-600/20 backdrop-blur-md shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2 group hover:border-amber-400 hover:shadow-amber-500/20"
+                          className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-amber-300 hover:text-amber-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-600/20 backdrop-blur-md shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2.5 group hover:border-amber-400 hover:shadow-amber-500/20"
                           title="Reservar Ahora"
                         >
-                          <CalendarCheck className="h-4.5 w-4.5 text-amber-400 group-hover:scale-110 transition-transform duration-200" />
+                          <CalendarCheck className="h-4.5 w-4.5 shrink-0 text-amber-400 group-hover:scale-110 transition-transform duration-200" />
                           <span>Reservar Ahora</span>
                         </a>
                       );
@@ -994,10 +1006,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           href={finalUbiUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-6 py-3.5 rounded-2xl text-xs sm:text-sm font-black text-sky-300 hover:text-sky-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-sky-500/40 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-blue-600/20 backdrop-blur-md shadow-lg shadow-sky-500/10 flex items-center justify-center gap-2 group hover:border-sky-400 hover:shadow-sky-500/20"
+                          className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-sky-300 hover:text-sky-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-sky-500/40 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-blue-600/20 backdrop-blur-md shadow-lg shadow-sky-500/10 flex items-center justify-center gap-2.5 group hover:border-sky-400 hover:shadow-sky-500/20"
                           title="Ubicame.info"
                         >
-                          <Globe className="h-4.5 w-4.5 text-sky-400 group-hover:scale-110 transition-transform duration-200" />
+                          <Globe className="h-4.5 w-4.5 shrink-0 text-sky-400 group-hover:scale-110 transition-transform duration-200" />
                           <span>Ubicame.info</span>
                         </a>
                       );
@@ -1005,16 +1017,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                     <button
                       onClick={handleShare}
-                      className="px-5 py-3.5 rounded-2xl text-xs sm:text-sm font-bold text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2"
+                      className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2.5 group hover:border-white/30"
                     >
                       {shareCopied ? (
                         <>
-                          <Check className="h-4.5 w-4.5 text-green-400" />
+                          <Check className="h-4.5 w-4.5 shrink-0 text-green-400" />
                           <span className="text-green-400">¡Copiado!</span>
                         </>
                       ) : (
                         <>
-                          <Share2 className="h-4.5 w-4.5 text-amber-400" />
+                          <Share2 className="h-4.5 w-4.5 shrink-0 text-amber-400" />
                           <span>Compartir</span>
                         </>
                       )}
@@ -2089,6 +2101,36 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                       </div>
                     </div>
                   )}
+
+                  {/* Customer Name and Phone inputs for Table and Takeout */}
+                  {selectedTable !== "Domicilio" && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1.5">
+                        <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">
+                          {isTableSelected ? "Nombre o Alias (Mesa)" : "Nombre o Alias (Para Retirar)"}
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="Ej. Juan Pérez / Carlos"
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          className="w-full bg-slate-950/60 border border-slate-850 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">
+                          Teléfono o WhatsApp
+                        </span>
+                        <input
+                          type="tel"
+                          placeholder="Ej. 0991234567"
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          className="w-full bg-slate-950/60 border border-slate-850 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -2141,7 +2183,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu Nombre</span>
+                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu Nombre o Alias</span>
                     <input
                       type="text"
                       required
@@ -2152,7 +2194,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu WhatsApp</span>
+                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu Teléfono o WhatsApp</span>
                     <input
                       type="tel"
                       required
@@ -2407,6 +2449,29 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             </p>
             
             <div className="grid grid-cols-4 gap-2.5 max-h-56 overflow-y-auto pr-1">
+              {(() => {
+                const tablesList = restaurant.tablesConfig 
+                  ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)
+                  : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+                
+                return tablesList.map((num) => (
+                  <button
+                    key={num}
+                    onClick={() => {
+                      setSelectedTable(num);
+                      setIsTableModalOpen(false);
+                    }}
+                    className={`py-3 rounded-xl text-sm font-black border transition duration-200 ${
+                      selectedTable === num 
+                        ? "text-white border-transparent" 
+                        : "text-slate-350 bg-slate-950/60 border-white/5 hover:text-white"
+                    }`}
+                    style={{ backgroundColor: selectedTable === num ? restaurant.themeColor : undefined }}
+                  >
+                    {num}
+                  </button>
+                ));
+              })()}
               <button
                 onClick={() => {
                   setSelectedTable("");
@@ -2437,29 +2502,6 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   🛵 Envío a Domicilio (${restaurant.deliveryCost.toFixed(2)})
                 </button>
               )}
-              {(() => {
-                const tablesList = restaurant.tablesConfig 
-                  ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)
-                  : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-                
-                return tablesList.map((num) => (
-                  <button
-                    key={num}
-                    onClick={() => {
-                      setSelectedTable(num);
-                      setIsTableModalOpen(false);
-                    }}
-                    className={`py-3 rounded-xl text-sm font-black border transition duration-200 ${
-                      selectedTable === num 
-                        ? "text-white border-transparent" 
-                        : "text-slate-350 bg-slate-950/60 border-white/5 hover:text-white"
-                    }`}
-                    style={{ backgroundColor: selectedTable === num ? restaurant.themeColor : undefined }}
-                  >
-                    {num}
-                  </button>
-                ));
-              })()}
             </div>
           </div>
         </div>
