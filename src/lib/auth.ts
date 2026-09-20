@@ -21,9 +21,13 @@ export async function getUserSession() {
   }
 }
 
-export async function setUserSession(userId: string, email: string) {
+export async function setUserSession(userId: string, email: string, restaurantId?: string) {
   try {
-    const token = signToken({ userId, email });
+    const token = signToken({ 
+      userId, 
+      email, 
+      ...(restaurantId ? { restaurantId } : {}) 
+    });
     const cookieStore = await cookies();
     cookieStore.set("session_token", token, {
       httpOnly: true,
@@ -32,6 +36,15 @@ export async function setUserSession(userId: string, email: string) {
       maxAge: 60 * 60 * 24 * 7, // 7 days
       path: "/",
     });
+    if (restaurantId) {
+      cookieStore.set("active_restaurant_id", restaurantId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 7,
+        path: "/",
+      });
+    }
   } catch (error) {
     logAuthError("setUserSession", error);
     throw error;
@@ -42,6 +55,7 @@ export async function clearUserSession() {
   try {
     const cookieStore = await cookies();
     cookieStore.delete("session_token");
+    cookieStore.delete("active_restaurant_id");
   } catch (error) {
     logAuthError("clearUserSession", error);
   }
@@ -56,7 +70,12 @@ export async function refreshUserSession() {
     if (!token) return;
     const payload = verifyToken(token);
     if (!payload) return;
-    const freshToken = signToken({ userId: payload.userId, email: payload.email });
+    const activeRestCookie = cookieStore.get("active_restaurant_id")?.value;
+    const freshToken = signToken({ 
+      userId: payload.userId, 
+      email: payload.email,
+      ...(payload.restaurantId || activeRestCookie ? { restaurantId: payload.restaurantId || activeRestCookie } : {})
+    });
     cookieStore.set("session_token", freshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

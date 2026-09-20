@@ -328,6 +328,7 @@ function MapEmbedConfigField({
 }
 
 import { TableSplitMonitor } from "./TableSplitMonitor";
+import BatchDishModal from "./BatchDishModal";
 
 export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { restaurant: Restaurant; subscriptionPaymentDetails?: SubscriptionPaymentDetails }) {
   const [isMounted, setIsMounted] = useState(false);
@@ -337,6 +338,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
 
   const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState("");
   const [currentPlan, setCurrentPlan] = useState<"FREE" | "PRO">(restaurant.plan || "FREE");
@@ -362,10 +364,13 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
     setIsSubmittingPayment(true);
     const result = await createManualSubscriptionPaymentAction({
       restaurantId: restaurant.id,
-      amount: 10,
+      amount: selectedPlanPrice,
       method: manualPaymentMethod,
       reference: manualPaymentReference,
       receiptUrl: manualPaymentReceiptUrl,
+      notes: selectedPlanPrice === 20 
+        ? "Plan Puesta en Marcha Inmediata ($20.00 USD) - Carga y digitalización asistida" 
+        : "Plan Digital Pro ($15.00 USD) - Autogestión",
     });
     setIsSubmittingPayment(false);
     if (result.error) {
@@ -978,6 +983,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
   // States for Dish Dialogs
   const [editingDish, setEditingDish] = useState<Dish | null>(null);
   const [isDishModalOpen, setIsDishModalOpen] = useState(false);
+  const [isBatchDishModalOpen, setIsBatchDishModalOpen] = useState(false);
   const [dishName, setDishName] = useState("");
   const [dishDescription, setDishDescription] = useState("");
   const [dishPrice, setDishPrice] = useState("0");
@@ -1237,7 +1243,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 <span>Suscripción</span>
               </div>
               <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                $10/mes
+                $15/mes
               </span>
             </button>
           </nav>
@@ -1296,7 +1302,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold">
-                      {isProActive ? "Plan Premium Activo ($10 USD/mes)" : isExpired ? "Suscripción Vencida" : "Prueba Gratuita (30 Días)"}
+                      {isProActive ? "Plan Premium Activo ($15 USD/mes)" : isExpired ? "Suscripción Vencida" : "Prueba Gratuita (30 Días)"}
                     </span>
                     <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-950/60 border border-current">
                       {isProActive ? "PRO" : isPro ? "VENCIDO" : `${daysRemaining}d restantes`}
@@ -1306,17 +1312,20 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     {isProActive
                       ? `Vencimiento: ${trialEnds.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}`
                       : isExpired 
-                        ? "Tu prueba ha finalizado. Activa el Plan Premium por solo $10 USD/mes para continuar." 
-                        : `Vence el ${trialEnds.toLocaleDateString()}. Suscríbete al Plan Premium por $10 USD/mes.`}
+                        ? "Tu prueba ha finalizado. Activa tu plan desde $15 USD/mes para continuar." 
+                        : `Vence el ${trialEnds.toLocaleDateString()}. Suscríbete al Plan Digital Pro ($15/mes) o Plan Puesta en Marcha ($20/mes).`}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setShowPaymentModal(true)}
+                onClick={() => {
+                  setSelectedPlanPrice(15);
+                  setShowPaymentModal(true);
+                }}
                 className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/10 transition-all shrink-0 flex items-center justify-center gap-1.5"
               >
                 <CreditCard className="w-3.5 h-3.5" />
-                {isProActive ? "Renovar ($10/mes)" : "Activar Premium ($10/mes)"}
+                {isProActive ? "Renovar ($15/mes)" : "Activar Plan ($15/mes)"}
               </button>
             </div>
           );
@@ -2979,28 +2988,38 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
         {/* Platos Tab */}
         {activeTab === "dishes" && (
           <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-bold text-white">Platos del Menú</h2>
                 <p className="text-slate-400 text-sm">Gestiona la carta completa: precios, imágenes y disponibilidad.</p>
               </div>
-              <button
-                disabled={restaurant.categories.length === 0}
-                onClick={() => {
-                  setEditingDish(null);
-                  setDishName("");
-                  setDishDescription("");
-                  setDishPrice("0");
-                  setDishImageUrl("");
-                  setDishAvailable(true);
-                  setDishCatId(restaurant.categories[0]?.id || "");
-                  setIsDishModalOpen(true);
-                }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
-              >
-                <Plus className="h-4 w-4" />
-                Nuevo Plato
-              </button>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsBatchDishModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all duration-200 shadow-sm"
+                >
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Subida por Lotes (Excel / CSV)
+                </button>
+                <button
+                  disabled={restaurant.categories.length === 0}
+                  onClick={() => {
+                    setEditingDish(null);
+                    setDishName("");
+                    setDishDescription("");
+                    setDishPrice("0");
+                    setDishImageUrl("");
+                    setDishAvailable(true);
+                    setDishCatId(restaurant.categories[0]?.id || "");
+                    setIsDishModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nuevo Plato
+                </button>
+              </div>
             </div>
 
             {restaurant.categories.length === 0 ? (
@@ -3307,6 +3326,16 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 </div>
               </div>
             )}
+            {/* Batch Dish Upload Modal */}
+            <BatchDishModal
+              isOpen={isBatchDishModalOpen}
+              onClose={() => setIsBatchDishModalOpen(false)}
+              restaurantId={restaurant.id}
+              categories={restaurant.categories || []}
+              onSuccess={() => {
+                window.location.reload();
+              }}
+            />
           </div>
         )}
 
@@ -4046,16 +4075,26 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                                     ? "🛵 Domicilio" 
                                     : `🪑 Mesa #${order.tableName}`}
                               </span>
+                              {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
+                                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
+                                  👤 Comensal: {order.customerName}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="py-3.5">
                             {order.customerName ? (
                               <div className="space-y-0.5 max-w-[220px]">
-                                <p className="font-bold text-white">{order.customerName}</p>
+                                <p className="font-bold text-white">
+                                  {order.customerName}
+                                  {order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
+                                    <span className="text-[10px] text-amber-400 font-normal ml-1.5">(Comensal)</span>
+                                  )}
+                                </p>
                                 {order.customerPhone && (
                                   <a 
                                     href={`https://wa.me/${order.customerPhone.replace(/\D/g, "")}`}
-                                    target="_blank"
+                                    target="_blank" 
                                     rel="noopener noreferrer"
                                     className="text-red-400 hover:underline text-[10px] block"
                                   >
@@ -4585,7 +4624,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
         {/* Plan & Suscripción Tab */}
         {activeTab === "subscription" && (
           <div className="space-y-6 animate-fade-in">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl relative overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 space-y-8 shadow-xl relative overflow-hidden">
               <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
                 <Crown className="w-64 h-64 text-amber-500" />
               </div>
@@ -4593,16 +4632,16 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
                 <div>
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">
-                    <Crown className="w-3.5 h-3.5" /> Suscripción SaaS
+                    <Crown className="w-3.5 h-3.5" /> Planes y Suscripción
                   </div>
-                  <h2 className="text-2xl font-extrabold text-white">Único Plan Premium</h2>
+                  <h2 className="text-2xl font-extrabold text-white">Elige tu Plan de Suscripción</h2>
                   <p className="text-slate-400 text-xs mt-1">
-                    Acceso total a todas las herramientas sin límites ni comisiones por pedido.
+                    Acceso total a todas las herramientas sin comisiones por pedido.
                   </p>
                 </div>
 
                 <div className="text-right bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                  <div className="text-3xl font-black text-white">$10.00 <span className="text-xs font-normal text-slate-400">/ mes</span></div>
+                  <div className="text-2xl font-black text-white">Desde $15.00 <span className="text-xs font-normal text-slate-400">/ mes</span></div>
                   <span className="text-[10px] text-amber-400 font-medium">Facturación mensual en USD</span>
                 </div>
               </div>
@@ -4627,49 +4666,109 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 </div>
               </div>
 
-              {/* Benefits list */}
-              <div className="space-y-3 pt-2">
-                <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Incluido en el Plan Premium ($10/mes):</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300">
-                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Menú Digital QR Ilimitado</span>
+              {/* Two Plan Cards in Admin Tab */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                {/* Plan 1: Plan Digital Pro ($15/mes) */}
+                <div className="bg-slate-950/60 border border-slate-800 p-6 rounded-2xl space-y-5 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px] font-bold uppercase tracking-wider">
+                          Autogestión
+                        </span>
+                        <h3 className="text-lg font-black text-white mt-1.5">Plan Digital Pro</h3>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-2xl font-black text-white">$15</span>
+                        <span className="text-xs text-slate-400">/mes</span>
+                      </div>
+                    </div>
+                    <p className="text-slate-400 text-xs">
+                      Gestiona y actualiza tu menú, platos, precios y pedidos con total autonomía.
+                    </p>
+                    <div className="space-y-2 text-xs text-slate-300 pt-2 border-t border-slate-800/60">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Menú QR interactivo ilimitado</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Pedidos automáticos a WhatsApp</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Gestión de platos, combos e impuestos</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>0% de comisiones por ventas</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Pedidos Automáticos a WhatsApp</span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Gestión de Platos y Categorías CRUD</span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Configuración de IVA, Servicio y Mesas</span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Subdominio / URL Personalizada</span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Soporte Técnico Continuo</span>
-                  </div>
-                </div>
-              </div>
 
-              {/* Action Button */}
-              <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-800">
-                <div className="text-xs text-slate-400">
-                  Pagos por transferencia o Deuna verificados manualmente.
+                  <button
+                    onClick={() => {
+                      setSelectedPlanPrice(15);
+                      setShowPaymentModal(true);
+                    }}
+                    className="w-full py-3 rounded-xl font-bold text-xs uppercase tracking-wider text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition flex items-center justify-center gap-2"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Pagar Plan Pro ($15/mes)
+                  </button>
                 </div>
-                <button
-                  onClick={() => setShowPaymentModal(true)}
-                  className="w-full sm:w-auto px-8 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2"
-                >
-                  <CreditCard className="w-4 h-4" />
-                  {currentPlan === "PRO" && currentTrialEndsAt > new Date() ? "Renovar Suscripción ($10/mes)" : "Activar Plan Premium ($10/mes)"}
-                </button>
+
+                {/* Plan 2: Plan Puesta en Marcha Inmediata ($20/mes) */}
+                <div className="bg-gradient-to-b from-amber-500/10 to-slate-950 border-2 border-amber-500/50 p-6 rounded-2xl space-y-5 flex flex-col justify-between relative overflow-hidden">
+                  <div className="space-y-4 relative z-10">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                          ⭐ Puesta en Marcha
+                        </span>
+                        <h3 className="text-lg font-black text-white mt-1.5 flex items-center gap-1.5">
+                          Puesta en Marcha Inmediata
+                        </h3>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-2xl font-black text-white">$20</span>
+                        <span className="text-xs text-amber-400">/mes</span>
+                      </div>
+                    </div>
+                    <p className="text-amber-200/90 text-xs font-medium">
+                      🚀 <strong>Nosotros subimos y cargamos todo tu menú por ti.</strong> Listo en menos de 24 horas.
+                    </p>
+                    <div className="space-y-2 text-xs text-slate-300 pt-2 border-t border-amber-500/20">
+                      <div className="flex items-center gap-2 text-amber-100 font-semibold">
+                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Carga completa de platos, fotos y categorías</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Optimización visual de fotos y descripciones</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Diseño de códigos QR listos para imprimir</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Asesoría personalizada por WhatsApp</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setSelectedPlanPrice(20);
+                      setShowPaymentModal(true);
+                    }}
+                    className="w-full py-3 rounded-xl font-extrabold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 transition flex items-center justify-center gap-2 relative z-10"
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    Pagar Puesta en Marcha ($20/mes)
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -4707,15 +4806,22 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     >
                       <div className="space-y-2">
                         <div className="flex justify-between items-start">
-                          <div>
-                            <span className="text-[10px] font-extrabold text-slate-400 uppercase bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800">
-                              {order.tableName === "Llevar" 
-                                ? "🛍️ Llevar" 
-                                : order.tableName === "Domicilio" 
-                                  ? "🛵 Domicilio" 
-                                  : `🪑 Mesa #${order.tableName}`}
-                            </span>
-                            <p className="text-[9px] text-slate-500 mt-1">{isMounted ? new Date(order.createdAt).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }) : "--:--"}</p>
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[10px] font-extrabold text-slate-300 uppercase bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800">
+                                {order.tableName === "Llevar" 
+                                  ? "🛍️ Llevar" 
+                                  : order.tableName === "Domicilio" 
+                                    ? "🛵 Domicilio" 
+                                    : `🪑 Mesa #${order.tableName}`}
+                              </span>
+                              {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
+                                <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                                  👤 {order.customerName}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[9px] text-slate-500">{isMounted ? new Date(order.createdAt).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }) : "--:--"}</p>
                           </div>
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
                             order.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" : "bg-blue-500/10 text-blue-500"
@@ -4724,10 +4830,17 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                           </span>
                         </div>
 
-                        {/* Customer info if delivery */}
+                        {/* Customer info */}
                         {(order.customerName || order.customerPhone) && (
                           <div className="text-[11px] text-slate-400 bg-slate-900/50 p-2.5 rounded-xl space-y-1 border border-slate-800/40">
-                            {order.customerName && <p><strong>Cliente:</strong> {order.customerName}</p>}
+                            {order.customerName && (
+                              <p>
+                                <strong className="text-slate-300">
+                                  {order.tableName !== "Llevar" && order.tableName !== "Domicilio" ? "Comensal:" : "Cliente:"}
+                                </strong>{" "}
+                                <span className="text-white font-bold">{order.customerName}</span>
+                              </p>
+                            )}
                             {order.customerPhone && (
                               <p>
                                 <strong>WhatsApp:</strong>{" "}
@@ -4797,7 +4910,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
         })()}
       </aside>
 
-      {/* Modal de solicitud de pago manual - Plan Premium ($10 USD/mes) */}
+      {/* Modal de solicitud de pago manual */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative space-y-6 my-8">
@@ -4812,17 +4925,55 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
               <div className="h-12 w-12 bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
                 <Crown className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-extrabold text-white">Solicitud de pago manual</h3>
+              <h3 className="text-xl font-extrabold text-white">Solicitud de pago de suscripción</h3>
               <p className="text-slate-400 text-xs">
-                Suscripción Plan Premium ($10.00 USD/mes) para <strong className="text-white">{restaurant.name}</strong>
+                Restaurante: <strong className="text-white">{restaurant.name}</strong>
               </p>
+            </div>
+
+            {/* Plan Selector Inside Modal */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-300 block">
+                Selecciona el Plan a Activar / Renovar:
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlanPrice(15)}
+                  className={`p-3 rounded-xl border text-left transition ${
+                    selectedPlanPrice === 15 
+                      ? "border-amber-400 bg-amber-500/10 text-white" 
+                      : "border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700"
+                  }`}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wider block text-slate-400">Autogestión</span>
+                  <span className="font-extrabold text-sm block mt-0.5">Plan Pro</span>
+                  <span className="text-amber-400 font-bold text-xs">$15.00 USD/mes</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlanPrice(20)}
+                  className={`p-3 rounded-xl border text-left transition ${
+                    selectedPlanPrice === 20 
+                      ? "border-amber-400 bg-amber-500/10 text-white" 
+                      : "border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700"
+                  }`}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wider block text-amber-400">⭐ Con Asistencia</span>
+                  <span className="font-extrabold text-sm block mt-0.5">Puesta en Marcha</span>
+                  <span className="text-amber-400 font-bold text-xs">$20.00 USD/mes</span>
+                </button>
+              </div>
             </div>
 
             {/* Price summary */}
             <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2 text-xs">
               <div className="flex justify-between items-center text-slate-300">
                 <span>Concepto:</span>
-                <span className="font-bold text-white">Suscripción Mensual Pro</span>
+                <span className="font-bold text-white">
+                  {selectedPlanPrice === 20 ? "Plan Puesta en Marcha Inmediata" : "Plan Digital Pro"}
+                </span>
               </div>
               <div className="flex justify-between items-center text-slate-300">
                 <span>Período:</span>
@@ -4834,128 +4985,13 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
               </div>
               <div className="border-t border-slate-800 pt-2.5 flex justify-between items-center">
                 <span className="font-bold text-white text-sm">Total a pagar:</span>
-                <span className="text-2xl font-black text-amber-400">$10.00 USD</span>
+                <span className="text-2xl font-black text-amber-400">${selectedPlanPrice}.00 USD</span>
               </div>
             </div>
 
-            {/* Legacy card form retained for migration compatibility but never rendered. */}
-            {false && (<form onSubmit={handleSubscribePremium} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 block">
-                  Nombre en la Tarjeta <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. JUAN CARLOS PEREZ"
-                  value={cardHolderName}
-                  onChange={(e) => setCardHolderName(e.target.value.toUpperCase())}
-                  className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none tracking-wide"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 flex justify-between items-center">
-                  <span>Número de Tarjeta de Crédito / Débito <span className="text-red-400">*</span></span>
-                  <span className="text-[10px] text-slate-500 font-mono">Visa / Mastercard / Amex / Diners</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    maxLength={19}
-                    placeholder="4532 1234 5678 9012"
-                    value={cardNumber}
-                    onChange={(e) => {
-                      const v = e.target.value.replace(/\D/g, "").slice(0, 16);
-                      const formatted = v.replace(/(.{4})/g, "$1 ").trim();
-                      setCardNumber(formatted);
-                    }}
-                    className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full pl-10 pr-3 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none font-mono tracking-widest"
-                  />
-                  <CreditCard className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Expiración <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={5}
-                    placeholder="MM/AA"
-                    value={cardExpiry}
-                    onChange={(e) => {
-                      let v = e.target.value.replace(/\D/g, "").slice(0, 4);
-                      if (v.length >= 3) v = `${v.slice(0, 2)}/${v.slice(2)}`;
-                      setCardExpiry(v);
-                    }}
-                    className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none text-center font-mono"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    CVC / CVV <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    maxLength={4}
-                    placeholder="123"
-                    value={cardCvc}
-                    onChange={(e) => setCardCvc(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                    className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none text-center font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 block">
-                  Identificación del Titular (Cédula / RUC)
-                </label>
-                <input
-                  type="text"
-                  maxLength={13}
-                  placeholder="Ej. 1712345678001"
-                  value={cardDocId}
-                  onChange={(e) => setCardDocId(e.target.value.replace(/\D/g, "").slice(0, 13))}
-                  className="bg-slate-950 border border-slate-800 focus:border-amber-500 block w-full px-3.5 py-2.5 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none font-mono"
-                />
-              </div>
-
-              {paymentSuccessMsg && (
-                <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs rounded-2xl text-center font-bold flex items-center justify-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  <span>{paymentSuccessMsg}</span>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={isSubmittingPayment}
-                className="w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-4"
-              >
-                {isSubmittingPayment ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                    Procesando Pago de $10.00 USD...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-4 h-4" />
-                    Pagar $10.00 USD y Activar Plan
-                  </>
-                )}
-              </button>
-            </form>)}
-
             <form onSubmit={handleManualSubscriptionPayment} className="space-y-4">
               <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200">
-                Selecciona un método, realiza el pago y envía la referencia. El plan se activará después de la verificación manual.
+                Realiza el pago de <strong>${selectedPlanPrice}.00 USD</strong> y envía la referencia. El plan se activará tras la verificación.
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <button type="button" onClick={() => setManualPaymentMethod("transferencia")} className={`rounded-xl border px-3 py-3 text-xs font-bold ${manualPaymentMethod === "transferencia" ? "border-amber-400 bg-amber-400/10 text-amber-300" : "border-slate-700 text-slate-400"}`}>Transferencia</button>
@@ -4967,7 +5003,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
               <input required aria-label="Referencia de pago" value={manualPaymentReference} onChange={(e) => setManualPaymentReference(e.target.value)} placeholder="Número de operación o referencia" className="w-full bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-xl text-white text-xs" />
               <input type="url" aria-label="URL del comprobante" value={manualPaymentReceiptUrl} onChange={(e) => setManualPaymentReceiptUrl(e.target.value)} placeholder="URL HTTPS del comprobante (opcional)" className="w-full bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-xl text-white text-xs" />
               {paymentSuccessMsg && <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs rounded-2xl text-center font-bold"><CheckCircle2 className="w-4 h-4 inline mr-2" />{paymentSuccessMsg}</div>}
-              <button type="submit" disabled={isSubmittingPayment} className="w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 disabled:opacity-50">{isSubmittingPayment ? "Enviando solicitud..." : "Enviar solicitud de pago"}</button>
+              <button type="submit" disabled={isSubmittingPayment} className="w-full py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 disabled:opacity-50">{isSubmittingPayment ? "Enviando solicitud..." : `Enviar solicitud de pago ($${selectedPlanPrice}.00 USD)`}</button>
             </form>
 
             <p className="text-[10px] text-center text-slate-500 leading-normal">

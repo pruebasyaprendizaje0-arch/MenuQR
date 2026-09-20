@@ -494,7 +494,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const handleSendOrder = async (selectedMethod: "cash" | "qr") => {
     if (cart.length === 0) return;
 
-    const isTableOrder = selectedTable !== "" && selectedTable !== "Domicilio";
+    const isTableOrder = Boolean(selectedTable && selectedTable !== "" && selectedTable !== "Llevar" && selectedTable !== "Domicilio");
     const isDeliveryOrder = selectedTable === "Domicilio";
     
     const ivaPercent = restaurant.ivaPercent || 0;
@@ -525,6 +525,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const scheduleCheck = isRestaurantOpen(restaurant, isDeliveryOrder ? "delivery" : "local");
     if (!scheduleCheck.isOpen) {
       alert(`⛔ No se puede procesar el pedido.\n\n${scheduleCheck.reason || "El restaurante se encuentra fuera de horario de atención."}`);
+      setIsSubmittingOrder(false);
+      return;
+    }
+
+    // Check diner name requirement for table orders to guarantee multi-diner independent ordering
+    if (isTableOrder && !customerName.trim()) {
+      alert(`⚠️ Por favor ingresa tu Nombre de Comensal para la Mesa #${selectedTable}.\n\nEsto asegura que la cocina y el camarero identifiquen claramente tus platos y tu cuenta individual si hay varios comensales en la misma mesa.`);
       setIsSubmittingOrder(false);
       return;
     }
@@ -576,9 +583,12 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return;
     }
 
-    let message = `¡Hola! Me gustaría hacer un pedido en *${restaurant.name}*:\n\n`;
+    let message = isTableOrder 
+      ? `¡Hola! Me gustaría hacer un pedido para la *Mesa #${selectedTable}* (Comensal: *${customerName.trim()}*) en *${restaurant.name}*:\n\n`
+      : `¡Hola! Me gustaría hacer un pedido en *${restaurant.name}*:\n\n`;
+
     message += `*Número de Pedido:* #${result.orderNumber || 1}\n`;
-    message += `*Detalle del Pedido:*\n`;
+    message += isTableOrder ? `*Detalle de Comanda (${customerName.trim()}):*\n` : `*Detalle del Pedido:*\n`;
     message += `-----------------------------------\n`;
     
     cart.forEach((item) => {
@@ -598,11 +608,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       if (deliveryReference.trim()) {
         message += `*Referencia:* ${deliveryReference.trim()}\n`;
       }
-    } else if (selectedTable) {
-      message += `*Mesa:* #${selectedTable} 🍽️\n`;
-      if (customerName.trim()) {
-        message += `*Cliente / Alias:* ${customerName.trim()}\n`;
-      }
+    } else if (isTableOrder) {
+      message += `*Mesa:* #${selectedTable} 🪑\n`;
+      message += `*Comensal:* ${customerName.trim()} 👤\n`;
       if (customerPhone.trim()) {
         message += `*WhatsApp / Teléfono:* ${customerPhone.trim()}\n`;
       }
@@ -2102,16 +2110,35 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </div>
                   )}
 
+                  {/* Multi-diner notice for tables */}
+                  {isTableSelected && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 flex items-start gap-2.5 text-xs text-amber-200">
+                      <span className="text-base shrink-0">👥</span>
+                      <div className="space-y-0.5">
+                        <strong className="text-white block font-bold">¿Varios comensales en la Mesa #{selectedTable}?</strong>
+                        <p className="text-[11px] text-amber-300/90 leading-tight">
+                          Cada comensal puede escanear el QR y pedir por su cuenta. Ingresa tu nombre para identificar tus platos y tu cuenta individual.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Customer Name and Phone inputs for Table and Takeout */}
                   {selectedTable !== "Domicilio" && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <div className="space-y-1.5">
-                        <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">
-                          {isTableSelected ? "Nombre o Alias (Mesa)" : "Nombre o Alias (Para Retirar)"}
+                        <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                          <span>{isTableSelected ? "Tu Nombre de Comensal *" : "Nombre o Alias (Para Retirar)"}</span>
+                          {isTableSelected && (
+                            <span className="text-[10px] text-amber-400 font-bold lowercase tracking-normal bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                              Requerido
+                            </span>
+                          )}
                         </span>
                         <input
                           type="text"
-                          placeholder="Ej. Juan Pérez / Carlos"
+                          required={isTableSelected}
+                          placeholder={isTableSelected ? "Ej. Carlos / María / Juan" : "Ej. Juan Pérez"}
                           value={customerName}
                           onChange={(e) => setCustomerName(e.target.value)}
                           className="w-full bg-slate-950/60 border border-slate-850 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs"
@@ -2119,7 +2146,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                       </div>
                       <div className="space-y-1.5">
                         <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">
-                          Teléfono o WhatsApp
+                          Teléfono o WhatsApp (opcional)
                         </span>
                         <input
                           type="tel"

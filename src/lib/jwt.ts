@@ -25,6 +25,7 @@ export interface UserSessionPayload {
   userId: string;
   email: string;
   role?: "superadmin";
+  restaurantId?: string;
 }
 
 export function signToken(payload: UserSessionPayload): string {

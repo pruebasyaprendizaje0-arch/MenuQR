@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { UtensilsCrossed, Sparkles, QrCode, MessageSquare, ShieldCheck, ArrowRight, MapPin, HelpCircle } from "lucide-react";
+import { UtensilsCrossed, Sparkles, QrCode, MessageSquare, ShieldCheck, ArrowRight, MapPin, HelpCircle, CheckCircle2, Zap, Rocket, Headphones } from "lucide-react";
 import { prismaControl, prismaTenant } from "@/lib/db";
 import { LandingSearch } from "./components/LandingSearch";
 import { ScrollVideoBackground } from "./components/ScrollVideoBackground";
@@ -50,6 +50,7 @@ export default async function LandingPage() {
   }
 
   const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent("Hola, quisiera saber más información sobre MenuQR Pro")}`;
+  const waSetupUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent("Hola, me interesa el Plan de Puesta en Marcha Inmediata ($20 USD) para que suban la información de mi restaurante y ponerlo en marcha de inmediato.")}`;
 
   const faqSchema = {
     "@context": "https://schema.org",
@@ -73,10 +74,10 @@ export default async function LandingPage() {
       },
       {
         "@type": "Question",
-        "name": "¿Cuánto cuesta MenuQR Pro en Ecuador?",
+        "name": "¿Cuánto cuesta MenuQR Pro en Ecuador y qué planes ofrecen?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "El plan completo de MenuQR Pro cuesta únicamente $10.00 USD mensuales por restaurante. Incluye menú interactivo ilimitado, pedidos por WhatsApp, gestión de mesas y 0% de comisiones por venta."
+          "text": "Ofrecemos dos planes claros y accesibles: 1) Plan Digital Pro a $15.00 USD/mes con 30 días de prueba gratis para gestionar tu propio menú. 2) Plan Puesta en Marcha Inmediata a $20.00 USD/mes donde nuestro equipo digitaliza y carga toda la información, platos, fotos y precios de tu restaurante para que comiences a vender en menos de 24 horas."
         }
       },
       {
@@ -203,71 +204,171 @@ export default async function LandingPage() {
           </div>
         </div>
 
-        {/* Pricing Section - Único Plan Premium ($10 USD/mes) */}
-        <div className="w-full max-w-2xl bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-amber-500/30 rounded-[2.5rem] p-8 md:p-12 shadow-2xl relative overflow-hidden text-center space-y-8 my-8">
-          <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
-          
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mx-auto">
-            <Sparkles className="w-4 h-4 text-amber-400" /> Único Plan Transparente
-          </div>
-
-          <div className="space-y-3">
-            <h2 className="text-3xl md:text-4xl font-extrabold text-white">Plan Premium SaaS</h2>
-            <p className="text-slate-400 text-xs md:text-sm max-w-md mx-auto">
-              Todas las funciones avanzadas para tu restaurante por un precio fijo mensual sin sorpresas ni comisiones por ventas.
+        {/* Pricing Section - Planes Claros y Transparentes */}
+        <div className="w-full max-w-5xl space-y-10 my-8">
+          <div className="text-center space-y-3">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mx-auto">
+              <Sparkles className="w-4 h-4 text-amber-400" /> Planes Transparentes Sin Comisiones
+            </div>
+            <h2 className="text-3xl md:text-4xl font-extrabold text-white">Elige el plan ideal para tu restaurante</h2>
+            <p className="text-slate-400 text-xs md:text-sm max-w-xl mx-auto">
+              Comienza hoy mismo sin contratos forzosos, sin comisiones por pedido y con soporte directo en Ecuador.
             </p>
           </div>
 
-          <div className="bg-slate-950/80 p-6 rounded-3xl border border-slate-800 inline-block w-full max-w-sm mx-auto shadow-inner">
-            <div className="flex items-baseline justify-center gap-1">
-              <span className="text-5xl font-black text-white">$10</span>
-              <span className="text-lg font-bold text-amber-400">.00 USD</span>
-              <span className="text-slate-400 text-xs ml-1">/ mes</span>
-            </div>
-            <p className="text-[11px] text-emerald-400 font-semibold mt-2">
-              ✨ Incluye 30 Días de Prueba 100% Gratuita
-            </p>
-            <p className="text-[11px] text-slate-400 mt-2">
-              Pago por transferencia o Deuna · Activación manual el mismo día
-            </p>
-          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
+            {/* Plan 1: Plan Digital Pro ($15/mes) */}
+            <div className="bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-slate-800 hover:border-slate-700 rounded-[2.5rem] p-8 md:p-10 shadow-2xl relative overflow-hidden flex flex-col justify-between text-left space-y-8 transition-all">
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <span className="px-3.5 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[11px] font-bold uppercase tracking-wider">
+                    Autogestionable
+                  </span>
+                  <span className="text-xs text-emerald-400 font-semibold">
+                    ✨ 30 Días de Prueba Gratis
+                  </span>
+                </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left text-xs text-slate-300 max-w-lg mx-auto">
-            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
-              <QrCode className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Menú Digital QR Ilimitado</span>
-            </div>
-            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
-              <MessageSquare className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Pedidos directos a WhatsApp</span>
-            </div>
-            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
-              <UtensilsCrossed className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Catálogo CRUD sin límite de platos</span>
-            </div>
-            <div className="flex items-center gap-2.5 bg-slate-900/50 p-3 rounded-2xl border border-slate-800/80">
-              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Cero comisiones por cada pedido</span>
-            </div>
-          </div>
+                <div>
+                  <h3 className="text-2xl font-black text-white">Plan Digital Pro</h3>
+                  <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+                    Ideal para restaurantes que desean gestionar y digitalizar su carta a su propio ritmo.
+                  </p>
+                </div>
 
-          <div className="pt-2">
-            <Link
-              href="/registro"
-              className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transform hover:scale-[1.02] transition-all"
-            >
-              Comenzar Prueba Gratis de 30 Días
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <a
-              href={waUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 inline-flex items-center justify-center gap-2 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition"
-            >
-              <MessageSquare className="w-4 h-4" />
-              ¿Quieres hablar antes de registrarte? Escríbenos por WhatsApp
-            </a>
+                <div className="bg-slate-950/80 p-5 rounded-2xl border border-slate-800/80">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl md:text-5xl font-black text-white">$15</span>
+                    <span className="text-base font-bold text-amber-400">.00 USD</span>
+                    <span className="text-slate-400 text-xs ml-1">/ mes</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Facturación mensual transparente · Cero comisiones
+                  </p>
+                </div>
+
+                <div className="space-y-3 text-xs text-slate-300">
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span><strong>Menú Digital QR Ilimitado</strong> para mesas, barra y llevar</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span><strong>Pedidos automáticos a WhatsApp</strong> con subtotales e impuestos</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span><strong>Panel administrativo fácil</strong> para platos, fotos, categorías y combos</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span><strong>Configuración fiscal</strong> de IVA (15%), Servicio (10%) y delivery por KM</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span><strong>0% de comisiones</strong> sobre tus ventas</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span>Soporte técnico continuo en Ecuador</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 space-y-3">
+                <Link
+                  href="/registro"
+                  className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-white bg-slate-900 border border-slate-700 hover:bg-slate-800 hover:border-slate-600 shadow-lg transition-all text-center"
+                >
+                  Comenzar Prueba Gratis de 30 Días
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+                <p className="text-[11px] text-center text-slate-500">
+                  Sin tarjeta de crédito requerida · Activación en 2 min
+                </p>
+              </div>
+            </div>
+
+            {/* Plan 2: Plan Puesta en Marcha Inmediata ($20/mes) */}
+            <div className="bg-gradient-to-b from-slate-900/95 via-slate-950 to-slate-950 border-2 border-amber-500/60 rounded-[2.5rem] p-8 md:p-10 shadow-2xl relative overflow-hidden flex flex-col justify-between text-left space-y-8 transform hover:scale-[1.01] transition-all">
+              <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-amber-500/15 rounded-full blur-3xl pointer-events-none"></div>
+
+              <div className="space-y-6 relative z-10">
+                <div className="flex items-center justify-between">
+                  <span className="px-3.5 py-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-md shadow-amber-500/20">
+                    ⭐ Más Popular · Puesta en Marcha
+                  </span>
+                  <span className="text-xs text-amber-400 font-bold flex items-center gap-1">
+                    <Rocket className="w-3.5 h-3.5" /> Listo en 24h
+                  </span>
+                </div>
+
+                <div>
+                  <h3 className="text-2xl font-black text-white flex items-center gap-2">
+                    Plan Puesta en Marcha Inmediata
+                  </h3>
+                  <p className="text-amber-200/80 text-xs mt-1 leading-relaxed font-medium">
+                    🚀 <strong>Nosotros llenamos y estructuramos toda la información por ti.</strong> Tú solo envíanos tu carta o fotos.
+                  </p>
+                </div>
+
+                <div className="bg-amber-500/10 p-5 rounded-2xl border border-amber-500/30">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl md:text-5xl font-black text-white">$20</span>
+                    <span className="text-base font-bold text-amber-400">.00 USD</span>
+                    <span className="text-slate-400 text-xs ml-1">/ mes</span>
+                  </div>
+                  <p className="text-[11px] text-amber-300 font-semibold mt-1">
+                    Incluye servicio completo de digitalización y carga inicial asistida
+                  </p>
+                </div>
+
+                <div className="space-y-3 text-xs text-slate-300">
+                  <div className="flex items-start gap-2.5 text-amber-100 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20">
+                    <Rocket className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span><strong>Carga completa de información:</strong> Subimos todos tus platos, fotos, categorías y precios por ti.</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span><strong>Todo lo incluido en el Plan Digital Pro</strong> (mesas, QR, pedidos WhatsApp)</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span><strong>Optimización visual:</strong> Ajuste de imágenes y estructura de menú para maximizar ventas</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span><strong>Códigos QR listos para imprimir</strong> en alta resolución para tus mesas y barra</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span><strong>Activación express garantizada</strong> en menos de 24 horas laborables</span>
+                  </div>
+                  <div className="flex items-start gap-2.5">
+                    <Headphones className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span><strong>Asesoría y acompañamiento VIP</strong> directo por WhatsApp para el lanzamiento</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 space-y-3 relative z-10">
+                <a
+                  href={waSetupUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl font-extrabold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transform hover:scale-[1.02] transition-all text-center"
+                >
+                  <Rocket className="w-4 h-4" />
+                  Quiero Puesta en Marcha Inmediata ($20)
+                </a>
+                <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                  <span>¿Prefieres registrarte primero?</span>
+                  <Link href="/registro" className="text-amber-400 hover:underline font-semibold">
+                    Crear cuenta gratis →
+                  </Link>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -315,10 +416,18 @@ export default async function LandingPage() {
                   },
                   {
                     "@type": "Question",
-                    "name": "¿Cuánto cuesta MenuQR Pro en Ecuador?",
+                    "name": "¿Cuánto cuesta MenuQR Pro y qué planes están disponibles?",
                     "acceptedAnswer": {
                       "@type": "Answer",
-                      "text": "MenuQR Pro cuenta con un Único Plan Premium de $10.00 USD mensuales. Todos los usuarios nuevos reciben 30 días de prueba completa totalmente gratis.",
+                      "text": "MenuQR Pro ofrece dos planes: el Plan Digital Pro de $15.00 USD mensuales (con 30 días de prueba gratuita) para autogestión, y el Plan Puesta en Marcha Inmediata de $20.00 USD mensuales donde nuestro equipo carga y digitaliza toda tu carta, fotos y precios en menos de 24 horas.",
+                    },
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "¿En qué consiste el Plan Puesta en Marcha Inmediata de $20 USD?",
+                    "acceptedAnswer": {
+                      "@type": "Answer",
+                      "text": "Con el Plan Puesta en Marcha Inmediata ($20 USD/mes), nuestro equipo se encarga de subir todos los platos, categorías, fotos, precios y datos bancarios de tu negocio, entregándote el menú digital 100% listo y los códigos QR para imprimir en menos de 24 horas.",
                     },
                   },
                   {
@@ -358,9 +467,16 @@ export default async function LandingPage() {
             </div>
 
             <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
-              <h3 className="font-bold text-white text-sm">¿Cuánto cuesta y cómo funciona la prueba gratis?</h3>
+              <h3 className="font-bold text-white text-sm">¿Cuánto cuesta y qué planes ofrecen?</h3>
               <p className="text-slate-400 text-xs leading-relaxed">
-                Obtienes <strong>30 días de prueba 100% gratuita</strong> al registrarte. Luego de la prueba, el servicio mantiene un valor fijo transparente de solo <strong>$10.00 USD al mes</strong>.
+                Ofrecemos el <strong>Plan Digital Pro ($15.00 USD/mes)</strong> con 30 días de prueba gratis para autogestión, y el <strong>Plan Puesta en Marcha Inmediata ($20.00 USD/mes)</strong> donde nuestro equipo carga toda la información de tu restaurante para que empieces a vender de inmediato.
+              </p>
+            </div>
+
+            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
+              <h3 className="font-bold text-white text-sm">¿En qué consiste el Plan Puesta en Marcha Inmediata ($20)?</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Tú solo nos envías tu menú físico o fotos de tu carta por WhatsApp. Nuestro equipo sube platos, optimiza fotos, configura categorías, precios e impuestos y te entrega los códigos QR listos en menos de 24 horas.
               </p>
             </div>
 
@@ -368,13 +484,6 @@ export default async function LandingPage() {
               <h3 className="font-bold text-white text-sm">¿Existen comisiones adicionales por pedido o venta?</h3>
               <p className="text-slate-400 text-xs leading-relaxed">
                 No. A diferencia de las apps de delivery tradicionales, en MenuQR Pro te quedas con el 100% de tus ventas sin comisiones por pedido.
-              </p>
-            </div>
-
-            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
-              <h3 className="font-bold text-white text-sm">¿Permite configurar IVA y recargo por servicio en Ecuador?</h3>
-              <p className="text-slate-400 text-xs leading-relaxed">
-                Sí. Puedes configurar de forma flexible el IVA (15% u otro porcentaje), el recargo de servicio (10%) y los datos bancarios para transferencias directas en Ecuador.
               </p>
             </div>
           </div>

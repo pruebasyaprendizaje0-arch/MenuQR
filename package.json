@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
-    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/seo-geo.test.ts && npx tsx src/lib/split-bill.test.ts"
+    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/split-bill.test.ts && npx tsx src/lib/batch-dishes.test.ts && npx tsx src/lib/impersonation.test.ts"
   },
   "engines": {
     "node": ">=20.9.0",
@@ -25,7 +25,8 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "resend": "^6.25.0",
-    "tsx": "^4.23.12"
+    "tsx": "^4.23.12",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

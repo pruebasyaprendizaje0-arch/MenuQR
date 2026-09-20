@@ -128,7 +128,7 @@ const CRM_STAGES = [
   { id: "CONTACTADO", label: "Contactados", color: "bg-purple-500/10 text-purple-400 border-purple-500/30" },
   { id: "EN_DEMO", label: "Demos Activas", color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" },
   { id: "NEGOCIACION", label: "En Negociación", color: "bg-amber-500/10 text-amber-400 border-amber-500/30" },
-  { id: "CLIENTE_PRO", label: "Clientes PRO ($10/mes)", color: "bg-green-500/10 text-green-400 border-green-500/30" },
+  { id: "CLIENTE_PRO", label: "Clientes PRO ($15 - $20/mes)", color: "bg-green-500/10 text-green-400 border-green-500/30" },
   { id: "EXPIRADO_INACTIVO", label: "Expirados / Inactivos", color: "bg-red-500/10 text-red-400 border-red-500/30" },
 ];
 
@@ -456,9 +456,9 @@ export function SuperAdminDashboard({
     if (templateType === "welcome") {
       text = `Hola ${name}, bienvenido a MenuQR Pro. Soy del equipo de soporte. Vi que creaste tu negocio y queremos ayudarte gratis a subir tus platos y fotos para que tu menú digital quede 100% listo hoy. ¿Te gustaría que te ayudemos?`;
     } else if (templateType === "trial_expiry") {
-      text = `Hola ${name}, tu período de prueba en MenuQR Pro está por vencer. Para mantener activo tu menú digital e incluir pedidos por WhatsApp, puedes activar el Plan PRO por solo $10 USD al mes. ¿Deseas los datos para transferencia?`;
+      text = `Hola ${name}, tu período de prueba en MenuQR Pro está por vencer. Para mantener activo tu menú digital e incluir pedidos por WhatsApp, puedes activar el Plan PRO por $15 USD al mes (o el Plan Puesta en Marcha por $20 USD con carga de datos asistida). ¿Deseas los datos para transferencia/Deuna?`;
     } else if (templateType === "pro_payment") {
-      text = `Hola ${name}, aquí tienes los datos para activar tu Plan PRO de MenuQR Pro ($10 USD/mes):\n\nBanco Pichincha - Cuenta de Ahorros\nN°: 2200XXXXXX\nTitular: MenuQR Pro\n\nPor favor envíanos el comprobante por aquí para activar tu cuenta inmediatamente.`;
+      text = `Hola ${name}, aquí tienes los datos para activar tu plan en MenuQR Pro (Plan Pro: $15 USD/mes | Puesta en Marcha Inmediata: $20 USD/mes):\n\nBanco Pichincha - Cuenta de Ahorros\nN°: 2200XXXXXX\nTitular: MenuQR Pro\n\nPor favor envíanos el comprobante por aquí para activar tu cuenta inmediatamente.`;
     } else {
       text = `Hola ${name}, te saludamos de MenuQR Pro...`;
     }
@@ -840,7 +840,7 @@ export function SuperAdminDashboard({
                                     className="bg-slate-950 border border-slate-800 text-xs rounded-xl px-2.5 py-1 text-slate-200 focus:outline-none focus:border-amber-500 font-semibold cursor-pointer"
                                   >
                                     <option value="FREE">FREE (Prueba)</option>
-                                    <option value="PRO">PRO ($10/mes)</option>
+                                    <option value="PRO">PRO (Desde $15/mes)</option>
                                   </select>
                                   <div className="text-[11px] text-slate-400">
                                     {isExpired ? (
@@ -884,7 +884,7 @@ export function SuperAdminDashboard({
                                 <button
                                   onClick={async () => {
                                     if (confirm(`¿Deseas ingresar al panel de "${res.name}" en Modo Puesta en Marcha / Asistencia?`)) {
-                                      await impersonateUserAction(res.userId);
+                                      await impersonateUserAction(res.userId, res.id);
                                     }
                                   }}
                                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-emerald-400 bg-emerald-950/30 border border-emerald-800/40 hover:bg-emerald-950/60 font-bold transition"
@@ -1759,7 +1759,7 @@ export function SuperAdminDashboard({
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
                   >
                     <option value="FREE">FREE (Demo 30 días)</option>
-                    <option value="PRO">PRO ($10/mes)</option>
+                    <option value="PRO">PRO (Desde $15/mes)</option>
                   </select>
                 </div>
               </div>
@@ -1939,7 +1939,7 @@ export function SuperAdminDashboard({
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
                     >
                       <option value="FREE">FREE (Prueba)</option>
-                      <option value="PRO">PRO ($10/mes)</option>
+                      <option value="PRO">PRO (Desde $15/mes)</option>
                     </select>
                   </div>
                 </div>

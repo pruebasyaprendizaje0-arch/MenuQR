@@ -743,6 +743,115 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   return { success: true };
 }
 
+export interface BatchDishInput {
+  name: string;
+  description?: string;
+  price: number;
+  categoryName: string;
+  isAvailable?: boolean;
+  imageUrl?: string;
+}
+
+export async function createBatchDishesAction(restaurantId: string, dishes: BatchDishInput[]) {
+  await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  if (!Array.isArray(dishes) || dishes.length === 0) {
+    return { error: "No se proporcionaron platos para importar." };
+  }
+
+  // Filter valid dishes with non-empty name
+  const validDishes = dishes.filter(d => d.name && d.name.trim().length > 0);
+  if (validDishes.length === 0) {
+    return { error: "Ningún registro contiene un nombre de plato válido." };
+  }
+
+  // Fetch current categories for this restaurant
+  const existingCategories = await prisma.category.findMany({
+    where: { restaurantId },
+    orderBy: { order: "asc" },
+  });
+
+  const categoryMap = new Map<string, string>();
+  existingCategories.forEach((cat) => {
+    categoryMap.set(cat.name.trim().toLowerCase(), cat.id);
+  });
+
+  let nextOrder = existingCategories.length > 0 
+    ? Math.max(...existingCategories.map((c) => c.order)) + 1 
+    : 0;
+
+  // Identify categories that need to be created
+  const newCategoriesToCreate: string[] = [];
+  for (const item of validDishes) {
+    const rawCat = (item.categoryName || "General").trim();
+    if (rawCat && !categoryMap.has(rawCat.toLowerCase()) && !newCategoriesToCreate.includes(rawCat)) {
+      newCategoriesToCreate.push(rawCat);
+    }
+  }
+
+  // Run in database transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // 1. Create missing categories
+    for (const catName of newCategoriesToCreate) {
+      const created = await tx.category.create({
+        data: {
+          name: catName,
+          order: nextOrder++,
+          restaurantId,
+        },
+      });
+      categoryMap.set(catName.trim().toLowerCase(), created.id);
+    }
+
+    // 2. Prepare dish records
+    const dishesData = validDishes.map((item) => {
+      const rawCat = (item.categoryName || "General").trim();
+      const catId = categoryMap.get(rawCat.toLowerCase()) || existingCategories[0]?.id;
+      
+      const parsedPrice = typeof item.price === "number" ? item.price : parseFloat(String(item.price)) || 0;
+      const cleanPrice = Math.max(0, isNaN(parsedPrice) ? 0 : parsedPrice);
+      
+      return {
+        name: item.name.trim(),
+        description: item.description?.trim() || null,
+        price: cleanPrice,
+        imageUrl: item.imageUrl?.trim() || null,
+        isAvailable: item.isAvailable !== false,
+        categoryId: catId!,
+        restaurantId,
+      };
+    });
+
+    // 3. Insert dishes in bulk
+    await tx.dish.createMany({
+      data: dishesData,
+    });
+
+    return {
+      count: dishesData.length,
+      createdCategoriesCount: newCategoriesToCreate.length,
+    };
+  });
+
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { slug: true },
+  });
+
+  if (restaurant?.slug) {
+    revalidatePath(`/${restaurant.slug}`);
+  }
+  revalidatePath("/admin");
+
+  return { 
+    success: true, 
+    count: result.count, 
+    createdCategoriesCount: result.createdCategoriesCount 
+  };
+}
+
 export async function updateDishAction(dishId: string, formData: FormData) {
   await refreshUserSession();
   const dish = await prisma.dish.findUnique({
@@ -1253,18 +1362,37 @@ export async function reassignRestaurantOwnerAction(restaurantId: string, ownerE
   };
 }
 
-export async function impersonateUserAction(userId: string) {
+export async function impersonateUserAction(userId: string, restaurantId?: string) {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) {
     return { error: "No autorizado. Acción reservada para SuperAdmin." };
   }
 
-  const user = await prismaControl.user.findUnique({
-    where: { id: userId }
-  });
-  if (!user) return { error: "Usuario no encontrado." };
+  let user = null;
+  let targetRestaurant = null;
 
-  await setUserSession(user.id, user.email);
+  if (restaurantId) {
+    targetRestaurant = await prismaTenant.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true, userId: true, name: true }
+    });
+    if (targetRestaurant?.userId) {
+      user = await prismaControl.user.findUnique({
+        where: { id: targetRestaurant.userId }
+      });
+    }
+  }
+
+  if (!user && userId) {
+    user = await prismaControl.user.findUnique({
+      where: { id: userId }
+    });
+  }
+
+  if (!user) return { error: "Usuario no encontrado para asistir este restaurante." };
+
+  const finalRestId = restaurantId || targetRestaurant?.id;
+  await setUserSession(user.id, user.email, finalRestId);
   redirect("/admin");
 }
 

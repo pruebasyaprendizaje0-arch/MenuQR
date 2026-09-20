@@ -43,7 +43,7 @@ export async function GET() {
 - **Dominio Principal**: ${baseUrl}
 - **Cobertura**: Ecuador (Quito, Guayaquil, Cuenca, Ambato, Manta, Salinas, Montañita, Olón, Loja, Machala, Portoviejo, Ibarra, Babahoyo, Quevedo, Riobamba, Esmeraldas y más).
 - **Servicios**: Menús Digitales QR, Pedidos estructurados a WhatsApp, Gestión de Mesas, Configuración de IVA 15% y Servicio 10%, Datos bancarios directos.
-- **Costo**: $10.00 USD/mes por restaurante con 30 días de prueba 100% gratuita.
+- **Costo**: Plan Digital Pro: $15.00 USD/mes (con 30 días de prueba gratis); Plan Puesta en Marcha Inmediata: $20.00 USD/mes (con digitalización y carga completa por el equipo).
 
 ## Secciones Principales
 - Inicio: ${baseUrl}

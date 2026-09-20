@@ -31,8 +31,12 @@ export default async function FaqPage() {
       a: "El cliente escanea el código QR en la mesa, escoge los platillos y bebidas, ingresa notas especiales si lo desea y hace clic en 'Enviar Pedido'. El sistema formatea automáticamente el resumen con subtotal, IVA, recargo de servicio y mesa, y abre WhatsApp para enviártelo sin comisiones.",
     },
     {
-      q: "¿Cuánto cuesta MenuQR Pro y qué incluye la prueba gratis?",
-      a: "MenuQR Pro ofrece 30 días de prueba 100% gratuita al registrarte. Luego de la prueba, el valor es de tan solo $10.00 USD mensuales por restaurante. Incluye menú ilimitado, mesas ilimitadas, cero comisiones por venta y soporte técnico en Ecuador.",
+      q: "¿Cuánto cuesta MenuQR Pro y qué planes ofrecen en Ecuador?",
+      a: "Ofrecemos dos planes claros y accesibles: 1) Plan Digital Pro ($15.00 USD/mes con 30 días de prueba gratuita) para que gestiones tu menú con total autonomía. 2) Plan Puesta en Marcha Inmediata ($20.00 USD/mes) donde nuestro equipo carga y digitaliza toda tu carta, platos, fotos y precios en menos de 24 horas para que empieces a vender sin perder tiempo.",
+    },
+    {
+      q: "¿En qué consiste el Plan Puesta en Marcha Inmediata ($20 USD/mes)?",
+      a: "Es un servicio llave en mano donde nosotros nos encargamos de todo el trabajo manual. Solo nos envías una foto o archivo de tu menú por WhatsApp, y nuestro equipo crea las categorías, redacta las descripciones, optimiza las fotos, configura precios, impuestos y te entrega los códigos QR listos para imprimir en menos de 24 horas.",
     },
     {
       q: "¿MenuQR Pro cobra comisiones sobre las ventas o platillos?",

@@ -1,6 +1,7 @@
 import { getUserSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { AdminDashboard } from "./components/AdminDashboard";
 
 export const dynamic = "force-dynamic";
@@ -28,33 +29,66 @@ export default async function AdminPage() {
     redirect("/login");
   }
 
+  const cookieStore = await cookies();
+  const activeRestaurantId = session.restaurantId || cookieStore.get("active_restaurant_id")?.value;
+
   let restaurant: any = null;
   try {
-    restaurant = await prisma.restaurant.findFirst({
-      where: { userId: session.userId },
-      include: {
-        categories: {
-          orderBy: { order: "asc" },
-          include: {
-            dishes: {
-              orderBy: { createdAt: "desc" },
+    if (activeRestaurantId) {
+      restaurant = await prisma.restaurant.findFirst({
+        where: { id: activeRestaurantId, userId: session.userId },
+        include: {
+          categories: {
+            orderBy: { order: "asc" },
+            include: {
+              dishes: {
+                orderBy: { createdAt: "desc" },
+              },
             },
           },
-        },
-        orders: {
-          orderBy: { createdAt: "desc" },
-          include: {
-            items: true
+          orders: {
+            orderBy: { createdAt: "desc" },
+            include: {
+              items: true
+            }
+          },
+          seasonRates: {
+            orderBy: { startDate: "asc" }
+          },
+          customers: {
+            orderBy: { lastOrderAt: "desc" }
           }
         },
-        seasonRates: {
-          orderBy: { startDate: "asc" }
+      });
+    }
+
+    if (!restaurant) {
+      restaurant = await prisma.restaurant.findFirst({
+        where: { userId: session.userId },
+        include: {
+          categories: {
+            orderBy: { order: "asc" },
+            include: {
+              dishes: {
+                orderBy: { createdAt: "desc" },
+              },
+            },
+          },
+          orders: {
+            orderBy: { createdAt: "desc" },
+            include: {
+              items: true
+            }
+          },
+          seasonRates: {
+            orderBy: { startDate: "asc" }
+          },
+          customers: {
+            orderBy: { lastOrderAt: "desc" }
+          }
         },
-        customers: {
-          orderBy: { lastOrderAt: "desc" }
-        }
-      },
-    });
+      });
+    }
   } catch (err) {
     console.error("Error fetching restaurant for admin page:", err);
     restaurant = null;

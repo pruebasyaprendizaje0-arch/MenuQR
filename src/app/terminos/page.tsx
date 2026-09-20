@@ -63,9 +63,10 @@ export default function TerminosPage() {
             MenuQR Pro permite a propietarios de establecimientos gastronómicos crear y personalizar su menú digital, generar códigos QR para mesas y recibir pedidos directamente en su cuenta de WhatsApp.
           </p>
           <ul className="list-disc pl-6 space-y-2 text-slate-400">
-            <li><strong>Prueba Gratuita:</strong> Al registrarse, el Usuario recibe 30 días de prueba sin costo.</li>
-            <li><strong>Único Plan Premium:</strong> Transcurrida la prueba, el costo del servicio es de <strong>$10.00 USD mensuales</strong> (dólares de los Estados Unidos de América).</li>
-            <li><strong>Sin Comisiones:</strong> MenuQR Pro no cobra comisiones por pedido ni intermediación sobre las ventas del restaurante.</li>
+            <li><strong>Prueba Gratuita:</strong> Al registrarse, el Usuario recibe 30 días de prueba sin costo en el Plan Digital Pro.</li>
+            <li><strong>Plan Digital Pro:</strong> Finalizada la prueba, el costo del servicio autogestionado es de <strong>$15.00 USD mensuales</strong> (dólares de los Estados Unidos de América).</li>
+            <li><strong>Plan Puesta en Marcha Inmediata:</strong> Por <strong>$20.00 USD mensuales</strong>, el equipo de MenuQR Pro se encarga de la carga completa, optimización y digitalización de productos, fotos, categorías y datos del establecimiento para su lanzamiento inmediato en menos de 24 horas.</li>
+            <li><strong>Sin Comisiones:</strong> MenuQR Pro no cobra comisiones por pedido ni tarifas de intermediación sobre las ventas del restaurante.</li>
           </ul>
         </section>
 
