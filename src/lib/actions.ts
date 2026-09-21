@@ -693,6 +693,74 @@ export async function deleteCategoryAction(categoryId: string) {
   return { success: true };
 }
 
+export async function moveCategoryOrderAction(categoryId: string, direction: "up" | "down") {
+  await refreshUserSession();
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: { id: true, restaurantId: true, order: true },
+  });
+  if (!category) return { error: "Categoría no encontrada." };
+
+  const auth = await verifyRestaurantOwnership(category.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  const allCategories = await prisma.category.findMany({
+    where: { restaurantId: category.restaurantId },
+    orderBy: [
+      { order: "asc" },
+      { createdAt: "asc" }
+    ],
+  });
+
+  const currentIndex = allCategories.findIndex((c) => c.id === categoryId);
+  if (currentIndex === -1) return { error: "Categoría no encontrada en la lista." };
+
+  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+  if (targetIndex < 0 || targetIndex >= allCategories.length) {
+    return { success: true };
+  }
+
+  const reordered = [...allCategories];
+  const [moved] = reordered.splice(currentIndex, 1);
+  reordered.splice(targetIndex, 0, moved);
+
+  await prisma.$transaction(
+    reordered.map((cat, idx) =>
+      prisma.category.update({
+        where: { id: cat.id },
+        data: { order: idx + 1 },
+      })
+    )
+  );
+
+  const restaurant = await prisma.restaurant.findUnique({ where: { id: category.restaurantId } });
+  if (restaurant) revalidatePath(`/${restaurant.slug}`);
+  revalidatePath("/admin");
+
+  return { success: true };
+}
+
+export async function reorderCategoriesAction(restaurantId: string, orderedCategoryIds: string[]) {
+  await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  await prisma.$transaction(
+    orderedCategoryIds.map((id, index) =>
+      prisma.category.update({
+        where: { id, restaurantId },
+        data: { order: index + 1 },
+      })
+    )
+  );
+
+  const restaurant = await prisma.restaurant.findUnique({ where: { id: restaurantId } });
+  if (restaurant) revalidatePath(`/${restaurant.slug}`);
+  revalidatePath("/admin");
+
+  return { success: true };
+}
+
 // Dish Actions
 export async function createDishAction(categoryId: string, formData: FormData) {
   await refreshUserSession();

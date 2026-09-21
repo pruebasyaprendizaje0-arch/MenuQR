@@ -7,6 +7,8 @@ import {
   createCategoryAction, 
   updateCategoryAction, 
   deleteCategoryAction, 
+  moveCategoryOrderAction,
+  reorderCategoriesAction,
   createDishAction, 
   updateDishAction, 
   deleteDishAction, 
@@ -76,8 +78,13 @@ import {
   Tag, 
   MapPin, 
   Utensils,
-  Globe 
+  Globe,
+  ChevronUp,
+  ChevronDown,
+  Loader2,
+  Download
 } from "lucide-react";
+import * as XLSX from "xlsx";
 
 type SeasonRate = {
   id: string;
@@ -622,6 +629,54 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
     document.body.removeChild(link);
   };
 
+  const handleExportDishesExcel = () => {
+    const allDishes: Array<{
+      Categoria: string;
+      Nombre: string;
+      Descripcion: string;
+      Precio: number;
+      Disponible: string;
+      URL_Imagen: string;
+    }> = [];
+
+    const cats = categoriesList && categoriesList.length > 0 ? categoriesList : (restaurant.categories || []);
+
+    cats.forEach((cat) => {
+      (cat.dishes || []).forEach((dish) => {
+        allDishes.push({
+          Categoria: cat.name,
+          Nombre: dish.name,
+          Descripcion: dish.description || "",
+          Precio: typeof dish.price === "number" ? dish.price : parseFloat((dish.price as any) || "0"),
+          Disponible: dish.isAvailable ? "SI" : "NO",
+          URL_Imagen: dish.imageUrl || "",
+        });
+      });
+    });
+
+    if (allDishes.length === 0) {
+      alert("No hay platos registrados en el menú para exportar.");
+      return;
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(allDishes);
+
+    worksheet["!cols"] = [
+      { wch: 22 }, // Categoria
+      { wch: 32 }, // Nombre
+      { wch: 48 }, // Descripcion
+      { wch: 12 }, // Precio
+      { wch: 14 }, // Disponible
+      { wch: 38 }, // URL_Imagen
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Platos");
+
+    const fileName = `platos_${restaurant.slug}_${new Date().toISOString().split("T")[0]}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
+
   // Import Contacts States & Handlers
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importTextContent, setImportTextContent] = useState("");
@@ -974,7 +1029,45 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
     }
   };
   
-  // States for Category Dialogs
+  // States for Category Dialogs & Ordering
+  const [categoriesList, setCategoriesList] = useState<Category[]>(() => 
+    [...(restaurant.categories || [])].sort((a, b) => a.order - b.order)
+  );
+  const [reorderingCatId, setReorderingCatId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCategoriesList([...(restaurant.categories || [])].sort((a, b) => a.order - b.order));
+  }, [restaurant.categories]);
+
+  const handleMoveCategory = async (categoryId: string, direction: "up" | "down") => {
+    const currentIndex = categoriesList.findIndex(c => c.id === categoryId);
+    if (currentIndex === -1) return;
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= categoriesList.length) return;
+
+    // Actualización optimista inmediata en la UI
+    const updated = [...categoriesList];
+    const [moved] = updated.splice(currentIndex, 1);
+    updated.splice(targetIndex, 0, moved);
+    const reorderedWithOrder = updated.map((c, i) => ({ ...c, order: i + 1 }));
+    
+    setCategoriesList(reorderedWithOrder);
+    setReorderingCatId(categoryId);
+
+    try {
+      const res = await moveCategoryOrderAction(categoryId, direction);
+      if (res && "error" in res && res.error) {
+        alert(res.error);
+        setCategoriesList([...(restaurant.categories || [])].sort((a, b) => a.order - b.order));
+      }
+    } catch (err) {
+      console.error("Error al mover categoría:", err);
+      setCategoriesList([...(restaurant.categories || [])].sort((a, b) => a.order - b.order));
+    } finally {
+      setReorderingCatId(null);
+    }
+  };
+
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
@@ -2818,7 +2911,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 onClick={() => {
                   setEditingCategory(null);
                   setNewCatName("");
-                  setNewCatOrder("0");
+                  setNewCatOrder((categoriesList.length + 1).toString());
                   setIsCategoryModalOpen(true);
                 }}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 transition-all duration-200"
@@ -2829,29 +2922,59 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
             </div>
 
             {/* List of categories */}
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden">
+            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden shadow-sm">
               <table className="min-w-full divide-y divide-slate-800">
                 <thead className="bg-slate-900/60">
                   <tr>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Nombre</th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Orden</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Orden / Posición</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Cantidad Platos</th>
                     <th className="px-6 py-4 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {restaurant.categories.length === 0 ? (
+                  {categoriesList.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-6 py-10 text-center text-sm text-slate-500">
                         No hay categorías creadas aún.
                       </td>
                     </tr>
                   ) : (
-                    restaurant.categories.map((cat) => (
+                    categoriesList.map((cat, index) => (
                       <tr key={cat.id} className="hover:bg-slate-900/30 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">{cat.name}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">{cat.order}</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{cat.dishes.length} platos</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-300">
+                          <div className="flex items-center gap-2.5">
+                            <span className="inline-flex items-center justify-center min-w-[2.25rem] h-8 px-2.5 rounded-xl bg-slate-950/90 text-xs font-bold text-amber-400 border border-slate-800 shadow-inner">
+                              #{cat.order}
+                            </span>
+                            <div className="inline-flex items-center bg-slate-950/90 rounded-xl p-0.5 border border-slate-800 gap-0.5 shadow-sm">
+                              <button
+                                type="button"
+                                disabled={index === 0 || reorderingCatId !== null}
+                                onClick={() => handleMoveCategory(cat.id, "up")}
+                                title="Subir posición (mostrar antes)"
+                                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                              >
+                                {reorderingCatId === cat.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                                ) : (
+                                  <ChevronUp className="h-4 w-4" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={index === categoriesList.length - 1 || reorderingCatId !== null}
+                                onClick={() => handleMoveCategory(cat.id, "down")}
+                                title="Bajar posición (mostrar después)"
+                                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{(cat.dishes || []).length} platos</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-2">
                           <button
                             onClick={() => {
@@ -2861,6 +2984,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                               setIsCategoryModalOpen(true);
                             }}
                             className="inline-flex p-2 text-slate-400 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg transition-all"
+                            title="Editar Categoría"
                           >
                             <Edit2 className="h-4.5 w-4.5" />
                           </button>
@@ -2877,6 +3001,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                               }
                             }}
                             className="inline-flex p-2 text-red-500/80 hover:text-red-400 bg-red-950/20 hover:bg-red-950/40 rounded-lg border border-red-900/20 transition-all"
+                            title="Eliminar Categoría"
                           >
                             <Trash2 className="h-4.5 w-4.5" />
                           </button>
@@ -2993,7 +3118,16 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 <h2 className="text-2xl font-bold text-white">Platos del Menú</h2>
                 <p className="text-slate-400 text-sm">Gestiona la carta completa: precios, imágenes y disponibilidad.</p>
               </div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleExportDishesExcel}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 transition-all duration-200 shadow-sm"
+                  title="Descargar todos los platos con sus categorías, precios y fotos en formato Excel (.xlsx)"
+                >
+                  <Download className="h-4 w-4" />
+                  Descargar Platos (Excel)
+                </button>
                 <button
                   type="button"
                   onClick={() => setIsBatchDishModalOpen(true)}
@@ -3003,7 +3137,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                   Subida por Lotes (Excel / CSV)
                 </button>
                 <button
-                  disabled={restaurant.categories.length === 0}
+                  disabled={categoriesList.length === 0}
                   onClick={() => {
                     setEditingDish(null);
                     setDishName("");
@@ -3011,7 +3145,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     setDishPrice("0");
                     setDishImageUrl("");
                     setDishAvailable(true);
-                    setDishCatId(restaurant.categories[0]?.id || "");
+                    setDishCatId(categoriesList[0]?.id || "");
                     setIsDishModalOpen(true);
                   }}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
@@ -3022,14 +3156,14 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
               </div>
             </div>
 
-            {restaurant.categories.length === 0 ? (
+            {categoriesList.length === 0 ? (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 text-center text-amber-300">
                 <AlertCircle className="h-8 w-8 mx-auto mb-2 text-amber-400" />
                 Debes crear al menos una categoría antes de agregar platos.
               </div>
             ) : (
               <div className="space-y-8">
-                {restaurant.categories.map((cat) => (
+                {categoriesList.map((cat) => (
                   <div key={cat.id} className="space-y-4">
                     <h3 className="text-lg font-bold text-slate-300 border-b border-slate-800 pb-2 flex items-center gap-2">
                       <span className="text-red-500">#</span> {cat.name}
