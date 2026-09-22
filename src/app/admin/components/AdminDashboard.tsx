@@ -82,7 +82,19 @@ import {
   ChevronUp,
   ChevronDown,
   Loader2,
-  Download
+  Download,
+  Cake,
+  Gift,
+  Award,
+  ShieldAlert,
+  Wheat,
+  History,
+  Star,
+  Flame,
+  User,
+  FileText,
+  CheckSquare,
+  Square
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -250,6 +262,128 @@ type Customer = {
   updatedAt: string;
 };
 
+export type CustomerMetadata = {
+  dietary?: string[]; // ["VEGAN", "VEGETARIAN", "GLUTEN_FREE", "LACTOSE_FREE", "KETO", "HALAL"]
+  allergies?: string;
+  birthDate?: string; // "YYYY-MM-DD"
+  points?: number;
+  favoriteDish?: string;
+  customNotes?: string;
+};
+
+export const DIETARY_PREFERENCES_LIST = [
+  { id: "VEGAN", label: "Vegano", emoji: "🌱", color: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" },
+  { id: "VEGETARIAN", label: "Vegetariano", emoji: "🥗", color: "bg-green-500/20 text-green-300 border-green-500/40" },
+  { id: "GLUTEN_FREE", label: "Sin Gluten / Celíaco", emoji: "🌾", color: "bg-amber-500/20 text-amber-300 border-amber-500/40" },
+  { id: "LACTOSE_FREE", label: "Sin Lactosa", emoji: "🥛", color: "bg-blue-500/20 text-blue-300 border-blue-500/40" },
+  { id: "KETO", label: "Keto / Low Carb", emoji: "🥑", color: "bg-purple-500/20 text-purple-300 border-purple-500/40" },
+  { id: "HALAL", label: "Halal", emoji: "🍖", color: "bg-teal-500/20 text-teal-300 border-teal-500/40" },
+];
+
+export function parseCustomerMetadata(notesString?: string | null): CustomerMetadata {
+  if (!notesString) {
+    return { dietary: [], allergies: "", birthDate: "", points: 0, favoriteDish: "", customNotes: "" };
+  }
+  try {
+    const trimmed = notesString.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      const parsed = JSON.parse(trimmed);
+      return {
+        dietary: Array.isArray(parsed.dietary) ? parsed.dietary : [],
+        allergies: typeof parsed.allergies === "string" ? parsed.allergies : "",
+        birthDate: typeof parsed.birthDate === "string" ? parsed.birthDate : "",
+        points: typeof parsed.points === "number" ? parsed.points : 0,
+        favoriteDish: typeof parsed.favoriteDish === "string" ? parsed.favoriteDish : "",
+        customNotes: typeof parsed.customNotes === "string" ? parsed.customNotes : "",
+      };
+    }
+  } catch (e) {
+    // fallback
+  }
+  return { dietary: [], allergies: "", birthDate: "", points: 0, favoriteDish: "", customNotes: notesString };
+}
+
+export function formatCustomerMetadata(meta: CustomerMetadata): string {
+  return JSON.stringify({
+    dietary: meta.dietary || [],
+    allergies: meta.allergies || "",
+    birthDate: meta.birthDate || "",
+    points: meta.points || 0,
+    favoriteDish: meta.favoriteDish || "",
+    customNotes: meta.customNotes || "",
+  });
+}
+
+export function getCustomerInsights(cust: Customer, orders: Order[], meta: CustomerMetadata) {
+  const cleanPhone = (cust.phone || "").replace(/\D/g, "");
+  const matchingOrders = (orders || []).filter((o) => {
+    if (!o.customerPhone) return false;
+    const oPhone = o.customerPhone.replace(/\D/g, "");
+    return oPhone && (oPhone === cleanPhone || oPhone.endsWith(cleanPhone) || cleanPhone.endsWith(oPhone));
+  });
+
+  const dishCountMap: Record<string, number> = {};
+  matchingOrders.forEach((o) => {
+    (o.items || []).forEach((it) => {
+      dishCountMap[it.dishName] = (dishCountMap[it.dishName] || 0) + it.quantity;
+    });
+  });
+
+  let topDishFromOrders = "";
+  let maxQty = 0;
+  Object.entries(dishCountMap).forEach(([dish, qty]) => {
+    if (qty > maxQty) {
+      maxQty = qty;
+      topDishFromOrders = dish;
+    }
+  });
+
+  const favoriteDish = meta.favoriteDish?.trim() || topDishFromOrders || "Por determinar";
+
+  let isBirthdayToday = false;
+  let isBirthdayThisMonth = false;
+  let daysUntilBirthday: number | null = null;
+  let formattedBirthday = "";
+
+  if (meta.birthDate) {
+    const today = new Date();
+    const parts = meta.birthDate.split("-");
+    if (parts.length === 3) {
+      const bMonth = parseInt(parts[1], 10) - 1;
+      const bDay = parseInt(parts[2], 10);
+      const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+      formattedBirthday = `${bDay} de ${months[bMonth] || ""}`;
+
+      if (today.getMonth() === bMonth && today.getDate() === bDay) {
+        isBirthdayToday = true;
+      }
+      if (today.getMonth() === bMonth) {
+        isBirthdayThisMonth = true;
+      }
+
+      let nextBday = new Date(today.getFullYear(), bMonth, bDay);
+      if (nextBday.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
+        nextBday = new Date(today.getFullYear() + 1, bMonth, bDay);
+      }
+      const diffTime = nextBday.getTime() - today.getTime();
+      daysUntilBirthday = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+    }
+  }
+
+  const avgTicket = cust.totalOrders > 0 ? cust.totalSpent / cust.totalOrders : 0;
+
+  return {
+    matchingOrders,
+    favoriteDish,
+    topDishQty: maxQty,
+    isBirthdayToday,
+    isBirthdayThisMonth,
+    daysUntilBirthday,
+    formattedBirthday,
+    avgTicket,
+  };
+}
+
 function MapEmbedConfigField({ 
   initialValue, 
   address, 
@@ -337,7 +471,22 @@ function MapEmbedConfigField({
 import { TableSplitMonitor } from "./TableSplitMonitor";
 import BatchDishModal from "./BatchDishModal";
 
-export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { restaurant: Restaurant; subscriptionPaymentDetails?: SubscriptionPaymentDetails }) {
+export type VisitStats = {
+  total: number;
+  today: number;
+  week: number;
+  month: number;
+};
+
+export function AdminDashboard({ 
+  restaurant, 
+  subscriptionPaymentDetails,
+  visitStats
+}: { 
+  restaurant: Restaurant; 
+  subscriptionPaymentDetails?: SubscriptionPaymentDetails;
+  visitStats?: VisitStats;
+}) {
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
     setIsMounted(true);
@@ -529,8 +678,10 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
   // CRM State Variables & Handlers
   const [crmSearch, setCrmSearch] = useState("");
   const [crmCategoryFilter, setCrmCategoryFilter] = useState("TODOS");
+  const [crmDietaryFilter, setCrmDietaryFilter] = useState("TODOS");
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [selectedCustomer360, setSelectedCustomer360] = useState<Customer | null>(null);
 
   const [custName, setCustName] = useState("");
   const [custPhone, setCustPhone] = useState("");
@@ -538,8 +689,18 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
   const [custAddress, setCustAddress] = useState("");
   const [custCity, setCustCity] = useState("");
   const [custCategory, setCustCategory] = useState("NUEVO");
-  const [custNotes, setCustNotes] = useState("");
+  const [custDietary, setCustDietary] = useState<string[]>([]);
+  const [custAllergies, setCustAllergies] = useState("");
+  const [custBirthDate, setCustBirthDate] = useState("");
+  const [custPoints, setCustPoints] = useState(0);
+  const [custFavoriteDish, setCustFavoriteDish] = useState("");
+  const [custCustomNotes, setCustCustomNotes] = useState("");
   const [savingCustomer, setSavingCustomer] = useState(false);
+
+  // Quick Points Adjustment in 360 modal
+  const [adjustPointsDelta, setAdjustPointsDelta] = useState<number>(10);
+  const [adjustPointsReason, setAdjustPointsReason] = useState("");
+  const [isAdjustingPoints, setIsAdjustingPoints] = useState(false);
 
   const handleOpenCustomerModal = (customer?: Customer) => {
     if (customer) {
@@ -550,7 +711,13 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
       setCustAddress(customer.address || "");
       setCustCity(customer.city || "");
       setCustCategory(customer.category || "NUEVO");
-      setCustNotes(customer.notes || "");
+      const meta = parseCustomerMetadata(customer.notes);
+      setCustDietary(meta.dietary || []);
+      setCustAllergies(meta.allergies || "");
+      setCustBirthDate(meta.birthDate || "");
+      setCustPoints(meta.points || 0);
+      setCustFavoriteDish(meta.favoriteDish || "");
+      setCustCustomNotes(meta.customNotes || "");
     } else {
       setEditingCustomer(null);
       setCustName("");
@@ -559,7 +726,12 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
       setCustAddress("");
       setCustCity("");
       setCustCategory("NUEVO");
-      setCustNotes("");
+      setCustDietary([]);
+      setCustAllergies("");
+      setCustBirthDate("");
+      setCustPoints(0);
+      setCustFavoriteDish("");
+      setCustCustomNotes("");
     }
     setIsCustomerModalOpen(true);
   };
@@ -571,6 +743,16 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
       return;
     }
     setSavingCustomer(true);
+
+    const serializedNotes = formatCustomerMetadata({
+      dietary: custDietary,
+      allergies: custAllergies.trim(),
+      birthDate: custBirthDate,
+      points: Number(custPoints) || 0,
+      favoriteDish: custFavoriteDish.trim(),
+      customNotes: custCustomNotes.trim(),
+    });
+
     if (editingCustomer) {
       const res = await updateCustomerAction(editingCustomer.id, {
         name: custName,
@@ -579,7 +761,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
         address: custAddress,
         city: custCity,
         category: custCategory,
-        notes: custNotes,
+        notes: serializedNotes,
       });
       setSavingCustomer(false);
       if (res.error) {
@@ -597,7 +779,7 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
         address: custAddress,
         city: custCity,
         category: custCategory,
-        notes: custNotes,
+        notes: serializedNotes,
       });
       setSavingCustomer(false);
       if (res.error) {
@@ -606,6 +788,31 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
         setIsCustomerModalOpen(false);
         window.location.reload();
       }
+    }
+  };
+
+  const handleQuickAdjustPoints = async (customer: Customer, delta: number) => {
+    setIsAdjustingPoints(true);
+    const meta = parseCustomerMetadata(customer.notes);
+    const newPoints = Math.max(0, (meta.points || 0) + delta);
+    meta.points = newPoints;
+    const serializedNotes = formatCustomerMetadata(meta);
+
+    const res = await updateCustomerAction(customer.id, {
+      notes: serializedNotes,
+    });
+    setIsAdjustingPoints(false);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      // Update local state
+      if (selectedCustomer360 && selectedCustomer360.id === customer.id) {
+        setSelectedCustomer360({
+          ...selectedCustomer360,
+          notes: serializedNotes,
+        });
+      }
+      window.location.reload();
     }
   };
 
@@ -1480,27 +1687,105 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
               {/* Metrics Header */}
               <div>
                 <h2 className="text-2xl font-bold text-white">Dashboard de Métricas</h2>
-                <p className="text-slate-400 text-sm">Resumen de facturación, platos estrella y mesas de mayor consumo.</p>
+                <p className="text-slate-400 text-sm">Resumen de facturación, visitas al negocio, platos estrella y mesas de mayor consumo.</p>
               </div>
 
               {/* Metrics Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                 <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold">Facturación Diaria</span>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Facturación Diaria</span>
                   <p className="text-2xl font-black text-white mt-1">${todayBilling.toFixed(2)}</p>
                   <span className="text-[10px] text-slate-500 block mt-1">{todayOrders.length} pedidos hoy</span>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold">Facturación Semanal</span>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Facturación Semanal</span>
                   <p className="text-2xl font-black text-white mt-1">${weekBilling.toFixed(2)}</p>
                   <span className="text-[10px] text-slate-500 block mt-1">Últimos 7 días</span>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold">Facturación Mensual</span>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Facturación Mensual</span>
                   <p className="text-2xl font-black text-white mt-1">${monthBilling.toFixed(2)}</p>
                   <span className="text-[10px] text-slate-500 block mt-1">Últimos 30 días</span>
                 </div>
               </div>
+
+              {/* Contador de Visitas al Negocio */}
+              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-xl relative overflow-hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-xl flex items-center justify-center shrink-0">
+                      <Eye className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-extrabold text-white">Contador de Visitas al Negocio</h3>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                          En Vivo
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Tráfico de clientes que consultan la carta digital y escanean el código QR.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 shrink-0">
+                    <span className="text-xs text-slate-400 uppercase font-bold">Total Histórico:</span>
+                    <span className="text-lg font-black text-cyan-400">
+                      {(visitStats?.total || 0).toLocaleString()}
+                    </span>
+                    <span className="text-[11px] text-slate-500">visitas</span>
+                  </div>
+                </div>
+
+                {/* Visit Metrics Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-slate-950/70 border border-slate-800/80 p-4 rounded-xl hover:border-cyan-500/30 transition-all">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Visitas Hoy</span>
+                      <span className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400">
+                        <Eye className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                    <p className="text-2xl font-black text-white mt-1.5">{(visitStats?.today || 0).toLocaleString()}</p>
+                    <span className="text-[10px] text-slate-500 block mt-1">Visitantes hoy en el menú</span>
+                  </div>
+
+                  <div className="bg-slate-950/70 border border-slate-800/80 p-4 rounded-xl hover:border-cyan-500/30 transition-all">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Visitas Semanales</span>
+                      <span className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
+                        <Globe className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                    <p className="text-2xl font-black text-white mt-1.5">{(visitStats?.week || 0).toLocaleString()}</p>
+                    <span className="text-[10px] text-slate-500 block mt-1">Últimos 7 días</span>
+                  </div>
+
+                  <div className="bg-slate-950/70 border border-slate-800/80 p-4 rounded-xl hover:border-cyan-500/30 transition-all">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Visitas Mensuales</span>
+                      <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400">
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                    <p className="text-2xl font-black text-white mt-1.5">{(visitStats?.month || 0).toLocaleString()}</p>
+                    <span className="text-[10px] text-slate-500 block mt-1">Últimos 30 días</span>
+                  </div>
+                </div>
+
+                {/* Conversion Insight if data available */}
+                {(visitStats?.today || 0) > 0 && todayOrders.length > 0 && (
+                  <div className="flex items-center gap-2 bg-emerald-950/20 border border-emerald-500/20 p-3 rounded-xl text-xs text-emerald-300">
+                    <TrendingUp className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <span>
+                      <strong>Tasa de conversión de hoy:</strong> {(((todayOrders.length) / (visitStats?.today || 1)) * 100).toFixed(1)}% de las visitas de hoy se convirtieron en pedidos ({todayOrders.length} pedidos / {visitStats?.today} visitas).
+                    </span>
+                  </div>
+                )}
+              </div>
+
 
               {/* Best Performers Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -4369,10 +4654,26 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
               const totalCust = allCust.length;
               const vipCust = allCust.filter(c => c.category === "VIP" || c.category === "FRECUENTE").length;
               const totalSpentSum = allCust.reduce((acc, c) => acc + (c.totalSpent || 0), 0);
-              const avgSpent = totalCust > 0 ? totalSpentSum / totalCust : 0;
+              
+              let totalPointsSum = 0;
+              let birthdayMonthCount = 0;
+
+              allCust.forEach(c => {
+                const meta = parseCustomerMetadata(c.notes);
+                totalPointsSum += (meta.points || 0);
+                if (meta.birthDate) {
+                  const parts = meta.birthDate.split("-");
+                  if (parts.length === 3) {
+                    const bMonth = parseInt(parts[1], 10) - 1;
+                    if (new Date().getMonth() === bMonth) {
+                      birthdayMonthCount++;
+                    }
+                  }
+                }
+              });
 
               return (
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
                     <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Total Clientes</span>
                     <p className="text-2xl font-black text-white mt-1">{totalCust}</p>
@@ -4384,47 +4685,109 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     <span className="text-[10px] text-slate-500 block mt-0.5">Clientes recurrentes</span>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
-                    <span className="text-[10px] uppercase font-black text-emerald-400 tracking-wider">Ventas CRM Acumuladas</span>
-                    <p className="text-2xl font-black text-emerald-400 mt-1">${totalSpentSum.toFixed(2)}</p>
-                    <span className="text-[10px] text-slate-500 block mt-0.5">Facturado a clientes</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-black text-pink-400 tracking-wider">🎂 Cumpleañeros del Mes</span>
+                      <span className="p-1 rounded-md bg-pink-500/10 text-pink-400">
+                        <Cake className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                    <p className="text-2xl font-black text-pink-400 mt-1">{birthdayMonthCount}</p>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">Para felicitaciones y promos</span>
                   </div>
                   <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
-                    <span className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Gasto Promedio</span>
-                    <p className="text-2xl font-black text-white mt-1">${avgSpent.toFixed(2)}</p>
-                    <span className="text-[10px] text-slate-500 block mt-0.5">Por cliente registrado</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-black text-emerald-400 tracking-wider">🪙 Puntos Fidelidad</span>
+                      <span className="p-1 rounded-md bg-emerald-500/10 text-emerald-400">
+                        <Award className="h-3.5 w-3.5" />
+                      </span>
+                    </div>
+                    <p className="text-2xl font-black text-emerald-400 mt-1">{totalPointsSum.toLocaleString()} pts</p>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">Emitidos en el sistema</span>
                   </div>
                 </div>
               );
             })()}
 
             {/* Search & Filter Bar */}
-            <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="relative w-full md:w-80">
-                <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar cliente, teléfono o notas..."
-                  value={crmSearch}
-                  onChange={(e) => setCrmSearch(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 pl-10 pr-4 py-2 rounded-xl text-xs text-white focus:outline-none"
-                />
+            <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="relative w-full md:w-80">
+                  <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nombre, teléfono, notas o alérgenos..."
+                    value={crmSearch}
+                    onChange={(e) => setCrmSearch(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 pl-10 pr-4 py-2 rounded-xl text-xs text-white focus:outline-none"
+                  />
+                </div>
+
+                {/* Category Filter Pills */}
+                <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
+                  {[
+                    { id: "TODOS", label: "Todos" },
+                    { id: "VIP", label: "⭐ VIP" },
+                    { id: "FRECUENTE", label: "🔥 Frecuentes" },
+                    { id: "NUEVO", label: "🆕 Nuevos" },
+                    { id: "CUMPLEANOS", label: "🎂 Cumpleaños" },
+                    { id: "INACTIVO", label: "💤 Inactivos" },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setCrmCategoryFilter(cat.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition border ${
+                        crmCategoryFilter === cat.id
+                          ? "bg-gradient-to-r from-red-600 to-amber-600 text-white border-transparent shadow-md"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Category Filter Pills */}
-              <div className="flex flex-wrap gap-1.5 w-full md:w-auto">
-                {["TODOS", "VIP", "FRECUENTE", "NUEVO", "INACTIVO"].map((cat) => (
+              {/* Dietary Preferences Filter Row */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60 text-xs">
+                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
+                  <Wheat className="h-3.5 w-3.5 text-amber-400" />
+                  Dietas & Alergias:
+                </span>
+                <button
+                  onClick={() => setCrmDietaryFilter("TODOS")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                    crmDietaryFilter === "TODOS"
+                      ? "bg-slate-800 text-white border border-slate-700"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-850"
+                  }`}
+                >
+                  Todas
+                </button>
+                {DIETARY_PREFERENCES_LIST.map((diet) => (
                   <button
-                    key={cat}
-                    onClick={() => setCrmCategoryFilter(cat)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition border ${
-                      crmCategoryFilter === cat
-                        ? "bg-gradient-to-r from-red-600 to-amber-600 text-white border-transparent shadow-md"
-                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                    key={diet.id}
+                    onClick={() => setCrmDietaryFilter(diet.id)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 border ${
+                      crmDietaryFilter === diet.id
+                        ? `${diet.color} shadow-sm`
+                        : "bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white"
                     }`}
                   >
-                    {cat === "TODOS" ? "Todos" : cat === "VIP" ? "⭐ VIP" : cat === "FRECUENTE" ? "🔥 Frecuentes" : cat === "NUEVO" ? "🆕 Nuevos" : "💤 Inactivos"}
+                    <span>{diet.emoji}</span>
+                    <span>{diet.label}</span>
                   </button>
                 ))}
+                <button
+                  onClick={() => setCrmDietaryFilter("ALERGIAS")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 border ${
+                    crmDietaryFilter === "ALERGIAS"
+                      ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                      : "bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                  <span>Con Alergias</span>
+                </button>
               </div>
             </div>
 
@@ -4434,12 +4797,12 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider bg-slate-950/60">
-                      <th className="pb-3 pt-4 pl-4">Cliente</th>
+                      <th className="pb-3 pt-4 pl-4">Cliente & Contacto</th>
                       <th className="pb-3 pt-4">Categoría</th>
-                      <th className="pb-3 pt-4 text-center">Pedidos</th>
-                      <th className="pb-3 pt-4 text-right">Total Gastado</th>
-                      <th className="pb-3 pt-4">Último Pedido</th>
-                      <th className="pb-3 pt-4">Notas Internas</th>
+                      <th className="pb-3 pt-4">Preferencias & Alergias</th>
+                      <th className="pb-3 pt-4">Plato Favorito & Visitas</th>
+                      <th className="pb-3 pt-4 text-right">Puntos & Total</th>
+                      <th className="pb-3 pt-4">Última Visita</th>
                       <th className="pb-3 pt-4 pr-4 text-right">Acciones</th>
                     </tr>
                   </thead>
@@ -4447,16 +4810,37 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     {(() => {
                       const allCust = restaurant.customers || [];
                       const filtered = allCust.filter((c) => {
+                        const meta = parseCustomerMetadata(c.notes);
+                        const cleanSearch = crmSearch.toLowerCase();
+                        
                         const matchesSearch = 
-                          (c.name && c.name.toLowerCase().includes(crmSearch.toLowerCase())) ||
-                          (c.phone && c.phone.includes(crmSearch)) ||
-                          (c.city && c.city.toLowerCase().includes(crmSearch.toLowerCase())) ||
-                          (c.notes && c.notes.toLowerCase().includes(crmSearch.toLowerCase()));
+                          (c.name && c.name.toLowerCase().includes(cleanSearch)) ||
+                          (c.phone && c.phone.includes(cleanSearch)) ||
+                          (c.city && c.city.toLowerCase().includes(cleanSearch)) ||
+                          (meta.customNotes && meta.customNotes.toLowerCase().includes(cleanSearch)) ||
+                          (meta.allergies && meta.allergies.toLowerCase().includes(cleanSearch)) ||
+                          (meta.favoriteDish && meta.favoriteDish.toLowerCase().includes(cleanSearch));
 
-                        const matchesCategory = 
-                          crmCategoryFilter === "TODOS" || c.category === crmCategoryFilter;
+                        let matchesCategory = true;
+                        if (crmCategoryFilter === "CUMPLEANOS") {
+                          if (!meta.birthDate) {
+                            matchesCategory = false;
+                          } else {
+                            const parts = meta.birthDate.split("-");
+                            matchesCategory = parts.length === 3 && parseInt(parts[1], 10) - 1 === new Date().getMonth();
+                          }
+                        } else if (crmCategoryFilter !== "TODOS") {
+                          matchesCategory = c.category === crmCategoryFilter;
+                        }
 
-                        return matchesSearch && matchesCategory;
+                        let matchesDietary = true;
+                        if (crmDietaryFilter === "ALERGIAS") {
+                          matchesDietary = !!(meta.allergies && meta.allergies.trim());
+                        } else if (crmDietaryFilter !== "TODOS") {
+                          matchesDietary = (meta.dietary || []).includes(crmDietaryFilter);
+                        }
+
+                        return matchesSearch && matchesCategory && matchesDietary;
                       });
 
                       if (filtered.length === 0) {
@@ -4464,26 +4848,47 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                           <tr>
                             <td colSpan={7} className="py-12 text-center text-slate-500">
                               <Users className="h-10 w-10 mx-auto text-slate-700 mb-2" />
-                              <p className="font-bold text-sm">No se encontraron clientes</p>
-                              <p className="text-xs text-slate-600 mt-1">Registra tu primer cliente o realiza pedidos en el menú para alimentar tu CRM automáticamente.</p>
+                              <p className="font-bold text-sm">No se encontraron clientes con los filtros aplicados</p>
+                              <p className="text-xs text-slate-600 mt-1">Intenta con otros términos o registra un nuevo cliente.</p>
                             </td>
                           </tr>
                         );
                       }
 
                       return filtered.map((cust) => {
+                        const meta = parseCustomerMetadata(cust.notes);
+                        const insights = getCustomerInsights(cust, restaurant.orders || [], meta);
                         const cleanPhone = (cust.phone || "").replace(/\D/g, "");
-                        const waLink = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=¡Hola%20${encodeURIComponent(cust.name)}!%20Te%20saludamos%20de%20*${encodeURIComponent(restaurant.name)}*.%20¡Gracias%20por%20ser%20nuestro%20cliente!`;
+
+                        // WhatsApp links
+                        const standardWaText = `¡Hola ${encodeURIComponent(cust.name)}! Te saludamos de *${encodeURIComponent(restaurant.name)}*. ¡Gracias por ser nuestro cliente!`;
+                        const birthdayWaText = `¡Feliz Cumpleaños ${encodeURIComponent(cust.name)}! 🎂🎉 De parte de todo el equipo de *${encodeURIComponent(restaurant.name)}*, esperamos que tengas un día increíble. ¡Te regalamos un detalle especial en tu próxima visita presentando este mensaje!`;
+                        
+                        const defaultWaLink = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${insights.isBirthdayToday || insights.isBirthdayThisMonth ? birthdayWaText : standardWaText}`;
 
                         return (
-                          <tr key={cust.id} className="hover:bg-slate-850/40 transition">
+                          <tr key={cust.id} className="hover:bg-slate-850/40 transition group">
                             <td className="py-3.5 pl-4">
-                              <div className="font-bold text-white text-sm">{cust.name}</div>
-                              <div className="text-slate-400 text-xs flex items-center gap-1.5 mt-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white text-sm">{cust.name}</span>
+                                {insights.isBirthdayToday && (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-pink-500/20 border border-pink-500/40 text-pink-300 animate-pulse">
+                                    <Cake className="h-3 w-3" />
+                                    ¡Cumpleaños Hoy!
+                                  </span>
+                                )}
+                                {!insights.isBirthdayToday && insights.isBirthdayThisMonth && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                                    🎂 {insights.formattedBirthday}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-slate-400 text-xs flex flex-wrap items-center gap-1.5 mt-0.5">
                                 <span>📱 {cust.phone}</span>
                                 {cust.city && <span className="text-slate-500">• 📍 {cust.city}</span>}
                               </div>
                             </td>
+
                             <td className="py-3.5">
                               <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
                                 cust.category === "VIP"
@@ -4497,33 +4902,100 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                                 {cust.category === "VIP" ? "⭐ VIP" : cust.category === "FRECUENTE" ? "🔥 FRECUENTE" : cust.category === "INACTIVO" ? "💤 INACTIVO" : "🆕 NUEVO"}
                               </span>
                             </td>
-                            <td className="py-3.5 text-center font-bold text-white">
-                              {cust.totalOrders}
+
+                            <td className="py-3.5">
+                              <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                {(meta.dietary && meta.dietary.length > 0) ? (
+                                  meta.dietary.map((d) => {
+                                    const match = DIETARY_PREFERENCES_LIST.find((dp) => dp.id === d);
+                                    return (
+                                      <span
+                                        key={d}
+                                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold border ${match?.color || "bg-slate-800 text-slate-300 border-slate-700"}`}
+                                        title={match?.label || d}
+                                      >
+                                        {match?.emoji || "🥗"} {match?.label || d}
+                                      </span>
+                                    );
+                                  })
+                                ) : null}
+
+                                {meta.allergies && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1"
+                                    title={`Alergia: ${meta.allergies}`}
+                                  >
+                                    <ShieldAlert className="h-3 w-3 text-rose-400" />
+                                    <span>{meta.allergies}</span>
+                                  </span>
+                                )}
+
+                                {(!meta.dietary || meta.dietary.length === 0) && !meta.allergies && (
+                                  <span className="text-slate-600 italic text-[11px]">Sin restricciones</span>
+                                )}
+                              </div>
                             </td>
-                            <td className="py-3.5 text-right font-black text-emerald-400">
-                              ${cust.totalSpent.toFixed(2)}
+
+                            <td className="py-3.5">
+                              <div className="space-y-0.5">
+                                <div className="font-bold text-white flex items-center gap-1 text-xs">
+                                  <Utensils className="h-3 w-3 text-amber-400 shrink-0" />
+                                  <span className="truncate max-w-[150px]" title={insights.favoriteDish}>
+                                    {insights.favoriteDish}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-slate-500 block">
+                                  {cust.totalOrders} {cust.totalOrders === 1 ? "pedido / visita" : "pedidos / visitas"}
+                                </span>
+                              </div>
                             </td>
+
+                            <td className="py-3.5 text-right">
+                              <div className="space-y-0.5">
+                                <span className="font-black text-emerald-400 block">
+                                  ${cust.totalSpent.toFixed(2)}
+                                </span>
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                  <Award className="h-3 w-3 text-amber-400" />
+                                  {(meta.points || 0)} pts
+                                </span>
+                              </div>
+                            </td>
+
                             <td className="py-3.5 text-slate-400">
                               {new Date(cust.lastOrderAt).toLocaleDateString("es-ES")}
                             </td>
-                            <td className="py-3.5 text-slate-350 max-w-[200px] truncate">
-                              {cust.notes || <span className="text-slate-600 italic">Sin notas</span>}
-                            </td>
+
                             <td className="py-3.5 pr-4 text-right">
                               <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => setSelectedCustomer360(cust)}
+                                  className="p-2 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-400 border border-cyan-800/40 transition active:scale-95"
+                                  title="Ver Ficha 360° y Puntos"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
                                 <a
-                                  href={waLink}
+                                  href={defaultWaLink}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="p-2 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border border-emerald-800/40 transition active:scale-95"
-                                  title="Contactar por WhatsApp"
+                                  className={`p-2 rounded-xl border transition active:scale-95 ${
+                                    insights.isBirthdayToday || insights.isBirthdayThisMonth
+                                      ? "bg-pink-950/40 hover:bg-pink-900/60 text-pink-300 border-pink-800/40"
+                                      : "bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border-emerald-800/40"
+                                  }`}
+                                  title={insights.isBirthdayToday || insights.isBirthdayThisMonth ? "Felicitar Cumpleaños por WhatsApp" : "Contactar por WhatsApp"}
                                 >
-                                  <MessageSquare className="h-4 w-4" />
+                                  {insights.isBirthdayToday || insights.isBirthdayThisMonth ? (
+                                    <Cake className="h-4 w-4 text-pink-400" />
+                                  ) : (
+                                    <MessageSquare className="h-4 w-4" />
+                                  )}
                                 </a>
                                 <button
                                   onClick={() => handleOpenCustomerModal(cust)}
                                   className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition active:scale-95"
-                                  title="Editar Cliente"
+                                  title="Editar Cliente & Preferencias"
                                 >
                                   <Edit2 className="h-4 w-4" />
                                 </button>
@@ -4552,12 +5024,12 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
 
             {/* Modal for Create/Edit Customer */}
             {isCustomerModalOpen && (
-              <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+              <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-4 shadow-2xl my-8">
                   <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                     <h3 className="text-lg font-bold text-white flex items-center gap-2">
                       <Users className="h-5 w-5 text-amber-400" />
-                      {editingCustomer ? "Editar Cliente CRM" : "Registrar Nuevo Cliente"}
+                      {editingCustomer ? "Editar Ficha de Cliente" : "Registrar Nuevo Cliente"}
                     </h3>
                     <button
                       onClick={() => setIsCustomerModalOpen(false)}
@@ -4567,20 +5039,20 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     </button>
                   </div>
 
-                  <form onSubmit={handleSaveCustomer} className="space-y-3.5 text-xs">
-                    <div>
-                      <label className="block text-slate-300 mb-1 font-semibold">Nombre Completo *</label>
-                      <input
-                        type="text"
-                        required
-                        value={custName}
-                        onChange={(e) => setCustName(e.target.value)}
-                        placeholder="Ej. María López"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
+                  <form onSubmit={handleSaveCustomer} className="space-y-4 text-xs">
+                    {/* Basic Info */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold">Nombre Completo *</label>
+                        <input
+                          type="text"
+                          required
+                          value={custName}
+                          onChange={(e) => setCustName(e.target.value)}
+                          placeholder="Ej. María López"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        />
+                      </div>
                       <div>
                         <label className="block text-slate-300 mb-1 font-semibold">Teléfono / WhatsApp *</label>
                         <input
@@ -4592,6 +5064,9 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                           className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
                         />
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-slate-300 mb-1 font-semibold">Categoría CRM</label>
                         <select
@@ -4605,16 +5080,13 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                           <option value="INACTIVO">💤 Inactivo</option>
                         </select>
                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-slate-300 mb-1 font-semibold">Ciudad / Sector</label>
                         <input
                           type="text"
                           value={custCity}
                           onChange={(e) => setCustCity(e.target.value)}
-                          placeholder="Ej. Olón / Montañita"
+                          placeholder="Ej. Manta / Barbasquillo"
                           className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
                         />
                       </div>
@@ -4631,28 +5103,132 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 mb-1 font-semibold">Dirección Habitual</label>
+                      <label className="block text-slate-300 mb-1 font-semibold">Dirección de Entrega Habitual</label>
                       <input
                         type="text"
                         value={custAddress}
                         onChange={(e) => setCustAddress(e.target.value)}
-                        placeholder="Ej. Calle Principal #123 junto a la plaza"
+                        placeholder="Ej. Av. Barbasquillo #404 frente al parque"
                         className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
                       />
                     </div>
 
+                    {/* Preferencias Dietéticas (Checkboxes) */}
+                    <div className="bg-slate-950/60 border border-slate-850 p-3.5 rounded-2xl space-y-2">
+                      <label className="block text-slate-300 font-bold flex items-center gap-1.5">
+                        <Wheat className="h-4 w-4 text-emerald-400" />
+                        Preferencias Dietéticas
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {DIETARY_PREFERENCES_LIST.map((diet) => {
+                          const isSelected = custDietary.includes(diet.id);
+                          return (
+                            <button
+                              type="button"
+                              key={diet.id}
+                              onClick={() => {
+                                if (isSelected) {
+                                  setCustDietary(custDietary.filter((d) => d !== diet.id));
+                                } else {
+                                  setCustDietary([...custDietary, diet.id]);
+                                }
+                              }}
+                              className={`p-2 rounded-xl text-left font-bold transition flex items-center justify-between border ${
+                                isSelected
+                                  ? `${diet.color} shadow-sm`
+                                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <span>{diet.emoji}</span>
+                                <span className="text-[11px]">{diet.label}</span>
+                              </span>
+                              {isSelected ? (
+                                <CheckSquare className="h-3.5 w-3.5 text-current shrink-0" />
+                              ) : (
+                                <Square className="h-3.5 w-3.5 text-slate-600 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Alergias & Cumpleaños */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                          <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                          Alergias o Restricciones Críticas
+                        </label>
+                        <input
+                          type="text"
+                          value={custAllergies}
+                          onChange={(e) => setCustAllergies(e.target.value)}
+                          placeholder="Ej. Mariscos, Maní, Frutos secos"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                          <Cake className="h-3.5 w-3.5 text-pink-400" />
+                          Fecha de Cumpleaños
+                        </label>
+                        <input
+                          type="date"
+                          value={custBirthDate}
+                          onChange={(e) => setCustBirthDate(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-pink-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Plato Favorito & Puntos */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                          <Utensils className="h-3.5 w-3.5 text-amber-400" />
+                          Plato Favorito (Opcional)
+                        </label>
+                        <input
+                          type="text"
+                          value={custFavoriteDish}
+                          onChange={(e) => setCustFavoriteDish(e.target.value)}
+                          placeholder="Ej. Empanada de Carne y Queso"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                          <Award className="h-3.5 w-3.5 text-emerald-400" />
+                          Saldo de Puntos de Lealtad
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={custPoints}
+                          onChange={(e) => setCustPoints(parseInt(e.target.value, 10) || 0)}
+                          placeholder="0"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white focus:outline-none font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Notas adicionales */}
                     <div>
                       <label className="block text-slate-300 mb-1 font-semibold">Notas Internas & Preferencias</label>
                       <textarea
-                        rows={3}
-                        value={custNotes}
-                        onChange={(e) => setCustNotes(e.target.value)}
-                        placeholder="Ej. Le gusta entrega en garita, prefiere pizza sin salsa picante..."
+                        rows={2}
+                        value={custCustomNotes}
+                        onChange={(e) => setCustCustomNotes(e.target.value)}
+                        placeholder="Ej. Le gusta mesa junto a la ventana, siempre pide salsa extra..."
                         className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
                       />
                     </div>
 
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
                       <button
                         type="button"
                         onClick={() => setIsCustomerModalOpen(false)}
@@ -4672,6 +5248,259 @@ export function AdminDashboard({ restaurant, subscriptionPaymentDetails }: { res
                 </div>
               </div>
             )}
+
+            {/* Modal for Customer 360 View */}
+            {selectedCustomer360 && (() => {
+              const cust = selectedCustomer360;
+              const meta = parseCustomerMetadata(cust.notes);
+              const insights = getCustomerInsights(cust, restaurant.orders || [], meta);
+              const cleanPhone = (cust.phone || "").replace(/\D/g, "");
+
+              const standardWaText = `¡Hola ${encodeURIComponent(cust.name)}! Te saludamos de *${encodeURIComponent(restaurant.name)}*. ¡Gracias por ser nuestro cliente!`;
+              const birthdayWaText = `¡Feliz Cumpleaños ${encodeURIComponent(cust.name)}! 🎂🎉 De parte de todo el equipo de *${encodeURIComponent(restaurant.name)}*, te deseamos un día extraordinario. ¡Te regalamos un postre o descuento especial en tu próxima visita presentando este mensaje!`;
+
+              return (
+                <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-2xl w-full space-y-5 shadow-2xl my-8">
+                    {/* 360 Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                      <div className="flex items-center gap-3.5">
+                        <div className="h-12 w-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-red-600 flex items-center justify-center text-white font-black text-lg shadow-lg shrink-0">
+                          {cust.name.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-xl font-extrabold text-white">{cust.name}</h3>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                              cust.category === "VIP"
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                : cust.category === "FRECUENTE"
+                                  ? "bg-red-500/20 text-red-300 border border-red-500/40"
+                                  : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                            }`}>
+                              {cust.category}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
+                            <span>📱 {cust.phone}</span>
+                            {cust.email && <span>• ✉️ {cust.email}</span>}
+                            {cust.city && <span>• 📍 {cust.city}</span>}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedCustomer360(null)}
+                        className="text-slate-400 hover:text-white px-3 py-1.5 rounded-xl bg-slate-800/80 text-xs font-bold self-start sm:self-auto"
+                      >
+                        Cerrar
+                      </button>
+                    </div>
+
+                    {/* Stat Badges */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Visitas / Pedidos</span>
+                        <p className="text-xl font-black text-white mt-1">{cust.totalOrders}</p>
+                        <span className="text-[10px] text-slate-500">Historial total</span>
+                      </div>
+                      <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Gasto Acumulado</span>
+                        <p className="text-xl font-black text-emerald-400 mt-1">${cust.totalSpent.toFixed(2)}</p>
+                        <span className="text-[10px] text-slate-500">Total facturado</span>
+                      </div>
+                      <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Ticket Promedio</span>
+                        <p className="text-xl font-black text-cyan-400 mt-1">${insights.avgTicket.toFixed(2)}</p>
+                        <span className="text-[10px] text-slate-500">Por visita/pedido</span>
+                      </div>
+                      <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
+                        <span className="text-[10px] font-bold text-amber-400 uppercase flex items-center gap-1">
+                          <Award className="h-3 w-3" />
+                          Puntos Lealtad
+                        </span>
+                        <p className="text-xl font-black text-amber-300 mt-1">{meta.points || 0} pts</p>
+                        <span className="text-[10px] text-slate-500">Saldo actual</span>
+                      </div>
+                    </div>
+
+                    {/* Preferencias & Alergias & Cumpleaños Box */}
+                    <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
+                      <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
+                        <Wheat className="h-4 w-4 text-amber-400" />
+                        Perfil Alimentario & Fechas
+                      </h4>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <span className="text-[11px] font-bold text-slate-400 block mb-1">Dietas:</span>
+                          <div className="flex flex-wrap gap-1">
+                            {(meta.dietary && meta.dietary.length > 0) ? (
+                              meta.dietary.map(d => {
+                                const match = DIETARY_PREFERENCES_LIST.find(dp => dp.id === d);
+                                return (
+                                  <span key={d} className={`px-2 py-0.5 rounded-md font-bold text-[10px] border ${match?.color || "bg-slate-800 text-white"}`}>
+                                    {match?.emoji} {match?.label || d}
+                                  </span>
+                                );
+                              })
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">Sin dietas especiales</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <span className="text-[11px] font-bold text-slate-400 block mb-1">Alergias / Intolerancias:</span>
+                          {meta.allergies ? (
+                            <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 inline-flex items-center gap-1">
+                              <ShieldAlert className="h-3 w-3 text-rose-400" />
+                              {meta.allergies}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 italic text-[11px]">Ninguna alergia registrada</span>
+                          )}
+                        </div>
+
+                        <div>
+                          <span className="text-[11px] font-bold text-slate-400 block mb-1">Cumpleaños:</span>
+                          {meta.birthDate ? (
+                            <div className="space-y-0.5">
+                              <span className="text-pink-300 font-bold flex items-center gap-1 text-[11px]">
+                                <Cake className="h-3 w-3 text-pink-400" />
+                                {insights.formattedBirthday}
+                              </span>
+                              {insights.isBirthdayToday ? (
+                                <span className="text-[10px] text-emerald-400 font-extrabold block">🎉 ¡Hoy cumple años!</span>
+                              ) : insights.daysUntilBirthday !== null ? (
+                                <span className="text-[10px] text-slate-500 block">Faltan {insights.daysUntilBirthday} días</span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 italic text-[11px]">No registrado</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {meta.customNotes && (
+                        <div className="pt-2 border-t border-slate-850">
+                          <span className="text-[11px] font-bold text-slate-400 block">Notas de atención:</span>
+                          <p className="text-slate-300 text-xs mt-0.5 italic bg-slate-900/60 p-2.5 rounded-xl border border-slate-850">
+                            "{meta.customNotes}"
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Quick Loyalty Points Adjustment */}
+                    <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-extrabold text-white flex items-center gap-2">
+                          <Award className="h-4 w-4 text-emerald-400" />
+                          Gestión Rápida de Puntos de Lealtad
+                        </h4>
+                        <span className="font-black text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20 text-xs">
+                          Saldo: {meta.points || 0} pts
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={isAdjustingPoints}
+                          onClick={() => handleQuickAdjustPoints(cust, 10)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 hover:bg-emerald-900/60 font-bold transition disabled:opacity-50"
+                        >
+                          +10 Puntos
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isAdjustingPoints}
+                          onClick={() => handleQuickAdjustPoints(cust, 50)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-950/60 text-emerald-300 border border-emerald-800/40 hover:bg-emerald-900/60 font-bold transition disabled:opacity-50"
+                        >
+                          +50 Puntos
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isAdjustingPoints || (meta.points || 0) < 50}
+                          onClick={() => handleQuickAdjustPoints(cust, -50)}
+                          className="px-3 py-1.5 rounded-xl bg-amber-950/60 text-amber-300 border border-amber-800/40 hover:bg-amber-900/60 font-bold transition disabled:opacity-50"
+                        >
+                          -50 Puntos (Canje)
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isAdjustingPoints || (meta.points || 0) < 100}
+                          onClick={() => handleQuickAdjustPoints(cust, -100)}
+                          className="px-3 py-1.5 rounded-xl bg-red-950/60 text-red-300 border border-red-800/40 hover:bg-red-900/60 font-bold transition disabled:opacity-50"
+                        >
+                          -100 Puntos (Canje)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Order History Timeline */}
+                    <div className="space-y-3">
+                      <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
+                        <History className="h-4 w-4 text-amber-400" />
+                        Historial de Pedidos ({insights.matchingOrders.length})
+                      </h4>
+                      {insights.matchingOrders.length === 0 ? (
+                        <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-center text-slate-500 text-xs">
+                          No se encontraron pedidos registrados con el teléfono {cust.phone}.
+                        </div>
+                      ) : (
+                        <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                          {insights.matchingOrders.map((ord) => (
+                            <div key={ord.id} className="bg-slate-950/70 border border-slate-850 p-3 rounded-xl flex items-center justify-between text-xs">
+                              <div>
+                                <div className="font-bold text-white flex items-center gap-2">
+                                  <span>Pedido #{ord.orderNumber || ord.id.substring(0, 6)}</span>
+                                  <span className="text-[10px] text-amber-400 font-normal">
+                                    {ord.tableName === "Llevar" ? "Para llevar" : ord.tableName === "Domicilio" ? "Domicilio" : `Mesa #${ord.tableName}`}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                  {(ord.items || []).map(it => `${it.quantity}x ${it.dishName}`).join(", ") || "Sin detalle de platos"}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <span className="font-black text-emerald-400 text-sm block">${ord.total.toFixed(2)}</span>
+                                <span className="text-[10px] text-slate-500">
+                                  {new Date(ord.createdAt).toLocaleDateString("es-ES")}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* WhatsApp Action Buttons */}
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                      <a
+                        href={`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${standardWaText}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition"
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        Mensaje Habitual
+                      </a>
+                      <a
+                        href={`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${birthdayWaText}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-600 to-amber-600 hover:from-pink-500 hover:to-amber-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-lg"
+                      >
+                        <Cake className="h-3.5 w-3.5" />
+                        Felicitar Cumpleaños (Regalo)
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
             {/* Modal for Import Contacts (CSV / VCF / Text) */}
             {isImportModalOpen && (
               <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">

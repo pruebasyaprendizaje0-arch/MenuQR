@@ -232,5 +232,71 @@ export default async function AdminPage() {
     console.warn("No se pudo cargar la configuración de pago de suscripciones.", error);
   }
 
-  return <AdminDashboard restaurant={serializedRestaurant as unknown as Parameters<typeof AdminDashboard>[0]["restaurant"]} subscriptionPaymentDetails={subscriptionPaymentDetails} />;
+  let visitStats = {
+    total: 0,
+    today: 0,
+    week: 0,
+    month: 0,
+  };
+
+  try {
+    if (restaurant?.id) {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const [totalVisits, todayVisits, weekVisits, monthVisits] = await Promise.all([
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+          },
+        }),
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            createdAt: { gte: startOfToday },
+          },
+        }),
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            createdAt: { gte: sevenDaysAgo },
+          },
+        }),
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            createdAt: { gte: thirtyDaysAgo },
+          },
+        }),
+      ]);
+
+      visitStats = {
+        total: totalVisits,
+        today: todayVisits,
+        week: weekVisits,
+        month: monthVisits,
+      };
+    }
+  } catch (error) {
+    console.warn("No se pudieron cargar las estadísticas de visitas:", error);
+  }
+
+  return (
+    <AdminDashboard
+      restaurant={serializedRestaurant as unknown as Parameters<typeof AdminDashboard>[0]["restaurant"]}
+      subscriptionPaymentDetails={subscriptionPaymentDetails}
+      visitStats={visitStats}
+    />
+  );
 }
+

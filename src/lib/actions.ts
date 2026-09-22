@@ -1913,9 +1913,24 @@ export async function createOrderAction(data: {
         const existing = await tx.customer.findFirst({
           where: { restaurantId: data.restaurantId, phone: rawPhone },
         });
+        const earnedPoints = Math.max(1, Math.floor(finalTotal));
+
         if (existing) {
           const newOrdersCount = existing.totalOrders + 1;
           const newCategory = newOrdersCount >= 5 ? "VIP" : newOrdersCount >= 2 ? "FRECUENTE" : existing.category;
+          
+          let meta: any = {};
+          try {
+            if (existing.notes && existing.notes.trim().startsWith("{") && existing.notes.trim().endsWith("}")) {
+              meta = JSON.parse(existing.notes);
+            } else if (existing.notes) {
+              meta = { customNotes: existing.notes };
+            }
+          } catch {
+            meta = { customNotes: existing.notes || "" };
+          }
+          meta.points = (typeof meta.points === "number" ? meta.points : 0) + earnedPoints;
+
           await tx.customer.update({
             where: { id: existing.id },
             data: {
@@ -1924,10 +1939,19 @@ export async function createOrderAction(data: {
               totalOrders: newOrdersCount,
               totalSpent: existing.totalSpent + finalTotal,
               category: newCategory,
+              notes: JSON.stringify(meta),
               lastOrderAt: new Date(),
             },
           });
         } else {
+          const initialMeta = JSON.stringify({
+            dietary: [],
+            allergies: "",
+            birthDate: "",
+            points: earnedPoints,
+            favoriteDish: "",
+            customNotes: "",
+          });
           await tx.customer.create({
             data: {
               restaurantId: data.restaurantId,
@@ -1937,6 +1961,7 @@ export async function createOrderAction(data: {
               totalOrders: 1,
               totalSpent: finalTotal,
               category: "NUEVO",
+              notes: initialMeta,
               lastOrderAt: new Date(),
             },
           });
@@ -2920,3 +2945,68 @@ export async function validateCouponAction(restaurantId: string, code: string, s
     return { error: error?.message || "No se pudo validar el cupón." };
   }
 }
+
+/**
+ * Retrieves aggregated visit/traffic analytics for a restaurant
+ */
+export async function getRestaurantVisitStatsAction(restaurantId: string) {
+  try {
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) {
+      return { error: auth.error || "No autorizado para ver estadísticas de este restaurante." };
+    }
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const [totalVisits, todayVisits, weekVisits, monthVisits] = await Promise.all([
+      prismaTenant.analyticsEvent.count({
+        where: {
+          restaurantId,
+          eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+        },
+      }),
+      prismaTenant.analyticsEvent.count({
+        where: {
+          restaurantId,
+          eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+          createdAt: { gte: startOfToday },
+        },
+      }),
+      prismaTenant.analyticsEvent.count({
+        where: {
+          restaurantId,
+          eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+          createdAt: { gte: sevenDaysAgo },
+        },
+      }),
+      prismaTenant.analyticsEvent.count({
+        where: {
+          restaurantId,
+          eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+          createdAt: { gte: thirtyDaysAgo },
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      stats: {
+        total: totalVisits,
+        today: todayVisits,
+        week: weekVisits,
+        month: monthVisits,
+      },
+    };
+  } catch (error: any) {
+    console.error("Error fetching visit stats:", error);
+    return { error: "No se pudieron obtener las estadísticas de visitas." };
+  }
+}
+
