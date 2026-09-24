@@ -254,27 +254,27 @@ export default function RegisterPage() {
               </div>
             </div>
 
-            {/* Aceptación de Términos y Políticas (Legislación Ecuatoriana) */}
-            <div className="flex items-start gap-3 pt-2">
+            {/* Aceptación de Términos y Políticas (Legislación Ecuatoriana - LOPDP) */}
+            <div className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800/90 flex items-start gap-3 transition-colors hover:border-slate-700">
               <div className="flex items-center h-5 mt-0.5">
                 <input
                   id="acceptTerms"
                   name="acceptTerms"
                   type="checkbox"
                   required
-                  className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-red-600 focus:ring-red-500 focus:ring-offset-slate-900 cursor-pointer"
+                  className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-950 cursor-pointer accent-amber-500"
                 />
               </div>
-              <label htmlFor="acceptTerms" className="text-xs text-slate-400 leading-normal cursor-pointer select-none">
-                Acepto de forma expresa los{" "}
-                <Link href="/terminos" target="_blank" className="text-amber-400 hover:underline font-semibold">
+              <label htmlFor="acceptTerms" className="text-xs text-slate-300 leading-relaxed cursor-pointer select-none">
+                He leído y acepto expresamente los{" "}
+                <Link href="/terminos" target="_blank" className="text-amber-400 hover:text-amber-300 underline font-semibold transition">
                   Términos y Condiciones
                 </Link>{" "}
                 y la{" "}
-                <Link href="/privacidad" target="_blank" className="text-amber-400 hover:underline font-semibold">
-                  Política de Privacidad
+                <Link href="/privacidad" target="_blank" className="text-amber-400 hover:text-amber-300 underline font-semibold transition">
+                  Política de Privacidad y Tratamiento de Datos
                 </Link>{" "}
-                conforme a la legislación de la República del Ecuador (LOPDP y Ley de Comercio Electrónico).
+                de <span className="text-white font-medium">menuqr.ubicame.cc</span> conforme a la LOPDP y Ley de Comercio Electrónico de Ecuador.
               </label>
             </div>
 

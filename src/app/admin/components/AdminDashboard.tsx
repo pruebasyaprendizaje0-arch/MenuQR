@@ -92,12 +92,14 @@ import {
   Star,
   Flame,
   User,
-  FileText,
   CheckSquare,
-  Square
+  Square,
+  Sliders
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
+import ElementFiltersAdminTab from "./ElementFiltersAdminTab";
+import { toggleDishDailySpecialAction, getElementFiltersConfigAction } from "@/lib/element-filters-actions";
 
 type SeasonRate = {
   id: string;
@@ -493,7 +495,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "filtros" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -539,6 +541,32 @@ export function AdminDashboard({
     setManualPaymentReceiptUrl("");
   };
   const [copied, setCopied] = useState(false);
+  const [dailySpecialDishIds, setDailySpecialDishIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function loadDailySpecials() {
+      try {
+        const config = await getElementFiltersConfigAction(restaurant.id);
+        if (config && Array.isArray(config.dailySpecialDishIds)) {
+          setDailySpecialDishIds(config.dailySpecialDishIds);
+        }
+      } catch (err) {
+        console.error("Error al cargar platos del día:", err);
+      }
+    }
+    loadDailySpecials();
+  }, [restaurant.id]);
+
+  const handleToggleDailySpecial = async (dishId: string) => {
+    setDailySpecialDishIds((prev) =>
+      prev.includes(dishId) ? prev.filter((id) => id !== dishId) : [...prev, dishId]
+    );
+    try {
+      await toggleDishDailySpecialAction(restaurant.id, dishId);
+    } catch (err) {
+      console.error("Error al actualizar plato del día:", err);
+    }
+  };
   const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
   const [savingTables, setSavingTables] = useState(false);
   const [tablesMessage, setTablesMessage] = useState("");
@@ -1490,6 +1518,17 @@ export function AdminDashboard({
             >
               <Gift className="h-4 w-4 text-amber-400" />
               <span>🎡 Ruleta de Premios</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("filtros")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "filtros" 
+                  ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <Sliders className="h-4 w-4 text-amber-400" />
+              <span>Filtros / Proteínas</span>
             </button>
             <button
               onClick={() => setActiveTab("qr")}
@@ -3496,26 +3535,43 @@ export function AdminDashboard({
                                 <p className="text-slate-400 text-xs mt-1 line-clamp-2">{dish.description || "Sin descripción."}</p>
                               </div>
 
-                              <div className="flex justify-between items-center pt-2">
-                                {/* Availability toggle */}
-                                <button
-                                  onClick={() => handleToggleDish(dish.id, dish.isAvailable)}
-                                  className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
-                                    dish.isAvailable 
-                                      ? "bg-green-500/10 text-green-400 border-green-500/30" 
-                                      : "bg-red-500/10 text-red-400 border-red-500/30"
-                                  }`}
-                                >
-                                  {dish.isAvailable ? (
-                                    <>
-                                      <Eye className="h-3 w-3" /> Disponible
-                                    </>
-                                  ) : (
-                                    <>
-                                      <EyeOff className="h-3 w-3" /> Agotado
-                                    </>
-                                  )}
-                                </button>
+                              <div className="flex flex-wrap justify-between items-center gap-2 pt-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {/* Availability toggle */}
+                                  <button
+                                    onClick={() => handleToggleDish(dish.id, dish.isAvailable)}
+                                    className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                                      dish.isAvailable 
+                                        ? "bg-green-500/10 text-green-400 border-green-500/30" 
+                                        : "bg-red-500/10 text-red-400 border-red-500/30"
+                                    }`}
+                                  >
+                                    {dish.isAvailable ? (
+                                      <>
+                                        <Eye className="h-3 w-3" /> Disponible
+                                      </>
+                                    ) : (
+                                      <>
+                                        <EyeOff className="h-3 w-3" /> Agotado
+                                      </>
+                                    )}
+                                  </button>
+
+                                  {/* Plato del Día 1-Click Toggle Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleDailySpecial(dish.id)}
+                                    className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                                      dailySpecialDishIds.includes(dish.id)
+                                        ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm shadow-amber-500/10"
+                                        : "bg-slate-800/60 text-slate-400 border-slate-700 hover:text-amber-400 hover:border-amber-500/40"
+                                    }`}
+                                    title="Marcar / Desmarcar como Plato del Día"
+                                  >
+                                    <Star className={`h-3 w-3 ${dailySpecialDishIds.includes(dish.id) ? "fill-amber-400 text-amber-400" : ""}`} />
+                                    <span>{dailySpecialDishIds.includes(dish.id) ? "Plato del Día ⭐" : "Hacer Especial"}</span>
+                                  </button>
+                                </div>
 
                                 {/* Edit / Delete Actions */}
                                 <div className="flex gap-2">
@@ -4330,6 +4386,11 @@ export function AdminDashboard({
         {/* Ruleta de Premios Tab */}
         {activeTab === "ruleta" && (
           <RuletaAdminTab restaurant={restaurant} />
+        )}
+
+        {/* Filtros de Ingredientes / Proteínas Tab */}
+        {activeTab === "filtros" && (
+          <ElementFiltersAdminTab restaurant={restaurant} />
         )}
 
         {/* Código QR Tab */}
