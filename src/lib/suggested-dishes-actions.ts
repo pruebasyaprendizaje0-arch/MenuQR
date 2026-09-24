@@ -1,3 +1,5 @@
+"use server";
+
 import { prisma } from "./prisma";
 
 const SETTING_PREFIX = "suggested_dishes_";

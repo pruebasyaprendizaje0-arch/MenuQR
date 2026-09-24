@@ -1322,6 +1322,7 @@ export function AdminDashboard({
   const [dishCatId, setDishCatId] = useState("");
   const [dishAvailable, setDishAvailable] = useState(true);
   const [dishImageUrl, setDishImageUrl] = useState("");
+  const [dishSuggested, setDishSuggested] = useState(false);
 
   // States for Season Rate Dialogs
   const [editingSeasonRate, setEditingSeasonRate] = useState<SeasonRate | null>(null);
@@ -3481,6 +3482,7 @@ export function AdminDashboard({
                     setDishPrice("0");
                     setDishImageUrl("");
                     setDishAvailable(true);
+                    setDishSuggested(false);
                     setDishCatId(categoriesList[0]?.id || "");
                     setIsDishModalOpen(true);
                   }}
@@ -3583,6 +3585,7 @@ export function AdminDashboard({
                                       setDishPrice(dish.price.toString());
                                       setDishImageUrl(dish.imageUrl || "");
                                       setDishAvailable(dish.isAvailable);
+                                      setDishSuggested(suggestedDishIds.includes(dish.id));
                                       setDishCatId(dish.categoryId);
                                       setIsDishModalOpen(true);
                                     }}
@@ -3636,12 +3639,18 @@ export function AdminDashboard({
                           alert(res.error);
                           return;
                         }
+                        if (dishSuggested !== suggestedDishIds.includes(editingDish.id)) {
+                          await toggleSuggestedDishAction(restaurant.id, editingDish.id);
+                        }
                         alert("¡Plato guardado con éxito!");
                       } else {
                         const res = await createDishAction(dishCatId, formData);
                         if (res && 'error' in res && res.error) {
                           alert(res.error);
                           return;
+                        }
+                        if (res && 'dish' in res && res.dish && dishSuggested) {
+                          await toggleSuggestedDishAction(restaurant.id, (res.dish as any).id);
                         }
                         alert("¡Plato creado con éxito!");
                       }
@@ -3758,17 +3767,33 @@ export function AdminDashboard({
                       </div>
                     </div>
 
-                    <div className="pt-2 flex items-center">
-                      <input
-                        type="checkbox"
-                        id="isAvailable"
-                        checked={dishAvailable}
-                        onChange={(e) => setDishAvailable(e.target.checked)}
-                        className="h-4 w-4 text-red-600 focus:ring-red-500 border-slate-800 rounded bg-slate-950"
-                      />
-                      <label htmlFor="isAvailable" className="ml-2 block text-sm text-slate-300 font-medium">
-                        Disponible para ordenar inmediatamente
-                      </label>
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id="isAvailable"
+                          checked={dishAvailable}
+                          onChange={(e) => setDishAvailable(e.target.checked)}
+                          className="h-4 w-4 text-red-600 focus:ring-red-500 border-slate-800 rounded bg-slate-950"
+                        />
+                        <label htmlFor="isAvailable" className="ml-2 block text-sm text-slate-300 font-medium">
+                          Disponible para ordenar inmediatamente
+                        </label>
+                      </div>
+
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id="isSuggestedModal"
+                          checked={dishSuggested}
+                          onChange={(e) => setDishSuggested(e.target.checked)}
+                          className="h-4 w-4 text-amber-500 focus:ring-amber-400 border-slate-800 rounded bg-slate-950"
+                        />
+                        <label htmlFor="isSuggestedModal" className="ml-2 flex items-center gap-1.5 text-sm text-amber-300 font-medium cursor-pointer">
+                          <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                          <span>Marcar como Plato Sugerido / Recomendación del Día</span>
+                        </label>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between gap-3 pt-6 border-t border-slate-800">
