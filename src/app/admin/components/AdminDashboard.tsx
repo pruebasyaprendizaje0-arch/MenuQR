@@ -98,6 +98,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
+import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 
 type SeasonRate = {
   id: string;
@@ -539,6 +540,36 @@ export function AdminDashboard({
     setManualPaymentReceiptUrl("");
   };
   const [copied, setCopied] = useState(false);
+  const [suggestedDishIds, setSuggestedDishIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function loadSuggestedDishes() {
+      try {
+        const ids = await getSuggestedDishIdsAction(restaurant.id);
+        setSuggestedDishIds(ids || []);
+      } catch (err) {
+        console.error("Error al cargar platos sugeridos:", err);
+      }
+    }
+    loadSuggestedDishes();
+  }, [restaurant.id]);
+
+  const handleToggleSuggestedDish = async (dishId: string) => {
+    // Optimistic update
+    setSuggestedDishIds((prev) =>
+      prev.includes(dishId) ? prev.filter((id) => id !== dishId) : [...prev, dishId]
+    );
+    try {
+      const res = await toggleSuggestedDishAction(restaurant.id, dishId);
+      if (!res.success) {
+        // Revert on failure
+        const rollback = await getSuggestedDishIdsAction(restaurant.id);
+        setSuggestedDishIds(rollback);
+      }
+    } catch (err) {
+      console.error("Error al actualizar plato sugerido:", err);
+    }
+  };
   const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
   const [savingTables, setSavingTables] = useState(false);
   const [tablesMessage, setTablesMessage] = useState("");
@@ -3412,8 +3443,16 @@ export function AdminDashboard({
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-white">Platos del Menú</h2>
-                <p className="text-slate-400 text-sm">Gestiona la carta completa: precios, imágenes y disponibilidad.</p>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-bold text-white">Platos del Menú</h2>
+                  {suggestedDishIds.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40 shadow-sm">
+                      <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                      {suggestedDishIds.length} Sugerido{suggestedDishIds.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+                <p className="text-slate-400 text-sm">Gestiona la carta completa: precios, imágenes, platos sugeridos y disponibilidad.</p>
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
@@ -3496,26 +3535,43 @@ export function AdminDashboard({
                                 <p className="text-slate-400 text-xs mt-1 line-clamp-2">{dish.description || "Sin descripción."}</p>
                               </div>
 
-                              <div className="flex justify-between items-center pt-2">
-                                {/* Availability toggle */}
-                                <button
-                                  onClick={() => handleToggleDish(dish.id, dish.isAvailable)}
-                                  className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${
-                                    dish.isAvailable 
-                                      ? "bg-green-500/10 text-green-400 border-green-500/30" 
-                                      : "bg-red-500/10 text-red-400 border-red-500/30"
-                                  }`}
-                                >
-                                  {dish.isAvailable ? (
-                                    <>
-                                      <Eye className="h-3 w-3" /> Disponible
-                                    </>
-                                  ) : (
-                                    <>
-                                      <EyeOff className="h-3 w-3" /> Agotado
-                                    </>
-                                  )}
-                                </button>
+                              <div className="flex flex-wrap justify-between items-center gap-2 pt-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {/* Availability toggle */}
+                                  <button
+                                    onClick={() => handleToggleDish(dish.id, dish.isAvailable)}
+                                    className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                                      dish.isAvailable 
+                                        ? "bg-green-500/10 text-green-400 border-green-500/30" 
+                                        : "bg-red-500/10 text-red-400 border-red-500/30"
+                                    }`}
+                                  >
+                                    {dish.isAvailable ? (
+                                      <>
+                                        <Eye className="h-3 w-3" /> Disponible
+                                      </>
+                                    ) : (
+                                      <>
+                                        <EyeOff className="h-3 w-3" /> Agotado
+                                      </>
+                                    )}
+                                  </button>
+
+                                  {/* Sugerido / Plato del Día toggle */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleSuggestedDish(dish.id)}
+                                    className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                                      suggestedDishIds.includes(dish.id)
+                                        ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm shadow-amber-500/15"
+                                        : "bg-slate-800/60 text-slate-400 border-slate-700 hover:text-amber-300 hover:border-amber-500/40"
+                                    }`}
+                                    title={suggestedDishIds.includes(dish.id) ? "Plato Sugerido / Especial de Hoy (Activo)" : "Marcar como Plato Sugerido"}
+                                  >
+                                    <Star className={`h-3 w-3 ${suggestedDishIds.includes(dish.id) ? "fill-amber-400 text-amber-400" : ""}`} />
+                                    <span>{suggestedDishIds.includes(dish.id) ? "Sugerido ⭐" : "Hacer Sugerido"}</span>
+                                  </button>
+                                </div>
 
                                 {/* Edit / Delete Actions */}
                                 <div className="flex gap-2">

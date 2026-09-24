@@ -32,7 +32,8 @@ import {
   ChevronDown,
   ChevronUp,
   CalendarCheck,
-  Gift
+  Gift,
+  Star
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -263,6 +264,24 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       }
     }
     checkRuletaConfig();
+  }, [restaurant.slug]);
+
+  // Suggested / Daily Special Dishes State
+  const [suggestedDishIds, setSuggestedDishIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function loadSuggestedDishes() {
+      try {
+        const res = await fetch(`/api/sugeridos/${restaurant.slug}`);
+        const data = await res.json();
+        if (data && data.success && Array.isArray(data.suggestedDishIds)) {
+          setSuggestedDishIds(data.suggestedDishIds);
+        }
+      } catch (err) {
+        console.error("Error al cargar platos sugeridos:", err);
+      }
+    }
+    loadSuggestedDishes();
   }, [restaurant.slug]);
 
   // Coupon State
@@ -1574,6 +1593,86 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               </div>
             </div>
 
+            {/* Platos Sugeridos / Especiales del Día */}
+            {(() => {
+              const allDishes = restaurant.categories.flatMap(cat => cat.dishes);
+              const suggestedDishes = allDishes.filter(dish => suggestedDishIds.includes(dish.id) && dish.isAvailable);
+
+              if (suggestedDishes.length === 0) return null;
+
+              return (
+                <div id="seccion-sugeridos" className="space-y-4 pt-1" style={{ fontFamily: 'var(--font-outfit)' }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-8 w-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/10">
+                        <Star className="h-4 w-4 fill-amber-400 text-amber-400 animate-pulse" />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-extrabold text-white tracking-wide flex items-center gap-1.5">
+                          <span>Sugerencias del Chef</span>
+                          <span className="text-amber-400 font-bold text-xs bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">⭐ Plato del Día</span>
+                        </h2>
+                        <p className="text-[11px] text-slate-400">Recomendaciones especiales preparadas para hoy</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-[0.15em] bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/30">
+                      {suggestedDishes.length} Plato{suggestedDishes.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-2">
+                    {suggestedDishes.map((dish) => (
+                      <div 
+                        key={dish.id}
+                        className="bg-gradient-to-b from-slate-900/90 to-slate-950/90 border-2 border-amber-500/40 hover:border-amber-400/80 rounded-3xl p-3.5 flex flex-col gap-2.5 relative group overflow-hidden transition-all duration-300 shadow-xl shadow-amber-500/5 hover:shadow-amber-500/15"
+                      >
+                        <div className="h-36 sm:h-40 w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-amber-500/30 relative">
+                          {dish.imageUrl ? (
+                            <img 
+                              src={dish.imageUrl} 
+                              alt={dish.name} 
+                              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center bg-slate-900 text-amber-400/60">
+                              <Utensils className="h-10 w-10" />
+                            </div>
+                          )}
+                          <div className="absolute top-2 left-2 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-1 backdrop-blur-md shadow-lg">
+                            <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> Especial del Día
+                          </div>
+                        </div>
+
+                        <div className="flex-1 flex flex-col justify-between min-w-0">
+                          <div>
+                            <h3 className="font-extrabold text-white text-sm group-hover:text-amber-300 transition-colors line-clamp-1">
+                              {dish.name}
+                            </h3>
+                            <p className="text-slate-400 text-[11px] mt-1 line-clamp-2 leading-relaxed">
+                              {dish.description || "Especialidad sugerida por la casa."}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2.5 border-t border-white/5 mt-1">
+                            <span className="text-base font-black text-amber-400">
+                              ${formatPrice(dish.price)}
+                            </span>
+                            <button
+                              onClick={() => addToCart(dish)}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 active:scale-95 transition-all duration-200"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              <span>Pedir</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Popular Dishes Slider */}
             {(() => {
               const allDishes = restaurant.categories.flatMap(cat => cat.dishes);
@@ -1749,6 +1848,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             ) : (
                               <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
                                 <Utensils className="h-8 w-8" />
+                              </div>
+                            )}
+                            {suggestedDishIds.includes(dish.id) && (
+                              <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-0.5 backdrop-blur-sm shadow-md">
+                                <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> Sugerido
                               </div>
                             )}
                           </div>
