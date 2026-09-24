@@ -742,7 +742,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
       {/* Sticky Header */}
       <header className="sticky top-0 z-30 bg-slate-950/70 backdrop-blur-xl border-b border-slate-900/80 transition-all duration-300">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-6xl xl:max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {logoClean ? (
               <img 
@@ -762,11 +762,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             )}
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-extrabold text-white text-base tracking-tight">{restaurant.name}</h1>
+                <h1 className="font-extrabold text-white text-base sm:text-lg tracking-tight">{restaurant.name}</h1>
                 {(() => {
                   const check = isRestaurantOpen(restaurant, "local");
                   return (
-                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${
+                    <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase border ${
                       check.isOpen 
                         ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" 
                         : "bg-red-500/20 text-red-300 border-red-500/30"
@@ -791,7 +791,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
             <button 
               onClick={() => setIsCartOpen(true)}
-              className="relative p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-200 hover:text-white transition-all duration-200"
+              className="relative p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-200 hover:text-white transition-all duration-200 cursor-pointer"
             >
               <ShoppingCart className="h-5 w-5" />
               {cartCount > 0 && (
@@ -807,11 +807,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         </div>
 
         {/* Navigation Tabs */}
-        <div className="max-w-3xl mx-auto px-4 pb-4 pt-1 hidden sm:flex justify-center" style={{ fontFamily: 'var(--font-outfit)' }}>
-          <div className="flex p-1 bg-slate-900/60 backdrop-blur-md border border-white/5 rounded-2xl w-full sm:w-[380px] gap-1 relative z-10">
+        <div className="max-w-6xl xl:max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-4 pt-1 hidden sm:flex justify-center" style={{ fontFamily: 'var(--font-outfit)' }}>
+          <div className="flex p-1.5 bg-slate-900/70 backdrop-blur-md border border-white/10 rounded-2xl w-full sm:w-[420px] gap-1.5 relative z-10 shadow-xl">
             <button
               onClick={() => setCurrentTab("profile")}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black tracking-wide uppercase transition-all duration-300 ${
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black tracking-wide uppercase transition-all duration-300 cursor-pointer ${
                 currentTab === "profile" 
                   ? "text-white shadow-lg" 
                   : "text-slate-400 hover:text-slate-200"
@@ -826,7 +826,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             </button>
             <button
               onClick={() => setCurrentTab("menu")}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black tracking-wide uppercase transition-all duration-300 ${
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-black tracking-wide uppercase transition-all duration-300 cursor-pointer ${
                 currentTab === "menu" 
                   ? "text-white shadow-lg" 
                   : "text-slate-400 hover:text-slate-200"
@@ -845,12 +845,12 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         {/* Scrollable Categories Navigation */}
         {currentTab === "menu" && (
           <div className="bg-slate-950/40 border-t border-slate-900/60 scrollbar-none overflow-x-auto">
-            <div className="max-w-3xl mx-auto px-4 flex gap-2 py-3">
+            <div className="max-w-6xl xl:max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-2.5 py-3">
             {restaurant.categories.map((cat) => (
               <button
                 key={cat.id}
                 onClick={() => scrollToCategory(cat.id)}
-                className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap tracking-wide border transition-all duration-200 ${
+                className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap tracking-wide border transition-all duration-200 cursor-pointer ${
                   activeCategory === cat.id
                     ? "text-white border-transparent"
                     : "text-slate-400 bg-slate-900/40 border-slate-900 hover:text-slate-200"
@@ -868,7 +868,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       </header>
 
       {/* Main Menu Feed */}
-      <main className="flex-1 max-w-3xl w-full mx-auto px-4 pt-6 pb-32 relative z-10 space-y-12">
+      <main className="flex-1 max-w-6xl xl:max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-32 relative z-10 space-y-12">
         {currentTab === "profile" ? (
           <div className="space-y-10 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
             {/* COOLINARY STAGE HERO SECTION */}
@@ -896,9 +896,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               )}
 
               {/* Main Coolinary Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center relative z-10">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center relative z-10">
                 {/* Left Column: Social Bar + Headline + Description + CTAs */}
-                <div className="md:col-span-7 flex flex-col justify-center space-y-6">
+                <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
                   {/* Category / Badge */}
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-black uppercase tracking-widest text-amber-400 bg-amber-400/10 border border-amber-400/20">
@@ -921,7 +921,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                   {/* Main Display Headline (Big Bold Typography) */}
                   <div className="space-y-2">
-                    <h1 className="text-4xl sm:text-6xl font-black text-white leading-[1.05] tracking-tight uppercase">
+                    <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white leading-[1.08] tracking-tight uppercase">
                       {restaurant.name}
                     </h1>
                     <p className="text-sm sm:text-base text-amber-400/90 font-bold uppercase tracking-wider">
@@ -930,7 +930,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   </div>
 
                   {/* Slogan / Tagline */}
-                  <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-xl font-normal">
+                  <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-2xl font-normal">
                     {restaurant.slogan || "Sabores incomparables preparados al instante con los mejores ingredientes y la máxima calidad."}
                   </p>
 
@@ -999,10 +999,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   </div>
 
                   {/* Primary CTA Buttons */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 w-full max-w-xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 pt-2 w-full">
                     <button
                       onClick={() => setCurrentTab("menu")}
-                      className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 shadow-xl relative overflow-hidden group flex items-center justify-center gap-2.5"
+                      className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 shadow-xl relative overflow-hidden group flex items-center justify-center gap-2 cursor-pointer shrink-0"
                       style={{ 
                         backgroundColor: restaurant.themeColor,
                         boxShadow: `0 12px 30px -5px ${restaurant.themeColor}55`
@@ -1010,7 +1010,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     >
                       <div className="absolute inset-0 w-1/2 h-full bg-white/15 skew-x-[-25deg] -translate-x-full group-hover:animate-shimmer"></div>
                       <Utensils className="h-4.5 w-4.5 shrink-0 transition-transform group-hover:rotate-12 duration-300" />
-                      <span>Ver Menú Digital</span>
+                      <span>Ver Menú</span>
                     </button>
 
                     {(() => {
@@ -1021,11 +1021,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           href={finalResUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-amber-300 hover:text-amber-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-600/20 backdrop-blur-md shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2.5 group hover:border-amber-400 hover:shadow-amber-500/20"
+                          className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-amber-300 hover:text-amber-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-600/20 backdrop-blur-md shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2 group hover:border-amber-400 hover:shadow-amber-500/20 shrink-0"
                           title="Reservar Ahora"
                         >
                           <CalendarCheck className="h-4.5 w-4.5 shrink-0 text-amber-400 group-hover:scale-110 transition-transform duration-200" />
-                          <span>Reservar Ahora</span>
+                          <span>Reservar</span>
                         </a>
                       );
                     })()}
@@ -1038,7 +1038,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           href={finalUbiUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-sky-300 hover:text-sky-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-sky-500/40 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-blue-600/20 backdrop-blur-md shadow-lg shadow-sky-500/10 flex items-center justify-center gap-2.5 group hover:border-sky-400 hover:shadow-sky-500/20"
+                          className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-sky-300 hover:text-sky-100 uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-sky-500/40 bg-gradient-to-r from-sky-500/20 via-sky-500/10 to-blue-600/20 backdrop-blur-md shadow-lg shadow-sky-500/10 flex items-center justify-center gap-2 group hover:border-sky-400 hover:shadow-sky-500/20 shrink-0"
                           title="Ubicame.info"
                         >
                           <Globe className="h-4.5 w-4.5 shrink-0 text-sky-400 group-hover:scale-110 transition-transform duration-200" />
@@ -1049,7 +1049,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                     <button
                       onClick={handleShare}
-                      className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2.5 group hover:border-white/30"
+                      className="w-full h-12 px-4 rounded-2xl text-xs sm:text-sm font-black text-slate-200 hover:text-white uppercase tracking-wider transition-all transform hover:scale-[1.02] active:scale-95 duration-200 border border-white/15 bg-slate-900/60 backdrop-blur-md shadow-lg flex items-center justify-center gap-2 group hover:border-white/30 cursor-pointer shrink-0"
                     >
                       {shareCopied ? (
                         <>
@@ -1067,8 +1067,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 </div>
 
                 {/* Right Column: Floating Dish Plate Container */}
-                <div className="md:col-span-5 flex justify-center">
-                  <div className="relative w-full max-w-sm aspect-square rounded-[3rem] p-3 bg-gradient-to-tr from-slate-900/80 via-slate-800/40 to-white/10 border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.8)] group/plate overflow-hidden">
+                <div className="lg:col-span-5 flex justify-center items-center">
+                  <div className="relative w-full max-w-sm sm:max-w-md lg:max-w-md aspect-square rounded-[3rem] p-3 bg-gradient-to-tr from-slate-900/80 via-slate-800/40 to-white/10 border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.8)] group/plate overflow-hidden">
                     {/* Inner Circular Dish Showcase */}
                     <div className="w-full h-full rounded-[2.5rem] overflow-hidden relative bg-slate-950 flex items-center justify-center">
                       {coverBg ? (
@@ -1295,7 +1295,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             )}
 
             {/* Contact & Actions Information Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
               {/* Online Reservations Card */}
               {(() => {
                 const resUrl = restaurant.reservationUrl?.trim() || "https://reservaciones.ubicame.cc";
@@ -1313,9 +1313,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     href={finalResUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-slate-900/50 border border-amber-500/30 p-6 rounded-[2.5rem] flex items-center gap-5 hover:bg-slate-900/90 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/10 transition-all duration-300 group"
+                    className="bg-slate-900/50 border border-amber-500/30 p-5 sm:p-6 rounded-[2.5rem] flex items-center gap-4 sm:gap-5 hover:bg-slate-900/90 hover:border-amber-400 hover:shadow-lg hover:shadow-amber-500/10 transition-all duration-300 group"
                   >
-                    <div className="h-14 w-14 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center shrink-0 border border-amber-500/20 group-hover:scale-110 group-hover:bg-amber-500/20 transition duration-300">
+                    <div className="h-12 w-12 sm:h-14 sm:w-14 bg-amber-500/10 text-amber-400 rounded-2xl flex items-center justify-center shrink-0 border border-amber-500/20 group-hover:scale-110 group-hover:bg-amber-500/20 transition duration-300">
                       <CalendarCheck className="h-6 w-6" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1324,7 +1324,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         <span>Reservar Ahora</span>
                         <span className="text-xs text-amber-400 font-normal">↗</span>
                       </p>
-                      <span className="text-xs text-slate-400 mt-0.5 block truncate max-w-[180px]">{displayDomain}</span>
+                      <span className="text-xs text-slate-400 mt-0.5 block truncate max-w-[200px] lg:max-w-none">{displayDomain}</span>
                     </div>
                   </a>
                 );
@@ -1347,9 +1347,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     href={finalUbiUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="bg-slate-900/50 border border-sky-500/30 p-6 rounded-[2.5rem] flex items-center gap-5 hover:bg-slate-900/90 hover:border-sky-400 hover:shadow-lg hover:shadow-sky-500/10 transition-all duration-300 group"
+                    className="bg-slate-900/50 border border-sky-500/30 p-5 sm:p-6 rounded-[2.5rem] flex items-center gap-4 sm:gap-5 hover:bg-slate-900/90 hover:border-sky-400 hover:shadow-lg hover:shadow-sky-500/10 transition-all duration-300 group"
                   >
-                    <div className="h-14 w-14 bg-sky-500/10 text-sky-400 rounded-2xl flex items-center justify-center shrink-0 border border-sky-500/20 group-hover:scale-110 group-hover:bg-sky-500/20 transition duration-300">
+                    <div className="h-12 w-12 sm:h-14 sm:w-14 bg-sky-500/10 text-sky-400 rounded-2xl flex items-center justify-center shrink-0 border border-sky-500/20 group-hover:scale-110 group-hover:bg-sky-500/20 transition duration-300">
                       <Globe className="h-6 w-6" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1358,7 +1358,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         <span>Ubicame.info</span>
                         <span className="text-xs text-sky-400 font-normal">↗</span>
                       </p>
-                      <span className="text-xs text-slate-400 mt-0.5 block truncate max-w-[180px]">{displayDomain}</span>
+                      <span className="text-xs text-slate-400 mt-0.5 block truncate max-w-[200px] lg:max-w-none">{displayDomain}</span>
                     </div>
                   </a>
                 );
@@ -1369,66 +1369,71 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   href={`https://wa.me/${restaurant.whatsappNumber.replace(/\D/g, "")}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] flex items-center gap-5 hover:bg-slate-900/80 hover:border-emerald-500/40 transition-all duration-300 group"
+                  className="bg-slate-900/50 border border-white/10 p-5 sm:p-6 rounded-[2.5rem] flex items-center gap-4 sm:gap-5 hover:bg-slate-900/80 hover:border-emerald-500/40 transition-all duration-300 group"
                 >
-                  <div className="h-14 w-14 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center shrink-0 border border-emerald-500/20 group-hover:scale-110 transition duration-300">
+                  <div className="h-12 w-12 sm:h-14 sm:w-14 bg-emerald-500/10 text-emerald-400 rounded-2xl flex items-center justify-center shrink-0 border border-emerald-500/20 group-hover:scale-110 transition duration-300">
                     <MessageSquare className="h-6 w-6" />
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Atención por WhatsApp</span>
-                    <p className="text-sm text-white font-black mt-0.5">Enviar mensaje directo</p>
-                    <span className="text-xs text-slate-400 mt-0.5 block">Hacer consultas y pedidos</span>
+                    <p className="text-sm text-white font-black mt-0.5 truncate">Enviar mensaje directo</p>
+                    <span className="text-xs text-slate-400 mt-0.5 block truncate">Hacer consultas y pedidos</span>
                   </div>
                 </a>
               )}
 
               {restaurant.address && (
-                <div className={`bg-slate-900/50 border border-white/10 p-6 rounded-[2.5rem] flex items-center gap-5 transition-all duration-300 ${!restaurant.whatsappNumber ? 'sm:col-span-2' : ''}`}>
-                  <div className="h-14 w-14 bg-red-500/10 text-red-400 rounded-2xl flex items-center justify-center shrink-0 border border-red-500/20">
+                <div className={`bg-slate-900/50 border border-white/10 p-5 sm:p-6 rounded-[2.5rem] flex items-center gap-4 sm:gap-5 transition-all duration-300 ${!restaurant.whatsappNumber ? 'sm:col-span-2' : ''}`}>
+                  <div className="h-12 w-12 sm:h-14 sm:w-14 bg-red-500/10 text-red-400 rounded-2xl flex items-center justify-center shrink-0 border border-red-500/20">
                     <MapPin className="h-6 w-6" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-[0.2em] block">Dirección Principal</span>
-                    <p className="text-sm text-white font-black mt-0.5 leading-relaxed truncate">{restaurant.address}</p>
-                    {restaurant.locality && <span className="block text-xs text-slate-400 mt-0.5">{restaurant.locality}</span>}
+                    <p className="text-sm text-white font-black mt-0.5 leading-snug line-clamp-2">{restaurant.address}</p>
+                    {restaurant.locality && <span className="block text-xs text-slate-400 mt-0.5 truncate">{restaurant.locality}</span>}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Services & Facilities */}
-            {restaurant.services && (
-              <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl space-y-4">
-                <span className="text-xs font-extrabold text-amber-400 uppercase tracking-[0.2em] block">Servicios y Facilidades del Local</span>
-                <div className="flex flex-wrap gap-2.5">
-                  {restaurant.services.split(",").map((service, idx) => (
-                    <span 
-                      key={idx} 
-                      className="px-4 py-2.5 rounded-2xl text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 flex items-center gap-2 shadow-inner"
-                    >
-                      <span className="text-emerald-400 font-black">✓</span> {service.trim()}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Services & Contact Numbers Grid on PC */}
+            {(restaurant.services || restaurant.contactNumbers) && (
+              <div className={`grid grid-cols-1 ${restaurant.services && restaurant.contactNumbers ? 'lg:grid-cols-2' : ''} gap-6`}>
+                {/* Services & Facilities */}
+                {restaurant.services && (
+                  <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-6 sm:p-8 backdrop-blur-xl space-y-4">
+                    <span className="text-xs font-extrabold text-amber-400 uppercase tracking-[0.2em] block">Servicios y Facilidades del Local</span>
+                    <div className="flex flex-wrap gap-2.5">
+                      {restaurant.services.split(",").map((service, idx) => (
+                        <span 
+                          key={idx} 
+                          className="px-4 py-2.5 rounded-2xl text-xs font-bold bg-slate-950 border border-white/10 text-slate-200 flex items-center gap-2 shadow-inner"
+                        >
+                          <span className="text-emerald-400 font-black">✓</span> {service.trim()}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-            {/* Contact Numbers */}
-            {restaurant.contactNumbers && (
-              <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl space-y-4">
-                <span className="text-xs font-extrabold text-amber-400 uppercase tracking-[0.2em] block">Otros Números de Contacto</span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {restaurant.contactNumbers.split(",").map((phone, idx) => (
-                    <a
-                      key={idx}
-                      href={`tel:${phone.replace(/\s+/g, "")}`}
-                      className="flex items-center gap-3.5 px-5 py-4 rounded-2xl bg-slate-950 border border-white/10 hover:border-amber-400/40 hover:bg-slate-900 text-sm font-bold text-slate-200 hover:text-white transition-all duration-300"
-                    >
-                      <Phone className="h-5 w-5 text-amber-400 shrink-0" />
-                      <span>{phone.trim()}</span>
-                    </a>
-                  ))}
-                </div>
+                {/* Contact Numbers */}
+                {restaurant.contactNumbers && (
+                  <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-6 sm:p-8 backdrop-blur-xl space-y-4">
+                    <span className="text-xs font-extrabold text-amber-400 uppercase tracking-[0.2em] block">Otros Números de Contacto</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      {restaurant.contactNumbers.split(",").map((phone, idx) => (
+                        <a
+                          key={idx}
+                          href={`tel:${phone.replace(/\s+/g, "")}`}
+                          className="flex items-center gap-3.5 px-5 py-4 rounded-2xl bg-slate-950 border border-white/10 hover:border-amber-400/40 hover:bg-slate-900 text-sm font-bold text-slate-200 hover:text-white transition-all duration-300"
+                        >
+                          <Phone className="h-5 w-5 text-amber-400 shrink-0" />
+                          <span className="truncate">{phone.trim()}</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1508,7 +1513,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                   {/* Map iframe container */}
                   {mapIframeSrc && (
-                    <div className="w-full h-80 sm:h-96 rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-950 relative group">
+                    <div className="w-full h-80 sm:h-96 lg:h-[460px] rounded-3xl overflow-hidden border border-white/10 shadow-2xl bg-slate-950 relative group">
                       <iframe
                         src={mapIframeSrc}
                         width="100%"
@@ -1575,7 +1580,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               const popularDishes = allDishes.filter(dish => 
                 ["Pizza Margherita", "Pizza Pepperoni", "Lasagna de Carne", "Fettuccine Alfredo"].includes(dish.name)
               ).slice(0, 4);
-              const fallbackPopularDishes = popularDishes.length > 0 ? popularDishes : allDishes.slice(0, 3);
+              const fallbackPopularDishes = popularDishes.length > 0 ? popularDishes : allDishes.slice(0, 4);
               
               if (fallbackPopularDishes.length === 0) return null;
               
@@ -1589,13 +1594,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.15em]">Los favoritos</span>
                   </div>
                   
-                  <div className="flex gap-4 overflow-x-auto scrollbar-none pb-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 pb-2">
                     {fallbackPopularDishes.map((dish) => (
                       <div 
                         key={dish.id}
-                        className="w-48 shrink-0 bg-slate-900/40 border border-white/5 rounded-3xl p-3 flex flex-col gap-2 relative group overflow-hidden transition duration-300 hover:border-white/10"
+                        className="bg-slate-900/40 border border-white/5 rounded-3xl p-3 flex flex-col gap-2 relative group overflow-hidden transition duration-300 hover:border-white/10"
                       >
-                        <div className="h-32 w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
+                        <div className="h-32 sm:h-36 w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
                           {dish.imageUrl ? (
                             <img 
                               src={dish.imageUrl} 
@@ -1662,7 +1667,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     <span className="text-[10px] text-slate-500 font-normal uppercase tracking-widest">{cat.dishes.length} Opciones</span>
                   </h2>
 
-                  <div className="grid grid-cols-1 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6">
                     {cat.dishes.map((dish) => {
                       if (isComboCategory) {
                         return (
