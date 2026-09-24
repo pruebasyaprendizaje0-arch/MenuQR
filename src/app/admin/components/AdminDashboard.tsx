@@ -97,6 +97,7 @@ import {
   Square
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import RuletaAdminTab from "./RuletaAdminTab";
 
 type SeasonRate = {
   id: string;
@@ -492,7 +493,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -1478,6 +1479,17 @@ export function AdminDashboard({
             >
               <Tag className="h-4 w-4 text-amber-400" />
               Cupones de Descuento
+            </button>
+            <button
+              onClick={() => setActiveTab("ruleta")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "ruleta" 
+                  ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <Gift className="h-4 w-4 text-amber-400" />
+              <span>🎡 Ruleta de Premios</span>
             </button>
             <button
               onClick={() => setActiveTab("qr")}
@@ -4313,6 +4325,11 @@ export function AdminDashboard({
               </div>
             )}
           </div>
+        )}
+
+        {/* Ruleta de Premios Tab */}
+        {activeTab === "ruleta" && (
+          <RuletaAdminTab restaurant={restaurant} />
         )}
 
         {/* Código QR Tab */}

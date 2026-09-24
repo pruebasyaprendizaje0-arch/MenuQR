@@ -100,6 +100,8 @@ model Restaurant {
   analyticsEvents AnalyticsEvent[]
   tableSessions  TableSession[]
   manualSubscriptionPayments ManualSubscriptionPayment[]
+  ruletaConfig   RuletaConfig?
+  ruletaGiros    RuletaGiro[]
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -273,6 +275,7 @@ model Customer {
   address      String?
   city         String?
   category     String     @default("NUEVO") // VIP, FRECUENTE, NUEVO, INACTIVO
+  birthDate    String?    // YYYY-MM-DD o DD/MM para promociones de cumpleaños
   notes        String?
   totalOrders  Int        @default(1)
   totalSpent   Float      @default(0.0)
@@ -397,4 +400,52 @@ model TableSplitAllocation {
 
   @@index([orderItemId])
   @@index([tableSplitPaymentId])
+}
+
+model RuletaConfig {
+  id                String     @id @default(uuid())
+  restaurantId      String     @unique
+  restaurant        Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  activa            Boolean    @default(true)
+  titulo            String     @default("¡Gira la Ruleta y Gana!")
+  descripcion       String     @default("Prueba tu suerte y obtén un premio exclusivo para tu consumo hoy.")
+  colorPrimario     String     @default("#111827")
+  colorSecundario   String     @default("#ef4444")
+  colorFondo        String     @default("#0f172a")
+  premios           String     // JSON array de 6 objetos [{id, label, tipo, valor, probabilidad, color_hex, stock_diario, codigo_prefijo}]
+  limiteDiasReGiro  Int        @default(30)
+  maxGirosIpDia     Int        @default(5)
+  expiracionHoras   Int        @default(24)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@index([restaurantId, activa])
+}
+
+model RuletaGiro {
+  id              String     @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  telefono        String
+  nombreCliente   String?
+  fechaNacimiento String?    // Fecha de cumpleaños para marketing
+  premioId        String
+  premioLabel     String
+  premioTipo      String?    @default("descuento")
+  premioValor     Float?     @default(0.0)
+  codigoCupon     String     @unique
+  estado          String     @default("PENDIENTE") // PENDIENTE, CANJEADO, EXPIRADO
+  ipAddress       String?
+  userAgent       String?
+  fechaGiro       DateTime   @default(now())
+  fechaCanjeo     DateTime?
+  fechaExpiracion DateTime
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([restaurantId, telefono])
+  @@index([restaurantId, estado])
+  @@index([codigoCupon])
+  @@index([telefono])
+  @@index([ipAddress, fechaGiro])
 }

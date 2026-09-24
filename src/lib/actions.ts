@@ -1730,31 +1730,65 @@ export async function createOrderAction(data: {
         },
       });
 
-      if (!coupon || !coupon.isActive) {
-        return { error: "El cupón ingresado no existe o está inactivo." };
-      }
+      if (coupon && coupon.isActive) {
+        if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
+          return { error: "El cupón ha expirado." };
+        }
 
-      if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
-        return { error: "El cupón ha expirado." };
-      }
+        if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
+          return { error: "El cupón ha alcanzado su límite máximo de usos." };
+        }
 
-      if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
-        return { error: "El cupón ha alcanzado su límite máximo de usos." };
-      }
+        if (calculatedSubtotal < coupon.minOrder) {
+          return {
+            error: `Este cupón requiere un consumo mínimo de $${coupon.minOrder.toFixed(2)}. Tu subtotal real es $${calculatedSubtotal.toFixed(2)}.`,
+          };
+        }
 
-      if (calculatedSubtotal < coupon.minOrder) {
-        return {
-          error: `Este cupón requiere un consumo mínimo de $${coupon.minOrder.toFixed(2)}. Tu subtotal real es $${calculatedSubtotal.toFixed(2)}.`,
-        };
-      }
-
-      verifiedCouponCode = coupon.code;
-      if (coupon.discountType === "PERCENTAGE") {
-        calculatedDiscount = (calculatedSubtotal * coupon.discountValue) / 100;
+        verifiedCouponCode = coupon.code;
+        if (coupon.discountType === "PERCENTAGE") {
+          calculatedDiscount = (calculatedSubtotal * coupon.discountValue) / 100;
+        } else {
+          calculatedDiscount = Math.min(calculatedSubtotal, coupon.discountValue);
+        }
+        calculatedDiscount = Math.min(calculatedSubtotal, calculatedDiscount);
       } else {
-        calculatedDiscount = Math.min(calculatedSubtotal, coupon.discountValue);
+        // Verificar en RuletaGiro
+        const ruletaGiro = await (prisma as any).ruletaGiro.findFirst({
+          where: {
+            restaurantId: data.restaurantId,
+            codigoCupon: cleanCode,
+          },
+        });
+
+        if (ruletaGiro) {
+          if (ruletaGiro.estado === "CANJEADO") {
+            return { error: `Este cupón de la ruleta (${cleanCode}) ya fue canjeado.` };
+          }
+          if (ruletaGiro.estado === "EXPIRADO" || new Date() > new Date(ruletaGiro.fechaExpiracion)) {
+            return { error: "Este cupón de la ruleta ha expirado." };
+          }
+
+          verifiedCouponCode = ruletaGiro.codigoCupon;
+          let discVal = Number(ruletaGiro.premioValor) || 0;
+
+          if (ruletaGiro.premioTipo === "monto") {
+            calculatedDiscount = Math.min(calculatedSubtotal, discVal);
+          } else if (ruletaGiro.premioTipo === "descuento") {
+            if (discVal <= 0) {
+              const match = ruletaGiro.premioLabel.match(/(\d+)%/);
+              discVal = match ? Number(match[1]) : 10;
+            }
+            calculatedDiscount = (calculatedSubtotal * discVal) / 100;
+          } else {
+            // Postre, bebida, regalo
+            calculatedDiscount = 0;
+          }
+          calculatedDiscount = Math.min(calculatedSubtotal, calculatedDiscount);
+        } else {
+          return { error: "El cupón ingresado no existe o está inactivo." };
+        }
       }
-      calculatedDiscount = Math.min(calculatedSubtotal, calculatedDiscount);
     }
 
     const subtotalAfterCoupon = Math.max(0, calculatedSubtotal - calculatedDiscount);
@@ -1905,6 +1939,10 @@ export async function createOrderAction(data: {
         await tx.coupon.updateMany({
           where: { restaurantId: data.restaurantId, code: verifiedCouponCode },
           data: { usedCount: { increment: 1 } },
+        });
+        await (tx as any).ruletaGiro.updateMany({
+          where: { restaurantId: data.restaurantId, codigoCupon: verifiedCouponCode },
+          data: { estado: "CANJEADO", fechaCanjeo: new Date() },
         });
       }
 
@@ -2907,7 +2945,58 @@ export async function validateCouponAction(restaurantId: string, code: string, s
     });
 
     if (!coupon || !coupon.isActive) {
-      return { error: "El cupón ingresado no existe o está inactivo." };
+      // 2. Si no se encontró en cupones regulares, buscar en RuletaGiro
+      const giroDelegate = (prisma as any).ruletaGiro;
+      const ruletaGiro = giroDelegate?.findFirst
+        ? await giroDelegate.findFirst({
+            where: {
+              restaurantId,
+              codigoCupon: cleanCode,
+            },
+          })
+        : null;
+
+      if (ruletaGiro) {
+        if (ruletaGiro.estado === "CANJEADO") {
+          return { error: `Este cupón de la ruleta (${cleanCode}) ya fue canjeado.` };
+        }
+        if (ruletaGiro.estado === "EXPIRADO" || new Date() > new Date(ruletaGiro.fechaExpiracion)) {
+          return { error: `Este cupón de la ruleta ha expirado.` };
+        }
+
+        let discountAmount = 0;
+        let discountType = "PERCENTAGE";
+        let discountValue = Number(ruletaGiro.premioValor) || 0;
+
+        if (ruletaGiro.premioTipo === "monto") {
+          discountType = "FIXED";
+          discountAmount = Math.min(subtotal, discountValue);
+        } else if (ruletaGiro.premioTipo === "descuento") {
+          discountType = "PERCENTAGE";
+          if (discountValue <= 0) {
+            const match = ruletaGiro.premioLabel.match(/(\d+)%/);
+            discountValue = match ? Number(match[1]) : 10;
+          }
+          discountAmount = (subtotal * discountValue) / 100;
+        } else {
+          // Postre, bebida, 2x1, producto de regalo
+          discountType = "GIFT";
+          discountAmount = 0;
+        }
+
+        return {
+          success: true,
+          coupon: {
+            code: ruletaGiro.codigoCupon,
+            discountType,
+            discountValue,
+            discountAmount: Number(discountAmount.toFixed(2)),
+            label: ruletaGiro.premioLabel,
+          },
+        };
+      }
+
+      return { error: "El cupón ingresado no existe o no es válido para este restaurante." };
     }
 
     if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {

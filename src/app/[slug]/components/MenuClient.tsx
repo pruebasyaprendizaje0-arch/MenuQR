@@ -31,10 +31,12 @@ import {
   Tag,
   ChevronDown,
   ChevronUp,
-  CalendarCheck
+  CalendarCheck,
+  Gift
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
+import RuletaNegocio from "@/components/Ruleta/RuletaNegocio";
 
 type Dish = {
   id: string;
@@ -239,13 +241,33 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
+  const [isRuletaOpen, setIsRuletaOpen] = useState(false);
+  const [isRuletaActiva, setIsRuletaActiva] = useState(true);
+  const [ruletaContext, setRuletaContext] = useState<{ isPostCheckout?: boolean; orderNumber?: string | number } | null>(null);
+  const [orderSuccessInfo, setOrderSuccessInfo] = useState<{ orderNumber: string | number } | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
+  // Check if ruleta is enabled by the restaurant admin
+  useEffect(() => {
+    async function checkRuletaConfig() {
+      try {
+        const res = await fetch(`/api/ruleta/config/${restaurant.slug}`);
+        const data = await res.json();
+        if (data && typeof data.activa === "boolean") {
+          setIsRuletaActiva(data.activa);
+        }
+      } catch (err) {
+        console.error("Error al consultar estado de ruleta:", err);
+      }
+    }
+    checkRuletaConfig();
+  }, [restaurant.slug]);
+
   // Coupon State
   const [inputCouponCode, setInputCouponCode] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discountType: string; discountValue: number; discountAmount: number } | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discountType: string; discountValue: number; discountAmount: number; label?: string } | null>(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
   const [couponError, setCouponError] = useState("");
 
@@ -686,9 +708,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodedMessage}`;
     window.open(whatsappUrl, "_blank");
     
-    // Clear cart and close checkout
+    // Clear cart and close checkout, show post-order reward modal
     setCart([]);
     setIsCheckoutOpen(false);
+    setIsSubmittingOrder(false);
+    setOrderSuccessInfo({ orderNumber: result.orderNumber || 1 });
   };
 
   return (
@@ -2283,7 +2307,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 p-3 rounded-xl text-xs text-emerald-300">
                   <div className="flex items-center gap-2 font-bold">
                     <Tag className="h-4 w-4 text-emerald-400" />
-                    <span>Cupón <strong>{appliedCoupon.code}</strong> aplicado (-${appliedCoupon.discountAmount.toFixed(2)})</span>
+                    <span>
+                      {appliedCoupon.discountAmount > 0 ? (
+                        <>Cupón <strong>{appliedCoupon.code}</strong> aplicado (-${appliedCoupon.discountAmount.toFixed(2)})</>
+                      ) : (
+                        <>🎁 Premio <strong>{appliedCoupon.label || "Ruleta"}</strong> aplicado (Cupón {appliedCoupon.code})</>
+                      )}
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -2298,36 +2328,63 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   </button>
                 </div>
               ) : (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Ej. BIENVENIDA10"
-                    value={inputCouponCode}
-                    onChange={(e) => {
-                      setInputCouponCode(e.target.value.toUpperCase());
-                      setCouponError("");
-                    }}
-                    className="flex-1 bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white font-mono font-bold uppercase focus:outline-none text-xs"
-                  />
-                  <button
-                    type="button"
-                    disabled={validatingCoupon || !inputCouponCode.trim()}
-                    onClick={async () => {
-                      if (!inputCouponCode.trim()) return;
-                      setValidatingCoupon(true);
-                      setCouponError("");
-                      const res = await validateCouponAction(restaurant.id, inputCouponCode, cartTotal);
-                      setValidatingCoupon(false);
-                      if (res.error) {
-                        setCouponError(res.error);
-                      } else if (res.coupon) {
-                        setAppliedCoupon(res.coupon);
-                      }
-                    }}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-amber-400 font-extrabold text-xs rounded-xl border border-white/5 transition active:scale-95 disabled:opacity-50"
-                  >
-                    {validatingCoupon ? "Validando..." : "Aplicar"}
-                  </button>
+                <div className="space-y-2.5">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Ej. BIENVENIDA10 o Cupón Ruleta"
+                      value={inputCouponCode}
+                      onChange={(e) => {
+                        setInputCouponCode(e.target.value.toUpperCase());
+                        setCouponError("");
+                      }}
+                      className="flex-1 bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white font-mono font-bold uppercase focus:outline-none text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={validatingCoupon || !inputCouponCode.trim()}
+                      onClick={async () => {
+                        if (!inputCouponCode.trim()) return;
+                        setValidatingCoupon(true);
+                        setCouponError("");
+                        const res = await validateCouponAction(restaurant.id, inputCouponCode, cartTotal);
+                        setValidatingCoupon(false);
+                        if (res.error) {
+                          setCouponError(res.error);
+                        } else if (res.coupon) {
+                          setAppliedCoupon(res.coupon);
+                        }
+                      }}
+                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-750 text-amber-400 font-extrabold text-xs rounded-xl border border-white/5 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                    >
+                      {validatingCoupon ? "Validando..." : "Aplicar"}
+                    </button>
+                  </div>
+
+                  {/* Banner Ruleta en Carrito */}
+                  {isRuletaActiva && (
+                    <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-500/10 via-red-500/10 to-purple-500/10 border border-amber-500/30 flex items-center justify-between gap-3 shadow-inner">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 grid place-items-center text-base shrink-0">
+                          🎁
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-white leading-tight">¿No tienes cupón? ¡Gira la Ruleta!</p>
+                          <p className="text-[10px] text-amber-300 font-medium leading-tight mt-0.5">Gana descuentos o postre para este pedido</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRuletaContext({ isPostCheckout: false });
+                          setIsRuletaOpen(true);
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-black text-[11px] uppercase tracking-wider shadow-md hover:scale-105 active:scale-95 transition cursor-pointer shrink-0"
+                      >
+                        Girar
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
               {couponError && (
@@ -2395,8 +2452,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                   {appliedCoupon && (
                     <div className="bg-emerald-500/10 border border-emerald-500/30 p-2.5 rounded-xl flex items-center justify-between text-emerald-400 font-bold text-[11px]">
-                      <span>🎟️ Descuento Cupón ({appliedCoupon.code}):</span>
-                      <span>-${couponDiscount.toFixed(2)}</span>
+                      <span>
+                        {appliedCoupon.discountAmount > 0
+                          ? `🎟️ Descuento Cupón (${appliedCoupon.code}):`
+                          : `🎁 Beneficio Ruleta (${appliedCoupon.code}):`}
+                      </span>
+                      <span>
+                        {appliedCoupon.discountAmount > 0
+                          ? `-$${couponDiscount.toFixed(2)}`
+                          : (appliedCoupon.label || "Incluido Gratis")}
+                      </span>
                     </div>
                   )}
 
@@ -2735,6 +2800,119 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           </a>
         );
       })()}
+
+      {/* Order Success & Post-Checkout Ruleta Reward Modal */}
+      {isRuletaActiva && orderSuccessInfo && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 p-6 sm:p-7 text-center shadow-2xl space-y-4">
+            <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-500 to-amber-500 mx-auto grid place-items-center shadow-lg text-3xl animate-bounce">
+              🎉
+            </div>
+            <div>
+              <span className="inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-black uppercase tracking-wider mb-2">
+                ¡Pedido #{orderSuccessInfo.orderNumber} Enviado!
+              </span>
+              <h3 className="text-2xl font-black text-white">¡Gracias por tu compra!</h3>
+              <p className="text-xs text-slate-300 mt-1">
+                Por realizar tu pedido, has desbloqueado <strong>1 Giro de la Suerte</strong> en nuestra Ruleta de Premios.
+              </p>
+            </div>
+            
+            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2 text-left text-xs">
+              <div className="flex items-center gap-2 text-slate-300 font-medium">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Tu comanda fue registrada y enviada al WhatsApp del local.</span>
+              </div>
+              <div className="flex items-center gap-2 text-amber-300 font-semibold">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Gira ahora para ganar postres, descuentos o regalos.</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setRuletaContext({ isPostCheckout: true, orderNumber: orderSuccessInfo.orderNumber });
+                  setOrderSuccessInfo(null);
+                  setIsRuletaOpen(true);
+                }}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-red-600 via-amber-600 to-rose-600 hover:from-red-500 hover:to-amber-500 text-white font-black text-sm uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition duration-200 active:scale-95 cursor-pointer"
+              >
+                <Gift className="w-5 h-5" />
+                <span>¡Girar Mi Ruleta de Regalo!</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOrderSuccessInfo(null)}
+                className="text-xs text-slate-400 hover:text-white underline font-semibold transition py-1 cursor-pointer"
+              >
+                Continuar viendo el menú
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Lucky Wheel (Ruleta) Button */}
+      {isRuletaActiva && (
+        <button
+          onClick={() => {
+            setRuletaContext({ isPostCheckout: false });
+            setIsRuletaOpen(true);
+          }}
+          className="fixed bottom-20 left-4 sm:bottom-8 sm:left-8 z-40 flex items-center gap-2 bg-gradient-to-r from-amber-500 via-red-500 to-rose-600 text-white p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-[0_10px_30px_rgba(239,68,68,0.5)] hover:shadow-[0_15px_35px_rgba(239,68,68,0.7)] transition-all duration-300 hover:scale-105 active:scale-95 group/ruleta cursor-pointer border-2 border-amber-300/40"
+          title="¡Gira la Ruleta y Gana!"
+        >
+          <div className="relative flex items-center justify-center">
+            <Gift className="h-6 w-6 text-amber-200 shrink-0 group-hover/ruleta:rotate-12 transition-transform duration-300 animate-bounce" />
+            <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-amber-300 animate-ping opacity-75"></span>
+          </div>
+          <div className="text-left leading-tight hidden sm:block">
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-200 block">Ruleta</span>
+            <span className="text-xs font-black uppercase tracking-wider block">¡Gira y Gana!</span>
+          </div>
+        </button>
+      )}
+
+      {/* Ruleta Modal Overlay */}
+      {isRuletaOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-xl max-h-[92vh] overflow-y-auto rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl">
+            <RuletaNegocio
+              slug={restaurant.slug}
+              restaurantInfo={{
+                name: restaurant.name,
+                logoUrl: restaurant.logoUrl,
+                whatsapp: restaurant.whatsappNumber || (restaurant as any).whatsapp,
+              }}
+              initialCustomerName={customerName}
+              initialCustomerPhone={customerPhone}
+              orderContext={ruletaContext || undefined}
+              onPrizeWon={async (prize) => {
+                if (prize.nombreCliente && !customerName) {
+                  setCustomerName(prize.nombreCliente);
+                }
+                if (prize.telefonoCliente && !customerPhone) {
+                  setCustomerPhone(prize.telefonoCliente);
+                }
+                if (prize.codigoCupon) {
+                  setInputCouponCode(prize.codigoCupon);
+                  setValidatingCoupon(true);
+                  setCouponError("");
+                  const res = await validateCouponAction(restaurant.id, prize.codigoCupon, cartTotal);
+                  setValidatingCoupon(false);
+                  if (res.coupon) {
+                    setAppliedCoupon(res.coupon);
+                  }
+                }
+              }}
+              onClose={() => setIsRuletaOpen(false)}
+              isEmbedded={true}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Split Bill Modal */}
       {selectedTable && selectedTable !== "Domicilio" && (

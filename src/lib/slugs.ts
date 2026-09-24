@@ -1,6 +1,9 @@
 import { prismaTenant } from "@/lib/db";
 
 export async function findRestaurantBySlugOrHistory(slug: string) {
+  if (!slug || typeof slug !== "string") {
+    return { restaurant: null, isRedirect: false, targetSlug: null };
+  }
   const cleanSlug = slug.toLowerCase().trim();
 
   // 1. Try finding by current active slug
