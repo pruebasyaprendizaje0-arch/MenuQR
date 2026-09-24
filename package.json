@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "node .next/standalone/server.js",
     "lint": "eslint .",
-    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/split-bill.test.ts && npx tsx src/lib/batch-dishes.test.ts && npx tsx src/lib/impersonation.test.ts && npx tsx src/lib/ruleta-flow.test.ts && npx tsx src/lib/element-filters.test.ts"
+    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/split-bill.test.ts && npx tsx src/lib/batch-dishes.test.ts && npx tsx src/lib/impersonation.test.ts && npx tsx src/lib/ruleta-flow.test.ts"
   },
   "engines": {
     "node": ">=20.9.0",

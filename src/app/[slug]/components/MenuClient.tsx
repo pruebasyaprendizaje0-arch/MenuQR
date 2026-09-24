@@ -37,8 +37,6 @@ import {
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import RuletaNegocio from "@/components/Ruleta/RuletaNegocio";
-import { ElementFiltersBar } from "@/components/Menu/ElementFiltersBar";
-import { ElementFiltersConfig } from "@/lib/element-filters-types";
 
 type Dish = {
   id: string;
@@ -265,24 +263,6 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       }
     }
     checkRuletaConfig();
-  }, [restaurant.slug]);
-
-  // Element / Ingredient Filters Config State
-  const [elementFiltersConfig, setElementFiltersConfig] = useState<ElementFiltersConfig | null>(null);
-
-  useEffect(() => {
-    async function checkElementFiltersConfig() {
-      try {
-        const res = await fetch(`/api/filtros/config/${restaurant.slug}`);
-        const data = await res.json();
-        if (data && data.success && data.config) {
-          setElementFiltersConfig(data.config);
-        }
-      } catch (err) {
-        console.error("Error al consultar filtros de ingredientes:", err);
-      }
-    }
-    checkElementFiltersConfig();
   }, [restaurant.slug]);
 
   // Coupon State
@@ -1593,16 +1573,6 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 </button>
               </div>
             </div>
-
-            {/* Filtro Interactivo de Ingredientes / Proteínas Clave (Modular - Controlado por Switch) */}
-            {elementFiltersConfig && elementFiltersConfig.enabled && (
-              <ElementFiltersBar
-                config={elementFiltersConfig}
-                categories={restaurant.categories}
-                themeColor={restaurant.themeColor}
-                onAddToCart={addToCart}
-              />
-            )}
 
             {/* Popular Dishes Slider */}
             {(() => {
