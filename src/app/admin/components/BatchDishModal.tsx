@@ -15,9 +15,12 @@ import {
   Layers, 
   Info, 
   Check, 
-  AlertCircle 
+  AlertCircle,
+  Image as ImageIcon,
+  ExternalLink
 } from "lucide-react";
 import { createBatchDishesAction, BatchDishInput } from "@/lib/actions";
+import { extractDishRow, fixMojibake } from "@/lib/batch-dishes-parser";
 
 interface BatchDishModalProps {
   isOpen: boolean;
@@ -76,7 +79,7 @@ export default function BatchDishModal({
         Descripcion: "Mozzarella, gorgonzola, parmesano reggiano y queso de cabra.",
         Precio: 14.00,
         Disponible: "SI",
-        URL_Imagen: "",
+        URL_Imagen: "https://images.unsplash.com/photo-1513104890138-7c749659a591?w=500",
       },
       {
         Categoria: defaultCats[1] || "Pastas",
@@ -84,7 +87,7 @@ export default function BatchDishModal({
         Descripcion: "Pasta fresca al huevo con crema de queso parmesano y pechuga a la parrilla.",
         Precio: 15.50,
         Disponible: "SI",
-        URL_Imagen: "",
+        URL_Imagen: "https://images.unsplash.com/photo-1645112411341-6c4fd023714a?w=500",
       },
       {
         Categoria: defaultCats[2] || "Bebidas",
@@ -92,7 +95,7 @@ export default function BatchDishModal({
         Descripcion: "Jugo de limón natural recién exprimido con hojas de menta fresca y hielo.",
         Precio: 3.50,
         Disponible: "SI",
-        URL_Imagen: "",
+        URL_Imagen: "https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=500",
       },
     ];
 
@@ -105,7 +108,7 @@ export default function BatchDishModal({
       { wch: 45 }, // Descripcion
       { wch: 12 }, // Precio
       { wch: 12 }, // Disponible
-      { wch: 35 }, // URL_Imagen
+      { wch: 40 }, // URL_Imagen
     ];
 
     const workbook = XLSX.utils.book_new();
@@ -114,7 +117,17 @@ export default function BatchDishModal({
     if (format === "xlsx") {
       XLSX.writeFile(workbook, "plantilla_menuqr_platos.xlsx");
     } else {
-      XLSX.writeFile(workbook, "plantilla_menuqr_platos.csv", { bookType: "csv" });
+      // Generar CSV con BOM UTF-8 (\uFEFF) para máxima compatibilidad con Microsoft Excel en Windows
+      const csvData = "\uFEFF" + XLSX.utils.sheet_to_csv(worksheet);
+      const blob = new Blob([csvData], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", "plantilla_menuqr_platos.csv");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -125,10 +138,26 @@ export default function BatchDishModal({
     setFile(uploadedFile);
 
     try {
-      const buffer = await uploadedFile.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
+      const isCsv = uploadedFile.name.toLowerCase().endsWith(".csv");
+      const rawBuffer = await uploadedFile.arrayBuffer();
+      let workbook: XLSX.WorkBook;
+
+      if (isCsv) {
+        // Soporte de codificación para CSVs de Windows (ANSI/Windows-1252 o UTF-8)
+        let textContent = new TextDecoder("utf-8").decode(rawBuffer);
+        if (textContent.includes("\uFFFD")) {
+          try {
+            textContent = new TextDecoder("windows-1252").decode(rawBuffer);
+          } catch {
+            // fallback
+          }
+        }
+        workbook = XLSX.read(textContent, { type: "string", raw: true });
+      } else {
+        workbook = XLSX.read(rawBuffer, { type: "array", codepage: 65001 });
+      }
+
       const firstSheetName = workbook.SheetNames[0];
-      
       if (!firstSheetName) {
         setErrorMsg("El archivo no contiene ninguna hoja válida.");
         return;
@@ -145,50 +174,36 @@ export default function BatchDishModal({
       const mappedRows: ParsedDishRow[] = [];
 
       rawData.forEach((row, index) => {
-        // Flexible key lookups
-        const getVal = (possibleKeys: string[]) => {
-          for (const key of Object.keys(row)) {
-            const cleanKey = key.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            for (const target of possibleKeys) {
-              if (cleanKey === target.toLowerCase()) {
-                return String(row[key] ?? "").trim();
-              }
-            }
-          }
-          return "";
-        };
+        // Extraer campos de forma tolerante a cualquier formato de cabecera y números
+        const extracted = extractDishRow(row);
 
-        const categoryName = getVal(["categoria", "category", "seccion", "tipo"]) || "General";
-        const name = getVal(["nombre", "name", "plato", "nombre del plato", "item"]);
-        const description = getVal(["descripcion", "description", "detalle"]);
-        const rawPrice = getVal(["precio", "price", "costo", "valor"]);
-        const rawAvailable = getVal(["disponible", "available", "activo", "estado"]).toUpperCase();
-        const imageUrl = getVal(["url_imagen", "imagen", "image", "url", "imageurl", "foto"]);
-
-        // Clean price
-        const parsedPrice = parseFloat(rawPrice.replace(/[^0-9.-]+/g, "")) || 0;
-        const isAvailable = rawAvailable !== "NO" && rawAvailable !== "FALSE" && rawAvailable !== "0";
+        const categoryName = extracted.categoryName || "General";
+        const name = extracted.name || "";
+        const description = extracted.description || "";
+        const price = extracted.price;
+        const isAvailable = extracted.isAvailable;
+        const imageUrl = extracted.imageUrl;
 
         const isNewCategory = !existingCategoryNames.has(categoryName.toLowerCase());
 
         let hasError = false;
         let errorMessage = "";
 
-        if (!name || name.length === 0) {
+        if (!name || name.trim().length === 0) {
           hasError = true;
           errorMessage = "Falta el nombre del plato.";
-        } else if (parsedPrice < 0 || isNaN(parsedPrice)) {
+        } else if (price < 0 || isNaN(price)) {
           hasError = true;
           errorMessage = "El precio debe ser un número mayor o igual a 0.";
         }
 
-        // Only include if at least name or category was filled
-        if (name || categoryName !== "General" || rawPrice) {
+        // Incluir fila si al menos tiene nombre, categoría o precio
+        if (name || categoryName !== "General" || price > 0 || imageUrl) {
           mappedRows.push({
             id: `row-${index}-${Date.now()}`,
             name,
             description,
-            price: parsedPrice,
+            price,
             categoryName,
             isAvailable,
             imageUrl: imageUrl || undefined,
@@ -243,7 +258,7 @@ export default function BatchDishModal({
         if (row.id !== id) return row;
         const updated = { ...row, [field]: value };
         
-        // Re-evaluate error state
+        // Re-evaluar estado de error
         if (field === "name" || field === "price") {
           if (!updated.name || updated.name.trim().length === 0) {
             updated.hasError = true;
@@ -308,7 +323,7 @@ export default function BatchDishModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md overflow-y-auto animate-fadeIn">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden my-auto flex flex-col max-h-[92vh]">
+      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-3xl shadow-2xl overflow-hidden my-auto flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-slate-800/80 bg-slate-950/40">
           <div className="flex items-center gap-3">
@@ -323,7 +338,7 @@ export default function BatchDishModal({
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Importa decenas de platos en segundos con categorías y precios automáticos.
+                Importa decenas de platos en segundos con categorías, precios y fotos automáticas.
               </p>
             </div>
           </div>
@@ -361,7 +376,7 @@ export default function BatchDishModal({
                 <span>Paso 1: Descarga la Plantilla de Ejemplo</span>
               </div>
               <p className="text-xs text-slate-400 max-w-md">
-                Usa nuestro archivo estructurado para llenar tus platos sin errores de formato.
+                Usa nuestra plantilla estructurada con soporte completo de tildes, precios e imágenes.
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -379,7 +394,7 @@ export default function BatchDishModal({
                 className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all"
               >
                 <Download className="h-4 w-4" />
-                CSV (.csv)
+                CSV con UTF-8 (.csv)
               </button>
             </div>
           </div>
@@ -424,7 +439,7 @@ export default function BatchDishModal({
                   {file ? file.name : "Arrastra tu archivo aquí o haz clic para examinar"}
                 </p>
                 <p className="text-xs text-slate-400">
-                  Soporta archivos <strong className="text-slate-300">.xlsx</strong>, <strong className="text-slate-300">.xls</strong> y <strong className="text-slate-300">.csv</strong>
+                  Soporta archivos <strong className="text-slate-300">.xlsx</strong>, <strong className="text-slate-300">.xls</strong> y <strong className="text-slate-300">.csv</strong> con cualquier orden de columnas
                 </p>
               </div>
               {file && (
@@ -482,17 +497,19 @@ export default function BatchDishModal({
 
               {/* Table */}
               <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950/40">
-                <div className="max-h-72 overflow-y-auto custom-scrollbar">
+                <div className="max-h-80 overflow-y-auto custom-scrollbar">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px] z-10">
                       <tr>
                         <th className="py-3 px-3">Estado</th>
+                        <th className="py-3 px-3 w-12 text-center">Foto</th>
                         <th className="py-3 px-3">Categoría</th>
                         <th className="py-3 px-3">Nombre del Plato</th>
                         <th className="py-3 px-3">Descripción</th>
+                        <th className="py-3 px-3 w-44">URL Imagen</th>
                         <th className="py-3 px-3 w-24">Precio ($)</th>
-                        <th className="py-3 px-3 w-20 text-center">Disp.</th>
-                        <th className="py-3 px-3 w-10 text-center"></th>
+                        <th className="py-3 px-3 w-16 text-center">Disp.</th>
+                        <th className="py-3 px-3 w-8 text-center"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 text-slate-300">
@@ -526,6 +543,24 @@ export default function BatchDishModal({
                             )}
                           </td>
 
+                          {/* Foto Thumbnail */}
+                          <td className="py-2.5 px-3 text-center">
+                            <div className="h-9 w-9 rounded-lg bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center mx-auto shrink-0 relative group">
+                              {row.imageUrl ? (
+                                <img
+                                  src={row.imageUrl}
+                                  alt={row.name || "Foto"}
+                                  className="h-full w-full object-cover"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                  }}
+                                />
+                              ) : (
+                                <ImageIcon className="h-4 w-4 text-slate-600" />
+                              )}
+                            </div>
+                          </td>
+
                           {/* Category */}
                           <td className="py-2.5 px-3">
                             <input
@@ -547,7 +582,7 @@ export default function BatchDishModal({
                                 row.hasError && !row.name
                                   ? "border-red-500/60 bg-red-500/10 text-red-300"
                                   : "border-transparent hover:border-slate-700 focus:border-amber-500/50"
-                              } rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:bg-slate-900 w-full min-w-[130px] font-medium`}
+                              } rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:bg-slate-900 w-full min-w-[120px] font-medium`}
                             />
                           </td>
 
@@ -558,8 +593,32 @@ export default function BatchDishModal({
                               value={row.description || ""}
                               onChange={(e) => handleUpdateRow(row.id, "description", e.target.value)}
                               placeholder="Opcional..."
-                              className="bg-transparent border border-transparent hover:border-slate-700 focus:border-amber-500/50 rounded px-1.5 py-0.5 text-xs text-slate-300 focus:outline-none focus:bg-slate-900 w-full min-w-[160px]"
+                              className="bg-transparent border border-transparent hover:border-slate-700 focus:border-amber-500/50 rounded px-1.5 py-0.5 text-xs text-slate-300 focus:outline-none focus:bg-slate-900 w-full min-w-[140px]"
                             />
+                          </td>
+
+                          {/* Image URL Input */}
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={row.imageUrl || ""}
+                                onChange={(e) => handleUpdateRow(row.id, "imageUrl", e.target.value)}
+                                placeholder="https://..."
+                                className="bg-transparent border border-transparent hover:border-slate-700 focus:border-amber-500/50 rounded px-1.5 py-0.5 text-[11px] text-slate-300 focus:outline-none focus:bg-slate-900 w-full min-w-[130px] truncate"
+                              />
+                              {row.imageUrl && (
+                                <a
+                                  href={row.imageUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-slate-500 hover:text-sky-400 p-1 rounded transition-colors shrink-0"
+                                  title="Abrir imagen en nueva pestaña"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              )}
+                            </div>
                           </td>
 
                           {/* Price */}
@@ -610,7 +669,7 @@ export default function BatchDishModal({
               <div className="flex items-start gap-2 text-[11px] text-slate-400 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
                 <Info className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
                 <p>
-                  <strong>Tip pro:</strong> Puedes editar el nombre, categoría y precio directamente en la tabla antes de confirmar. Las categorías nuevas identificadas se crearán de forma 100% automática.
+                  <strong>Tip pro:</strong> Puedes verificar y editar la categoría, nombre, descripción, URL de imagen y precio de cada plato directamente en la tabla antes de confirmar.
                 </p>
               </div>
             </div>

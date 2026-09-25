@@ -811,6 +811,8 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   return { success: true };
 }
 
+import { parsePriceValue, fixMojibake } from "@/lib/batch-dishes-parser";
+
 export interface BatchDishInput {
   name: string;
   description?: string;
@@ -830,7 +832,15 @@ export async function createBatchDishesAction(restaurantId: string, dishes: Batc
   }
 
   // Filter valid dishes with non-empty name
-  const validDishes = dishes.filter(d => d.name && d.name.trim().length > 0);
+  const validDishes = dishes
+    .map((d) => ({
+      ...d,
+      name: fixMojibake(d.name || "").trim(),
+      description: d.description ? fixMojibake(d.description).trim() : undefined,
+      categoryName: fixMojibake(d.categoryName || "General").trim(),
+    }))
+    .filter((d) => d.name.length > 0);
+
   if (validDishes.length === 0) {
     return { error: "Ningún registro contiene un nombre de plato válido." };
   }
@@ -878,8 +888,7 @@ export async function createBatchDishesAction(restaurantId: string, dishes: Batc
       const rawCat = (item.categoryName || "General").trim();
       const catId = categoryMap.get(rawCat.toLowerCase()) || existingCategories[0]?.id;
       
-      const parsedPrice = typeof item.price === "number" ? item.price : parseFloat(String(item.price)) || 0;
-      const cleanPrice = Math.max(0, isNaN(parsedPrice) ? 0 : parsedPrice);
+      const cleanPrice = parsePriceValue(item.price);
       
       return {
         name: item.name.trim(),
