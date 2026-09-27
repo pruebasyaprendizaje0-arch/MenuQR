@@ -33,7 +33,9 @@ import {
   ChevronUp,
   CalendarCheck,
   Gift,
-  Star
+  Star,
+  ArrowRight,
+  Zap
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -1894,6 +1896,109 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             })}
           </div>
         )}
+
+        {/* Footer Branding & Call to Action: Registra tu Negocio */}
+        <footer className="pt-8 pb-28 md:pb-14 mt-12 border-t border-slate-800/80" style={{ fontFamily: 'var(--font-outfit)' }}>
+          <div className="relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-slate-900/95 via-slate-900/80 to-slate-950/95 border border-amber-500/20 shadow-2xl p-6 sm:p-10 text-center">
+            {/* Subtle ambient lighting */}
+            <div className="absolute top-0 right-1/4 w-72 h-72 bg-gradient-to-br from-red-600/15 via-amber-500/10 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+            <div className="absolute bottom-0 left-1/4 w-72 h-72 bg-gradient-to-tr from-amber-600/15 via-orange-500/10 to-transparent rounded-full blur-3xl pointer-events-none"></div>
+
+            <div className="relative z-10 max-w-2xl mx-auto space-y-6">
+              {/* Pill Header Badge */}
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-amber-500/15 via-red-500/15 to-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] sm:text-xs font-black uppercase tracking-wider shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                <span>¿Tienes un Bar, Cafetería o Restaurante?</span>
+              </div>
+
+              {/* Headline */}
+              <div className="space-y-2.5">
+                <h3 className="text-xl sm:text-3xl font-black text-white tracking-tight leading-tight">
+                  Digitaliza tu menú y recibe pedidos directos a WhatsApp
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-xl mx-auto">
+                  Crea tu propio menú digital interactivo con código QR como el de <strong className="text-white">{restaurant.name}</strong>. Aumenta tus ventas con ruletas de premios, cartas con fotos y gestión de pedidos sin comisiones.
+                </p>
+              </div>
+
+              {/* Value Highlights */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 text-left">
+                <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
+                    <QrCode className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] sm:text-[11px] font-black text-white block truncate">Menú con QR</span>
+                    <span className="text-[9px] text-slate-400 block truncate">100% Interactivo</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] sm:text-[11px] font-black text-white block truncate">A WhatsApp</span>
+                    <span className="text-[9px] text-slate-400 block truncate">Pedidos directos</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center shrink-0">
+                    <Gift className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] sm:text-[11px] font-black text-white block truncate">Ruleta & Premios</span>
+                    <span className="text-[9px] text-slate-400 block truncate">Fideliza clientes</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center shrink-0">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] sm:text-[11px] font-black text-white block truncate">Sin Comisiones</span>
+                    <span className="text-[9px] text-slate-400 block truncate">Ventas directas</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* CTA Buttons */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
+                <Link
+                  href={`/registro?ref=${encodeURIComponent(restaurant.slug || "")}`}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 px-7 py-3.5 rounded-2xl bg-gradient-to-r from-red-600 via-amber-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white font-black text-sm uppercase tracking-wider shadow-xl shadow-red-600/20 hover:shadow-amber-500/30 transition-all duration-300 hover:scale-[1.03] active:scale-95 cursor-pointer"
+                >
+                  <span>🚀 Registra tu Negocio Gratis</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+                
+                <Link
+                  href="/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white font-bold text-xs transition-all border border-white/5 active:scale-95 cursor-pointer"
+                >
+                  <span>Conoce más de MenuQR Pro</span>
+                  <span className="text-amber-400 font-bold">↗</span>
+                </Link>
+              </div>
+
+              {/* Micro Powered By */}
+              <div className="pt-3 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Plataforma activa para bares, cafeterías y restaurantes</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <span>Powered by</span>
+                  <strong className="text-white font-black tracking-wide">MenuQR Pro</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </footer>
       </main>
 
       {/* Floating Cart Button (Visible if cart has items) */}

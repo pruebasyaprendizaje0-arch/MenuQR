@@ -233,9 +233,14 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
         </div>
       </main>
 
-      <footer className="max-w-4xl w-full mx-auto px-6 py-8 flex items-center justify-between text-xs text-slate-500 border-t border-slate-900 mt-8">
-        <p>© 2026 MenuQR Pro Ecuador.</p>
-        <Link href={`/${restaurant.slug}`} className="hover:text-slate-300 transition">Menú Digital</Link>
+      <footer className="max-w-4xl w-full mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400 border-t border-slate-900 mt-8">
+        <p>© 2026 MenuQR Pro.</p>
+        <div className="flex items-center gap-4">
+          <Link href={`/${restaurant.slug}`} className="hover:text-slate-300 transition">Menú de {restaurant.name}</Link>
+          <Link href={`/registro?ref=${encodeURIComponent(restaurant.slug || "")}`} className="text-amber-400 hover:text-amber-300 font-bold transition">
+            🚀 Registra tu Negocio
+          </Link>
+        </div>
       </footer>
     </div>
   );
