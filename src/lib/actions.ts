@@ -17,6 +17,7 @@ import {
   connectWhatsAppInstance,
   logoutWhatsAppInstance,
 } from "@/lib/evolution";
+import { sendOrderStatusNotification } from "@/lib/whatsapp/fsm";
 
 
 /**
@@ -2162,14 +2163,30 @@ export async function updateOrderStatusAction(
     const updatedOrder = await prisma.order.update({
       where: { id: orderId },
       data: updateData,
-      include: { restaurant: { select: { slug: true } } }
+      select: {
+        id: true,
+        orderNumber: true,
+        customerPhone: true,
+        restaurantId: true,
+        restaurant: { select: { slug: true } }
+      }
     });
+
+    if (updatedOrder.customerPhone && updatedOrder.restaurantId) {
+      sendOrderStatusNotification(
+        updatedOrder.restaurantId,
+        updatedOrder.customerPhone,
+        updatedOrder.orderNumber,
+        status
+      ).catch((err) => console.error("Error enviando notificación transaccional de WhatsApp:", err));
+    }
 
     revalidatePath(`/admin`);
     revalidatePath(`/${updatedOrder.restaurant.slug}`);
     revalidatePath(`/${updatedOrder.restaurant.slug}/rastreo`);
     revalidatePath(`/${updatedOrder.restaurant.slug}/repartidor`);
     return { success: true };
+
   } catch (error) {
     console.error("Error updating order status:", error);
     return { error: "No se pudo actualizar el estado del pedido." };

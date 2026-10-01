@@ -104,6 +104,7 @@ model Restaurant {
   ruletaGiros    RuletaGiro[]
   whatsappSessions WhatsAppSession[]
   whatsappLogs   WhatsAppLog[]
+  whatsappInstance WhatsAppInstance?
   whatsappBotEnabled Boolean @default(true)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
@@ -499,4 +500,23 @@ model WhatsAppLog {
   @@index([phone])
   @@index([restaurantId])
 }
+
+model WhatsAppInstance {
+  id             String     @id @default(uuid())
+  restaurantId   String     @unique
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  instanceName   String     @unique
+  status         String     @default("close") // open, connecting, close
+  qrcode         String?
+  pairingCode    String?
+  ownerJid       String?
+  profileName    String?
+  profilePicture String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([restaurantId])
+  @@index([instanceName])
+}
+
 

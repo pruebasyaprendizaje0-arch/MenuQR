@@ -71,3 +71,30 @@ ALTER TABLE "WhatsAppLog" ADD CONSTRAINT "WhatsAppLog_restaurantId_fkey" FOREIGN
 -- AlterTable
 ALTER TABLE "Restaurant" ADD COLUMN IF NOT EXISTS "whatsappBotEnabled" BOOLEAN NOT NULL DEFAULT true;
 
+-- CreateTable
+CREATE TABLE IF NOT EXISTS "WhatsAppInstance" (
+    "id" TEXT NOT NULL,
+    "restaurantId" TEXT NOT NULL,
+    "instanceName" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'close',
+    "qrcode" TEXT,
+    "pairingCode" TEXT,
+    "ownerJid" TEXT,
+    "profileName" TEXT,
+    "profilePicture" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "WhatsAppInstance_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX IF NOT EXISTS "WhatsAppInstance_restaurantId_key" ON "WhatsAppInstance"("restaurantId");
+CREATE UNIQUE INDEX IF NOT EXISTS "WhatsAppInstance_instanceName_key" ON "WhatsAppInstance"("instanceName");
+CREATE INDEX IF NOT EXISTS "WhatsAppInstance_restaurantId_idx" ON "WhatsAppInstance"("restaurantId");
+CREATE INDEX IF NOT EXISTS "WhatsAppInstance_instanceName_idx" ON "WhatsAppInstance"("instanceName");
+
+-- AddForeignKey
+ALTER TABLE "WhatsAppInstance" ADD CONSTRAINT "WhatsAppInstance_restaurantId_fkey" FOREIGN KEY ("restaurantId") REFERENCES "Restaurant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+

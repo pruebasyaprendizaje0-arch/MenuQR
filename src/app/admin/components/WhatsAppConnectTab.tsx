@@ -2,16 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  getWhatsAppInstanceStatusAction,
-  getWhatsAppQRCodeAction,
-  disconnectWhatsAppInstanceAction,
-} from "@/lib/actions";
-import {
   QrCode,
   CheckCircle2,
   RefreshCw,
   LogOut,
-  Smartphone,
   ShieldCheck,
   AlertCircle,
   MessageSquare,
@@ -29,13 +23,18 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await getWhatsAppInstanceStatusAction(restaurantId);
-      if (res.success && res.state) {
-        setConnectionState(res.state);
-        if (res.state === "open") {
+      const res = await fetch(`/api/admin/whatsapp/instance?restaurantId=${restaurantId}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (data.success && data.status) {
+        setConnectionState(data.status);
+        if (data.status === "open") {
           setQrBase64(null);
           setPairingCode(null);
         }
+      } else if (data.error) {
+        setErrorMsg(data.error);
       }
     } catch (err: any) {
       console.error("Error al obtener estado de WhatsApp:", err);
@@ -48,16 +47,19 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
     setIsRefreshing(true);
     setErrorMsg(null);
     try {
-      const res = await getWhatsAppQRCodeAction(restaurantId);
-      if (res.error) {
-        setErrorMsg(res.error);
-      } else if (res.success) {
-        if (res.state === "open") {
+      const res = await fetch(`/api/admin/whatsapp/qr?restaurantId=${restaurantId}`, {
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || `HTTP ${res.status}`);
+      } else if (data.success) {
+        if (data.state === "open") {
           setConnectionState("open");
           setQrBase64(null);
         } else {
-          setQrBase64(res.base64 || null);
-          setPairingCode(res.pairingCode || null);
+          setQrBase64(data.base64 || null);
+          setPairingCode(data.pairingCode || null);
           setConnectionState("connecting");
         }
       }
@@ -78,14 +80,24 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
       return;
     }
     setLoading(true);
-    const res = await disconnectWhatsAppInstanceAction(restaurantId);
-    if (res.error) {
-      alert(res.error);
-    } else {
-      setConnectionState("close");
-      setQrBase64(null);
+    try {
+      const res = await fetch(`/api/admin/whatsapp/instance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId, action: "disconnect" }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+      } else {
+        setConnectionState("close");
+        setQrBase64(null);
+      }
+    } catch (err: any) {
+      alert("Error al desconectar: " + err.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const formattedQrSrc = qrBase64

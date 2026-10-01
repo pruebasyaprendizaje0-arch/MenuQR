@@ -66,7 +66,20 @@ export async function processWhatsAppFSM(
         { whatsapp: { contains: phone } },
       ],
     },
-    select: { id: true, slug: true, name: true, whatsappBotEnabled: true },
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      whatsappBotEnabled: true,
+      bankName: true,
+      bankAccountType: true,
+      bankAccountNumber: true,
+      bankAccountName: true,
+      bankAccountDocument: true,
+      schedule: true,
+      address: true,
+      city: true,
+    },
   });
 
   if (matchedRestaurant) {
@@ -224,27 +237,37 @@ export async function processWhatsAppFSM(
 
       if (cleanText === "1" || cleanText === "menu" || cleanText === "carta" || cleanText === "ver menu") {
         newFallbackCount = 0;
-        responseText = `📱 *Carta Digital de ${restaurantName}*\n\nConsulta los platos, bebidas y promociones del día aquí:\n👉 ${menuUrl}\n\nEscribe *2* si deseas consultar el estado de un pedido en curso, o *3* para hablar con un asesor.`;
+        responseText = `📱 *Carta Digital de ${restaurantName}*\n\nConsulta los platos, bebidas y promociones del día aquí:\n👉 ${menuUrl}\n\nResponde con un número:\n1️⃣ Ver Menú\n2️⃣ Estado del Pedido\n3️⃣ Datos Bancarios\n4️⃣ Horarios y Ubicación\n5️⃣ Hablar con Personal`;
       } else if (cleanText === "2" || cleanText === "pedido" || cleanText === "estado" || cleanText === "orden") {
         nextState = "AWAITING_ORDER_ID" as WhatsAppBotState;
         newFallbackCount = 0;
         responseText = `🔎 *Consulta de Estado de Pedido*\n\nPor favor, escribe únicamente el número de tu pedido (ejemplo: *105* o *#105*):\n\n_(Escribe *MENU* para volver al menú principal)_`;
-      } else if (cleanText === "3" || cleanText === "soporte" || cleanText === "humano" || cleanText === "asesor" || cleanText === "ayuda") {
+      } else if (cleanText === "3" || cleanText === "pago" || cleanText === "banco" || cleanText === "cuenta" || cleanText === "transferencia") {
+        newFallbackCount = 0;
+        if (matchedRestaurant?.bankAccountNumber) {
+          responseText = `💳 *Datos para Pago o Transferencia (${restaurantName})*\n\n🏦 *Banco:* ${matchedRestaurant.bankName || "Pichincha"}\n📋 *Tipo de Cuenta:* ${matchedRestaurant.bankAccountType || "Ahorros"}\n🔢 *N° de Cuenta:* ${matchedRestaurant.bankAccountNumber}\n👤 *Titular:* ${matchedRestaurant.bankAccountName || restaurantName}\n🆔 *Identificación / RUC:* ${matchedRestaurant.bankAccountDocument || "N/A"}\n\nPor favor envía el comprobante por este chat para verificar tu pago.`;
+        } else {
+          responseText = `💳 *Datos de Pago (${restaurantName})*\n\nPuedes consultar con el personal o realizar tu pago al momento de retirar/recibir tu pedido.`;
+        }
+      } else if (cleanText === "4" || cleanText === "horario" || cleanText === "ubicacion" || cleanText === "direccion" || cleanText === "donde") {
+        newFallbackCount = 0;
+        responseText = `📍 *Ubicación y Horarios (${restaurantName})*\n\n🗺️ *Dirección:* ${matchedRestaurant?.address || "Consultar en la carta web"}${matchedRestaurant?.city ? `, ${matchedRestaurant.city}` : ""}\n🕒 *Horario:* ${matchedRestaurant?.schedule || "Abierto hoy"}\n📱 *Menú Web:* ${menuUrl}`;
+      } else if (cleanText === "5" || cleanText === "soporte" || cleanText === "humano" || cleanText === "asesor" || cleanText === "ayuda" || cleanText === "personal") {
         nextState = "IN_HUMAN_HANDOFF" as WhatsAppBotState;
         newHandoffUntil = new Date(Date.now() + HUMAN_HANDOFF_DURATION_MS);
         newFallbackCount = 0;
-        responseText = `👨‍🍳 *Atención Personalizada*\n\nUn asesor de ${restaurantName} atenderá tu mensaje a la brevedad. El bot automatizado se pausará durante 45 minutos.\n\n_(Si deseas reactivar el bot antes, escribe *BOT*)_`;
+        responseText = `👨‍🍳 *Atención Personalizada*\n\nUn integrante de nuestro equipo atenderá tu mensaje a la brevedad. El bot automatizado se pausará durante 45 minutos.\n\n_(Si deseas reactivar el bot antes, escribe *BOT*)_`;
       } else if (cleanText === "hola" || cleanText === "buenas" || cleanText === "hola!" || cleanText === "start") {
         newFallbackCount = 0;
-        responseText = `👋 ¡Hola ${senderName}! Bienvenido a *${restaurantName}*.\n\n¿En qué podemos ayudarte hoy?\n\n1️⃣ Ver Menú / Carta Digital\n2️⃣ Consultar Estado de mi Pedido\n3️⃣ Hablar con un Asesor Humano\n\nResponde únicamente con el número (*1*, *2* o *3*).`;
+        responseText = `👋 ¡Hola ${senderName}! Bienvenido a *${restaurantName}*.\n\n¿En qué podemos ayudarte hoy?\n\n1️⃣ Ver Menú / Carta Digital\n2️⃣ Consultar Estado de Pedido\n3️⃣ Datos para Transferencia\n4️⃣ Horarios y Ubicación\n5️⃣ Hablar con el Personal\n\nResponde únicamente con el número del *1* al *5*.`;
       } else {
         // Opción no reconocida -> Incrementar fallbacks
         newFallbackCount += 1;
         if (newFallbackCount >= 2) {
           newFallbackCount = 0;
-          responseText = `⚠️ No logramos entender tu solicitud.\n\nTe mostramos nuevamente nuestras opciones principales:\n\n1️⃣ Ver Menú / Carta Digital\n2️⃣ Consultar Estado de Pedido\n3️⃣ Hablar con un Asesor Humano\n\n👉 Responde *1*, *2* o *3*.`;
+          responseText = `⚠️ No logramos entender tu solicitud (2 de 2 intentos).\n\nTe mostramos nuevamente nuestras opciones principales:\n\n1️⃣ Ver Menú / Carta Digital\n2️⃣ Consultar Estado de Pedido\n3️⃣ Datos para Transferencia\n4️⃣ Horarios y Ubicación\n5️⃣ Hablar con el Personal\n\n👉 Responde con el número de tu opción (1-5).`;
         } else {
-          responseText = `🤖 Opción no válida.\n\nPor favor responde:\n1️⃣ Ver Menú\n2️⃣ Estado de Pedido\n3️⃣ Asesor Humano`;
+          responseText = `🤖 Opción no válida.\n\nPor favor responde con el número:\n1️⃣ Ver Menú\n2️⃣ Estado de Pedido\n3️⃣ Datos de Pago\n4️⃣ Ubicación\n5️⃣ Hablar con Personal`;
         }
       }
       break;
@@ -384,3 +407,54 @@ export async function processWhatsAppFSM(
 
   return { status: "success", sessionState: nextState, responseSent: false };
 }
+
+/**
+ * Envía notificaciones transaccionales automáticas al cliente cuando cambia el estado de su pedido
+ */
+export async function sendOrderStatusNotification(
+  restaurantId: string,
+  customerPhone: string,
+  orderNumber: number,
+  newStatus: string
+) {
+  try {
+    if (!customerPhone) return;
+
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { slug: true, name: true, whatsappBotEnabled: true },
+    });
+
+    if (!restaurant || restaurant.whatsappBotEnabled === false) return;
+
+    const instanceName = restaurant.slug;
+
+    let messageText = "";
+    if (newStatus === "CONFIRMED" || newStatus === "PREPARING" || newStatus === "IN_PREPARATION") {
+      messageText = `👨‍🍳 *¡Tu pedido #${orderNumber} ha sido CONFIRMADO!*\n\nRestaurante: *${restaurant.name}*\nEstado: En cocina en preparación.\n\nTe notificaremos por aquí cuando esté listo para retiro o entrega.`;
+    } else if (newStatus === "READY" || newStatus === "IN_TRANSIT") {
+      messageText = `🎉 *¡Tu pedido #${orderNumber} está LISTO!*\n\nRestaurante: *${restaurant.name}*\nEstado: Listo para entrega / retiro.\n\n¡Gracias por preferirnos!`;
+    } else if (newStatus === "CANCELLED") {
+      messageText = `❌ *Tu pedido #${orderNumber} ha sido CANCELADO.*\n\nRestaurante: *${restaurant.name}*\nSi tienes alguna duda, por favor contáctanos.`;
+    }
+
+    if (!messageText) return;
+
+    await sendWhatsAppPresence({
+      instance: instanceName,
+      to: customerPhone,
+      presence: "composing",
+      delay: 1500,
+    });
+
+    await sendWhatsAppText({
+      instance: instanceName,
+      to: customerPhone,
+      text: messageText,
+      delay: 2000,
+    });
+  } catch (error) {
+    console.error("[WhatsApp Transactional] Error enviando notificación:", error);
+  }
+}
+
