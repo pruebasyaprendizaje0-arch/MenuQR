@@ -472,6 +472,8 @@ function MapEmbedConfigField({
 
 import { TableSplitMonitor } from "./TableSplitMonitor";
 import BatchDishModal from "./BatchDishModal";
+import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
+
 
 export type VisitStats = {
   total: number;
@@ -494,7 +496,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -1533,6 +1535,17 @@ export function AdminDashboard({
             >
               <QrCode className="h-4 w-4" />
               Código QR
+            </button>
+            <button
+              onClick={() => setActiveTab("whatsapp")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "whatsapp" 
+                  ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-400 border-l-4 border-emerald-500 font-bold" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <MessageSquare className="h-4 w-4 text-emerald-400" />
+              <span>📱 Conectar WhatsApp</span>
             </button>
             <button
               onClick={() => setActiveTab("orders")}
@@ -5833,6 +5846,10 @@ export function AdminDashboard({
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === "whatsapp" && (
+          <WhatsAppConnectTab restaurantId={restaurant.id} restaurantSlug={restaurant.slug} />
         )}
       </main>
 

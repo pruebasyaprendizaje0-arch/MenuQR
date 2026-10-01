@@ -102,6 +102,9 @@ model Restaurant {
   manualSubscriptionPayments ManualSubscriptionPayment[]
   ruletaConfig   RuletaConfig?
   ruletaGiros    RuletaGiro[]
+  whatsappSessions WhatsAppSession[]
+  whatsappLogs   WhatsAppLog[]
+  whatsappBotEnabled Boolean @default(true)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -449,3 +452,51 @@ model RuletaGiro {
   @@index([telefono])
   @@index([ipAddress, fechaGiro])
 }
+
+enum WhatsAppBotState {
+  MENU
+  AWAITING_ORDER_ID
+  IN_HUMAN_HANDOFF
+}
+
+model WhatsAppSession {
+  id                String           @id @default(uuid())
+  restaurantId      String?
+  restaurant        Restaurant?      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  phone             String
+  remoteJid         String
+  customerName      String?
+  state             WhatsAppBotState @default(MENU)
+  fallbackCount     Int              @default(0)
+  humanHandoffUntil DateTime?
+  lastInteractionAt DateTime         @default(now())
+  metadata          String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  logs              WhatsAppLog[]
+
+  @@unique([phone, restaurantId])
+  @@index([remoteJid])
+  @@index([phone])
+  @@index([restaurantId])
+}
+
+model WhatsAppLog {
+  id           String           @id @default(uuid())
+  sessionId    String?
+  session      WhatsAppSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  restaurantId String?
+  restaurant   Restaurant?      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  messageId    String           @unique
+  direction    String           // INCOMING | OUTGOING
+  fromMe       Boolean          @default(false)
+  phone        String
+  text         String?
+  rawPayload   String?
+  createdAt    DateTime         @default(now())
+
+  @@index([messageId])
+  @@index([phone])
+  @@index([restaurantId])
+}
+

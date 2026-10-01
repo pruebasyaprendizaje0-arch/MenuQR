@@ -176,6 +176,34 @@ export function parseEvolutionPayload(payload: EvolutionWebhookPayload): ParsedW
 }
 
 /**
+ * Obtiene dinámicamente las credenciales de Evolution API leyendo process.env con fallback a la base de datos (SystemSetting)
+ */
+export async function getEvolutionCredentials(): Promise<{ baseUrl: string; apiKey: string }> {
+  let baseUrl = process.env.EVOLUTION_API_URL || "";
+  let apiKey = process.env.EVOLUTION_API_KEY || "";
+
+  if (!baseUrl || !apiKey) {
+    try {
+      const { prisma } = await import("@/lib/prisma");
+      const settings = await prisma.systemSetting.findMany({
+        where: { key: { in: ["evolution_api_url", "evolution_api_key"] } },
+      });
+      const settingMap = new Map(settings.map((s) => [s.key, s.value]));
+      if (!baseUrl) baseUrl = settingMap.get("evolution_api_url") || "";
+      if (!apiKey) apiKey = settingMap.get("evolution_api_key") || "";
+    } catch (err) {
+      console.warn("[Evolution API Config] Warning al buscar SystemSetting:", err);
+    }
+  }
+
+  if (baseUrl && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+    baseUrl = `http://${baseUrl}`;
+  }
+
+  return { baseUrl, apiKey };
+}
+
+/**
  * Envía un mensaje de texto plano a través de Evolution API v2.3.7
  */
 export async function sendWhatsAppText({
@@ -184,8 +212,7 @@ export async function sendWhatsAppText({
   text,
   delay = 1200,
 }: SendMessageOptions): Promise<{ success: boolean; data?: any; error?: string }> {
-  const baseUrl = process.env.EVOLUTION_API_URL;
-  const apiKey = process.env.EVOLUTION_API_KEY;
+  const { baseUrl, apiKey } = await getEvolutionCredentials();
   const instanceName = instance || process.env.EVOLUTION_INSTANCE_NAME || "menuqr";
 
   if (!baseUrl || !apiKey) {
@@ -197,6 +224,7 @@ export async function sendWhatsAppText({
   const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
   const endpoint = `${cleanBaseUrl}/message/sendText/${instanceName}`;
   const formattedNumber = to.includes("@") ? to : `${to}@s.whatsapp.net`;
+
 
   console.log(`[Evolution API Client] Enviando mensaje a ${formattedNumber} via ${endpoint}...`);
 
@@ -236,3 +264,195 @@ export async function sendWhatsAppText({
     return { success: false, error: error.message || "Error al conectar con Evolution API" };
   }
 }
+
+export interface SendPresenceOptions {
+  instance?: string;
+  to: string;
+  presence: "composing" | "recording" | "paused";
+  delay?: number;
+}
+
+/**
+ * Envía el estado de presencia (escribiendo/composing) a WhatsApp vía Evolution API v2
+ */
+export async function sendWhatsAppPresence({
+  instance,
+  to,
+  presence = "composing",
+  delay = 1200,
+}: SendPresenceOptions): Promise<{ success: boolean; error?: string }> {
+  const { baseUrl, apiKey } = await getEvolutionCredentials();
+  const instanceName = instance || process.env.EVOLUTION_INSTANCE_NAME || "menuqr";
+
+  if (!baseUrl || !apiKey) {
+    return { success: false, error: "EVOLUTION_API_URL o EVOLUTION_API_KEY no configurados" };
+  }
+
+  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+  const endpoint = `${cleanBaseUrl}/chat/sendPresence/${instanceName}`;
+  const formattedNumber = to.includes("@") ? to : `${to}@s.whatsapp.net`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: apiKey,
+      },
+      body: JSON.stringify({
+        number: formattedNumber,
+        presence,
+        delay,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return { success: false, error: `HTTP ${response.status}: ${errText}` };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.warn("[Evolution API Presence Warning]:", error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Obtiene el estado de conexión de una instancia en Evolution API v2
+ */
+export async function getWhatsAppConnectionState(instanceName: string): Promise<{ state: "open" | "connecting" | "close" | "unknown"; raw?: any; error?: string }> {
+  const { baseUrl, apiKey } = await getEvolutionCredentials();
+
+  if (!baseUrl || !apiKey) {
+    return { state: "unknown", error: "Configuración de Evolution API incompleta. Ingresa EVOLUTION_API_URL y EVOLUTION_API_KEY en tu entorno o en la consola SuperAdmin." };
+  }
+
+  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+  const endpoint = `${cleanBaseUrl}/instance/connectionState/${instanceName}`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers: { apikey: apiKey },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return { state: "unknown", error: data.message || `HTTP ${response.status}`, raw: data };
+    }
+
+    const state = data.instance?.state || data.state || "unknown";
+    return { state, raw: data };
+  } catch (err: any) {
+    const isFetchFailed = err.name === "TypeError" || err.message?.includes("fetch failed");
+    const friendlyError = isFetchFailed
+      ? `No se pudo conectar con el servidor de Evolution API (${cleanBaseUrl}). Si ejecutas localmente en tu PC, configura EVOLUTION_API_URL en el archivo .env con una URL/IP pública accesible.`
+      : err.message;
+    return { state: "unknown", error: friendlyError };
+  }
+}
+
+/**
+ * Solicita el código QR en Base64 o Pairing Code para conectar una instancia en Evolution API v2
+ */
+export async function connectWhatsAppInstance(instanceName: string): Promise<{ success: boolean; qrcode?: string; base64?: string; pairingCode?: string; state?: string; error?: string }> {
+  const { baseUrl, apiKey } = await getEvolutionCredentials();
+
+  if (!baseUrl || !apiKey) {
+    return { success: false, error: "EVOLUTION_API_URL o EVOLUTION_API_KEY no configurados" };
+  }
+
+  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+
+  try {
+    const endpoint = `${cleanBaseUrl}/instance/connect/${instanceName}`;
+    let response = await fetch(endpoint, {
+      method: "GET",
+      headers: { apikey: apiKey },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10000),
+    });
+
+    let resData = await response.json();
+
+    // Si la instancia no existe (HTTP 404), la creamos automáticamente con webhook suscrito
+    if (response.status === 404 || resData.error?.includes("not found")) {
+      const createEndpoint = `${cleanBaseUrl}/instance/create`;
+      const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://menuqr.ubicame.cc"}/api/webhook/whatsapp`;
+
+      const createRes = await fetch(createEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: apiKey,
+        },
+        body: JSON.stringify({
+          instanceName,
+          token: apiKey,
+          qrcode: true,
+          integration: "WHATSAPP-BAILEYS",
+          webhook: webhookUrl,
+          webhook_by_events: false,
+          events: ["MESSAGES_UPSERT", "SEND_MESSAGE", "CONNECTION_UPDATE"],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      resData = await createRes.json();
+    }
+
+    const base64 = resData.base64 || resData.qrcode?.base64 || resData.code;
+    const pairingCode = resData.pairingCode;
+    const state = resData.instance?.state || resData.state;
+
+    return {
+      success: true,
+      base64,
+      pairingCode,
+      state,
+    };
+  } catch (error: any) {
+    console.error("[Evolution API Connect Exception]:", error);
+    const isFetchFailed = error.name === "TypeError" || error.message?.includes("fetch failed");
+    const friendlyError = isFetchFailed
+      ? `Imposible conectar con el servidor de Evolution API (${cleanBaseUrl}). Asegúrate de configurar la URL pública o IP accesible desde tu máquina de desarrollo.`
+      : error.message || "Error al conectar con Evolution API";
+    return { success: false, error: friendlyError };
+  }
+}
+
+/**
+ * Desconecta (Logout) una instancia de WhatsApp en Evolution API v2
+ */
+export async function logoutWhatsAppInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
+  const { baseUrl, apiKey } = await getEvolutionCredentials();
+
+  if (!baseUrl || !apiKey) {
+    return { success: false, error: "EVOLUTION_API_URL o EVOLUTION_API_KEY no configurados" };
+  }
+
+  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+  const endpoint = `${cleanBaseUrl}/instance/logout/${instanceName}`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "DELETE",
+      headers: { apikey: apiKey },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return { success: false, error: errText };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+

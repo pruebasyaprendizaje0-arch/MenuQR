@@ -20,7 +20,8 @@ import {
   reassignRestaurantOwnerAction
   ,createManualSubscriptionPaymentAction,
   approveManualSubscriptionPaymentAction,
-  rejectManualSubscriptionPaymentAction
+  rejectManualSubscriptionPaymentAction,
+  toggleWhatsAppBotAction
 } from "@/lib/actions";
 import { 
   Building, 
@@ -72,6 +73,7 @@ type Restaurant = {
   email: string;
   logoUrl: string | null;
   whatsappNumber: string;
+  whatsappBotEnabled?: boolean;
   locality?: string | null;
   address?: string | null;
   slogan?: string | null;
@@ -201,6 +203,23 @@ export function SuperAdminDashboard({
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentReceiptUrl, setPaymentReceiptUrl] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
+
+  // WhatsApp Bot State per restaurant
+  const [waBotStates, setWaBotStates] = useState<Record<string, boolean>>({});
+
+  const isBotActive = (res: Restaurant) => {
+    return waBotStates[res.id] !== undefined ? waBotStates[res.id] : (res.whatsappBotEnabled ?? true);
+  };
+
+  const handleToggleBot = async (restaurantId: string, currentStatus: boolean) => {
+    const newStatus = !currentStatus;
+    setWaBotStates(prev => ({ ...prev, [restaurantId]: newStatus }));
+    const res = await toggleWhatsAppBotAction(restaurantId, newStatus);
+    if (res?.error) {
+      alert(res.error);
+      setWaBotStates(prev => ({ ...prev, [restaurantId]: currentStatus }));
+    }
+  };
 
   // Reassign / Adjudicate Modal State
   const [reassignModalTarget, setReassignModalTarget] = useState<Restaurant | null>(null);
@@ -811,6 +830,26 @@ export function SuperAdminDashboard({
                                   <div className="text-xs text-slate-300 flex items-center gap-1.5">
                                     <Smartphone className="h-3.5 w-3.5 text-slate-500" />
                                     {res.whatsappNumber}
+                                  </div>
+                                  <div className="pt-1.5">
+                                    {(() => {
+                                      const botActive = isBotActive(res);
+                                      return (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleBot(res.id, botActive)}
+                                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold border transition cursor-pointer ${
+                                            botActive
+                                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                                              : "bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20"
+                                          }`}
+                                          title={botActive ? "Bot de WhatsApp ACTIVO. Clic para desactivar" : "Bot de WhatsApp INACTIVO. Clic para activar"}
+                                        >
+                                          <span className={`h-2 w-2 rounded-full ${botActive ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`} />
+                                          {botActive ? "Bot WhatsApp: ON" : "Bot WhatsApp: OFF"}
+                                        </button>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                               </td>

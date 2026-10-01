@@ -112,6 +112,7 @@ export default async function SuperAdminPage() {
       userName: owner?.name || "Usuario",
       email: owner?.email || "",
       whatsappNumber: r.whatsapp,
+      whatsappBotEnabled: r.whatsappBotEnabled ?? true,
       qrCobroUrl: r.qrCobroUrl,
       leadStatus: r.leadStatus || "LEAD_NUEVO",
       nextFollowUpAt: r.nextFollowUpAt ? toIso(r.nextFollowUpAt) : null,
