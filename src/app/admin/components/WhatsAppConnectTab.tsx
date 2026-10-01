@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   QrCode,
   CheckCircle2,
@@ -11,15 +11,24 @@ import {
   MessageSquare,
   Sparkles,
   Zap,
+  Loader2,
 } from "lucide-react";
 
 export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restaurantId: string; restaurantSlug: string }) {
+  const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [connectionState, setConnectionState] = useState<"open" | "connecting" | "close" | "unknown">("unknown");
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Asegurar el montaje limpio del componente para evitar React Hydration Error (#418)
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const checkStatus = useCallback(async () => {
     try {
@@ -32,6 +41,7 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
         if (data.status === "open") {
           setQrBase64(null);
           setPairingCode(null);
+          setErrorMsg(null);
         }
       } else if (data.error) {
         setErrorMsg(data.error);
@@ -57,6 +67,7 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
         if (data.state === "open") {
           setConnectionState("open");
           setQrBase64(null);
+          setPairingCode(null);
         } else {
           setQrBase64(data.base64 || null);
           setPairingCode(data.pairingCode || null);
@@ -71,9 +82,33 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
     }
   }, [restaurantId]);
 
+  // Carga inicial al montar el componente
   useEffect(() => {
-    checkStatus();
-  }, [checkStatus]);
+    if (isMounted) {
+      checkStatus();
+    }
+  }, [isMounted, checkStatus]);
+
+  // Polling automático mientras está en estado "connecting" o con QR activo
+  useEffect(() => {
+    if (isMounted && connectionState === "connecting") {
+      pollingTimerRef.current = setInterval(() => {
+        checkStatus();
+      }, 5000);
+    } else {
+      if (pollingTimerRef.current) {
+        clearInterval(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (pollingTimerRef.current) {
+        clearInterval(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
+    };
+  }, [isMounted, connectionState, checkStatus]);
 
   const handleDisconnect = async () => {
     if (!confirm("¿Estás seguro de desconectar esta cuenta de WhatsApp? El bot dejará de responder automáticamente hasta que vuelvas a vincular el QR.")) {
@@ -92,6 +127,7 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
       } else {
         setConnectionState("close");
         setQrBase64(null);
+        setPairingCode(null);
       }
     } catch (err: any) {
       alert("Error al desconectar: " + err.message);
@@ -99,6 +135,16 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
       setLoading(false);
     }
   };
+
+  // Render inicial para garantizar Hydration sin discrepancias servidor/cliente
+  if (!isMounted) {
+    return (
+      <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-12 text-center space-y-3 max-w-4xl mx-auto">
+        <Loader2 className="h-8 w-8 text-emerald-400 animate-spin mx-auto" />
+        <p className="text-xs text-slate-400">Cargando panel de vinculación de WhatsApp...</p>
+      </div>
+    );
+  }
 
   const formattedQrSrc = qrBase64
     ? qrBase64.startsWith("data:")
@@ -131,7 +177,7 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
           type="button"
           onClick={checkStatus}
           disabled={loading || isRefreshing}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-750 border border-slate-700 transition shrink-0"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-750 border border-slate-700 transition shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
           Actualizar Estado
@@ -237,8 +283,9 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
                   </div>
                 )}
 
-                <p className="text-[11px] text-slate-400">
-                  ⏳ El código QR se actualiza periódicamente. Si expira, presiona regenerar.
+                <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
+                  <RefreshCw className="h-3 w-3 text-emerald-400 animate-spin" />
+                  Verificando estado automáticamente cada 5 segundos...
                 </p>
               </div>
             ) : (
@@ -253,11 +300,15 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
             <button
               type="button"
               onClick={loadQRCode}
-              disabled={isRefreshing}
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-600/20 transition duration-200"
+              disabled={isRefreshing || loading}
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-600/20 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-              {formattedQrSrc ? "Regenerar Código QR" : "Generar Código QR de WhatsApp"}
+              {isRefreshing
+                ? "Cargando QR..."
+                : formattedQrSrc
+                ? "Regenerar Código QR"
+                : "Generar Código QR de WhatsApp"}
             </button>
           </div>
 

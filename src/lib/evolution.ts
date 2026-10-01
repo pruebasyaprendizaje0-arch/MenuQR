@@ -368,18 +368,18 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{ s
   const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
 
   try {
-    const endpoint = `${cleanBaseUrl}/instance/connect/${instanceName}`;
-    let response = await fetch(endpoint, {
+    const connectEndpoint = `${cleanBaseUrl}/instance/connect/${instanceName}`;
+    let response = await fetch(connectEndpoint, {
       method: "GET",
       headers: { apikey: apiKey },
       cache: "no-store",
       signal: AbortSignal.timeout(10000),
     });
 
-    let resData = await response.json();
+    let resData = await response.json().catch(() => ({}));
 
-    // Si la instancia no existe (HTTP 404), la creamos automáticamente con webhook suscrito
-    if (response.status === 404 || resData.error?.includes("not found")) {
+    // Si la instancia NO existe (HTTP 404 o mensaje 'not found'), intentamos crearla con el esquema exacto de Evolution API v2
+    if (response.status === 404 || resData.error?.includes("not found") || resData.message?.includes("not found")) {
       const createEndpoint = `${cleanBaseUrl}/instance/create`;
       const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://menuqr.ubicame.cc"}/api/webhook/whatsapp`;
 
@@ -401,16 +401,54 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{ s
         signal: AbortSignal.timeout(10000),
       });
 
-      resData = await createRes.json();
+      const createData = await createRes.json().catch(() => ({}));
+
+      // Fallback para conflicto (409 Conflict o ya existe): consultar /instance/connect sin fallar 500
+      if (
+        createRes.status === 409 ||
+        createData.error?.includes("already exists") ||
+        createData.message?.includes("already exists") ||
+        createData.error?.includes("in use")
+      ) {
+        console.log(`[Evolution API] Instancia "${instanceName}" ya registrada (409 Conflict). Ejecutando fallback a /instance/connect...`);
+        const retryRes = await fetch(connectEndpoint, {
+          method: "GET",
+          headers: { apikey: apiKey },
+          cache: "no-store",
+          signal: AbortSignal.timeout(10000),
+        });
+        resData = await retryRes.json().catch(() => ({}));
+      } else if (!createRes.ok) {
+        return {
+          success: false,
+          error: createData.message || createData.error || `Error al crear instancia en Evolution API (HTTP ${createRes.status})`,
+        };
+      } else {
+        resData = createData;
+      }
     }
 
-    const base64 = resData.base64 || resData.qrcode?.base64 || resData.code;
-    const pairingCode = resData.pairingCode;
-    const state = resData.instance?.state || resData.state;
+    // Extraer y sanitizar Base64 de la respuesta (data.base64 o data.qrcode.base64 o data.code)
+    let rawBase64: string | null =
+      resData.base64 ||
+      resData.qrcode?.base64 ||
+      resData.code ||
+      resData.qrcode?.code ||
+      null;
+
+    if (rawBase64 && typeof rawBase64 === "string") {
+      rawBase64 = rawBase64.trim();
+      if (!rawBase64.startsWith("data:image/")) {
+        rawBase64 = `data:image/png;base64,${rawBase64}`;
+      }
+    }
+
+    const pairingCode = resData.pairingCode || resData.qrcode?.pairingCode || undefined;
+    const state = resData.instance?.state || resData.state || "connecting";
 
     return {
       success: true,
-      base64,
+      base64: rawBase64 || undefined,
       pairingCode,
       state,
     };
