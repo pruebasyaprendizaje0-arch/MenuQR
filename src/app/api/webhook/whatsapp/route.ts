@@ -9,173 +9,150 @@ import {
 /**
  * Webhook Handler para Evolution API v2.3.7 en Next.js App Router
  * Ruta: POST /api/webhook/whatsapp
+ *
+ * Características:
+ * - Respuesta HTTP 200 ultrarrápida para evitar timeouts de pasarela.
+ * - Validación flexible/permisiva de seguridad con warnings descriptivos.
+ * - Registro estructurado y detallado en consola.
+ * - Detección de comandos ('menu', 'menú', 'hola', 'pedido').
  */
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
-  
-  try {
-    console.log(`[WhatsApp Webhook] Petición POST recibida a las ${new Date().toISOString()}`);
+  console.log(`\n==================================================`);
+  console.log(`[WhatsApp Webhook] 🚀 Petición POST recibida: ${new Date().toISOString()}`);
 
-    // 1. Validar Autenticación/Seguridad del Webhook mediante Headers
-    if (!verifyWebhookAuth(req.headers)) {
-      console.warn("[WhatsApp Webhook Error 401] Intento de acceso no autorizado: Header 'apikey' / 'x-webhook-secret' no válido");
+  try {
+    // 1. Loguear Headers relevantes para trazabilidad
+    const authHeader = req.headers.get("apikey") || req.headers.get("x-webhook-secret") || "ausente";
+    console.log(`[WhatsApp Webhook Header] apikey/x-webhook-secret: "${authHeader !== "ausente" ? authHeader.substring(0, 5) + "***" : "ausente"}"`);
+
+    // 2. Validar Seguridad (Permisivo si EVOLUTION_STRICT_AUTH no es true)
+    const authCheck = verifyWebhookAuth(req.headers);
+    if (!authCheck.valid) {
+      console.warn(`[WhatsApp Webhook 401] Rechazado: ${authCheck.reason}`);
       return NextResponse.json(
-        { error: "Unauthorized", message: "API key o Webhook Secret no válido" },
+        { error: "Unauthorized", message: authCheck.reason },
         { status: 401 }
       );
     }
 
-    // 2. Extraer y Parsear el Payload JSON
+    // 3. Extraer Body
     let payload: EvolutionWebhookPayload;
     try {
       payload = await req.json();
     } catch (parseErr) {
-      console.error("[WhatsApp Webhook Error 400] Error al decodificar el cuerpo JSON de la petición:", parseErr);
-      return NextResponse.json(
-        { error: "Bad Request", message: "El cuerpo de la petición no es un JSON válido" },
-        { status: 400 }
-      );
+      console.error("[WhatsApp Webhook 400] Error decodificando cuerpo JSON:", parseErr);
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
+
+    // Trazar estructura del payload recibido
+    console.log(`[WhatsApp Webhook Payload Dump]:`, JSON.stringify({
+      event: payload.event,
+      instance: payload.instance,
+      sender: payload.sender,
+      remoteJid: payload.data?.key?.remoteJid,
+      fromMe: payload.data?.key?.fromMe,
+      messageType: payload.data?.messageType,
+    }, null, 2));
 
     if (!payload || !payload.event) {
-      console.warn("[WhatsApp Webhook Error 400] Payload sin campo 'event':", payload);
-      return NextResponse.json(
-        { error: "Bad Request", message: "Falta el campo 'event' en el payload" },
-        { status: 400 }
-      );
+      console.warn("[WhatsApp Webhook 400] Payload sin evento.");
+      return NextResponse.json({ error: "Missing event field" }, { status: 400 });
     }
 
-    // Normalizar el evento (Evolution API v2 maneja eventos tipo 'messages.upsert' o 'MESSAGES_UPSERT')
+    // Normalizar nombre de evento ('MESSAGES_UPSERT', 'messages.upsert', 'messages_upsert')
     const rawEvent = payload.event;
     const normalizedEvent = rawEvent.toLowerCase().replace(/_/g, ".");
 
-    console.log(`[WhatsApp Webhook] Evento detectado: '${rawEvent}' (Normalizado: '${normalizedEvent}') | Instancia: '${payload.instance || "desconocida"}'`);
-
-    // 3. Procesar Eventos de Mensajes Entrantes (MESSAGES_UPSERT / messages.upsert)
+    // 4. Procesar Eventos de Mensajes Entrantes (messages.upsert)
     if (normalizedEvent === "messages.upsert") {
       const msgData = parseEvolutionPayload(payload);
 
-      // Si no es un mensaje de texto válido o fue enviado por el propio bot (fromMe === true), ignorar
       if (!msgData) {
-        console.log("[WhatsApp Webhook] Payload de mensaje vacío o no compatible. Evento ignorado.");
-        return NextResponse.json({ status: "ignored", reason: "Payload de mensaje no procesable" });
+        console.log("[WhatsApp Webhook] Mensaje sin estructura procesable. Ignorando.");
+        return NextResponse.json({ status: "ignored", reason: "Unprocessable message structure" });
       }
 
+      // Descartar si el mensaje fue enviado por el propio bot
       if (msgData.fromMe) {
-        console.log(`[WhatsApp Webhook] Mensaje saliente de la propia instancia (${msgData.messageId}). Ignorado para evitar bucles.`);
-        return NextResponse.json({ status: "ignored", reason: "Mensaje generado por la propia instancia (fromMe)" });
+        console.log(`[WhatsApp Webhook] Mensaje propio (${msgData.messageId}). Ignorando para evitar bucles.`);
+        return NextResponse.json({ status: "ignored", reason: "fromMe is true" });
       }
 
-      console.log(
-        `[WhatsApp Webhook] 📩 Mensaje entrante de ${msgData.phone} (${msgData.senderName}): "${msgData.text}"`
-      );
-
-      // Normalización del texto para detectar comandos (remueve tildes y convierte a minúsculas)
-      const cleanText = msgData.text
-        .toLowerCase()
-        .trim()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-
-      // -------------------------------------------------------------
-      // Detección de Comandos y Respuesta Automática via Evolution API
-      // -------------------------------------------------------------
-      if (cleanText === "menu") {
-        console.log(`[WhatsApp Webhook] Comando 'MENÚ' detectado para ${msgData.phone}. Enviando carta digital...`);
-        
-        const sendResult = await sendWhatsAppText({
-          instance: msgData.instance,
-          to: msgData.phone,
-          text: `👋 ¡Hola ${msgData.senderName}! Bienvenido a MenuQR Pro.\n\n📱 Puedes explorar nuestra carta interactiva, platos del día y promociones aquí:\nhttps://menuqr.ubicame.cc\n\n¿Deseas realizar un pedido? Escribe *PEDIDO*.`,
-        });
-
-        if (sendResult.success) {
-          console.log(`[WhatsApp Webhook] ✅ Respuesta con el Menú enviada con éxito a ${msgData.phone}`);
-        } else {
-          console.error(`[WhatsApp Webhook] ❌ Error al enviar mensaje con el Menú a ${msgData.phone}:`, sendResult.error);
-        }
-
-      } else if (cleanText === "pedido" || cleanText === "pedidos") {
-        console.log(`[WhatsApp Webhook] Comando 'PEDIDO' detectado para ${msgData.phone}. Enviando enlace de orden...`);
-        
-        const sendResult = await sendWhatsAppText({
-          instance: msgData.instance,
-          to: msgData.phone,
-          text: `🍔 ¡Excelente! Puedes armar tu pedido directamente desde nuestro menú digital:\nhttps://menuqr.ubicame.cc\n\nTu orden será recibida inmediatamente en nuestra cocina.`,
-        });
-
-        if (sendResult.success) {
-          console.log(`[WhatsApp Webhook] ✅ Respuesta de Pedido enviada con éxito a ${msgData.phone}`);
-        } else {
-          console.error(`[WhatsApp Webhook] ❌ Error al enviar mensaje de Pedido a ${msgData.phone}:`, sendResult.error);
-        }
-
-      } else {
-        console.log(`[WhatsApp Webhook] Mensaje estándar recibido. Enviando respuesta por defecto...`);
-        
-        const sendResult = await sendWhatsAppText({
-          instance: msgData.instance,
-          to: msgData.phone,
-          text: `🤖 Hola ${msgData.senderName}, hemos recibido tu mensaje: "${msgData.text}".\n\nComandos disponibles:\n• Escribe *MENÚ* para ver nuestra carta digital.\n• Escribe *PEDIDO* para realizar un pedido en línea.`,
-        });
-
-        if (sendResult.success) {
-          console.log(`[WhatsApp Webhook] ✅ Respuesta por defecto enviada con éxito a ${msgData.phone}`);
-        } else {
-          console.error(`[WhatsApp Webhook] ❌ Error al enviar respuesta por defecto a ${msgData.phone}:`, sendResult.error);
-        }
+      // Descartar si es un mensaje de grupo (a menos que se desee habilitar)
+      if (msgData.isGroup) {
+        console.log(`[WhatsApp Webhook] Mensaje de grupo (${msgData.remoteJid}). Ignorando.`);
+        return NextResponse.json({ status: "ignored", reason: "Group message ignored" });
       }
 
-      const duration = Date.now() - startTime;
-      console.log(`[WhatsApp Webhook] Evento 'messages.upsert' procesado exitosamente en ${duration}ms`);
+      console.log(`[WhatsApp Webhook] 📩 Mensaje procesable de [${msgData.phone}] (${msgData.senderName}): "${msgData.text}"`);
 
-      return NextResponse.json({
-        status: "success",
-        event: "messages.upsert",
-        processedInMs: duration,
+      // Ejecutar el procesamiento de la respuesta sin bloquear la respuesta HTTP 200 al webhook
+      processIncomingMessageAsync(msgData).catch((err) => {
+        console.error("[WhatsApp Webhook Background Process Exception]:", err);
       });
+
+      const elapsed = Date.now() - startTime;
+      console.log(`[WhatsApp Webhook] ⚡ Respuesta HTTP 200 retornada al webhook en ${elapsed}ms`);
+      return NextResponse.json({ status: "success", event: "messages.upsert", messageId: msgData.messageId });
     }
 
-    // 4. Procesar Eventos de Conexión (CONNECTION_UPDATE / connection.update)
+    // 5. Procesar Eventos de Estado de Conexión (connection.update)
     if (normalizedEvent === "connection.update") {
       const state = payload.data?.state;
-      const statusReason = payload.data?.statusReason;
-
-      console.log(
-        `[WhatsApp Webhook] Estado de conexión de la instancia '${payload.instance}': ${state} (Razón: ${statusReason || "N/A"})`
-      );
-
-      if (state === "open") {
-        console.log(`✅ [WhatsApp Webhook] Instancia '${payload.instance}' activa y lista.`);
-      } else if (state === "close") {
-        console.warn(`⚠️ [WhatsApp Webhook] Instancia '${payload.instance}' se ha desconectado.`);
-      }
-
-      return NextResponse.json({
-        status: "success",
-        event: "connection.update",
-        state,
-      });
+      console.log(`[WhatsApp Webhook] Estado de conexión de '${payload.instance}': ${state}`);
+      return NextResponse.json({ status: "success", event: "connection.update", state });
     }
 
-    // Eventos no manejados explícitamente (ej: qrcode.updated, presence.update)
-    console.log(`[WhatsApp Webhook] Evento '${rawEvent}' recibido pero no requiere acción. Ignorando.`);
+    console.log(`[WhatsApp Webhook] Evento '${rawEvent}' ignorado.`);
     return NextResponse.json({ status: "ignored", event: rawEvent });
 
   } catch (error: any) {
-    const duration = Date.now() - startTime;
-    console.error(`[WhatsApp Webhook Exception Critical] Error no controlado en Webhook tras ${duration}ms:`, {
-      message: error.message,
-      stack: error.stack,
-    });
+    const elapsed = Date.now() - startTime;
+    console.error(`[WhatsApp Webhook Critical Error] Invocación falló tras ${elapsed}ms:`, error);
+    return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 });
+  }
+}
 
-    return NextResponse.json(
-      {
-        error: "Internal Server Error",
-        message: "Ocurrió un error inesperado al procesar el webhook",
-        details: process.env.NODE_ENV === "development" ? error.message : undefined,
-      },
-      { status: 500 }
-    );
+/**
+ * Función asíncrona para procesar la lógica de negocio y responder vía WhatsApp
+ */
+async function processIncomingMessageAsync(msgData: ReturnType<typeof parseEvolutionPayload> & {}) {
+  if (!msgData || !msgData.text) {
+    console.log("[WhatsApp Async Worker] Mensaje de texto vacío. No se envía respuesta.");
+    return;
+  }
+
+  // Normalizar texto (remover tildes, minúsculas)
+  const cleanText = msgData.text
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  console.log(`[WhatsApp Async Worker] Evalundo texto limpio: "${cleanText}" para cliente ${msgData.phone}`);
+
+  let responseText = "";
+
+  if (cleanText === "menu" || cleanText === "carta") {
+    responseText = `👋 ¡Hola ${msgData.senderName}! Bienvenido a MenuQR Pro.\n\n📱 Consulta nuestra carta digital y promociones en:\nhttps://menuqr.ubicame.cc\n\n¿Deseas realizar un pedido? Escribe *PEDIDO*.`;
+  } else if (cleanText === "hola" || cleanText === "buenas" || cleanText === "inicio") {
+    responseText = `👋 ¡Hola ${msgData.senderName}! Gracias por escribirnos a MenuQR Pro.\n\nComandos disponibles:\n• Escribe *MENÚ* para ver la carta.\n• Escribe *PEDIDO* para ordenar en línea.`;
+  } else if (cleanText === "pedido" || cleanText === "pedidos" || cleanText === "orden") {
+    responseText = `🍔 ¡Excelente! Realiza tu pedido directamente en:\nhttps://menuqr.ubicame.cc\n\nTu orden se enviará directo a la cocina.`;
+  } else {
+    responseText = `🤖 Hola ${msgData.senderName}, recibimos tu mensaje: "${msgData.text}".\n\n• Escribe *MENÚ* para ver nuestra carta.\n• Escribe *PEDIDO* para solicitar una orden.`;
+  }
+
+  const result = await sendWhatsAppText({
+    instance: msgData.instance,
+    to: msgData.phone,
+    text: responseText,
+  });
+
+  if (result.success) {
+    console.log(`[WhatsApp Async Worker] ✅ Respuesta auto-reply enviada con éxito a ${msgData.phone}`);
+  } else {
+    console.error(`[WhatsApp Async Worker] ❌ Error enviando respuesta a ${msgData.phone}:`, result.error);
   }
 }

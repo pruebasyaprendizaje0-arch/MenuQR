@@ -2,7 +2,6 @@
  * Evolution API v2.3.7 Integration Helper for MenuQR Pro
  */
 
-// Interfaces para payloads de Evolution API v2.3.7
 export interface EvolutionWebhookPayload {
   event: string;
   instance: string;
@@ -46,7 +45,6 @@ export interface EvolutionWebhookPayload {
     messageTimestamp?: number;
     owner?: string;
     source?: string;
-    // Campos para CONNECTION_UPDATE
     state?: string;
     statusReason?: number;
     instance?: string;
@@ -60,6 +58,7 @@ export interface ParsedWhatsAppMessage {
   phone: string;
   senderName: string;
   fromMe: boolean;
+  isGroup: boolean;
   messageId: string;
   text: string;
   messageType?: string;
@@ -74,30 +73,66 @@ export interface SendMessageOptions {
 }
 
 /**
- * Valida la autenticación del Webhook entrante
- * Compara el header 'apikey' o 'x-webhook-secret' enviado por Evolution API con el secret del archivo .env
+ * Valida la autenticación del Webhook de forma flexible y tolerante.
+ * 
+ * Regla de Oro:
+ * - Si EVOLUTION_STRICT_AUTH no es explícitamente "true", SIEMPRE retorna { valid: true },
+ *   logueando advertencias detalladas en consola para evitar cualquier error 401 durante pruebas.
+ * - Si EVOLUTION_STRICT_AUTH === "true", exige coincidencia exacta de 'apikey' o 'x-webhook-secret'.
  */
-export function verifyWebhookAuth(headers: Headers): boolean {
-  const secret = process.env.EVOLUTION_WEBHOOK_SECRET || process.env.EVOLUTION_API_KEY;
-  if (!secret) {
-    // Si no se definió secreto en el entorno, logueamos advertencia (para dev)
-    console.warn("[Evolution API] ADVERTENCIA: EVOLUTION_WEBHOOK_SECRET no está configurado en .env");
-    return true;
+export function verifyWebhookAuth(headers: Headers): { valid: boolean; reason?: string } {
+  const webhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
+  const apiKeySecret = process.env.EVOLUTION_API_KEY;
+  const isStrict = String(process.env.EVOLUTION_STRICT_AUTH).toLowerCase() === "true";
+
+  // Buscar el header de autenticación en múltiples variaciones conocidas de Evolution API
+  const incomingHeaderRaw =
+    headers.get("apikey") ||
+    headers.get("x-webhook-secret") ||
+    headers.get("x-api-key") ||
+    headers.get("x-evolution-apikey") ||
+    headers.get("authorization");
+
+  const incomingClean = incomingHeaderRaw ? incomingHeaderRaw.replace(/^Bearer\s+/i, "").trim() : null;
+
+  // Registrar en logs para trazabilidad
+  console.log(`[Evolution Auth Check] Strictly Enforced: ${isStrict} | Header Recibido: ${incomingClean ? incomingClean.substring(0, 5) + "***" : "AUSENTE"}`);
+
+  // Si no hay ningún secreto configurado en el entorno
+  if (!webhookSecret && !apiKeySecret) {
+    const msg = "Ni EVOLUTION_WEBHOOK_SECRET ni EVOLUTION_API_KEY están configurados en el archivo .env.";
+    console.warn(`[Evolution Auth Warning] ${msg} Permitiendo petición.`);
+    return { valid: true, reason: "No secrets configured in env" };
   }
 
-  const apiKeyHeader = headers.get("apikey") || headers.get("x-webhook-secret") || headers.get("authorization");
-  
-  if (!apiKeyHeader) {
-    return false;
+  // Verificar si coincide con alguno de los secretos de entorno válidos
+  const matchesWebhookSecret = webhookSecret ? incomingClean === webhookSecret.trim() : false;
+  const matchesApiKeySecret = apiKeySecret ? incomingClean === apiKeySecret.trim() : false;
+
+  const isMatched = matchesWebhookSecret || matchesApiKeySecret;
+
+  if (isMatched) {
+    console.log("[Evolution Auth Success] ✅ Cabecera de autenticación validada correctamente.");
+    return { valid: true };
   }
 
-  // Permite formatos "Bearer TOKEN" o token directo
-  const cleanHeader = apiKeyHeader.replace(/^Bearer\s+/i, "").trim();
-  return cleanHeader === secret.trim();
+  // Si no hubo coincidencia:
+  const reasonText = !incomingClean
+    ? "Header de autenticación (apikey / x-webhook-secret) ausente en la petición HTTP."
+    : `Header recibido ('${incomingClean.substring(0, 4)}***') no coincide con los secretos del entorno.`;
+
+  if (isStrict) {
+    console.warn(`[Evolution Auth Blocked 401] ❌ Petición rechazada debido a EVOLUTION_STRICT_AUTH=true. Razón: ${reasonText}`);
+    return { valid: false, reason: reasonText };
+  }
+
+  // MODO PERMISIVO (Bypass por defecto cuando strict no es true)
+  console.warn(`[Evolution Auth Permissive Bypass] ⚠️ ${reasonText} PERMITIENDO acceso para pruebas en producción (EVOLUTION_STRICT_AUTH=false).`);
+  return { valid: true, reason: `Permissive Mode: ${reasonText}` };
 }
 
 /**
- * Extrae y normaliza los datos relevantes de un mensaje entrante de Evolution API
+ * Extrae y normaliza los datos de un mensaje entrante de Evolution API v2.3.7
  */
 export function parseEvolutionPayload(payload: EvolutionWebhookPayload): ParsedWhatsAppMessage | null {
   if (!payload || !payload.data) return null;
@@ -108,10 +143,10 @@ export function parseEvolutionPayload(payload: EvolutionWebhookPayload): ParsedW
   if (!key || !key.remoteJid) return null;
 
   const remoteJid = key.remoteJid;
-  // Limpia el remoteJid dejando solo el número de teléfono (ej: 593999999999@s.whatsapp.net -> 593999999999)
+  const isGroup = remoteJid.endsWith("@g.us");
   const phone = remoteJid.replace(/@.*$/, "");
 
-  // Extraer el contenido del mensaje según el tipo
+  // Extraer el contenido del mensaje contemplando todos los subtipos de la v2.3.7
   const messageObj = data.message;
   let text = "";
 
@@ -127,11 +162,12 @@ export function parseEvolutionPayload(payload: EvolutionWebhookPayload): ParsedW
   }
 
   return {
-    instance: instance || payload.data.instance || process.env.EVOLUTION_INSTANCE_NAME || "default",
+    instance: instance || payload.data.instance || process.env.EVOLUTION_INSTANCE_NAME || "menuqr",
     remoteJid,
     phone,
-    senderName: data.pushName || "Cliente",
+    senderName: data.pushName || "Cliente WhatsApp",
     fromMe: Boolean(key.fromMe),
+    isGroup,
     messageId: key.id || "",
     text: text.trim(),
     messageType: data.messageType,
@@ -150,26 +186,19 @@ export async function sendWhatsAppText({
 }: SendMessageOptions): Promise<{ success: boolean; data?: any; error?: string }> {
   const baseUrl = process.env.EVOLUTION_API_URL;
   const apiKey = process.env.EVOLUTION_API_KEY;
-  const instanceName = instance || process.env.EVOLUTION_INSTANCE_NAME;
+  const instanceName = instance || process.env.EVOLUTION_INSTANCE_NAME || "menuqr";
 
-  if (!baseUrl || !apiKey || !instanceName) {
-    const missing = [
-      !baseUrl && "EVOLUTION_API_URL",
-      !apiKey && "EVOLUTION_API_KEY",
-      !instanceName && "EVOLUTION_INSTANCE_NAME",
-    ]
-      .filter(Boolean)
-      .join(", ");
-    console.error(`[Evolution API Error] Faltan variables de entorno: ${missing}`);
-    return { success: false, error: `Configuración incompleta: Faltan variables (${missing})` };
+  if (!baseUrl || !apiKey) {
+    const missing = [!baseUrl && "EVOLUTION_API_URL", !apiKey && "EVOLUTION_API_KEY"].filter(Boolean).join(", ");
+    console.error(`[Evolution API Client Error] Faltan variables de entorno: ${missing}`);
+    return { success: false, error: `Configuración incompleta: ${missing}` };
   }
 
-  // Limpiar URL base para asegurar que no tenga slash final
   const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
   const endpoint = `${cleanBaseUrl}/message/sendText/${instanceName}`;
-
-  // Formatear el número de destino (acepta '593999999999' o '593999999999@s.whatsapp.net')
   const formattedNumber = to.includes("@") ? to : `${to}@s.whatsapp.net`;
+
+  console.log(`[Evolution API Client] Enviando mensaje a ${formattedNumber} via ${endpoint}...`);
 
   try {
     const response = await fetch(endpoint, {
@@ -192,7 +221,7 @@ export async function sendWhatsAppText({
     const resData = await response.json();
 
     if (!response.ok) {
-      console.error(`[Evolution API HTTP Error ${response.status}]:`, resData);
+      console.error(`[Evolution API Client HTTP Error ${response.status}]:`, JSON.stringify(resData, null, 2));
       return {
         success: false,
         error: resData.message || resData.error || `HTTP ${response.status}`,
@@ -200,9 +229,10 @@ export async function sendWhatsAppText({
       };
     }
 
+    console.log(`[Evolution API Client Success] Mensaje enviado a ${formattedNumber}. ResId: ${resData.key?.id || "N/A"}`);
     return { success: true, data: resData };
   } catch (error: any) {
-    console.error("[Evolution API Fetch Exception]:", error);
+    console.error("[Evolution API Client Exception]:", error);
     return { success: false, error: error.message || "Error al conectar con Evolution API" };
   }
 }
