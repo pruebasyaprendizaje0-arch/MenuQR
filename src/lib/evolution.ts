@@ -358,7 +358,15 @@ export async function getWhatsAppConnectionState(instanceName: string): Promise<
 /**
  * Solicita el código QR en Base64 o Pairing Code para conectar una instancia en Evolution API v2
  */
-export async function connectWhatsAppInstance(instanceName: string): Promise<{ success: boolean; qrcode?: string; base64?: string; pairingCode?: string; state?: string; error?: string }> {
+export async function connectWhatsAppInstance(instanceName: string): Promise<{
+  success: boolean;
+  qrcode?: string;
+  base64?: string;
+  pairingCode?: string;
+  state?: string;
+  alreadyConnected?: boolean;
+  error?: string;
+}> {
   const { baseUrl, apiKey } = await getEvolutionCredentials();
 
   if (!baseUrl || !apiKey) {
@@ -368,6 +376,29 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{ s
   const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
 
   try {
+    // 1. Verificar primero si la instancia ya está conectada (state === "open")
+    const stateEndpoint = `${cleanBaseUrl}/instance/connectionState/${instanceName}`;
+    const stateRes = await fetch(stateEndpoint, {
+      method: "GET",
+      headers: { apikey: apiKey },
+      cache: "no-store",
+      signal: AbortSignal.timeout(6000),
+    }).catch(() => null);
+
+    if (stateRes && stateRes.ok) {
+      const stateData = await stateRes.json().catch(() => ({}));
+      const currentState = stateData.instance?.state || stateData.state;
+      if (currentState === "open" || currentState === "connected") {
+        console.log(`[Evolution API] Instancia "${instanceName}" ya se encuentra CONECTADA (open).`);
+        return {
+          success: true,
+          state: "open",
+          alreadyConnected: true,
+        };
+      }
+    }
+
+    // 2. Si no está conectada, solicitar conexión/QR con GET /instance/connect/{instance}
     const connectEndpoint = `${cleanBaseUrl}/instance/connect/${instanceName}`;
     let response = await fetch(connectEndpoint, {
       method: "GET",
@@ -378,7 +409,7 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{ s
 
     let resData = await response.json().catch(() => ({}));
 
-    // Si la instancia NO existe (HTTP 404 o mensaje 'not found'), intentamos crearla con el esquema exacto de Evolution API v2
+    // 3. Si la instancia NO existe (HTTP 404 o mensaje 'not found'), intentamos crearla con POST /instance/create
     if (response.status === 404 || resData.error?.includes("not found") || resData.message?.includes("not found")) {
       const createEndpoint = `${cleanBaseUrl}/instance/create`;
       const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://menuqr.ubicame.cc"}/api/webhook/whatsapp`;
@@ -402,15 +433,19 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{ s
       });
 
       const createData = await createRes.json().catch(() => ({}));
+      const strData = JSON.stringify(createData).toLowerCase();
 
-      // Fallback para conflicto (409 Conflict o ya existe): consultar /instance/connect sin fallar 500
+      // Fallback para nombre duplicado (HTTP 403 Forbidden o 409 Conflict o "already in use" / "already exists"):
+      // No lanzar error 502/500, sino realizar fallback inmediato a /instance/connect
       if (
+        createRes.status === 403 ||
         createRes.status === 409 ||
-        createData.error?.includes("already exists") ||
-        createData.message?.includes("already exists") ||
-        createData.error?.includes("in use")
+        strData.includes("already in use") ||
+        strData.includes("already exists") ||
+        strData.includes("in use") ||
+        strData.includes("forbidden")
       ) {
-        console.log(`[Evolution API] Instancia "${instanceName}" ya registrada (409 Conflict). Ejecutando fallback a /instance/connect...`);
+        console.log(`[Evolution API] Instancia "${instanceName}" ya existente (HTTP ${createRes.status}). Ejecutando fallback a /instance/connect...`);
         const retryRes = await fetch(connectEndpoint, {
           method: "GET",
           headers: { apikey: apiKey },
@@ -428,7 +463,17 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{ s
       }
     }
 
-    // Extraer y sanitizar Base64 de la respuesta (data.base64 o data.qrcode.base64 o data.code)
+    // 4. Evaluar si la respuesta de connect o create devolvió un estado ya abierto
+    const state = resData.instance?.state || resData.state || "connecting";
+    if (state === "open" || state === "connected") {
+      return {
+        success: true,
+        state: "open",
+        alreadyConnected: true,
+      };
+    }
+
+    // 5. Extraer y sanitizar Base64 de la respuesta (data.base64 o data.qrcode.base64 o data.code)
     let rawBase64: string | null =
       resData.base64 ||
       resData.qrcode?.base64 ||
@@ -444,13 +489,12 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{ s
     }
 
     const pairingCode = resData.pairingCode || resData.qrcode?.pairingCode || undefined;
-    const state = resData.instance?.state || resData.state || "connecting";
 
     return {
       success: true,
       base64: rawBase64 || undefined,
       pairingCode,
-      state,
+      state: state || "connecting",
     };
   } catch (error: any) {
     console.error("[Evolution API Connect Exception]:", error);
@@ -473,7 +517,48 @@ export async function logoutWhatsAppInstance(instanceName: string): Promise<{ su
   }
 
   const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
-  const endpoint = `${cleanBaseUrl}/instance/logout/${instanceName}`;
+  const logoutEndpoint = `${cleanBaseUrl}/instance/logout/${instanceName}`;
+
+  try {
+    const response = await fetch(logoutEndpoint, {
+      method: "DELETE",
+      headers: { apikey: apiKey },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!response.ok) {
+      // Intentar borrado directo con /instance/delete como fallback
+      const deleteEndpoint = `${cleanBaseUrl}/instance/delete/${instanceName}`;
+      const delResponse = await fetch(deleteEndpoint, {
+        method: "DELETE",
+        headers: { apikey: apiKey },
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => null);
+
+      if (!delResponse || !delResponse.ok) {
+        const errText = await response.text().catch(() => "Error al cerrar sesión");
+        return { success: false, error: errText };
+      }
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Elimina por completo una instancia en Evolution API v2
+ */
+export async function deleteWhatsAppInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
+  const { baseUrl, apiKey } = await getEvolutionCredentials();
+
+  if (!baseUrl || !apiKey) {
+    return { success: false, error: "EVOLUTION_API_URL o EVOLUTION_API_KEY no configurados" };
+  }
+
+  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+  const endpoint = `${cleanBaseUrl}/instance/delete/${instanceName}`;
 
   try {
     const response = await fetch(endpoint, {
@@ -483,7 +568,7 @@ export async function logoutWhatsAppInstance(instanceName: string): Promise<{ su
     });
 
     if (!response.ok) {
-      const errText = await response.text();
+      const errText = await response.text().catch(() => "Error al eliminar instancia");
       return { success: false, error: errText };
     }
 
@@ -492,5 +577,6 @@ export async function logoutWhatsAppInstance(instanceName: string): Promise<{ su
     return { success: false, error: error.message };
   }
 }
+
 
 

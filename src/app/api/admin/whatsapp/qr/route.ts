@@ -71,9 +71,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      base64: qrResult.base64,
-      pairingCode: qrResult.pairingCode,
-      state: qrResult.state,
+      base64: qrResult.base64 || null,
+      pairingCode: qrResult.pairingCode || null,
+      state: qrResult.state || (qrResult.alreadyConnected ? "open" : "connecting"),
+      alreadyConnected: Boolean(qrResult.alreadyConnected || qrResult.state === "open"),
     });
   } catch (error: any) {
     console.error("[API Admin WhatsApp QR GET Error]:", error);

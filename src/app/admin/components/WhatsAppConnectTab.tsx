@@ -12,6 +12,7 @@ import {
   Sparkles,
   Zap,
   Loader2,
+  Trash2,
 } from "lucide-react";
 
 export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restaurantId: string; restaurantSlug: string }) {
@@ -25,7 +26,7 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
 
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Asegurar el montaje limpio del componente para evitar React Hydration Error (#418)
+  // Garantizar el montaje limpio del componente para evitar React Hydration Error (#418)
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -64,10 +65,11 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
       if (!res.ok || data.error) {
         setErrorMsg(data.error || `HTTP ${res.status}`);
       } else if (data.success) {
-        if (data.state === "open") {
+        if (data.state === "open" || data.alreadyConnected) {
           setConnectionState("open");
           setQrBase64(null);
           setPairingCode(null);
+          setErrorMsg(null);
         } else {
           setQrBase64(data.base64 || null);
           setPairingCode(data.pairingCode || null);
@@ -111,7 +113,7 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
   }, [isMounted, connectionState, checkStatus]);
 
   const handleDisconnect = async () => {
-    if (!confirm("¿Estás seguro de desconectar esta cuenta de WhatsApp? El bot dejará de responder automáticamente hasta que vuelvas a vincular el QR.")) {
+    if (!confirm("¿Estás seguro de cerrar la sesión de esta cuenta de WhatsApp?")) {
       return;
     }
     setLoading(true);
@@ -131,6 +133,33 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
       }
     } catch (err: any) {
       alert("Error al desconectar: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetInstance = async () => {
+    if (!confirm("¿Deseas reiniciar por completo la instancia de WhatsApp? Esto eliminará la conexión en Evolution API para forzar un nuevo código QR limpio.")) {
+      return;
+    }
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/admin/whatsapp/instance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId, action: "delete" }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        alert("Aviso: " + data.error);
+      }
+      setConnectionState("close");
+      setQrBase64(null);
+      setPairingCode(null);
+      alert("Instancia reiniciada. Puedes hacer clic en 'Generar Código QR' para emparejar un nuevo número.");
+    } catch (err: any) {
+      alert("Error al reiniciar instancia: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -229,16 +258,26 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
 
           <div className="border-t border-slate-800/80 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-xs text-slate-400">
-              Si deseas cambiar de número telefónico o desvincular el bot, haz clic en desconectar.
+              Si deseas cambiar de número telefónico o desvincular el bot, puedes cerrar sesión o reiniciar la instancia.
             </p>
-            <button
-              type="button"
-              onClick={handleDisconnect}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-red-600/90 hover:bg-red-600 transition shadow-lg shadow-red-600/20 shrink-0"
-            >
-              <LogOut className="h-4 w-4" />
-              Desconectar WhatsApp
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 bg-slate-800 hover:bg-slate-750 transition border border-slate-700 shrink-0"
+              >
+                <LogOut className="h-4 w-4" />
+                Cerrar Sesión
+              </button>
+              <button
+                type="button"
+                onClick={handleResetInstance}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-red-600/90 hover:bg-red-600 transition shadow-lg shadow-red-600/20 shrink-0"
+              >
+                <Trash2 className="h-4 w-4" />
+                Reiniciar Instancia
+              </button>
+            </div>
           </div>
         </div>
       ) : (
@@ -257,12 +296,22 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
             </div>
 
             {errorMsg && (
-              <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-2xl text-xs text-red-400 flex items-start gap-2 text-left">
-                <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
-                <div>
-                  <strong>Error de Conexión:</strong>
-                  <p className="mt-0.5">{errorMsg}</p>
+              <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-2xl text-xs text-red-400 space-y-2 text-left">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Estado de Conexión:</strong>
+                    <p className="mt-0.5">{errorMsg}</p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleResetInstance}
+                  className="w-full mt-2 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-red-600/30 hover:bg-red-600/50 text-red-200 border border-red-500/30 transition"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Reiniciar Instancia para Generar QR Nuevo
+                </button>
               </div>
             )}
 
@@ -297,19 +346,31 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={loadQRCode}
-              disabled={isRefreshing || loading}
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-600/20 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-              {isRefreshing
-                ? "Cargando QR..."
-                : formattedQrSrc
-                ? "Regenerar Código QR"
-                : "Generar Código QR de WhatsApp"}
-            </button>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={loadQRCode}
+                disabled={isRefreshing || loading}
+                className="w-full inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-600/20 transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+                {isRefreshing
+                  ? "Cargando QR..."
+                  : formattedQrSrc
+                  ? "Regenerar Código QR"
+                  : "Generar Código QR de WhatsApp"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetInstance}
+                disabled={isRefreshing || loading}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition border border-transparent hover:border-slate-750"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Reiniciar Instancia / Forzar Nuevo QR
+              </button>
+            </div>
           </div>
 
           {/* Columna Derecha: Instrucciones paso a paso */}

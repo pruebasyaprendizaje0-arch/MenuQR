@@ -5,6 +5,7 @@ import {
   getWhatsAppConnectionState,
   connectWhatsAppInstance,
   logoutWhatsAppInstance,
+  deleteWhatsAppInstance,
 } from "@/lib/evolution";
 
 /**
@@ -108,10 +109,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Restaurante no encontrado" }, { status: 404 });
     }
 
-    if (action === "disconnect") {
-      const logoutRes = await logoutWhatsAppInstance(restaurant.slug);
+    if (action === "disconnect" || action === "delete") {
+      const logoutRes = action === "delete"
+        ? await deleteWhatsAppInstance(restaurant.slug)
+        : await logoutWhatsAppInstance(restaurant.slug);
+
       if (!logoutRes.success) {
-        return NextResponse.json({ error: logoutRes.error || "Error al desconectar instancia" }, { status: 500 });
+        console.warn(`[WhatsApp Action Warning] Fallback intent en ${action}:`, logoutRes.error);
       }
 
       await prisma.whatsAppInstance.update({
@@ -119,7 +123,10 @@ export async function POST(req: NextRequest) {
         data: { status: "close", qrcode: null, pairingCode: null },
       }).catch(() => {});
 
-      return NextResponse.json({ success: true, message: "Instancia desconectada con éxito" });
+      return NextResponse.json({
+        success: true,
+        message: action === "delete" ? "Instancia eliminada con éxito" : "Instancia desconectada con éxito",
+      });
     }
 
     return NextResponse.json({ error: "Acción no soportada" }, { status: 400 });
@@ -128,3 +135,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal Server Error", details: error.message }, { status: 500 });
   }
 }
+
