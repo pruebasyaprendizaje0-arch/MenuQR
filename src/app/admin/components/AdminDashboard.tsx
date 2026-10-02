@@ -31,6 +31,7 @@ import {
   deleteCouponAction,
   toggleCouponStatusAction
 } from "@/lib/actions";
+import { SmartLogo } from "@/components/SmartImage";
 import { 
   WeeklySchedule, 
   BlockedDateItem, 
@@ -1412,13 +1413,12 @@ export function AdminDashboard({
           {/* Header */}
           <div className="p-4 md:p-6 border-b border-slate-800 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              {restaurant.logoUrl ? (
-                <img src={restaurant.logoUrl} alt={restaurant.name} className="h-10 w-10 rounded-xl object-cover border border-slate-700" />
-              ) : (
-                <div className="h-10 w-10 bg-gradient-to-tr from-red-600 to-amber-500 rounded-xl flex items-center justify-center font-bold text-white">
-                  {restaurant.name.charAt(0)}
-                </div>
-              )}
+              <SmartLogo
+                src={restaurant.logoUrl}
+                alt={restaurant.name}
+                name={restaurant.name}
+                className="h-10 w-10 rounded-xl object-cover border border-slate-700"
+              />
               <div>
                 <h1 className="font-bold text-sm tracking-tight text-white line-clamp-1">{restaurant.name}</h1>
                 <p className="text-xs text-slate-400">Panel Admin</p>

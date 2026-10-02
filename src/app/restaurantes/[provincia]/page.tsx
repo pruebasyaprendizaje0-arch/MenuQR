@@ -4,6 +4,7 @@ import { UtensilsCrossed, MapPin, ArrowRight, Sparkles, ChevronRight } from "luc
 import type { Metadata } from "next";
 import { getBaseUrl, unslugify, generateBreadcrumbJsonLd } from "@/lib/seo";
 import { ecuadorData } from "@/lib/ecuador";
+import { SmartLogo } from "@/components/SmartImage";
 
 export const dynamic = "force-dynamic";
 
@@ -205,13 +206,12 @@ export default async function ProvinceDirectoryPage({ params: paramsPromise }: P
                 >
                   <div className="space-y-4">
                     <div className="flex items-center gap-4">
-                      <div className="h-14 w-14 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
-                        {r.logoUrl ? (
-                          <img src={r.logoUrl} alt={`Logo de ${r.name}`} className="h-full w-full object-cover" />
-                        ) : (
-                          <UtensilsCrossed className="h-6 w-6 text-slate-600" />
-                        )}
-                      </div>
+                      <SmartLogo
+                        src={r.logoUrl}
+                        alt={r.name}
+                        name={r.name}
+                        className="h-14 w-14 rounded-2xl object-cover border border-slate-800"
+                      />
                       <div className="overflow-hidden">
                         <h3 className="font-extrabold text-white text-base group-hover:text-amber-400 transition truncate">
                           {r.name}

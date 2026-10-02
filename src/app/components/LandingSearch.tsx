@@ -3,6 +3,7 @@
 import { useState, useEffect, useTransition } from "react";
 import { Search, MapPin, Sparkles, UtensilsCrossed, ArrowRight, Tag, DollarSign, RefreshCw } from "lucide-react";
 import { ecuadorData, parishData, communeData } from "@/lib/ecuador";
+import { SmartLogo } from "@/components/SmartImage";
 
 type RestaurantListItem = {
   id: string;
@@ -407,20 +408,13 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
               >
                 <div className="space-y-4">
                   <div className="flex items-center gap-4">
-                    {res.logoUrl ? (
-                      <img
-                        src={res.logoUrl}
-                        alt={res.name}
-                        className="h-14 w-14 rounded-2xl object-cover border border-slate-800"
-                      />
-                    ) : (
-                      <div
-                        className="h-14 w-14 rounded-2xl flex items-center justify-center font-black text-white text-lg border border-slate-850"
-                        style={{ backgroundColor: res.themeColor }}
-                      >
-                        {res.name.charAt(0)}
-                      </div>
-                    )}
+                    <SmartLogo
+                      src={res.logoUrl}
+                      alt={res.name}
+                      name={res.name}
+                      themeColor={res.themeColor}
+                      className="h-14 w-14 rounded-2xl object-cover border border-slate-800"
+                    />
                     <div>
                       <h4 className="font-extrabold text-white text-base group-hover:text-amber-500 transition duration-200">
                         {res.name}

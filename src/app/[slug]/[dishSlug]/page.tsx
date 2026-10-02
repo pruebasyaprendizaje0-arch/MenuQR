@@ -4,6 +4,7 @@ import { UtensilsCrossed, MapPin, ArrowLeft, MessageSquare, Check, Sparkles, Che
 import type { Metadata } from "next";
 import { getBaseUrl, normalizeSlug, generateBreadcrumbJsonLd, resolvePublicImageUrl } from "@/lib/seo";
 import { notFound } from "next/navigation";
+import { SmartLogo } from "@/components/SmartImage";
 
 export const dynamic = "force-dynamic";
 
@@ -209,13 +210,12 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
         {/* Restaurant Context Card */}
         <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
-              {restaurant.logoUrl ? (
-                <img src={restaurant.logoUrl} alt={`Logo de ${restaurant.name}`} className="h-full w-full object-cover" />
-              ) : (
-                <UtensilsCrossed className="w-5 h-5 text-slate-600" />
-              )}
-            </div>
+            <SmartLogo
+              src={restaurant.logoUrl}
+              alt={restaurant.name}
+              name={restaurant.name}
+              className="h-12 w-12 rounded-xl object-cover border border-slate-800"
+            />
             <div>
               <h3 className="font-bold text-white text-sm">{restaurant.name}</h3>
               <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">

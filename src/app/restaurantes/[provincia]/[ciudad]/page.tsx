@@ -3,6 +3,7 @@ import Link from "next/link";
 import { UtensilsCrossed, MapPin, ArrowRight, Sparkles, ChevronRight, HelpCircle } from "lucide-react";
 import type { Metadata } from "next";
 import { getBaseUrl, unslugify, generateBreadcrumbJsonLd, generateCityCategoryJsonLd } from "@/lib/seo";
+import { SmartLogo } from "@/components/SmartImage";
 
 export const dynamic = "force-dynamic";
 

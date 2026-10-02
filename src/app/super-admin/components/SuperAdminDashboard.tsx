@@ -23,6 +23,7 @@ import {
   rejectManualSubscriptionPaymentAction,
   toggleWhatsAppBotAction
 } from "@/lib/actions";
+import { SmartLogo } from "@/components/SmartImage";
 import { 
   Building, 
   Smartphone, 

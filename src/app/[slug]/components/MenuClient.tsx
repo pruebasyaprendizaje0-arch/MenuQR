@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction, validateCouponAction } from "@/lib/actions";
+import { SmartLogo, SmartCover } from "@/components/SmartImage";
 import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
 import { 
   Utensils, 
@@ -765,22 +766,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       <header className="sticky top-0 z-30 bg-slate-950/70 backdrop-blur-xl border-b border-slate-900/80 transition-all duration-300">
         <div className="max-w-6xl xl:max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {logoClean ? (
-              <img 
-                src={logoClean} 
-                alt={restaurant.name} 
-                loading="lazy"
-                decoding="async"
-                className="h-12 w-12 rounded-2xl object-cover border border-slate-800"
-              />
-            ) : (
-              <div 
-                className="h-12 w-12 rounded-2xl flex items-center justify-center font-bold text-white shadow-lg text-lg"
-                style={{ backgroundColor: restaurant.themeColor }}
-              >
-                {restaurant.name.charAt(0)}
-              </div>
-            )}
+            <SmartLogo
+              src={logoClean}
+              alt={restaurant.name}
+              name={restaurant.name}
+              themeColor={restaurant.themeColor}
+              className="h-12 w-12 rounded-2xl object-cover border border-slate-800"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-extrabold text-white text-base sm:text-lg tracking-tight">{restaurant.name}</h1>
@@ -1092,44 +1084,25 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   <div className="relative w-full max-w-sm sm:max-w-md lg:max-w-md aspect-square rounded-[3rem] p-3 bg-gradient-to-tr from-slate-900/80 via-slate-800/40 to-white/10 border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.8)] group/plate overflow-hidden">
                     {/* Inner Circular Dish Showcase */}
                     <div className="w-full h-full rounded-[2.5rem] overflow-hidden relative bg-slate-950 flex items-center justify-center">
-                      {coverBg ? (
-                        <img 
-                          src={coverBg} 
-                          alt={restaurant.name} 
-                          loading="lazy"
-                          decoding="async"
-                          className="w-full h-full object-cover transition-transform duration-700 group-hover/plate:scale-110 filter brightness-95"
-                        />
-                      ) : (
-                        <div 
-                          className="w-full h-full flex flex-col items-center justify-center gap-2 p-6 text-center text-white"
-                          style={{ backgroundColor: restaurant.themeColor }}
-                        >
-                          <Utensils className="h-16 w-16 opacity-80" />
-                          <span className="font-extrabold text-lg">{restaurant.name}</span>
-                        </div>
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent"></div>
+                      <SmartCover
+                        src={coverBg}
+                        alt={restaurant.name}
+                        name={restaurant.name}
+                        themeColor={restaurant.themeColor}
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover/plate:scale-110 filter brightness-95"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent pointer-events-none"></div>
 
                       {/* Logo Avatar Overlay (Bottom Left) */}
                       <div className="absolute bottom-4 left-4 z-20 flex items-center gap-3 bg-slate-950/80 backdrop-blur-md p-2 pr-4 rounded-2xl border border-white/15 shadow-xl">
                         <div className="relative shrink-0">
-                          {logoClean ? (
-                            <img 
-                              src={logoClean} 
-                              alt={restaurant.name} 
-                              loading="lazy"
-                              decoding="async"
-                              className="h-12 w-12 rounded-xl object-cover border border-white/20"
-                            />
-                          ) : (
-                            <div 
-                              className="h-12 w-12 rounded-xl flex items-center justify-center font-bold text-white text-lg border border-white/20"
-                              style={{ backgroundColor: restaurant.themeColor }}
-                            >
-                              {restaurant.name.charAt(0)}
-                            </div>
-                          )}
+                          <SmartLogo
+                            src={logoClean}
+                            alt={restaurant.name}
+                            name={restaurant.name}
+                            themeColor={restaurant.themeColor}
+                            className="h-12 w-12 rounded-xl object-cover border border-white/20"
+                          />
 
                           {restaurant.isOwner && (
                             <button 
