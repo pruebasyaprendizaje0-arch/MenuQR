@@ -34,6 +34,114 @@ function getRandomDelay(minMs = 2500, maxMs = 5500): number {
 }
 
 /**
+ * Invoca la IA (OpenAI o Google Gemini) cuando el restaurante tiene habilitado aiFallbackEnabled (BYOK)
+ */
+async function callAiFallback({
+  restaurantName,
+  restaurantSlug,
+  address,
+  city,
+  schedule,
+  categories,
+  aiProvider,
+  aiApiKey,
+  aiModel,
+  aiPromptContext,
+  userMessage,
+}: {
+  restaurantName: string;
+  restaurantSlug: string;
+  address?: string | null;
+  city?: string | null;
+  schedule?: string | null;
+  categories?: any[];
+  aiProvider: string;
+  aiApiKey: string;
+  aiModel?: string | null;
+  aiPromptContext?: string | null;
+  userMessage: string;
+}): Promise<string | null> {
+  try {
+    if (!aiApiKey || !aiProvider || aiProvider === "NONE") return null;
+
+    let menuSummary = "";
+    if (categories && categories.length > 0) {
+      menuSummary = categories
+        .map((cat) => {
+          const dishesList = cat.dishes
+            ?.slice(0, 6)
+            ?.map((d: any) => `- ${d.name} ($${Number(d.price).toFixed(2)})`)
+            ?.join("\n");
+          return `*${cat.name}*:\n${dishesList || "Consultar en la carta"}`;
+        })
+        .join("\n\n");
+    }
+
+    const systemPrompt = `Eres el asistente virtual de WhatsApp del restaurante "${restaurantName}".
+Ubicación: ${address || "Consultar en el menú web"}${city ? `, ${city}` : ""}
+Horario de atención: ${schedule || "Abierto hoy"}
+Carta Web: https://menuqr.ubicame.cc/${restaurantSlug}
+
+${menuSummary ? `PLATTOS Y PRECIOS DESTACADOS:\n${menuSummary}\n` : ""}
+${aiPromptContext ? `INFORMACIÓN ADICIONAL DEL RESTAURANTE:\n${aiPromptContext}\n` : ""}
+
+INSTRUCCIONES DE RESPUESTA:
+- Responde de forma amable, corta y profesional en español (máximo 2 a 3 párrafos breves).
+- Si te preguntan sobre platos, precios o recomendaciones, usa la información del menú.
+- Al finalizar tu mensaje, invita amablemente al cliente a revisar la carta web (https://menuqr.ubicame.cc/${restaurantSlug}) o escribir MENU para volver al menú numérico principal.`;
+
+    if (aiProvider === "GEMINI") {
+      const model = aiModel || "gemini-1.5-flash";
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiApiKey.trim()}`;
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: `${systemPrompt}\n\nCliente en WhatsApp: ${userMessage}` }],
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      return textResponse || null;
+    } else {
+      const model = aiModel || "gpt-4o-mini";
+      const endpoint = "https://api.openai.com/v1/chat/completions";
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${aiApiKey.trim()}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          max_tokens: 250,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      const textResponse = data.choices?.[0]?.message?.content?.trim();
+      return textResponse || null;
+    }
+  } catch (err) {
+    console.error("[WhatsApp AI Fallback Exception]:", err);
+    return null;
+  }
+}
+
+/**
  * Procesa la máquina de estados finitos (FSM) determinista para WhatsApp
  */
 export async function processWhatsAppFSM(
@@ -78,6 +186,20 @@ export async function processWhatsAppFSM(
       schedule: true,
       address: true,
       city: true,
+      aiProvider: true,
+      aiApiKey: true,
+      aiModel: true,
+      aiPromptContext: true,
+      aiFallbackEnabled: true,
+      categories: {
+        select: {
+          name: true,
+          dishes: {
+            where: { isAvailable: true },
+            select: { name: true, price: true, description: true },
+          },
+        },
+      },
     },
   });
 
@@ -86,7 +208,6 @@ export async function processWhatsAppFSM(
     restaurantSlug = matchedRestaurant.slug;
     restaurantName = matchedRestaurant.name;
 
-    // Verificar si el Super Admin desactivó el bot para este negocio
     if (matchedRestaurant.whatsappBotEnabled === false) {
       console.log(`[WhatsApp FSM] Bot desactivado por Super Admin para el restaurante "${restaurantName}" (${restaurantId}). Ignorando auto-reply.`);
       return { status: "ignored", reason: "whatsapp_bot_disabled" };
@@ -252,12 +373,41 @@ export async function processWhatsAppFSM(
         newFallbackCount = 0;
         responseText = `¡Hola! Te damos la bienvenida a *${restaurantName}* 🍽️\n\nPor favor elige una opción escribiendo el número:\n1️⃣ Ver Menú Digital y Promociones\n2️⃣ Llamar al Mesero / Pedir Cuenta en Mesa\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano`;
       } else {
-        newFallbackCount += 1;
-        if (newFallbackCount >= 2) {
+        // Ocultar opción no reconocida -> Intentar Fallback de IA si el negocio configuró BYOK
+        let aiResponse: string | null = null;
+
+        if (
+          matchedRestaurant?.aiFallbackEnabled &&
+          matchedRestaurant?.aiApiKey &&
+          matchedRestaurant?.aiProvider &&
+          matchedRestaurant.aiProvider !== "NONE"
+        ) {
+          aiResponse = await callAiFallback({
+            restaurantName,
+            restaurantSlug,
+            address: matchedRestaurant.address,
+            city: matchedRestaurant.city,
+            schedule: matchedRestaurant.schedule,
+            categories: matchedRestaurant.categories,
+            aiProvider: matchedRestaurant.aiProvider,
+            aiApiKey: matchedRestaurant.aiApiKey,
+            aiModel: matchedRestaurant.aiModel,
+            aiPromptContext: matchedRestaurant.aiPromptContext,
+            userMessage: text,
+          });
+        }
+
+        if (aiResponse) {
           newFallbackCount = 0;
-          responseText = `⚠️ Opción no válida.\n\nTe mostramos nuevamente nuestras opciones principales:\n1️⃣ Ver Menú Digital y Promociones\n2️⃣ Llamar al Mesero / Pedir Cuenta en Mesa\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano\n\n👉 Responde escribiendo el número del 1 al 5.`;
+          responseText = aiResponse;
         } else {
-          responseText = `🤖 Opción no reconocida.\n\nPor favor responde con el número:\n1️⃣ Ver Menú Digital\n2️⃣ Llamar al Mesero\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Pago\n5️⃣ Hablar con un Asesor Humano`;
+          newFallbackCount += 1;
+          if (newFallbackCount >= 2) {
+            newFallbackCount = 0;
+            responseText = `⚠️ Opción no válida.\n\nTe mostramos nuevamente nuestras opciones principales:\n1️⃣ Ver Menú Digital y Promociones\n2️⃣ Llamar al Mesero / Pedir Cuenta en Mesa\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano\n\n👉 Responde escribiendo el número del 1 al 5.`;
+          } else {
+            responseText = `🤖 Opción no reconocida.\n\nPor favor responde con el número:\n1️⃣ Ver Menú Digital\n2️⃣ Llamar al Mesero\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Pago\n5️⃣ Hablar con un Asesor Humano`;
+          }
         }
       }
       break;

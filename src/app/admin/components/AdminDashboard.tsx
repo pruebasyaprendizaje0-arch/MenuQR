@@ -94,7 +94,8 @@ import {
   User,
   FileText,
   CheckSquare,
-  Square
+  Square,
+  Bot
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
@@ -473,6 +474,7 @@ function MapEmbedConfigField({
 import { TableSplitMonitor } from "./TableSplitMonitor";
 import BatchDishModal from "./BatchDishModal";
 import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
+import { AISettingsTab } from "./AISettingsTab";
 
 
 export type VisitStats = {
@@ -496,7 +498,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "ai-settings" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -1546,6 +1548,17 @@ export function AdminDashboard({
             >
               <MessageSquare className="h-4 w-4 text-emerald-400" />
               <span>📱 Conectar WhatsApp</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("ai-settings")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "ai-settings" 
+                  ? "bg-gradient-to-r from-teal-600/20 to-emerald-500/20 text-teal-300 border-l-4 border-teal-500 font-bold" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <Bot className="h-4 w-4 text-teal-400" />
+              <span>🤖 Asistente IA (BYOK)</span>
             </button>
             <button
               onClick={() => setActiveTab("orders")}
@@ -5850,6 +5863,10 @@ export function AdminDashboard({
 
         {activeTab === "whatsapp" && (
           <WhatsAppConnectTab restaurantId={restaurant.id} restaurantSlug={restaurant.slug} />
+        )}
+
+        {activeTab === "ai-settings" && (
+          <AISettingsTab restaurantId={restaurant.id} restaurantSlug={restaurant.slug} />
         )}
       </main>
 
