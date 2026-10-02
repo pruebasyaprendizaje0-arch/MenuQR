@@ -27,14 +27,14 @@ function normalizeText(text: string): string {
 }
 
 /**
- * Calcula un retardo aleatorio entre minMs y maxMs para simular tipeo humano
+ * Calcula un retardo aleatorio entre minMs (2500ms) y maxMs (5500ms) para simular tipeo humano
  */
-function getRandomDelay(minMs = 1500, maxMs = 3000): number {
+function getRandomDelay(minMs = 2500, maxMs = 5500): number {
   return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
 }
 
 /**
- * Procesa la máquina de estados finitos (FSM) para un mensaje entrante/saliente de WhatsApp
+ * Procesa la máquina de estados finitos (FSM) determinista para WhatsApp
  */
 export async function processWhatsAppFSM(
   msgData: ParsedWhatsAppMessage,
@@ -42,7 +42,7 @@ export async function processWhatsAppFSM(
 ): Promise<ProcessFSMResult> {
   const { messageId, phone, remoteJid, text, fromMe, instance, senderName } = msgData;
 
-  // 1. DEDUPLICACIÓN E IDEMPOTENCIA
+  // 1. DEDUPLICACIÓN E IDEMPOTENCIA DE ENTRADA
   if (messageId) {
     const existingLog = await prisma.whatsAppLog.findUnique({
       where: { messageId },
@@ -53,12 +53,11 @@ export async function processWhatsAppFSM(
     }
   }
 
-  // 2. RESOLUCIÓN DE RESTAURANTE
+  // 2. RESOLUCIÓN DE RESTAURANTE POR SLUG DE INSTANCIA O TELÉFONO
   let restaurantId: string | null = null;
   let restaurantSlug = "";
   let restaurantName = "MenuQR Pro";
 
-  // Intentar relacionar por slug de instancia o número de WhatsApp
   const matchedRestaurant = await prisma.restaurant.findFirst({
     where: {
       OR: [
@@ -94,10 +93,8 @@ export async function processWhatsAppFSM(
     }
   }
 
-
   // 3. MANEJO DE MENSAJES ENVIADOS POR EL OPERADOR (fromMe = true)
   if (fromMe) {
-    // Si un operador responde desde WhatsApp Web, pausamos el bot por 45 minutos (Human Handoff)
     if (messageId) {
       await prisma.whatsAppLog.create({
         data: {
@@ -140,7 +137,7 @@ export async function processWhatsAppFSM(
     return { status: "ignored", reason: "fromMe_operator_handoff_activated" };
   }
 
-  // 4. REGISTRAR MENSAJE ENTRANTE EN WHATSAPP LOG
+  // 4. REGISTRAR MENSAJE ENTRANTE EN LOG DE AUDITORÍA
   const incomingLog = messageId
     ? await prisma.whatsAppLog.create({
         data: {
@@ -177,7 +174,6 @@ export async function processWhatsAppFSM(
     });
   }
 
-  // Vincular log a la sesión creada
   if (incomingLog) {
     await prisma.whatsAppLog.update({
       where: { id: incomingLog.id },
@@ -187,12 +183,11 @@ export async function processWhatsAppFSM(
 
   const cleanText = normalizeText(text);
 
-  // 6. CONTROL DE PAUSA POR ATENCIÓN HUMANA (HUMAN HANDOFF)
+  // 6. CONTROL DE PAUSA POR ATENCIÓN HUMANA (HUMAN HANDOFF 45 MIN)
   const now = new Date();
   const isHandoffActive = session.humanHandoffUntil && session.humanHandoffUntil > now;
 
   if (isHandoffActive) {
-    // Si el usuario escribe "bot", "reactivar" o "menu", rompemos la pausa manualmente
     if (["bot", "reactivar", "activar"].includes(cleanText)) {
       console.log(`[WhatsApp FSM] Cliente ${phone} solicitó reactivar el bot.`);
       session = await prisma.whatsAppSession.update({
@@ -204,82 +199,75 @@ export async function processWhatsAppFSM(
           lastInteractionAt: now,
         },
       });
-      // Proceder a enviar menú principal más abajo
     } else {
-      console.log(`[WhatsApp FSM] Bot pausado para el cliente ${phone} hasta ${session.humanHandoffUntil?.toISOString()}. Ignorando auto-reply.`);
+      console.log(`[WhatsApp FSM] Bot pausado para el cliente ${phone} hasta ${session.humanHandoffUntil?.toISOString()}. Permanece en silencio absoluto.`);
       return { status: "paused", reason: "in_human_handoff", sessionState: session.state };
     }
   }
 
-  // 7. MÁQUINA DE ESTADOS FINITOS (FSM)
+  // 7. MÁQUINA DE ESTADOS FINITOS (FSM DETERMINISTA)
   let nextState: WhatsAppBotState = session.state;
   let responseText = "";
   let newFallbackCount = session.fallbackCount;
   let newHandoffUntil: Date | null = session.humanHandoffUntil;
 
-  // Comando global para volver al menú principal en cualquier momento
+  // Comando global para volver al menú principal
   if (cleanText === "menu" || cleanText === "inicio" || cleanText === "start" || cleanText === "cancelar") {
     nextState = "MENU" as WhatsAppBotState;
     newFallbackCount = 0;
   }
 
+  const menuUrl = restaurantSlug ? `https://menuqr.ubicame.cc/${restaurantSlug}` : `https://menuqr.ubicame.cc`;
+
   switch (nextState) {
     case "IN_HUMAN_HANDOFF": {
-      // Handoff expirado o cancelado
       nextState = "MENU" as WhatsAppBotState;
       newHandoffUntil = null;
       newFallbackCount = 0;
-      // Fallthrough al bloque MENU
     }
 
     case "MENU": {
-      const menuUrl = restaurantSlug ? `https://menuqr.ubicame.cc/${restaurantSlug}` : `https://menuqr.ubicame.cc`;
-
       if (cleanText === "1" || cleanText === "menu" || cleanText === "carta" || cleanText === "ver menu") {
         newFallbackCount = 0;
-        responseText = `📱 *Carta Digital de ${restaurantName}*\n\nConsulta los platos, bebidas y promociones del día aquí:\n👉 ${menuUrl}\n\nResponde con un número:\n1️⃣ Ver Menú\n2️⃣ Estado del Pedido\n3️⃣ Datos Bancarios\n4️⃣ Horarios y Ubicación\n5️⃣ Hablar con Personal`;
-      } else if (cleanText === "2" || cleanText === "pedido" || cleanText === "estado" || cleanText === "orden") {
-        nextState = "AWAITING_ORDER_ID" as WhatsAppBotState;
+        responseText = `📱 *Carta Digital y Promociones de ${restaurantName}*\n\nConsulta los platos, bebidas y promociones del día aquí:\n👉 ${menuUrl}\n\nEscribe *MENU* para volver a ver las opciones.`;
+      } else if (cleanText === "2" || cleanText === "mesero" || cleanText === "cuenta" || cleanText === "mesa") {
         newFallbackCount = 0;
-        responseText = `🔎 *Consulta de Estado de Pedido*\n\nPor favor, escribe únicamente el número de tu pedido (ejemplo: *105* o *#105*):\n\n_(Escribe *MENU* para volver al menú principal)_`;
-      } else if (cleanText === "3" || cleanText === "pago" || cleanText === "banco" || cleanText === "cuenta" || cleanText === "transferencia") {
+        responseText = `🔔 *Llamar al Mesero / Pedir Cuenta*\n\nPor favor indícanos tu número de mesa para avisar inmediatamente al personal de *${restaurantName}* (Ejemplo: *Mesa 4*).\n\n_(Escribe *MENU* para regresar al menú principal)_`;
+      } else if (cleanText === "3" || cleanText === "horario" || cleanText === "ubicacion" || cleanText === "direccion" || cleanText === "donde") {
+        newFallbackCount = 0;
+        responseText = `📍 *Horarios y Ubicación (${restaurantName})*\n\n🗺️ *Dirección:* ${matchedRestaurant?.address || "Consultar en la carta web"}${matchedRestaurant?.city ? `, ${matchedRestaurant.city}` : ""}\n🕒 *Horario:* ${matchedRestaurant?.schedule || "Abierto hoy"}\n📱 *Menú Web:* ${menuUrl}`;
+      } else if (cleanText === "4" || cleanText === "pago" || cleanText === "banco" || cleanText === "cuenta" || cleanText === "transferencia") {
         newFallbackCount = 0;
         if (matchedRestaurant?.bankAccountNumber) {
-          responseText = `💳 *Datos para Pago o Transferencia (${restaurantName})*\n\n🏦 *Banco:* ${matchedRestaurant.bankName || "Pichincha"}\n📋 *Tipo de Cuenta:* ${matchedRestaurant.bankAccountType || "Ahorros"}\n🔢 *N° de Cuenta:* ${matchedRestaurant.bankAccountNumber}\n👤 *Titular:* ${matchedRestaurant.bankAccountName || restaurantName}\n🆔 *Identificación / RUC:* ${matchedRestaurant.bankAccountDocument || "N/A"}\n\nPor favor envía el comprobante por este chat para verificar tu pago.`;
+          responseText = `💳 *Datos de Transferencia / Pago (${restaurantName})*\n\n🏦 *Banco:* ${matchedRestaurant.bankName || "Pichincha"}\n📋 *Tipo de Cuenta:* ${matchedRestaurant.bankAccountType || "Ahorros"}\n🔢 *N° de Cuenta:* ${matchedRestaurant.bankAccountNumber}\n👤 *Titular:* ${matchedRestaurant.bankAccountName || restaurantName}\n🆔 *Identificación / RUC:* ${matchedRestaurant.bankAccountDocument || "N/A"}\n\nPor favor envía el comprobante por este chat para verificar tu pago.`;
         } else {
-          responseText = `💳 *Datos de Pago (${restaurantName})*\n\nPuedes consultar con el personal o realizar tu pago al momento de retirar/recibir tu pedido.`;
+          responseText = `💳 *Datos de Pago (${restaurantName})*\n\nPuedes solicitar la cuenta al mesero o realizar tu pago al retirar tu pedido.`;
         }
-      } else if (cleanText === "4" || cleanText === "horario" || cleanText === "ubicacion" || cleanText === "direccion" || cleanText === "donde") {
-        newFallbackCount = 0;
-        responseText = `📍 *Ubicación y Horarios (${restaurantName})*\n\n🗺️ *Dirección:* ${matchedRestaurant?.address || "Consultar en la carta web"}${matchedRestaurant?.city ? `, ${matchedRestaurant.city}` : ""}\n🕒 *Horario:* ${matchedRestaurant?.schedule || "Abierto hoy"}\n📱 *Menú Web:* ${menuUrl}`;
       } else if (cleanText === "5" || cleanText === "soporte" || cleanText === "humano" || cleanText === "asesor" || cleanText === "ayuda" || cleanText === "personal") {
         nextState = "IN_HUMAN_HANDOFF" as WhatsAppBotState;
         newHandoffUntil = new Date(Date.now() + HUMAN_HANDOFF_DURATION_MS);
         newFallbackCount = 0;
-        responseText = `👨‍🍳 *Atención Personalizada*\n\nUn integrante de nuestro equipo atenderá tu mensaje a la brevedad. El bot automatizado se pausará durante 45 minutos.\n\n_(Si deseas reactivar el bot antes, escribe *BOT*)_`;
+        responseText = `👤 Un miembro de nuestro equipo te atenderá en este chat en breve. He pausado mis respuestas automáticas durante 45 minutos.\n\n_(Si deseas reactivar el bot antes, escribe *BOT*)_`;
       } else if (cleanText === "hola" || cleanText === "buenas" || cleanText === "hola!" || cleanText === "start") {
         newFallbackCount = 0;
-        responseText = `👋 ¡Hola ${senderName}! Bienvenido a *${restaurantName}*.\n\n¿En qué podemos ayudarte hoy?\n\n1️⃣ Ver Menú / Carta Digital\n2️⃣ Consultar Estado de Pedido\n3️⃣ Datos para Transferencia\n4️⃣ Horarios y Ubicación\n5️⃣ Hablar con el Personal\n\nResponde únicamente con el número del *1* al *5*.`;
+        responseText = `¡Hola! Te damos la bienvenida a *${restaurantName}* 🍽️\n\nPor favor elige una opción escribiendo el número:\n1️⃣ Ver Menú Digital y Promociones\n2️⃣ Llamar al Mesero / Pedir Cuenta en Mesa\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano`;
       } else {
-        // Opción no reconocida -> Incrementar fallbacks
         newFallbackCount += 1;
         if (newFallbackCount >= 2) {
           newFallbackCount = 0;
-          responseText = `⚠️ No logramos entender tu solicitud (2 de 2 intentos).\n\nTe mostramos nuevamente nuestras opciones principales:\n\n1️⃣ Ver Menú / Carta Digital\n2️⃣ Consultar Estado de Pedido\n3️⃣ Datos para Transferencia\n4️⃣ Horarios y Ubicación\n5️⃣ Hablar con el Personal\n\n👉 Responde con el número de tu opción (1-5).`;
+          responseText = `⚠️ Opción no válida.\n\nTe mostramos nuevamente nuestras opciones principales:\n1️⃣ Ver Menú Digital y Promociones\n2️⃣ Llamar al Mesero / Pedir Cuenta en Mesa\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano\n\n👉 Responde escribiendo el número del 1 al 5.`;
         } else {
-          responseText = `🤖 Opción no válida.\n\nPor favor responde con el número:\n1️⃣ Ver Menú\n2️⃣ Estado de Pedido\n3️⃣ Datos de Pago\n4️⃣ Ubicación\n5️⃣ Hablar con Personal`;
+          responseText = `🤖 Opción no reconocida.\n\nPor favor responde con el número:\n1️⃣ Ver Menú Digital\n2️⃣ Llamar al Mesero\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Pago\n5️⃣ Hablar con un Asesor Humano`;
         }
       }
       break;
     }
 
     case "AWAITING_ORDER_ID": {
-      // Extraer dígitos del texto (ej. "#105" -> 105, "pedido 42" -> 42)
       const digitsMatch = text.match(/\d+/);
       const parsedOrderNum = digitsMatch ? parseInt(digitsMatch[0], 10) : null;
 
       if (parsedOrderNum) {
-        // Buscar el pedido en la base de datos
         const order = await prisma.order.findFirst({
           where: {
             orderNumber: parsedOrderNum,
@@ -328,7 +316,7 @@ export async function processWhatsAppFSM(
           if (newFallbackCount >= 2) {
             nextState = "MENU" as WhatsAppBotState;
             newFallbackCount = 0;
-            responseText = `❌ No encontramos ningún pedido con el número *#${parsedOrderNum}*.\n\nVolviendo al menú principal. Escribe *1* para ver la carta o *3* para hablar con un asesor.`;
+            responseText = `❌ No encontramos ningún pedido con el número *#${parsedOrderNum}*.\n\nVolviendo al menú principal. Escribe *1* para ver la carta o *5* para hablar con un asesor.`;
           } else {
             responseText = `❌ No encontramos el pedido *#${parsedOrderNum}*.\n\nPor favor verifica el número o escribe *CANCELAR* para volver al menú.`;
           }
@@ -338,7 +326,7 @@ export async function processWhatsAppFSM(
         if (newFallbackCount >= 2) {
           nextState = "MENU" as WhatsAppBotState;
           newFallbackCount = 0;
-          responseText = `⚠️ No detectamos un número de pedido válido.\n\nVolviendo al menú principal. Escribe *1* para ver la carta o *3* para hablar con un asesor.`;
+          responseText = `⚠️ No detectamos un número de pedido válido.\n\nVolviendo al menú principal. Escribe *1* para ver la carta o *5* para hablar con un asesor.`;
         } else {
           responseText = `🤖 Por favor escribe únicamente el número de tu pedido (ejemplo: *105*), o escribe *CANCELAR* para regresar.`;
         }
@@ -348,7 +336,7 @@ export async function processWhatsAppFSM(
 
     default: {
       nextState = "MENU" as WhatsAppBotState;
-      responseText = `👋 ¡Hola ${senderName}! Escribe *MENU* para ver las opciones disponibles.`;
+      responseText = `¡Hola ${senderName}! Te damos la bienvenida a *${restaurantName}* 🍽️\n\n1️⃣ Ver Menú Digital\n2️⃣ Llamar al Mesero\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Pago\n5️⃣ Hablar con Asesor`;
       break;
     }
   }
@@ -364,24 +352,36 @@ export async function processWhatsAppFSM(
     },
   });
 
-  // 9. ENVÍO DE RESPUESTA CON ESTRATEGIA ANTI-BANEO (DELAYS + COMPOSING)
+  // 9. ENVÍO DE RESPUESTA CON ESTRATEGIA ANTI-BANEO (DELAYS ALEATORIOS 2500ms - 5500ms + COMPOSING)
   if (responseText) {
-    const artificialDelay = getRandomDelay(1500, 3000);
+    const artificialDelay = getRandomDelay(2500, 5500);
 
-    // Simular que el bot está escribiendo
+    // a) Disparar presencia "composing"
     await sendWhatsAppPresence({
       instance,
       to: phone,
       presence: "composing",
-      delay: Math.min(artificialDelay, 1500),
+      delay: Math.min(artificialDelay, 2000),
     });
 
+    // b) Esperar el delay aleatorio realista de emulación humana
+    await new Promise((resolve) => setTimeout(resolve, artificialDelay));
+
+    // c) Enviar el mensaje con sendWhatsAppText
     const sendResult = await sendWhatsAppText({
       instance,
       to: phone,
       text: responseText,
-      delay: artificialDelay,
+      delay: 0,
     });
+
+    // d) Cambiar presencia a "paused" para concluir la simulación
+    await sendWhatsAppPresence({
+      instance,
+      to: phone,
+      presence: "paused",
+      delay: 0,
+    }).catch(() => {});
 
     if (sendResult.success && sendResult.data?.key?.id) {
       await prisma.whatsAppLog.create({
@@ -440,6 +440,8 @@ export async function sendOrderStatusNotification(
 
     if (!messageText) return;
 
+    const artificialDelay = getRandomDelay(2500, 4000);
+
     await sendWhatsAppPresence({
       instance: instanceName,
       to: customerPhone,
@@ -447,14 +449,22 @@ export async function sendOrderStatusNotification(
       delay: 1500,
     });
 
+    await new Promise((resolve) => setTimeout(resolve, artificialDelay));
+
     await sendWhatsAppText({
       instance: instanceName,
       to: customerPhone,
       text: messageText,
-      delay: 2000,
+      delay: 0,
     });
+
+    await sendWhatsAppPresence({
+      instance: instanceName,
+      to: customerPhone,
+      presence: "paused",
+      delay: 0,
+    }).catch(() => {});
   } catch (error) {
     console.error("[WhatsApp Transactional] Error enviando notificación:", error);
   }
 }
-
