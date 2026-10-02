@@ -41,6 +41,7 @@ import {
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import RuletaNegocio from "@/components/Ruleta/RuletaNegocio";
+import { getBusinessLabels } from "@/lib/business-labels";
 
 type Dish = {
   id: string;
@@ -65,6 +66,8 @@ type Restaurant = {
   logoUrl: string | null;
   coverUrl: string | null;
   isOwner?: boolean;
+  businessType?: string | null;
+  customLabels?: string | null;
   paymentQrUrl: string | null;
   whatsappNumber: string;
   themeColor: string;
@@ -225,6 +228,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  const bLabels = useMemo(() => {
+    return getBusinessLabels(restaurant.customLabels, restaurant.businessType || "RESTAURANT");
+  }, [restaurant.customLabels, restaurant.businessType]);
 
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
@@ -789,7 +796,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   );
                 })()}
               </div>
-              <p className="text-xs text-slate-400">Menú Digital Auténtico</p>
+              <p className="text-xs text-slate-400">{bLabels.subTitle}</p>
             </div>
           </div>
 
@@ -850,7 +857,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               }}
             >
               <BookOpen className="h-4 w-4" />
-              <span>Menú Digital</span>
+              <span>{bLabels.catalogTabTitle}</span>
             </button>
           </div>
         </div>
@@ -2242,25 +2249,38 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
               const isTableSelected = selectedTable !== "" && selectedTable !== "Domicilio";
 
+              const hasPickup = (restaurant as any).enablePickup !== false;
+              const hasDelivery = (restaurant as any).enableDelivery !== false && (restaurant as any).deliveryEnabled !== false;
+              const hasTable = (restaurant as any).enableTableOrdering !== false;
+
+              const activeModalitiesCount = [hasPickup, hasDelivery, hasTable].filter(Boolean).length;
+              const gridColsClass = activeModalitiesCount === 1 
+                ? "grid-cols-1" 
+                : activeModalitiesCount === 2 
+                  ? "grid-cols-2" 
+                  : "grid-cols-3";
+
               return (
                 <div className="space-y-3" style={{ fontFamily: 'var(--font-outfit)' }}>
-                  <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">Modalidad del Pedido</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTable("")}
-                      className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
-                        selectedTable === ""
-                          ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
-                      }`}
-                      style={{ backgroundColor: selectedTable === "" ? restaurant.themeColor : undefined }}
-                    >
-                      <span>🛍️</span>
-                      <span className="truncate">Para Llevar</span>
-                    </button>
+                  <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">MODALIDAD DEL PEDIDO</label>
+                  <div className={`grid ${gridColsClass} gap-2`}>
+                    {hasPickup && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTable("")}
+                        className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
+                          selectedTable === ""
+                            ? "text-white border-transparent shadow-lg"
+                            : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
+                        }`}
+                        style={{ backgroundColor: selectedTable === "" ? restaurant.themeColor : undefined }}
+                      >
+                        <span>🛍️</span>
+                        <span className="truncate">Para Llevar</span>
+                      </button>
+                    )}
 
-                    {restaurant.deliveryEnabled && (
+                    {hasDelivery && (
                       <button
                         type="button"
                         onClick={() => setSelectedTable("Domicilio")}
@@ -2276,23 +2296,25 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                       </button>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!isTableSelected) {
-                          setSelectedTable(tablesList[0] || "1");
-                        }
-                      }}
-                      className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
-                        isTableSelected
-                          ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
-                      }`}
-                      style={{ backgroundColor: isTableSelected ? restaurant.themeColor : undefined }}
-                    >
-                      <span>🍽️</span>
-                      <span className="truncate">{isTableSelected ? `Mesa #${selectedTable}` : "En Mesa"}</span>
-                    </button>
+                    {hasTable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!isTableSelected) {
+                            setSelectedTable(tablesList[0] || "1");
+                          }
+                        }}
+                        className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
+                          isTableSelected
+                            ? "text-white border-transparent shadow-lg"
+                            : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
+                        }`}
+                        style={{ backgroundColor: isTableSelected ? restaurant.themeColor : undefined }}
+                      >
+                        <span>🍽️</span>
+                        <span className="truncate">{isTableSelected ? `Mesa #${selectedTable}` : "En Mesa"}</span>
+                      </button>
+                    )}
                   </div>
 
                   {/* If Table option is selected, show table numbers grid */}

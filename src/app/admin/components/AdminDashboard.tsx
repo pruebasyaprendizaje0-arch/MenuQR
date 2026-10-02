@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getBusinessLabels } from "@/lib/business-labels";
 import { 
   logoutUserAction, 
   updateRestaurantAction, 
@@ -43,6 +44,7 @@ import {
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { 
   Store, 
+  Sliders,
   FolderHeart, 
   Soup, 
   QrCode, 
@@ -500,6 +502,75 @@ export function AdminDashboard({
   }, []);
 
   const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "ai-settings" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const isLikelyStore = /licor|tienda|boutique|farmacia|ferreter|repuesto|minimarket|comercio/i.test(restaurant.name || "");
+  const defaultBusinessType = (restaurant as any).businessType && (restaurant as any).businessType !== "RESTAURANT"
+    ? (restaurant as any).businessType
+    : (isLikelyStore ? "RETAIL" : "RESTAURANT");
+
+  const [selectedBusinessType, setSelectedBusinessType] = useState<string>(defaultBusinessType);
+  const [selectedCatalogMode, setSelectedCatalogMode] = useState<string>(
+    (restaurant as any).catalogMode || (defaultBusinessType === "RESTAURANT" ? "MENU" : "CATALOG")
+  );
+  const [enableTableOrdering, setEnableTableOrdering] = useState<boolean>(
+    (restaurant as any).enableTableOrdering ?? (defaultBusinessType === "RESTAURANT")
+  );
+  const [enablePickup, setEnablePickup] = useState<boolean>(
+    (restaurant as any).enablePickup ?? true
+  );
+  const [enableDeliveryState, setEnableDeliveryState] = useState<boolean>(
+    (restaurant as any).enableDelivery ?? (restaurant as any).deliveryEnabled ?? true
+  );
+
+  const initialCustomLabels: any = (() => {
+    try {
+      return (restaurant as any).customLabels ? JSON.parse((restaurant as any).customLabels) : {};
+    } catch {
+      return {};
+    }
+  })();
+
+  const defaultItemChoice = initialCustomLabels.items === "Platos" || initialCustomLabels.items === "Productos" || initialCustomLabels.items === "Servicios"
+    ? initialCustomLabels.items
+    : initialCustomLabels.items 
+      ? "CUSTOM" 
+      : (defaultBusinessType === "RESTAURANT" ? "Platos" : "Productos");
+
+  const [customItemChoice, setCustomItemChoice] = useState<string>(defaultItemChoice);
+  const [customItemsPlural, setCustomItemsPlural] = useState<string>(initialCustomLabels.items || "");
+  const [customItemSingle, setCustomItemSingle] = useState<string>(initialCustomLabels.itemSingle || "");
+
+  const defaultCatalogTabChoice = initialCustomLabels.catalogTabTitle === "Menú Digital" || initialCustomLabels.catalogTabTitle === "Productos" || initialCustomLabels.catalogTabTitle === "Catálogo de Productos" || initialCustomLabels.catalogTabTitle === "Servicios"
+    ? initialCustomLabels.catalogTabTitle
+    : initialCustomLabels.catalogTabTitle
+      ? "CUSTOM"
+      : (defaultBusinessType === "RESTAURANT" ? "Menú Digital" : "Productos");
+
+  const [customCatalogTabChoice, setCustomCatalogTabChoice] = useState<string>(defaultCatalogTabChoice);
+  const [customCatalogTabInput, setCustomCatalogTabInput] = useState<string>(initialCustomLabels.catalogTabTitle || "");
+
+  const [disabledModules, setDisabledModules] = useState<string[]>(
+    initialCustomLabels.disabledModules || (defaultBusinessType !== "RESTAURANT" ? ["split-bill"] : [])
+  );
+
+  const catalogTabTitleValue = customCatalogTabChoice === "CUSTOM"
+    ? customCatalogTabInput
+    : customCatalogTabChoice;
+
+  const currentCustomLabelsJSON = JSON.stringify({
+    items: customItemChoice === "CUSTOM" ? customItemsPlural : customItemChoice,
+    itemSingle: customItemChoice === "CUSTOM" ? customItemSingle : (customItemChoice === "Productos" ? "Producto" : customItemChoice === "Servicios" ? "Servicio" : "Plato"),
+    catalogTabTitle: catalogTabTitleValue,
+    subTitle: catalogTabTitleValue === "Menú Digital"
+      ? "Menú Digital Auténtico"
+      : catalogTabTitleValue === "Productos"
+        ? "Catálogo Digital de Productos"
+        : `Catálogo Digital de ${customItemChoice === "CUSTOM" ? customItemsPlural : customItemChoice}`,
+    disabledModules: disabledModules,
+    showSplitBill: !disabledModules.includes("split-bill"),
+  });
+
+  const bLabels = getBusinessLabels(currentCustomLabelsJSON, selectedBusinessType);
+  const isRetail = selectedBusinessType !== "RESTAURANT";
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -1470,7 +1541,7 @@ export function AdminDashboard({
               }`}
             >
               <Store className="h-4 w-4" />
-              Restaurante
+              {bLabels.businessTabTitle}
             </button>
             <button
               onClick={() => setActiveTab("categories")}
@@ -1481,7 +1552,7 @@ export function AdminDashboard({
               }`}
             >
               <FolderHeart className="h-4 w-4" />
-              Categorías
+              {bLabels.categories}
             </button>
             <button
               onClick={() => setActiveTab("dishes")}
@@ -1492,41 +1563,47 @@ export function AdminDashboard({
               }`}
             >
               <Soup className="h-4 w-4" />
-              Platos
+              {bLabels.items}
             </button>
-            <button
-              onClick={() => setActiveTab("seasons")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "seasons" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <CalendarDays className="h-4 w-4 text-amber-400" />
-              Tarifas y Temporadas
-            </button>
-            <button
-              onClick={() => setActiveTab("coupons")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "coupons" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <Tag className="h-4 w-4 text-amber-400" />
-              Cupones de Descuento
-            </button>
-            <button
-              onClick={() => setActiveTab("ruleta")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "ruleta" 
-                  ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <Gift className="h-4 w-4 text-amber-400" />
-              <span>🎡 Ruleta de Premios</span>
-            </button>
+            {bLabels.showSeasons && (
+              <button
+                onClick={() => setActiveTab("seasons")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "seasons" 
+                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <CalendarDays className="h-4 w-4 text-amber-400" />
+                Tarifas y Temporadas
+              </button>
+            )}
+            {bLabels.showCoupons && (
+              <button
+                onClick={() => setActiveTab("coupons")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "coupons" 
+                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <Tag className="h-4 w-4 text-amber-400" />
+                Cupones de Descuento
+              </button>
+            )}
+            {bLabels.showRuleta && (
+              <button
+                onClick={() => setActiveTab("ruleta")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "ruleta" 
+                    ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <Gift className="h-4 w-4 text-amber-400" />
+                <span>🎡 Ruleta de Premios</span>
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("qr")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -1549,17 +1626,19 @@ export function AdminDashboard({
               <MessageSquare className="h-4 w-4 text-emerald-400" />
               <span>📱 Conectar WhatsApp</span>
             </button>
-            <button
-              onClick={() => setActiveTab("ai-settings")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "ai-settings" 
-                  ? "bg-gradient-to-r from-teal-600/20 to-emerald-500/20 text-teal-300 border-l-4 border-teal-500 font-bold" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <Bot className="h-4 w-4 text-teal-400" />
-              <span>🤖 Asistente IA (BYOK)</span>
-            </button>
+            {bLabels.showAiSettings && (
+              <button
+                onClick={() => setActiveTab("ai-settings")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "ai-settings" 
+                    ? "bg-gradient-to-r from-teal-600/20 to-emerald-500/20 text-teal-300 border-l-4 border-teal-500 font-bold" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <Bot className="h-4 w-4 text-teal-400" />
+                <span>🤖 Asistente IA (BYOK)</span>
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("orders")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -1571,35 +1650,39 @@ export function AdminDashboard({
               <ShoppingBag className="h-4 w-4" />
               Historial de Pedidos
             </button>
-            <button
-              onClick={() => setActiveTab("split-bill")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "split-bill" 
-                  ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <Utensils className="h-4 w-4 text-amber-400" />
-              <span>Dividir Cuenta en Mesa</span>
-            </button>
-            <button
-              onClick={() => setActiveTab("crm")}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "crm" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Users className="h-4 w-4 text-amber-400" />
-                <span>CRM Clientes</span>
-              </div>
-              {restaurant.customers && restaurant.customers.length > 0 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
-                  {restaurant.customers.length}
-                </span>
-              )}
-            </button>
+            {bLabels.showSplitBill && (
+              <button
+                onClick={() => setActiveTab("split-bill")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "split-bill" 
+                    ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <Utensils className="h-4 w-4 text-amber-400" />
+                <span>Dividir Cuenta en Mesa</span>
+              </button>
+            )}
+            {bLabels.showCrm && (
+              <button
+                onClick={() => setActiveTab("crm")}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "crm" 
+                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Users className="h-4 w-4 text-amber-400" />
+                  <span>CRM Clientes</span>
+                </div>
+                {restaurant.customers && restaurant.customers.length > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
+                    {restaurant.customers.length}
+                  </span>
+                )}
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("subscription")}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -2249,14 +2332,485 @@ export function AdminDashboard({
                 const combinedLocality = [province, canton, parroquia, sector].map(s => s.trim()).filter(Boolean).join(" | ");
                 formData.set("locality", combinedLocality);
                 await updateRestaurantAction(restaurant.id, formData);
-                alert("Restaurante actualizado correctamente.");
+                alert("Configuración del negocio actualizada correctamente.");
               }}
               encType="multipart/form-data"
               className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 space-y-6 backdrop-blur-md"
             >
+              {/* Selector de Giro de Negocio / Presets por Vertical */}
+              <div className="bg-slate-950/90 border border-slate-800 p-6 rounded-2xl space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Store className="h-5 w-5 text-amber-400" />
+                    <h3 className="text-base font-extrabold text-white">Giro de Negocio y Modalidad del Panel</h3>
+                  </div>
+                  <span className="text-[10px] font-bold px-3 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full">
+                    ✨ Presets por Vertical
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Selecciona el tipo de tu empresa para adaptar automáticamente los nombres de pestañas, botones y funciones tanto en tu panel como en tu catálogo web.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+                  {/* Option 1: RESTAURANT */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBusinessType("RESTAURANT");
+                      setSelectedCatalogMode("MENU");
+                      setEnableTableOrdering(true);
+                    }}
+                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                      selectedBusinessType === "RESTAURANT"
+                        ? "bg-red-500/15 border-red-500 text-white shadow-lg shadow-red-500/10 font-bold"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
+                        <span>🍔</span> Restaurante / Bar
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
+                        Platos, comandas de cocina, mesas y opción para dividir cuenta.
+                      </p>
+                    </div>
+                    <div className="mt-3 text-[10px] font-bold uppercase text-red-400">
+                      {selectedBusinessType === "RESTAURANT" ? "✓ Seleccionado" : "Seleccionar"}
+                    </div>
+                  </button>
+
+                  {/* Option 2: RETAIL (Licorería / Tienda) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBusinessType("RETAIL");
+                      setSelectedCatalogMode("CATALOG");
+                      setEnableTableOrdering(false);
+                    }}
+                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                      selectedBusinessType === "RETAIL"
+                        ? "bg-amber-500/15 border-amber-500 text-white shadow-lg shadow-amber-500/10 font-bold"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
+                        <span>🍷</span> Licorería / Tienda
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
+                        Productos, licores/inventario, despacho a domicilio. Oculta mesas.
+                      </p>
+                    </div>
+                    <div className="mt-3 text-[10px] font-bold uppercase text-amber-400">
+                      {selectedBusinessType === "RETAIL" ? "✓ Seleccionado" : "Seleccionar"}
+                    </div>
+                  </button>
+
+                  {/* Option 3: SERVICES */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBusinessType("SERVICES");
+                      setSelectedCatalogMode("CATALOG");
+                      setEnableTableOrdering(false);
+                    }}
+                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                      selectedBusinessType === "SERVICES"
+                        ? "bg-emerald-500/15 border-emerald-500 text-white shadow-lg shadow-emerald-500/10 font-bold"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
+                        <span>🛠️</span> Servicios / Citas
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
+                        Servicios, cotización directa por WhatsApp y agenda.
+                      </p>
+                    </div>
+                    <div className="mt-3 text-[10px] font-bold uppercase text-emerald-400">
+                      {selectedBusinessType === "SERVICES" ? "✓ Seleccionado" : "Seleccionar"}
+                    </div>
+                  </button>
+
+                  {/* Option 4: GENERAL_CATALOG */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBusinessType("GENERAL_CATALOG");
+                      setSelectedCatalogMode("CATALOG");
+                      setEnableTableOrdering(false);
+                    }}
+                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                      selectedBusinessType === "GENERAL_CATALOG"
+                        ? "bg-blue-500/15 border-blue-500 text-white shadow-lg shadow-blue-500/10 font-bold"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
+                        <span>📦</span> Catálogo General
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
+                        Exhibición de ítems y consultas de información.
+                      </p>
+                    </div>
+                    <div className="mt-3 text-[10px] font-bold uppercase text-blue-400">
+                      {selectedBusinessType === "GENERAL_CATALOG" ? "✓ Seleccionado" : "Seleccionar"}
+                    </div>
+                  </button>
+                </div>
+
+                <input type="hidden" name="businessType" value={selectedBusinessType} />
+                <input type="hidden" name="catalogMode" value={selectedCatalogMode} />
+                <input type="hidden" name="enableTableOrdering" value={enableTableOrdering ? "true" : "false"} />
+                <input type="hidden" name="enablePickup" value={enablePickup ? "true" : "false"} />
+                <input type="hidden" name="enableDelivery" value={enableDeliveryState ? "true" : "false"} />
+                <input type="hidden" name="deliveryEnabled" value={enableDeliveryState ? "true" : "false"} />
+                <input type="hidden" name="customLabels" value={currentCustomLabelsJSON} />
+              </div>
+
+              {/* Personalización de Herramientas y Terminología del Panel */}
+              <div className="bg-slate-950/90 border border-slate-800 p-6 rounded-2xl space-y-6">
+                <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-850 pb-4">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="h-5 w-5 text-sky-400" />
+                    <div>
+                      <h3 className="text-base font-extrabold text-white">Personalización de Herramientas y Modalidades del Pedido</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Activa u oculta las modalidades de entrega de tu carrito (Para Llevar, Domicilio, En Mesa) y personaliza la presentación de tu menú o productos.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-3 py-1 bg-sky-500/10 border border-sky-500/30 text-sky-300 rounded-full">
+                    ⚙️ Control Total
+                  </span>
+                </div>
+
+                {/* Section A: Modalidades del Pedido (Para Llevar, Domicilio, En Mesa) */}
+                <div className="space-y-3">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                    Modalidades del Pedido en Carrito (ON / OFF)
+                  </label>
+                  <p className="text-xs text-slate-400">
+                    Controla qué opciones de envío/entrega se le muestran al cliente al finalizar su orden.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                    {/* Modality 1: Para Llevar */}
+                    <div className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                      enablePickup 
+                        ? "bg-emerald-500/10 border-emerald-500/40 text-white" 
+                        : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                    }`}>
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                            <span>🛍️</span> Para Llevar / Retiro
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setEnablePickup(!enablePickup)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                              enablePickup ? "bg-emerald-500" : "bg-slate-800"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                enablePickup ? "translate-x-4" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-snug">
+                          {enablePickup ? "✓ Habilitado para retiro en tienda." : "✕ Oculto en el checkout."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Modality 2: Domicilio */}
+                    <div className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                      enableDeliveryState 
+                        ? "bg-sky-500/10 border-sky-500/40 text-white" 
+                        : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                    }`}>
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                            <span>🛵</span> Envío a Domicilio
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setEnableDeliveryState(!enableDeliveryState)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                              enableDeliveryState ? "bg-sky-500" : "bg-slate-800"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                enableDeliveryState ? "translate-x-4" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-snug">
+                          {enableDeliveryState ? "✓ Habilitado con tarifa de envío." : "✕ Oculto en el checkout."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Modality 3: En Mesa */}
+                    <div className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                      enableTableOrdering 
+                        ? "bg-amber-500/10 border-amber-500/40 text-white" 
+                        : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                    }`}>
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                            <span>🍽️</span> Atención en Mesa
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setEnableTableOrdering(!enableTableOrdering)}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                              enableTableOrdering ? "bg-amber-500" : "bg-slate-800"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                enableTableOrdering ? "translate-x-4" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-snug">
+                          {enableTableOrdering ? "✓ Habilitado con QR de mesa." : "✕ Oculto en el checkout y menú."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section B: Título de la Pestaña en el Catálogo Web */}
+                <div className="space-y-3 pt-4 border-t border-slate-850">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                    ¿Cómo deseas que aparezca la pestaña de tu catálogo web público?
+                  </label>
+                  <p className="text-xs text-slate-400">
+                    Elige entre mostrar &quot;Menú Digital&quot; (gastronomía), &quot;Productos&quot; (licorería/tienda), &quot;Catálogo de Productos&quot; o un título personalizado.
+                  </p>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { id: "Menú Digital", label: "📖 Menú Digital", desc: "Formato Restaurante / Bar" },
+                      { id: "Productos", label: "📦 Productos", desc: "Formato Licorería / Tienda" },
+                      { id: "Catálogo de Productos", label: "🛍️ Catálogo de Productos", desc: "Formato Catálogo Extenso" },
+                      { id: "CUSTOM", label: "✏️ Personalizado", desc: "Escribe tu propio título" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setCustomCatalogTabChoice(opt.id);
+                          if (opt.id !== "CUSTOM") {
+                            setCustomCatalogTabInput(opt.id);
+                          }
+                        }}
+                        className={`p-3 rounded-xl border text-xs font-bold text-left transition-all ${
+                          customCatalogTabChoice === opt.id
+                            ? "bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm"
+                            : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="font-extrabold">{opt.label}</div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">{opt.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {customCatalogTabChoice === "CUSTOM" && (
+                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 mt-3">
+                      <label className="block text-xs font-medium text-slate-400 mb-1">
+                        Título Personalizado para la Pestaña (Ej: Nuestros Licores, Catálogo 2026)
+                      </label>
+                      <input
+                        type="text"
+                        value={customCatalogTabInput}
+                        onChange={(e) => setCustomCatalogTabInput(e.target.value)}
+                        placeholder="ej. Nuestros Licores"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Section C: Terminología de Ítems */}
+                <div className="space-y-3 pt-4 border-t border-slate-850">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                    ¿Cómo deseas llamar a los elementos individuales (ítems)?
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { id: "Platos", label: "🍲 Platos", single: "Plato" },
+                      { id: "Productos", label: "🛍️ Productos", single: "Producto" },
+                      { id: "Servicios", label: "🛠️ Servicios", single: "Servicio" },
+                      { id: "CUSTOM", label: "✏️ Personalizado", single: "Custom" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setCustomItemChoice(opt.id);
+                          if (opt.id !== "CUSTOM") {
+                            setCustomItemsPlural(opt.id);
+                            setCustomItemSingle(opt.single);
+                          }
+                        }}
+                        className={`p-3 rounded-xl border text-xs font-bold text-center transition-all ${
+                          customItemChoice === opt.id
+                            ? "bg-sky-500/20 border-sky-500 text-sky-300 shadow-sm"
+                            : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom item inputs */}
+                  {customItemChoice === "CUSTOM" && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800 mt-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-400 mb-1">Nombre en Plural (Ej: Licores, Repuestos)</label>
+                        <input
+                          type="text"
+                          value={customItemsPlural}
+                          onChange={(e) => setCustomItemsPlural(e.target.value)}
+                          placeholder="ej. Licores"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-400 mb-1">Nombre en Singular (Ej: Licor, Repuesto)</label>
+                        <input
+                          type="text"
+                          value={customItemSingle}
+                          onChange={(e) => setCustomItemSingle(e.target.value)}
+                          placeholder="ej. Licor"
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Section C: Visibilidad de Herramientas del Panel (Sidebar Toggles) */}
+                <div className="space-y-4 pt-4 border-t border-slate-850">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Ocultar / Activar Módulos del Panel Admin
+                      </label>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Usa los interruptores ON / OFF para habilitar u ocultar las funciones secundarias que tu negocio no requiera.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Switch Dividir Cuenta */}
+                  <div className="grid grid-cols-1 gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800 my-2">
+                    <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                      !disabledModules.includes("split-bill") 
+                        ? "bg-amber-500/10 border-amber-500/40 text-white" 
+                        : "bg-slate-950/60 border-slate-850 text-slate-400"
+                    }`}>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                          <Sliders className="h-4 w-4 text-amber-400" />
+                          <span>Módulo Dividir Cuenta en Mesa</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-snug">
+                          {!disabledModules.includes("split-bill") 
+                            ? "✓ Muestra la herramienta para separar cuenta por comensal." 
+                            : "✕ Oculta por completo la herramienta de dividir cuenta."}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (disabledModules.includes("split-bill")) {
+                            setDisabledModules(prev => prev.filter(m => m !== "split-bill"));
+                          } else {
+                            setDisabledModules(prev => [...prev, "split-bill"]);
+                          }
+                        }}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          !disabledModules.includes("split-bill") ? "bg-amber-500" : "bg-slate-800"
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            !disabledModules.includes("split-bill") ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    {[
+                      { id: "ruleta", label: "Ruleta de Premios", desc: "Juego de fidelización y entrega de premios", icon: Gift },
+                      { id: "seasons", label: "Tarifas y Temporadas", desc: "Ajuste de precios por festivos o temporadas altas", icon: CalendarDays },
+                      { id: "coupons", label: "Cupones de Descuento", desc: "Códigos promocionales de descuento para clientes", icon: Tag },
+                      { id: "ai-settings", label: "Asistente IA (BYOK)", desc: "Configuración del bot inteligente de ventas", icon: Bot },
+                      { id: "crm", label: "CRM Clientes", desc: "Base de datos de clientes e historial de consumo", icon: Users },
+                    ].map((mod) => {
+                      const isHidden = disabledModules.includes(mod.id);
+                      const IconComp = mod.icon;
+                      return (
+                        <label
+                          key={mod.id}
+                          className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer select-none transition-all ${
+                            !isHidden
+                              ? "bg-slate-900/90 border-slate-800 text-white"
+                              : "bg-slate-950/40 border-slate-900 opacity-50 text-slate-500"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!isHidden}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setDisabledModules(prev => prev.filter(m => m !== mod.id));
+                              } else {
+                                setDisabledModules(prev => [...prev, mod.id]);
+                              }
+                            }}
+                            className="h-4.5 w-4.5 mt-0.5 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 cursor-pointer shrink-0"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                              <IconComp className="h-3.5 w-3.5 text-slate-400" />
+                              <span>{mod.label}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{mod.desc}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <input type="hidden" name="customLabels" value={currentCustomLabelsJSON} />
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Nombre del Restaurante</label>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">
+                    {selectedBusinessType === "RESTAURANT" ? "Nombre del Restaurante" : "Nombre de tu Negocio / Empresa"}
+                  </label>
                   <input
                     type="text"
                     name="name"
@@ -3471,7 +4025,7 @@ export function AdminDashboard({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <h2 className="text-2xl font-bold text-white">Platos del Menú</h2>
+                  <h2 className="text-2xl font-bold text-white">{bLabels.itemsPageTitle}</h2>
                   {suggestedDishIds.length > 0 && (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40 shadow-sm">
                       <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
@@ -3479,17 +4033,21 @@ export function AdminDashboard({
                     </span>
                   )}
                 </div>
-                <p className="text-slate-400 text-sm">Gestiona la carta completa: precios, imágenes, platos sugeridos y disponibilidad.</p>
+                <p className="text-slate-400 text-sm">
+                  {isRetail
+                    ? "Gestiona el catálogo completo: precios, imágenes, stock y disponibilidad."
+                    : "Gestiona la carta completa: precios, imágenes, sugeridos y disponibilidad."}
+                </p>
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
                   onClick={handleExportDishesExcel}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 transition-all duration-200 shadow-sm"
-                  title="Descargar todos los platos con sus categorías, precios y fotos en formato Excel (.xlsx)"
+                  title="Descargar catálogo completo en formato Excel (.xlsx)"
                 >
                   <Download className="h-4 w-4" />
-                  Descargar Platos (Excel)
+                  {bLabels.exportExcelButton}
                 </button>
                 <button
                   type="button"
@@ -3497,7 +4055,7 @@ export function AdminDashboard({
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all duration-200 shadow-sm"
                 >
                   <FileSpreadsheet className="h-4 w-4" />
-                  Subida por Lotes (Excel / CSV)
+                  {bLabels.importExcelButton}
                 </button>
                 <button
                   disabled={categoriesList.length === 0}
@@ -3515,7 +4073,7 @@ export function AdminDashboard({
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                 >
                   <Plus className="h-4 w-4" />
-                  Nuevo Plato
+                  {bLabels.newItemButton}
                 </button>
               </div>
             </div>
@@ -3523,7 +4081,7 @@ export function AdminDashboard({
             {categoriesList.length === 0 ? (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 text-center text-amber-300">
                 <AlertCircle className="h-8 w-8 mx-auto mb-2 text-amber-400" />
-                Debes crear al menos una categoría antes de agregar platos.
+                Debes crear al menos una categoría antes de agregar {bLabels.items.toLowerCase()}.
               </div>
             ) : (
               <div className="space-y-8">
@@ -3652,7 +4210,7 @@ export function AdminDashboard({
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
                 <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-lg shadow-2xl relative overflow-y-auto max-h-[90vh]">
                   <h3 className="text-lg font-bold text-white mb-4">
-                    {editingDish ? "Editar Plato" : "Nuevo Plato"}
+                    {editingDish ? `Editar ${bLabels.itemSingle}` : `Nuevo ${bLabels.itemSingle}`}
                   </h3>
                   <form
                     action={async (formData) => {
@@ -3668,7 +4226,7 @@ export function AdminDashboard({
                         if (dishSuggested !== suggestedDishIds.includes(editingDish.id)) {
                           await toggleSuggestedDishAction(restaurant.id, editingDish.id);
                         }
-                        alert("¡Plato guardado con éxito!");
+                        alert(`¡${bLabels.itemSingle} guardado con éxito!`);
                       } else {
                         const res = await createDishAction(dishCatId, formData);
                         if (res && 'error' in res && res.error) {
@@ -3678,7 +4236,7 @@ export function AdminDashboard({
                         if (res && 'dish' in res && res.dish && dishSuggested) {
                           await toggleSuggestedDishAction(restaurant.id, (res.dish as any).id);
                         }
-                        alert("¡Plato creado con éxito!");
+                        alert(`¡${bLabels.itemSingle} creado con éxito!`);
                       }
                       setIsDishModalOpen(false);
                       window.location.reload();
@@ -3687,14 +4245,15 @@ export function AdminDashboard({
                   >
                     <div className="grid grid-cols-2 gap-4">
                       <div className="col-span-2">
-                        <label className="block text-sm font-medium text-slate-300 mb-2">Nombre del Plato</label>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Nombre del {bLabels.itemSingle}</label>
                         <input
                           type="text"
                           name="name"
                           value={dishName}
                           onChange={(e) => setDishName(e.target.value)}
                           required
-                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none"
+                          placeholder={`ej: ${bLabels.itemSingle === "Producto" ? "Whisky Johnnie Walker Black Label 750ml" : bLabels.itemSingle === "Servicio" ? "Mantenimiento Preventivo" : "Pizza Margherita Especial"}`}
+                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
                         />
                       </div>
                       <div>
@@ -3703,7 +4262,7 @@ export function AdminDashboard({
                           name="categoryId"
                           value={dishCatId}
                           onChange={(e) => setDishCatId(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none"
+                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
                         >
                           {restaurant.categories.map((c) => (
                             <option key={c.id} value={c.id}>{c.name}</option>
@@ -3721,7 +4280,7 @@ export function AdminDashboard({
                             value={dishPrice}
                             onChange={(e) => setDishPrice(e.target.value)}
                             required
-                            className="w-full bg-slate-950 border border-slate-850 block pl-8 pr-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none"
+                            className="w-full bg-slate-950 border border-slate-850 block pl-8 pr-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
                           />
                         </div>
                       </div>
@@ -3734,14 +4293,16 @@ export function AdminDashboard({
                         rows={2}
                         value={dishDescription}
                         onChange={(e) => setDishDescription(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none"
-                        placeholder="ej: Mozzarella, albahaca y orégano..."
+                        className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
+                        placeholder={bLabels.itemSingle === "Producto" ? "ej: Botella de 750 ml de licor importado 40% Alc. Vol..." : "ej: Detalle de ingredientes o especificaciones del servicio..."}
                       />
                     </div>
 
                     <div className="border-t border-slate-800 pt-4 space-y-3">
                       <div className="flex items-center justify-between flex-wrap gap-2">
-                        <label className="block text-xs font-semibold text-slate-300">URL DE IMAGEN DEL PLATO (HTTPS)</label>
+                        <label className="block text-xs font-semibold text-slate-300">
+                          URL DE IMAGEN DEL {bLabels.itemSingle.toUpperCase()} (HTTPS)
+                        </label>
                         <span className="text-[10px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-full">
                           ✨ WebP · máx 1200 px · 100–300 KB
                         </span>
@@ -3756,11 +4317,11 @@ export function AdminDashboard({
                               setDishImageUrl(e.target.value);
                               setDishImageHasError(false);
                             }}
-                            placeholder="https://i.postimg.cc/xxxxx/plato.webp"
+                            placeholder="https://i.postimg.cc/xxxxx/imagen.webp"
                             className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none"
                           />
                           <p className="text-[10px] text-slate-400">
-                            Pega la URL pública de la imagen del plato.
+                            Pega la URL pública de la imagen del {bLabels.itemSingle.toLowerCase()}.
                           </p>
                           <input
                             type="file"
@@ -3775,7 +4336,7 @@ export function AdminDashboard({
                               !dishImageHasError ? (
                                 <img
                                   src={dishImageUrl.trim()}
-                                  alt="Vista previa plato"
+                                  alt={`Vista previa ${bLabels.itemSingle.toLowerCase()}`}
                                   onError={() => setDishImageHasError(true)}
                                   className="w-full h-full object-cover rounded-lg shadow"
                                 />
@@ -3817,7 +4378,11 @@ export function AdminDashboard({
                         />
                         <label htmlFor="isSuggestedModal" className="ml-2 flex items-center gap-1.5 text-sm text-amber-300 font-medium cursor-pointer">
                           <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                          <span>Marcar como Plato Sugerido / Recomendación del Día</span>
+                          <span>
+                            {bLabels.itemSingle === "Plato" 
+                              ? "Marcar como Plato Sugerido / Recomendación del Día" 
+                              : `Marcar como ${bLabels.itemSingle} Destacado / Oferta Recomendada`}
+                          </span>
                         </label>
                       </div>
                     </div>
@@ -3827,13 +4392,13 @@ export function AdminDashboard({
                         <button
                           type="button"
                           onClick={async () => {
-                            if (confirm(`¿Estás seguro de eliminar el plato "${editingDish.name}"?`)) {
+                            if (confirm(`¿Estás seguro de eliminar "${editingDish.name}"?`)) {
                               const res = await deleteDishAction(editingDish.id);
                               if (res && 'error' in res && res.error) {
                                 alert(res.error);
                               } else {
                                 setIsDishModalOpen(false);
-                                alert(`¡Plato "${editingDish.name}" eliminado con éxito!`);
+                                alert(`¡${bLabels.itemSingle} "${editingDish.name}" eliminado con éxito!`);
                                 window.location.reload();
                               }
                             }
@@ -3856,7 +4421,7 @@ export function AdminDashboard({
                           type="submit"
                           className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-red-600 to-amber-600 text-white hover:from-red-500 hover:to-amber-500 transition"
                         >
-                          {editingDish ? "Guardar Cambios" : "Crear Plato"}
+                          {editingDish ? `Guardar ${bLabels.itemSingle}` : `Crear ${bLabels.itemSingle}`}
                         </button>
                       </div>
                     </div>

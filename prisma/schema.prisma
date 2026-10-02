@@ -12,6 +12,18 @@ enum Plan {
   PRO
 }
 
+enum BusinessType {
+  RESTAURANT
+  RETAIL
+  SERVICES
+  GENERAL_CATALOG
+}
+
+enum CatalogMode {
+  MENU
+  CATALOG
+}
+
 model User {
   id               String       @id @default(uuid())
   email            String       @unique
@@ -89,6 +101,15 @@ model Restaurant {
   trialEndsAt    DateTime   @default(now())
   leadStatus     String     @default("LEAD_NUEVO") // LEAD_NUEVO, CONTACTADO, EN_DEMO, NEGOCIACION, CLIENTE_PRO, EXPIRADO_INACTIVO, PERDIDO
   nextFollowUpAt DateTime?
+  
+  // Campos Multi-Negocio y Catálogo
+  businessType        BusinessType @default(RESTAURANT)
+  catalogMode         CatalogMode  @default(MENU)
+  enableTableOrdering Boolean      @default(true)
+  enableDelivery      Boolean      @default(true)
+  enablePickup        Boolean      @default(true)
+  customLabels        String?      @db.Text
+
   categories     Category[]
   dishes         Dish[]
   orders         Order[]
@@ -143,12 +164,20 @@ model Dish {
   category     Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   restaurantId String
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  
+  // Campos de producto/servicio para comercio
+  sku          String?
+  stock        Int?
+  isService    Boolean    @default(false)
+  variants     String?    @db.Text
+
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   @@index([categoryId])
   @@index([restaurantId])
   @@index([restaurantId, isAvailable])
+  @@index([restaurantId, sku])
 }
 
 model SystemSetting {

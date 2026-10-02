@@ -5,6 +5,7 @@ import {
   sendWhatsAppPresence,
 } from "@/lib/evolution";
 import { WhatsAppBotState } from "@prisma/client";
+import { getBusinessLabels } from "@/lib/business-labels";
 
 const HUMAN_HANDOFF_DURATION_MS = 45 * 60 * 1000; // 45 minutos
 
@@ -178,6 +179,9 @@ export async function processWhatsAppFSM(
       slug: true,
       name: true,
       whatsappBotEnabled: true,
+      businessType: true,
+      catalogMode: true,
+      customLabels: true,
       bankName: true,
       bankAccountType: true,
       bankAccountNumber: true,
@@ -348,30 +352,39 @@ export async function processWhatsAppFSM(
     }
 
     case "MENU": {
-      if (cleanText === "1" || cleanText === "menu" || cleanText === "carta" || cleanText === "ver menu") {
+      const bLabels = getBusinessLabels(matchedRestaurant?.customLabels, matchedRestaurant?.businessType);
+      const isGastro = (matchedRestaurant?.businessType || "RESTAURANT") === "RESTAURANT";
+
+      const option2Title = isGastro ? "Llamar al Mesero / Pedir Cuenta en Mesa" : "Consultar Estado de Envío / Guía de Despacho";
+
+      if (cleanText === "1" || cleanText === "menu" || cleanText === "carta" || cleanText === "ver menu" || cleanText === "catalogo") {
         newFallbackCount = 0;
-        responseText = `📱 *Carta Digital y Promociones de ${restaurantName}*\n\nConsulta los platos, bebidas y promociones del día aquí:\n👉 ${menuUrl}\n\nEscribe *MENU* para volver a ver las opciones.`;
-      } else if (cleanText === "2" || cleanText === "mesero" || cleanText === "cuenta" || cleanText === "mesa") {
+        responseText = `📱 *${bLabels.items} y Promociones de ${restaurantName}*\n\nConsulta nuestro catálogo interactivo aquí:\n👉 ${menuUrl}\n\nEscribe *MENU* para volver a ver las opciones.`;
+      } else if (cleanText === "2" || cleanText === "mesero" || cleanText === "cuenta" || cleanText === "mesa" || cleanText === "envio" || cleanText === "despacho" || cleanText === "guia") {
         newFallbackCount = 0;
-        responseText = `🔔 *Llamar al Mesero / Pedir Cuenta*\n\nPor favor indícanos tu número de mesa para avisar inmediatamente al personal de *${restaurantName}* (Ejemplo: *Mesa 4*).\n\n_(Escribe *MENU* para regresar al menú principal)_`;
+        if (isGastro) {
+          responseText = `🔔 *Llamar al Mesero / Pedir Cuenta*\n\nPor favor indícanos tu número de mesa para avisar inmediatamente al personal de *${restaurantName}* (Ejemplo: *Mesa 4*).\n\n_(Escribe *MENU* para regresar al menú principal)_`;
+        } else {
+          responseText = `📦 *Consulta de Envíos y Rastreo de Pedido*\n\nSi realizaste una compra en *${restaurantName}*, por favor indícanos tu nombre o número de pedido para enviarte el estado de tu despacho.\n\n_(Escribe *MENU* para regresar al menú principal)_`;
+        }
       } else if (cleanText === "3" || cleanText === "horario" || cleanText === "ubicacion" || cleanText === "direccion" || cleanText === "donde") {
         newFallbackCount = 0;
-        responseText = `📍 *Horarios y Ubicación (${restaurantName})*\n\n🗺️ *Dirección:* ${matchedRestaurant?.address || "Consultar en la carta web"}${matchedRestaurant?.city ? `, ${matchedRestaurant.city}` : ""}\n🕒 *Horario:* ${matchedRestaurant?.schedule || "Abierto hoy"}\n📱 *Menú Web:* ${menuUrl}`;
+        responseText = `📍 *Horarios y Ubicación (${restaurantName})*\n\n🗺️ *Dirección:* ${matchedRestaurant?.address || "Consultar en el catálogo web"}${matchedRestaurant?.city ? `, ${matchedRestaurant.city}` : ""}\n🕒 *Horario:* ${matchedRestaurant?.schedule || "Abierto hoy"}\n📱 *Catálogo Web:* ${menuUrl}`;
       } else if (cleanText === "4" || cleanText === "pago" || cleanText === "banco" || cleanText === "cuenta" || cleanText === "transferencia") {
         newFallbackCount = 0;
         if (matchedRestaurant?.bankAccountNumber) {
           responseText = `💳 *Datos de Transferencia / Pago (${restaurantName})*\n\n🏦 *Banco:* ${matchedRestaurant.bankName || "Pichincha"}\n📋 *Tipo de Cuenta:* ${matchedRestaurant.bankAccountType || "Ahorros"}\n🔢 *N° de Cuenta:* ${matchedRestaurant.bankAccountNumber}\n👤 *Titular:* ${matchedRestaurant.bankAccountName || restaurantName}\n🆔 *Identificación / RUC:* ${matchedRestaurant.bankAccountDocument || "N/A"}\n\nPor favor envía el comprobante por este chat para verificar tu pago.`;
         } else {
-          responseText = `💳 *Datos de Pago (${restaurantName})*\n\nPuedes solicitar la cuenta al mesero o realizar tu pago al retirar tu pedido.`;
+          responseText = `💳 *Datos de Pago (${restaurantName})*\n\nPuedes realizar tu pago por transferencia bancaria o al recibir/retirar tu producto.`;
         }
       } else if (cleanText === "5" || cleanText === "soporte" || cleanText === "humano" || cleanText === "asesor" || cleanText === "ayuda" || cleanText === "personal") {
         nextState = "IN_HUMAN_HANDOFF" as WhatsAppBotState;
         newHandoffUntil = new Date(Date.now() + HUMAN_HANDOFF_DURATION_MS);
         newFallbackCount = 0;
-        responseText = `👤 Un miembro de nuestro equipo te atenderá en este chat en breve. He pausado mis respuestas automáticas durante 45 minutos.\n\n_(Si deseas reactivar el bot antes, escribe *BOT*)_`;
+        responseText = `👤 Un miembro de nuestro equipo de ventas te atenderá en este chat en breve. He pausado mis respuestas automáticas durante 45 minutos.\n\n_(Si deseas reactivar el bot antes, escribe *BOT*)_`;
       } else if (cleanText === "hola" || cleanText === "buenas" || cleanText === "hola!" || cleanText === "start") {
         newFallbackCount = 0;
-        responseText = `¡Hola! Te damos la bienvenida a *${restaurantName}* 🍽️\n\nPor favor elige una opción escribiendo el número:\n1️⃣ Ver Menú Digital y Promociones\n2️⃣ Llamar al Mesero / Pedir Cuenta en Mesa\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano`;
+        responseText = `¡Hola! Te damos la bienvenida a *${restaurantName}* 👋\n\nPor favor elige una opción escribiendo el número:\n1️⃣ Ver ${bLabels.items} y Realizar Pedido\n2️⃣ ${option2Title}\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano`;
       } else {
         // Ocultar opción no reconocida -> Intentar Fallback de IA si el negocio configuró BYOK
         let aiResponse: string | null = null;
@@ -404,9 +417,9 @@ export async function processWhatsAppFSM(
           newFallbackCount += 1;
           if (newFallbackCount >= 2) {
             newFallbackCount = 0;
-            responseText = `⚠️ Opción no válida.\n\nTe mostramos nuevamente nuestras opciones principales:\n1️⃣ Ver Menú Digital y Promociones\n2️⃣ Llamar al Mesero / Pedir Cuenta en Mesa\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano\n\n👉 Responde escribiendo el número del 1 al 5.`;
+            responseText = `⚠️ Opción no válida.\n\nTe mostramos nuevamente nuestras opciones principales:\n1️⃣ Ver ${bLabels.items}\n2️⃣ ${option2Title}\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Transferencia / Pago\n5️⃣ Hablar con un Asesor Humano\n\n👉 Responde escribiendo el número del 1 al 5.`;
           } else {
-            responseText = `🤖 Opción no reconocida.\n\nPor favor responde con el número:\n1️⃣ Ver Menú Digital\n2️⃣ Llamar al Mesero\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Pago\n5️⃣ Hablar con un Asesor Humano`;
+            responseText = `🤖 Opción no reconocida.\n\nPor favor responde con el número:\n1️⃣ Ver ${bLabels.items}\n2️⃣ ${option2Title}\n3️⃣ Horarios y Ubicación\n4️⃣ Datos de Pago\n5️⃣ Hablar con un Asesor Humano`;
           }
         }
       }

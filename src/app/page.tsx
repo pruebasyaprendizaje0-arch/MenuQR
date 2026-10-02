@@ -103,21 +103,39 @@ export default async function LandingPage() {
       <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-amber-600/10 rounded-full blur-[150px] pointer-events-none"></div>
 
       {/* Header */}
-      <header className="max-w-6xl w-full mx-auto px-6 py-6 flex items-center justify-between relative z-10">
-        <div className="flex items-center gap-2">
-          <div className="h-10 w-10 bg-gradient-to-tr from-red-600 to-amber-500 rounded-xl flex items-center justify-center shadow-lg">
-            <UtensilsCrossed className="h-5 w-5 text-white" />
+      <header className="max-w-6xl w-full mx-auto px-6 py-6 flex items-center justify-between relative z-10 gap-4">
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <div className="h-10 w-10 bg-gradient-to-tr from-red-600 to-amber-500 rounded-xl flex items-center justify-center shadow-lg">
+              <UtensilsCrossed className="h-5 w-5 text-white" />
+            </div>
+            <span className="font-extrabold text-white text-lg tracking-tight">
+              MenuQR <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-amber-500">Pro</span>
+            </span>
           </div>
-          <span className="font-extrabold text-white text-lg tracking-tight">
-            MenuQR <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-amber-500">Pro</span>
-          </span>
+
+          {/* Cross-navigation Context Switcher */}
+          <div className="hidden md:inline-flex p-1 bg-slate-900/90 rounded-full border border-slate-800 text-xs font-semibold">
+            <Link href="/" className="px-4 py-1.5 rounded-full bg-red-600 text-white font-bold shadow-md shadow-red-600/20">
+              🍔 Para Restaurantes
+            </Link>
+            <Link href="/catalogos" className="px-4 py-1.5 rounded-full text-slate-400 hover:text-white transition">
+              🛍️ Para Tiendas y Comercios
+            </Link>
+          </div>
         </div>
-        <Link 
-          href="/admin" 
-          className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl transition"
-        >
-          Iniciar Sesión
-        </Link>
+
+        <div className="flex items-center gap-3">
+          <Link href="/catalogos" className="md:hidden text-xs font-semibold text-amber-400 hover:underline">
+            Comercios
+          </Link>
+          <Link 
+            href="/admin" 
+            className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl transition"
+          >
+            Iniciar Sesión
+          </Link>
+        </div>
       </header>
 
       {/* Hero section */}

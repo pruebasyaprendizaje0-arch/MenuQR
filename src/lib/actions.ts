@@ -255,6 +255,14 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
     const localityParts = [province, canton, parroquia, sector].filter(Boolean);
     const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
 
+    const businessTypeInput = (formData.get("businessType") as string) || "RESTAURANT";
+    const validBusinessTypes = ["RESTAURANT", "RETAIL", "SERVICES", "GENERAL_CATALOG"];
+    const businessType = validBusinessTypes.includes(businessTypeInput.toUpperCase())
+      ? (businessTypeInput.toUpperCase() as any)
+      : "RESTAURANT";
+    const catalogMode = businessType === "RESTAURANT" ? "MENU" : "CATALOG";
+    const enableTableOrdering = businessType === "RESTAURANT";
+
     await prismaTenant.restaurant.create({
       data: {
         userId: user.id,
@@ -263,6 +271,9 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
         whatsapp: "",
         locality,
         trialEndsAt,
+        businessType,
+        catalogMode,
+        enableTableOrdering,
       },
     });
 
@@ -460,6 +471,19 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
     await recordSlugChange(restaurantId, currentRestaurant.slug, newSlug);
   }
 
+  const businessType = (formData.get("businessType") as any) || "RESTAURANT";
+  const catalogMode = (formData.get("catalogMode") as any) || "MENU";
+  const enableTableOrdering = formData.has("enableTableOrdering")
+    ? (formData.get("enableTableOrdering") === "true" || formData.get("enableTableOrdering") === "on")
+    : true;
+  const enableDeliveryParam = formData.has("enableDelivery")
+    ? (formData.get("enableDelivery") === "true" || formData.get("enableDelivery") === "on")
+    : true;
+  const enablePickupParam = formData.has("enablePickup")
+    ? (formData.get("enablePickup") === "true" || formData.get("enablePickup") === "on")
+    : true;
+  const customLabelsParam = formData.get("customLabels") as string || null;
+
   await prisma.restaurant.update({
     where: { id: restaurantId },
     data: {
@@ -516,6 +540,14 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       ivaOnTakeout,
       serviceOnTable,
       serviceOnTakeout,
+
+      // Parámetros Multi-Negocio
+      businessType,
+      catalogMode,
+      enableTableOrdering,
+      enableDelivery: enableDeliveryParam,
+      enablePickup: enablePickupParam,
+      customLabels: customLabelsParam,
     },
   });
 
@@ -801,6 +833,12 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     finalImageUrl = val.cleanUrl;
   }
 
+  const sku = (formData.get("sku") as string)?.trim() || null;
+  const stockRaw = formData.get("stock") as string;
+  const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
+  const isService = formData.get("isService") === "true";
+  const variants = (formData.get("variants") as string)?.trim() || null;
+
   await prisma.dish.create({
     data: {
       name,
@@ -808,6 +846,10 @@ export async function createDishAction(categoryId: string, formData: FormData) {
       price,
       imageUrl: finalImageUrl || null,
       isAvailable,
+      sku,
+      stock: isNaN(stock as number) ? null : stock,
+      isService,
+      variants,
       categoryId,
       restaurantId: category.restaurantId,
     },
@@ -969,12 +1011,22 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     finalImageUrl = val.cleanUrl;
   }
 
+  const sku = (formData.get("sku") as string)?.trim() || null;
+  const stockRaw = formData.get("stock") as string;
+  const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
+  const isService = formData.get("isService") === "true";
+  const variants = (formData.get("variants") as string)?.trim() || null;
+
   const updateData: {
     name: string;
     description: string;
     price: number;
     imageUrl: string | null;
     isAvailable: boolean;
+    sku?: string | null;
+    stock?: number | null;
+    isService?: boolean;
+    variants?: string | null;
     categoryId?: string;
   } = {
     name,
@@ -982,6 +1034,10 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     price,
     imageUrl: finalImageUrl || null,
     isAvailable,
+    sku,
+    stock: isNaN(stock as number) ? null : stock,
+    isService,
+    variants,
   };
 
   if (categoryId) {
