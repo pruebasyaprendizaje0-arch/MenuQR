@@ -49,26 +49,38 @@ export async function POST(req: NextRequest) {
     if (aiProvider === "GEMINI") {
       let model = aiModel || "gemini-1.5-flash";
       if (model === "gemini-1.5-pro") model = "gemini-1.5-pro-latest";
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiApiKey.trim()}`;
+      if (model === "gemini-2.0-flash") model = "gemini-2.5-flash";
 
-      const geminiRes = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `${systemPrompt}\n\nPregunta del Cliente: ${sampleQuery}`,
-                },
-              ],
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
+      const tryGeminiCall = async (modelToUse: string) => {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${aiApiKey.trim()}`;
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `${systemPrompt}\n\nPregunta del Cliente: ${sampleQuery}`,
+                  },
+                ],
+              },
+            ],
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = await res.json().catch(() => ({}));
+        return { res, data };
+      };
 
-      const geminiData = await geminiRes.json().catch(() => ({}));
+      let result = await tryGeminiCall(model);
+
+      // Si Google responde que el modelo ya no está disponible, reintentar automáticamente con gemini-1.5-flash
+      if (!result.res.ok && (result.data?.error?.message?.includes("no longer available") || result.data?.error?.message?.includes("not found"))) {
+        result = await tryGeminiCall("gemini-1.5-flash");
+      }
+
+      const { res: geminiRes, data: geminiData } = result;
 
       if (!geminiRes.ok || geminiData.error) {
         return NextResponse.json(

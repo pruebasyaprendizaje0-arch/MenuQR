@@ -55,7 +55,10 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
       const data = await res.json();
       if (data.success) {
         setAiProvider(data.aiProvider || "NONE");
-        setAiModel(data.aiModel || "gpt-4o-mini");
+        let loadedModel = data.aiModel || "gpt-4o-mini";
+        if (loadedModel === "gemini-2.0-flash") loadedModel = "gemini-1.5-flash";
+        if (loadedModel === "gemini-1.5-pro") loadedModel = "gemini-1.5-pro-latest";
+        setAiModel(loadedModel);
         setAiPromptContext(data.aiPromptContext || "");
         setAiFallbackEnabled(Boolean(data.aiFallbackEnabled));
         setHasApiKey(Boolean(data.hasApiKey));
@@ -485,9 +488,8 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
                     </>
                   ) : (
                     <>
-                      <option value="gemini-1.5-flash">gemini-1.5-flash (Ultrarrápido y Estable)</option>
-                      <option value="gemini-2.0-flash">gemini-2.0-flash (Nueva Generación 2.0)</option>
-                      <option value="gemini-2.5-flash">gemini-2.5-flash (Modelo 2.5)</option>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash (Ultrarrápido, Estable y Recomendado)</option>
+                      <option value="gemini-2.5-flash">gemini-2.5-flash (Modelo 2.5 Flash)</option>
                       <option value="gemini-1.5-pro-latest">gemini-1.5-pro-latest (Pro - Razonamiento Profundo)</option>
                       <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Ultraliviano)</option>
                     </>

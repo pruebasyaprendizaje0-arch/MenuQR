@@ -94,22 +94,33 @@ INSTRUCCIONES DE RESPUESTA:
     if (aiProvider === "GEMINI") {
       let model = aiModel || "gemini-1.5-flash";
       if (model === "gemini-1.5-pro") model = "gemini-1.5-pro-latest";
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiApiKey.trim()}`;
+      if (model === "gemini-2.0-flash") model = "gemini-2.5-flash";
 
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: `${systemPrompt}\n\nCliente en WhatsApp: ${userMessage}` }],
-            },
-          ],
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
+      const tryCall = async (modelToUse: string) => {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${aiApiKey.trim()}`;
+        return fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [{ text: `${systemPrompt}\n\nCliente en WhatsApp: ${userMessage}` }],
+              },
+            ],
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+      };
 
-      const data = await res.json().catch(() => ({}));
+      let res = await tryCall(model);
+      let data = await res.json().catch(() => ({}));
+
+      // Si Google responde que el modelo ya no está disponible, reintentar automáticamente con gemini-1.5-flash
+      if (!res.ok && (data.error?.message?.includes("no longer available") || data.error?.message?.includes("not found"))) {
+        res = await tryCall("gemini-1.5-flash");
+        data = await res.json().catch(() => ({}));
+      }
+
       const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
       return textResponse || null;
     } else if (aiProvider === "DEEPSEEK") {
