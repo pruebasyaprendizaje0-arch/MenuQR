@@ -608,26 +608,34 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           : deliveryAddress.trim())
       : undefined;
 
-    const result = await createOrderAction({
-      restaurantId: restaurant.id,
-      tableName: selectedTable || "Llevar",
-      customerName: customerName.trim() || undefined,
-      customerPhone: customerPhone.trim() || undefined,
-      customerAddress: fullCustomerAddress,
-      subtotal,
-      iva,
-      serviceCharge,
-      tip,
-      deliveryCost,
-      deliveryKmRateId: selectedKmRate?.id,
-      seasonRateName: activeRate ? activeRate.name : undefined,
-      seasonRateAmount: seasonBonusAmount,
-      couponCode: appliedCoupon ? appliedCoupon.code : undefined,
-      discountAmount: couponDiscount,
-      total,
-      paymentMethod: selectedMethod,
-      items: itemsData,
-    });
+    let result: any;
+    try {
+      result = await createOrderAction({
+        restaurantId: restaurant.id,
+        tableName: selectedTable || "Llevar",
+        customerName: customerName.trim() || undefined,
+        customerPhone: customerPhone.trim() || undefined,
+        customerAddress: fullCustomerAddress,
+        subtotal,
+        iva,
+        serviceCharge,
+        tip,
+        deliveryCost,
+        deliveryKmRateId: selectedKmRate?.id,
+        seasonRateName: activeRate ? activeRate.name : undefined,
+        seasonRateAmount: seasonBonusAmount,
+        couponCode: appliedCoupon ? appliedCoupon.code : undefined,
+        discountAmount: couponDiscount,
+        total,
+        paymentMethod: selectedMethod,
+        items: itemsData,
+      });
+    } catch (actionErr: any) {
+      console.warn("[MenuClient] Error ejecutando Server Action:", actionErr);
+      alert("Hemos actualizado el sistema con una nueva versión. La página se actualizará para procesar tu pedido.");
+      window.location.reload();
+      return;
+    }
 
     if (result.error) {
       alert(result.error);
