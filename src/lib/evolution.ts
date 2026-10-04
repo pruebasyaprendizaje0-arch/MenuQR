@@ -229,22 +229,46 @@ export async function sendWhatsAppText({
   console.log(`[Evolution API Client] Enviando mensaje a ${formattedNumber} via ${endpoint}...`);
 
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: apiKey,
-      },
-      body: JSON.stringify({
-        number: formattedNumber,
-        text: text,
-        options: {
-          delay: delay,
-          presence: "composing",
-          linkPreview: true,
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: apiKey,
         },
-      }),
-    });
+        body: JSON.stringify({
+          number: formattedNumber,
+          text: text,
+          options: {
+            delay: delay,
+            presence: "composing",
+            linkPreview: true,
+          },
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch (fetchErr: any) {
+      console.warn(`[Evolution API Client] Intento primario falló (${fetchErr.message}). Probando fallback interno coolify-proxy...`);
+      response = await fetch(`http://coolify-proxy:80/message/sendText/${instanceName}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Host: "evolucion.ubicame.cc",
+          apikey: apiKey,
+        },
+        body: JSON.stringify({
+          number: formattedNumber,
+          text: text,
+          options: {
+            delay: delay,
+            presence: "composing",
+            linkPreview: true,
+          },
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+    }
 
     const resData = await response.json();
 
@@ -293,18 +317,37 @@ export async function sendWhatsAppPresence({
   const formattedNumber = to.includes("@") ? to : `${to}@s.whatsapp.net`;
 
   try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: apiKey,
-      },
-      body: JSON.stringify({
-        number: formattedNumber,
-        presence,
-        delay,
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: apiKey,
+        },
+        body: JSON.stringify({
+          number: formattedNumber,
+          presence,
+          delay,
+        }),
+        signal: AbortSignal.timeout(4000),
+      });
+    } catch (presenceErr: any) {
+      response = await fetch(`http://coolify-proxy:80/chat/sendPresence/${instanceName}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Host: "evolucion.ubicame.cc",
+          apikey: apiKey,
+        },
+        body: JSON.stringify({
+          number: formattedNumber,
+          presence,
+          delay,
+        }),
+        signal: AbortSignal.timeout(4000),
+      });
+    }
 
     if (!response.ok) {
       const errText = await response.text();
