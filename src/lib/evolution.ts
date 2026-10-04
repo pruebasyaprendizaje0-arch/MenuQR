@@ -285,8 +285,14 @@ export async function fetchEvolutionRequest(
         signal: AbortSignal.timeout(timeoutMs),
       });
 
-      // Si nos devuelve 301 o 302, ignorar este candidato
-      if (res.status === 301 || res.status === 302 || res.status === 307) {
+      // Si nos devuelve redirect, ignorar este candidato
+      if (res.status === 301 || res.status === 302 || res.status === 307 || res.status === 308) {
+        continue;
+      }
+
+      // Si 404, el endpoint no encontró el recurso en ESTE servidor — probar siguiente candidato
+      if (res.status === 404) {
+        lastError = `404 en ${candidate.url} — probando siguiente candidato`;
         continue;
       }
 

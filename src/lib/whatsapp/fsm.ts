@@ -101,13 +101,21 @@ INSTRUCCIONES DE RESPUESTA:
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: systemPrompt }],
+            },
             contents: [
               {
-                parts: [{ text: `${systemPrompt}\n\nCliente en WhatsApp: ${userMessage}` }],
+                role: "user",
+                parts: [{ text: userMessage }],
               },
             ],
+            generationConfig: {
+              maxOutputTokens: 300,
+              temperature: 0.7,
+            },
           }),
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(12000),
         });
       };
 
@@ -116,7 +124,7 @@ INSTRUCCIONES DE RESPUESTA:
 
       // Si Google responde que el modelo no existe o no está disponible, descubrir en vivo el modelo activo
       if (!res.ok && (
-        data.error?.message?.includes("no longer available") || 
+        data.error?.message?.includes("no longer available") ||
         data.error?.message?.includes("not found") ||
         res.status === 404
       )) {
@@ -142,12 +150,20 @@ INSTRUCCIONES DE RESPUESTA:
         }
 
         if (!res.ok) {
-          res = await tryCall("gemini-3.8-flash");
+          res = await tryCall("gemini-2.0-flash");
           data = await res.json().catch(() => ({}));
         }
       }
 
-      const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      // Verificar si el modelo bloqueó la respuesta por seguridad
+      const candidate = data.candidates?.[0];
+      const finishReason = candidate?.finishReason;
+      if (finishReason === "SAFETY" || finishReason === "RECITATION") {
+        console.warn(`[AI] Gemini bloqueó la respuesta por ${finishReason}`);
+        return null;
+      }
+
+      const textResponse = candidate?.content?.parts?.[0]?.text?.trim();
       return textResponse || null;
     } else if (aiProvider === "DEEPSEEK") {
       const model = aiModel || "deepseek-chat";

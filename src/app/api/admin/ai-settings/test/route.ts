@@ -56,17 +56,21 @@ export async function POST(req: NextRequest) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: systemPrompt }],
+            },
             contents: [
               {
-                parts: [
-                  {
-                    text: `${systemPrompt}\n\nPregunta del Cliente: ${sampleQuery}`,
-                  },
-                ],
+                role: "user",
+                parts: [{ text: sampleQuery }],
               },
             ],
+            generationConfig: {
+              maxOutputTokens: 200,
+              temperature: 0.7,
+            },
           }),
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(12000),
         });
         const data = await res.json().catch(() => ({}));
         return { res, data, modelUsed: modelToUse };
@@ -101,7 +105,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (!result.res.ok) {
-          result = await tryGeminiCall("gemini-3.8-flash");
+          result = await tryGeminiCall("gemini-2.0-flash");
         }
       }
 
@@ -110,6 +114,14 @@ export async function POST(req: NextRequest) {
       if (!geminiRes.ok || geminiData.error) {
         return NextResponse.json(
           { error: geminiData.error?.message || `Error en Google Gemini (HTTP ${geminiRes.status})` },
+          { status: 400 }
+        );
+      }
+
+      const finishReason = geminiData.candidates?.[0]?.finishReason;
+      if (finishReason === "SAFETY" || finishReason === "RECITATION") {
+        return NextResponse.json(
+          { error: `Gemini bloqueó la respuesta por filtro de seguridad (${finishReason}). Ajusta el prompt del restaurante.` },
           { status: 400 }
         );
       }
