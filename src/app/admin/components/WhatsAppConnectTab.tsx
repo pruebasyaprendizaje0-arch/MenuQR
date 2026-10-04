@@ -23,8 +23,32 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [syncingWebhook, setSyncingWebhook] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSyncWebhook = async () => {
+    setSyncingWebhook(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/admin/whatsapp/sync-webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSyncResult({ success: true, message: data.message });
+      } else {
+        setSyncResult({ success: false, message: data.error || "No se pudo sincronizar el webhook." });
+      }
+    } catch (err: any) {
+      setSyncResult({ success: false, message: "Error: " + err.message });
+    } finally {
+      setSyncingWebhook(false);
+    }
+  };
 
   // Garantizar el montaje limpio del componente para evitar React Hydration Error (#418)
   useEffect(() => {
@@ -289,11 +313,37 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
             </div>
           </div>
 
+          {syncResult && (
+            <div
+              className={`p-4 rounded-2xl text-xs flex items-center gap-2 border ${
+                syncResult.success
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                  : "bg-red-500/10 border-red-500/30 text-red-400"
+              }`}
+            >
+              {syncResult.success ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+              ) : (
+                <AlertCircle className="h-4 w-4 shrink-0" />
+              )}
+              <span>{syncResult.message}</span>
+            </div>
+          )}
+
           <div className="border-t border-slate-800/80 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-xs text-slate-400">
-              Si deseas cambiar de número telefónico o desvincular el bot, puedes cerrar sesión o reiniciar la instancia.
+              Si deseas forzar la recepción de mensajes automáticos, sincroniza el webhook o reinicia la conexión.
             </p>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleSyncWebhook}
+                disabled={syncingWebhook}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition shadow-lg shadow-emerald-600/20 shrink-0 disabled:opacity-50"
+              >
+                {syncingWebhook ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                {syncingWebhook ? "Sincronizando..." : "Sincronizar Webhook (Auto-Respuesta)"}
+              </button>
               <button
                 type="button"
                 onClick={handleDisconnect}

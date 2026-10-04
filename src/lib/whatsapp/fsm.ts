@@ -229,7 +229,7 @@ export async function processWhatsAppFSM(
   let restaurantSlug = "";
   let restaurantName = "MenuQR Pro";
 
-  const matchedRestaurant = await prisma.restaurant.findFirst({
+  let matchedRestaurant = await prisma.restaurant.findFirst({
     where: {
       OR: [
         { slug: instance },
@@ -268,6 +268,42 @@ export async function processWhatsAppFSM(
       },
     },
   });
+
+  if (!matchedRestaurant) {
+    matchedRestaurant = await prisma.restaurant.findFirst({
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        whatsappBotEnabled: true,
+        businessType: true,
+        catalogMode: true,
+        customLabels: true,
+        bankName: true,
+        bankAccountType: true,
+        bankAccountNumber: true,
+        bankAccountName: true,
+        bankAccountDocument: true,
+        schedule: true,
+        address: true,
+        city: true,
+        aiProvider: true,
+        aiApiKey: true,
+        aiModel: true,
+        aiPromptContext: true,
+        aiFallbackEnabled: true,
+        categories: {
+          select: {
+            name: true,
+            dishes: {
+              where: { isAvailable: true },
+              select: { name: true, price: true, description: true },
+            },
+          },
+        },
+      },
+    });
+  }
 
   if (matchedRestaurant) {
     restaurantId = matchedRestaurant.id;
@@ -375,8 +411,8 @@ export async function processWhatsAppFSM(
   const isHandoffActive = session.humanHandoffUntil && session.humanHandoffUntil > now;
 
   if (isHandoffActive) {
-    if (["bot", "reactivar", "activar"].includes(cleanText)) {
-      console.log(`[WhatsApp FSM] Cliente ${phone} solicitó reactivar el bot.`);
+    if (["bot", "reactivar", "activar", "menu", "hola", "inicio", "carta", "1", "2", "3", "4", "5"].includes(cleanText)) {
+      console.log(`[WhatsApp FSM] Cliente ${phone} solicitó reactivar el bot (${cleanText}).`);
       session = await prisma.whatsAppSession.update({
         where: { id: session.id },
         data: {
@@ -579,17 +615,17 @@ export async function processWhatsAppFSM(
 
   // 9. ENVÍO DE RESPUESTA CON ESTRATEGIA ANTI-BANEO (DELAYS ALEATORIOS 2500ms - 5500ms + COMPOSING)
   if (responseText) {
-    const artificialDelay = getRandomDelay(2500, 5500);
+    const artificialDelay = getRandomDelay(1000, 2500);
 
-    // a) Disparar presencia "composing"
-    await sendWhatsAppPresence({
+    // a) Disparar presencia "composing" de forma no bloqueante
+    sendWhatsAppPresence({
       instance,
       to: phone,
       presence: "composing",
-      delay: Math.min(artificialDelay, 2000),
-    });
+      delay: Math.min(artificialDelay, 1500),
+    }).catch(() => {});
 
-    // b) Esperar el delay aleatorio realista de emulación humana
+    // b) Esperar delay ágil y realista
     await new Promise((resolve) => setTimeout(resolve, artificialDelay));
 
     // c) Enviar el mensaje con sendWhatsAppText
