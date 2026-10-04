@@ -92,9 +92,8 @@ INSTRUCCIONES DE RESPUESTA:
 - Al finalizar tu mensaje, invita amablemente al cliente a revisar la carta web (https://menuqr.ubicame.cc/${restaurantSlug}) o escribir MENU para volver al menú numérico principal.`;
 
     if (aiProvider === "GEMINI") {
-      let model = aiModel || "gemini-1.5-flash";
-      if (model === "gemini-1.5-pro") model = "gemini-1.5-pro-latest";
-      if (model === "gemini-2.0-flash") model = "gemini-2.5-flash";
+      let model = aiModel || "gemini-3.8-flash";
+      if (model.includes("1.5") || model.includes("2.0") || model.includes("2.5")) model = "gemini-3.8-flash";
 
       const tryCall = async (modelToUse: string) => {
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${aiApiKey.trim()}`;
@@ -115,10 +114,37 @@ INSTRUCCIONES DE RESPUESTA:
       let res = await tryCall(model);
       let data = await res.json().catch(() => ({}));
 
-      // Si Google responde que el modelo ya no está disponible, reintentar automáticamente con gemini-1.5-flash
-      if (!res.ok && (data.error?.message?.includes("no longer available") || data.error?.message?.includes("not found"))) {
-        res = await tryCall("gemini-1.5-flash");
-        data = await res.json().catch(() => ({}));
+      // Si Google responde que el modelo no existe o no está disponible, descubrir en vivo el modelo activo
+      if (!res.ok && (
+        data.error?.message?.includes("no longer available") || 
+        data.error?.message?.includes("not found") ||
+        res.status === 404
+      )) {
+        try {
+          const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${aiApiKey.trim()}`, {
+            signal: AbortSignal.timeout(6000),
+          });
+          const listData = await listRes.json().catch(() => ({}));
+          if (listData.models && Array.isArray(listData.models)) {
+            const valid = listData.models.find((m: any) =>
+              m.supportedGenerationMethods?.includes("generateContent") &&
+              !m.name.includes("embedding") &&
+              !m.name.includes("aqa")
+            );
+            if (valid) {
+              const liveModel = valid.name.replace(/^models\//, "");
+              res = await tryCall(liveModel);
+              data = await res.json().catch(() => ({}));
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        if (!res.ok) {
+          res = await tryCall("gemini-3.8-flash");
+          data = await res.json().catch(() => ({}));
+        }
       }
 
       const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();

@@ -56,8 +56,9 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
       if (data.success) {
         setAiProvider(data.aiProvider || "NONE");
         let loadedModel = data.aiModel || "gpt-4o-mini";
-        if (loadedModel === "gemini-2.0-flash") loadedModel = "gemini-1.5-flash";
-        if (loadedModel === "gemini-1.5-pro") loadedModel = "gemini-1.5-pro-latest";
+        if (data.aiProvider === "GEMINI" && (loadedModel.includes("1.5") || loadedModel.includes("2.0") || loadedModel.includes("2.5"))) {
+          loadedModel = "gemini-3.8-flash";
+        }
         setAiModel(loadedModel);
         setAiPromptContext(data.aiPromptContext || "");
         setAiFallbackEnabled(Boolean(data.aiFallbackEnabled));
@@ -180,6 +181,9 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
           message: data.message,
           response: data.response,
         });
+        if (data.detectedModel) {
+          setAiModel(data.detectedModel);
+        }
       } else {
         setTestResult({
           success: false,
@@ -336,7 +340,7 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
               type="button"
               onClick={() => {
                 setAiProvider("GEMINI");
-                setAiModel("gemini-1.5-flash");
+                setAiModel("gemini-3.8-flash");
                 setAvailableModels([]);
               }}
               className={`p-4 rounded-2xl border text-left space-y-2 transition ${
@@ -352,7 +356,7 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
                 </span>
                 {aiProvider === "GEMINI" && <CheckCircle2 className="h-4 w-4 text-blue-400" />}
               </div>
-              <p className="text-[11px] text-slate-400">Gemini 1.5 / 2.0 Flash (Opción económica de Google).</p>
+              <p className="text-[11px] text-slate-400">Gemini 3.8 Flash (Modelo oficial de Google).</p>
             </button>
 
             {/* DeepSeek */}
@@ -488,10 +492,9 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
                     </>
                   ) : (
                     <>
-                      <option value="gemini-1.5-flash">gemini-1.5-flash (Ultrarrápido, Estable y Recomendado)</option>
+                      <option value="gemini-3.8-flash">gemini-3.8-flash (Recomendado - Nueva Generación Google)</option>
                       <option value="gemini-2.5-flash">gemini-2.5-flash (Modelo 2.5 Flash)</option>
-                      <option value="gemini-1.5-pro-latest">gemini-1.5-pro-latest (Pro - Razonamiento Profundo)</option>
-                      <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Ultraliviano)</option>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash (Legacy)</option>
                     </>
                   )}
                 </select>

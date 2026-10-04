@@ -47,9 +47,8 @@ export async function POST(req: NextRequest) {
     let aiReply = "";
 
     if (aiProvider === "GEMINI") {
-      let model = aiModel || "gemini-1.5-flash";
-      if (model === "gemini-1.5-pro") model = "gemini-1.5-pro-latest";
-      if (model === "gemini-2.0-flash") model = "gemini-2.5-flash";
+      let model = aiModel || "gemini-3.8-flash";
+      if (model.includes("1.5") || model.includes("2.0") || model.includes("2.5")) model = "gemini-3.8-flash";
 
       const tryGeminiCall = async (modelToUse: string) => {
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${aiApiKey.trim()}`;
@@ -70,17 +69,43 @@ export async function POST(req: NextRequest) {
           signal: AbortSignal.timeout(10000),
         });
         const data = await res.json().catch(() => ({}));
-        return { res, data };
+        return { res, data, modelUsed: modelToUse };
       };
 
       let result = await tryGeminiCall(model);
 
-      // Si Google responde que el modelo ya no está disponible, reintentar automáticamente con gemini-1.5-flash
-      if (!result.res.ok && (result.data?.error?.message?.includes("no longer available") || result.data?.error?.message?.includes("not found"))) {
-        result = await tryGeminiCall("gemini-1.5-flash");
+      // Si Google responde que el modelo ya no está disponible o no existe (404), descubrir el modelo activo en vivo
+      if (!result.res.ok && (
+        result.data?.error?.message?.includes("no longer available") || 
+        result.data?.error?.message?.includes("not found") ||
+        result.res.status === 404
+      )) {
+        try {
+          const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${aiApiKey.trim()}`, {
+            signal: AbortSignal.timeout(6000),
+          });
+          const listData = await listRes.json().catch(() => ({}));
+          if (listData.models && Array.isArray(listData.models)) {
+            const valid = listData.models.find((m: any) =>
+              m.supportedGenerationMethods?.includes("generateContent") &&
+              !m.name.includes("embedding") &&
+              !m.name.includes("aqa")
+            );
+            if (valid) {
+              const liveModel = valid.name.replace(/^models\//, "");
+              result = await tryGeminiCall(liveModel);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
+        if (!result.res.ok) {
+          result = await tryGeminiCall("gemini-3.8-flash");
+        }
       }
 
-      const { res: geminiRes, data: geminiData } = result;
+      const { res: geminiRes, data: geminiData, modelUsed } = result;
 
       if (!geminiRes.ok || geminiData.error) {
         return NextResponse.json(
@@ -92,6 +117,13 @@ export async function POST(req: NextRequest) {
       aiReply =
         geminiData.candidates?.[0]?.content?.parts?.[0]?.text ||
         "¡Conexión con Google Gemini verificada con éxito!";
+
+      return NextResponse.json({
+        success: true,
+        message: `¡Conexión exitosa con Google Gemini usando el modelo "${modelUsed}"!`,
+        response: aiReply,
+        detectedModel: modelUsed,
+      });
     } else if (aiProvider === "DEEPSEEK") {
       const model = aiModel || "deepseek-chat";
       const endpoint = "https://api.deepseek.com/chat/completions";
