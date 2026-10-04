@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
-import { connectWhatsAppInstance } from "@/lib/evolution";
+import { connectWhatsAppInstance, getEvolutionCredentials } from "@/lib/evolution";
 
 /**
  * Proxy Endpoint Seguro para Obtención de Código QR y Pairing Code (Evolution API v2)
@@ -45,10 +45,18 @@ export async function GET(req: NextRequest) {
     const qrResult = await connectWhatsAppInstance(restaurant.slug);
 
     if (!qrResult.success) {
-      return NextResponse.json(
-        { error: qrResult.error || "No se pudo obtener el código QR de Evolution API" },
-        { status: 502 }
-      );
+      const { baseUrl, apiKey } = await getEvolutionCredentials();
+      const publicBaseUrl = (process.env.NEXT_PUBLIC_EVOLUTION_API_URL || baseUrl || "https://evolucion.ubicame.cc").replace(/\/+$/, "");
+      return NextResponse.json({
+        success: false,
+        clientFallback: true,
+        instanceName: restaurant.slug,
+        connectUrl: `${publicBaseUrl}/instance/connect/${restaurant.slug}`,
+        stateUrl: `${publicBaseUrl}/instance/connectionState/${restaurant.slug}`,
+        deleteUrl: `${publicBaseUrl}/instance/delete/${restaurant.slug}`,
+        apiKey: apiKey,
+        error: qrResult.error,
+      });
     }
 
     // Sincronizar en base de datos

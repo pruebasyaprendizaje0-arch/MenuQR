@@ -376,35 +376,13 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
   const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
 
   try {
-    // 1. Verificar primero si la instancia ya está conectada (state === "open")
-    const stateEndpoint = `${cleanBaseUrl}/instance/connectionState/${instanceName}`;
-    const stateRes = await fetch(stateEndpoint, {
-      method: "GET",
-      headers: { apikey: apiKey },
-      cache: "no-store",
-      signal: AbortSignal.timeout(6000),
-    }).catch(() => null);
-
-    if (stateRes && stateRes.ok) {
-      const stateData = await stateRes.json().catch(() => ({}));
-      const currentState = stateData.instance?.state || stateData.state;
-      if (currentState === "open" || currentState === "connected") {
-        console.log(`[Evolution API] Instancia "${instanceName}" ya se encuentra CONECTADA (open).`);
-        return {
-          success: true,
-          state: "open",
-          alreadyConnected: true,
-        };
-      }
-    }
-
-    // 2. Si no está conectada, solicitar conexión/QR con GET /instance/connect/{instance}
+    // Solicitar conexión/QR directamente con GET /instance/connect/{instance} (timeout ágil de 4s)
     const connectEndpoint = `${cleanBaseUrl}/instance/connect/${instanceName}`;
     let response = await fetch(connectEndpoint, {
       method: "GET",
       headers: { apikey: apiKey },
       cache: "no-store",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(4000),
     });
 
     let resData = await response.json().catch(() => ({}));

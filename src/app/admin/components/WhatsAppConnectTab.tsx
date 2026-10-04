@@ -62,9 +62,40 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
         cache: "no-store",
       });
       const data = await res.json();
-      if (!res.ok || data.error) {
-        setErrorMsg(data.error || `HTTP ${res.status}`);
-      } else if (data.success) {
+
+      // Fallback Directo desde el Navegador si el backend de Vultr da Timeout (Hairpin NAT):
+      if (data.clientFallback && data.connectUrl && data.apiKey) {
+        console.log("[WhatsAppConnect] Activando conexión directa desde el navegador a Evolution API...");
+        try {
+          const directRes = await fetch(data.connectUrl, {
+            headers: { apikey: data.apiKey },
+          });
+          const directData = await directRes.json();
+          const state = directData.instance?.state || directData.state;
+          if (state === "open" || state === "connected") {
+            setConnectionState("open");
+            setQrBase64(null);
+            setPairingCode(null);
+            setErrorMsg(null);
+            return;
+          }
+          let rawBase64 = directData.base64 || directData.qrcode?.base64 || directData.code || directData.qrcode?.code || null;
+          if (rawBase64 && typeof rawBase64 === "string" && !rawBase64.startsWith("data:image/")) {
+            rawBase64 = `data:image/png;base64,${rawBase64}`;
+          }
+          if (rawBase64) {
+            setQrBase64(rawBase64);
+            setPairingCode(directData.pairingCode || directData.qrcode?.pairingCode || null);
+            setConnectionState("connecting");
+            setErrorMsg(null);
+            return;
+          }
+        } catch (directErr: any) {
+          console.warn("[WhatsAppConnect Direct Error]:", directErr);
+        }
+      }
+
+      if (data.success) {
         if (data.state === "open" || data.alreadyConnected) {
           setConnectionState("open");
           setQrBase64(null);
@@ -75,6 +106,8 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: { restauran
           setPairingCode(data.pairingCode || null);
           setConnectionState("connecting");
         }
+      } else if (!res.ok || data.error) {
+        setErrorMsg(data.error || `HTTP ${res.status}`);
       }
     } catch (err: any) {
       setErrorMsg(err.message || "Error al conectar con el servidor de WhatsApp.");
