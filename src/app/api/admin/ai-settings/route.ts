@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
 
     const updateData: any = {
       aiProvider: aiProvider || "NONE",
-      aiModel: aiModel || (aiProvider === "GEMINI" ? "gemini-1.5-flash" : "gpt-4o-mini"),
+      aiModel: aiModel || (aiProvider === "GEMINI" ? "gemini-1.5-flash" : aiProvider === "DEEPSEEK" ? "deepseek-chat" : "gpt-4o-mini"),
       aiPromptContext: aiPromptContext || null,
       aiFallbackEnabled: Boolean(aiFallbackEnabled),
     };

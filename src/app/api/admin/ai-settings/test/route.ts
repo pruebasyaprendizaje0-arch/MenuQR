@@ -47,7 +47,8 @@ export async function POST(req: NextRequest) {
     let aiReply = "";
 
     if (aiProvider === "GEMINI") {
-      const model = aiModel || "gemini-1.5-flash";
+      let model = aiModel || "gemini-1.5-flash";
+      if (model === "gemini-1.5-pro") model = "gemini-1.5-pro-latest";
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiApiKey.trim()}`;
 
       const geminiRes = await fetch(endpoint, {
@@ -79,6 +80,39 @@ export async function POST(req: NextRequest) {
       aiReply =
         geminiData.candidates?.[0]?.content?.parts?.[0]?.text ||
         "¡Conexión con Google Gemini verificada con éxito!";
+    } else if (aiProvider === "DEEPSEEK") {
+      const model = aiModel || "deepseek-chat";
+      const endpoint = "https://api.deepseek.com/chat/completions";
+
+      const deepseekRes = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${aiApiKey.trim()}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: sampleQuery },
+          ],
+          max_tokens: 150,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      const deepseekData = await deepseekRes.json().catch(() => ({}));
+
+      if (!deepseekRes.ok || deepseekData.error) {
+        return NextResponse.json(
+          { error: deepseekData.error?.message || `Error en DeepSeek (HTTP ${deepseekRes.status})` },
+          { status: 400 }
+        );
+      }
+
+      aiReply =
+        deepseekData.choices?.[0]?.message?.content ||
+        "¡Conexión con DeepSeek verificada con éxito!";
     } else {
       // Por defecto OpenAI
       const model = aiModel || "gpt-4o-mini";

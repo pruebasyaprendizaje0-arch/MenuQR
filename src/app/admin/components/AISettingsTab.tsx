@@ -16,6 +16,7 @@ import {
   Loader2,
   Save,
   MessageSquare,
+  Cpu,
 } from "lucide-react";
 
 export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: string; restaurantSlug: string }) {
@@ -26,13 +27,17 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
   const [showApiKey, setShowApiKey] = useState(false);
 
   // Estados del Formulario
-  const [aiProvider, setAiProvider] = useState<"NONE" | "OPENAI" | "GEMINI">("NONE");
+  const [aiProvider, setAiProvider] = useState<"NONE" | "OPENAI" | "GEMINI" | "DEEPSEEK">("NONE");
   const [aiApiKey, setAiApiKey] = useState("");
   const [hasApiKey, setHasApiKey] = useState(false);
   const [maskedApiKey, setMaskedApiKey] = useState("");
   const [aiModel, setAiModel] = useState("gpt-4o-mini");
   const [aiPromptContext, setAiPromptContext] = useState("");
   const [aiFallbackEnabled, setAiFallbackEnabled] = useState(false);
+
+  // Sincronización dinámica de modelos
+  const [availableModels, setAvailableModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
 
   // Feedback Visual
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -72,6 +77,48 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
       loadSettings();
     }
   }, [isMounted, loadSettings]);
+
+  const handleFetchModels = async () => {
+    if (aiProvider === "NONE") return;
+    setFetchingModels(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch("/api/admin/ai-settings/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantId,
+          aiProvider,
+          aiApiKey,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
+        setAvailableModels(data.models);
+        // Si el modelo actual no está en la lista retornada, seleccionar el primero
+        const exists = data.models.some((m: any) => m.id === aiModel);
+        if (!exists && data.models[0]) {
+          setAiModel(data.models[0].id);
+        }
+        setStatusMessage({
+          type: "success",
+          text: `¡${data.models.length} modelos actualizados desde la API de ${aiProvider}!`,
+        });
+      } else {
+        setStatusMessage({
+          type: "error",
+          text: data.error || "No se pudieron obtener los modelos. Verifica tu clave API.",
+        });
+      }
+    } catch (err: any) {
+      setStatusMessage({
+        type: "error",
+        text: "Error al sincronizar modelos: " + err.message,
+      });
+    } finally {
+      setFetchingModels(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -171,7 +218,7 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
               </span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Conecta tu propia cuenta de <strong>OpenAI</strong> o <strong>Google Gemini</strong> para responder consultas complejas en WhatsApp manteniendo el motor determinista de 1 al 5 como base gratuita.
+              Conecta tu propia cuenta de <strong>OpenAI</strong>, <strong>Google Gemini</strong> o <strong>DeepSeek</strong> para responder consultas complejas en WhatsApp manteniendo el motor determinista de 1 al 5 como base gratuita.
             </p>
           </div>
         </div>
@@ -184,7 +231,7 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
           ¿Cómo funciona "Bring Your Own Key" (BYOK)?
         </div>
         <p className="text-xs text-slate-300 leading-relaxed">
-          Por defecto, <strong>MenuQR Pro</strong> funciona 100% gratis con un menú determinista (opciones 1 al 5). Si deseas que el bot responda preguntas abiertas sobre ingredientes, alérgenos, recomendaciones o historia de tu negocio, ingresa tu clave API personal de OpenAI o Google Gemini. <strong>Pagarás directamente a tu proveedor de IA a costo de consumo centavicular sin sobreprecio.</strong>
+          Por defecto, <strong>MenuQR Pro</strong> funciona 100% gratis con un menú determinista (opciones 1 al 5). Si deseas que el bot responda preguntas abiertas sobre platos, recomendaciones o historia de tu negocio, ingresa tu clave API personal de OpenAI, Google Gemini o DeepSeek. <strong>Pagarás directamente a tu proveedor de IA a costo de consumo centavicular sin sobreprecio.</strong>
         </p>
       </div>
 
@@ -235,12 +282,14 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
           <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
             1. Selecciona tu Proveedor de Inteligencia Artificial
           </label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Desactivado */}
             <button
               type="button"
               onClick={() => {
                 setAiProvider("NONE");
                 setAiFallbackEnabled(false);
+                setAvailableModels([]);
               }}
               className={`p-4 rounded-2xl border text-left space-y-2 transition ${
                 aiProvider === "NONE"
@@ -255,11 +304,13 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
               <p className="text-[11px] text-slate-400">100% Determinista (FSM Opciones 1-5). Sin costo API.</p>
             </button>
 
+            {/* OpenAI */}
             <button
               type="button"
               onClick={() => {
                 setAiProvider("OPENAI");
                 setAiModel("gpt-4o-mini");
+                setAvailableModels([]);
               }}
               className={`p-4 rounded-2xl border text-left space-y-2 transition ${
                 aiProvider === "OPENAI"
@@ -274,14 +325,16 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
                 </span>
                 {aiProvider === "OPENAI" && <CheckCircle2 className="h-4 w-4 text-teal-400" />}
               </div>
-              <p className="text-[11px] text-slate-400">GPT-4o-mini (Respuestas ultrarrápidas y precisas).</p>
+              <p className="text-[11px] text-slate-400">GPT-4o-mini, GPT-4o (Respuestas precisas).</p>
             </button>
 
+            {/* Google Gemini */}
             <button
               type="button"
               onClick={() => {
                 setAiProvider("GEMINI");
                 setAiModel("gemini-1.5-flash");
+                setAvailableModels([]);
               }}
               className={`p-4 rounded-2xl border text-left space-y-2 transition ${
                 aiProvider === "GEMINI"
@@ -296,7 +349,31 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
                 </span>
                 {aiProvider === "GEMINI" && <CheckCircle2 className="h-4 w-4 text-blue-400" />}
               </div>
-              <p className="text-[11px] text-slate-400">Gemini 1.5 Flash (Opción económica de Google).</p>
+              <p className="text-[11px] text-slate-400">Gemini 1.5 / 2.0 Flash (Opción económica de Google).</p>
+            </button>
+
+            {/* DeepSeek */}
+            <button
+              type="button"
+              onClick={() => {
+                setAiProvider("DEEPSEEK");
+                setAiModel("deepseek-chat");
+                setAvailableModels([]);
+              }}
+              className={`p-4 rounded-2xl border text-left space-y-2 transition ${
+                aiProvider === "DEEPSEEK"
+                  ? "bg-indigo-950/60 border-indigo-500/60 text-white ring-1 ring-indigo-500/30"
+                  : "bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold flex items-center gap-1.5">
+                  <Cpu className="h-4 w-4 text-indigo-400" />
+                  DeepSeek
+                </span>
+                {aiProvider === "DEEPSEEK" && <CheckCircle2 className="h-4 w-4 text-indigo-400" />}
+              </div>
+              <p className="text-[11px] text-slate-400">DeepSeek-V3 & R1 (Alta potencia al menor costo).</p>
             </button>
           </div>
         </div>
@@ -315,7 +392,13 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
                     type={showApiKey ? "text" : "password"}
                     value={aiApiKey}
                     onChange={(e) => setAiApiKey(e.target.value)}
-                    placeholder={aiProvider === "OPENAI" ? "sk-proj-..." : "AIzaSy..."}
+                    placeholder={
+                      aiProvider === "OPENAI"
+                        ? "sk-proj-..."
+                        : aiProvider === "DEEPSEEK"
+                        ? "sk-..."
+                        : "AIzaSy..."
+                    }
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 font-mono"
                   />
                   <button
@@ -327,33 +410,94 @@ export function AISettingsTab({ restaurantId, restaurantSlug }: { restaurantId: 
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  {aiProvider === "OPENAI"
-                    ? "Obtén tu clave en platform.openai.com/api-keys"
-                    : "Obtén tu clave gratuita en aistudio.google.com"}
+                  {aiProvider === "OPENAI" && (
+                    <a
+                      href="https://platform.openai.com/api-keys"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-teal-400 hover:underline"
+                    >
+                      Obtén tu clave en platform.openai.com/api-keys
+                    </a>
+                  )}
+                  {aiProvider === "GEMINI" && (
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:underline"
+                    >
+                      Obtén tu clave gratuita en aistudio.google.com
+                    </a>
+                  )}
+                  {aiProvider === "DEEPSEEK" && (
+                    <a
+                      href="https://platform.deepseek.com/api_keys"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-400 hover:underline"
+                    >
+                      Obtén tu clave en platform.deepseek.com/api_keys
+                    </a>
+                  )}
                 </p>
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
-                  3. Modelo de Lenguaje
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                    3. Modelo de Lenguaje
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleFetchModels}
+                    disabled={fetchingModels}
+                    title="Consultar modelos disponibles en tiempo real con tu API Key"
+                    className="inline-flex items-center gap-1 text-[11px] text-teal-400 hover:text-teal-300 transition font-medium disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${fetchingModels ? "animate-spin" : ""}`} />
+                    {fetchingModels ? "Sincronizando..." : "Ver Modelos Actualizados"}
+                  </button>
+                </div>
+
                 <select
                   value={aiModel}
                   onChange={(e) => setAiModel(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-teal-500 font-mono"
                 >
-                  {aiProvider === "OPENAI" ? (
+                  {availableModels.length > 0 ? (
+                    availableModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))
+                  ) : aiProvider === "OPENAI" ? (
                     <>
                       <option value="gpt-4o-mini">gpt-4o-mini (Recomendado - Rápido y Económico)</option>
-                      <option value="gpt-4o">gpt-4o (Máxima Precisión)</option>
+                      <option value="gpt-4o">gpt-4o (Máxima Capacidad)</option>
+                      <option value="o3-mini">o3-mini (Razonamiento Rápido)</option>
+                      <option value="gpt-4-turbo">gpt-4-turbo (Avanzado)</option>
+                    </>
+                  ) : aiProvider === "DEEPSEEK" ? (
+                    <>
+                      <option value="deepseek-chat">deepseek-chat (DeepSeek-V3 - Rápido y Muy Económico)</option>
+                      <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1 - Razonamiento Avanzado)</option>
                     </>
                   ) : (
                     <>
-                      <option value="gemini-1.5-flash">gemini-1.5-flash (Ultrarrápido)</option>
-                      <option value="gemini-1.5-pro">gemini-1.5-pro (Avanzado)</option>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash (Ultrarrápido y Estable)</option>
+                      <option value="gemini-2.0-flash">gemini-2.0-flash (Nueva Generación 2.0)</option>
+                      <option value="gemini-2.5-flash">gemini-2.5-flash (Modelo 2.5)</option>
+                      <option value="gemini-1.5-pro-latest">gemini-1.5-pro-latest (Pro - Razonamiento Profundo)</option>
+                      <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Ultraliviano)</option>
                     </>
                   )}
                 </select>
+                <p className="text-[10px] text-slate-500">
+                  {availableModels.length > 0
+                    ? `Mostrando lista de ${availableModels.length} modelos oficiales actualizados desde la API.`
+                    : "Haz clic en 'Ver Modelos Actualizados' para listar todos los modelos activos de tu cuenta."}
+                </p>
               </div>
             </div>
 

@@ -92,7 +92,8 @@ INSTRUCCIONES DE RESPUESTA:
 - Al finalizar tu mensaje, invita amablemente al cliente a revisar la carta web (https://menuqr.ubicame.cc/${restaurantSlug}) o escribir MENU para volver al menú numérico principal.`;
 
     if (aiProvider === "GEMINI") {
-      const model = aiModel || "gemini-1.5-flash";
+      let model = aiModel || "gemini-1.5-flash";
+      if (model === "gemini-1.5-pro") model = "gemini-1.5-pro-latest";
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiApiKey.trim()}`;
 
       const res = await fetch(endpoint, {
@@ -110,6 +111,30 @@ INSTRUCCIONES DE RESPUESTA:
 
       const data = await res.json().catch(() => ({}));
       const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      return textResponse || null;
+    } else if (aiProvider === "DEEPSEEK") {
+      const model = aiModel || "deepseek-chat";
+      const endpoint = "https://api.deepseek.com/chat/completions";
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${aiApiKey.trim()}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          max_tokens: 250,
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      const textResponse = data.choices?.[0]?.message?.content?.trim();
       return textResponse || null;
     } else {
       const model = aiModel || "gpt-4o-mini";
