@@ -224,9 +224,31 @@ export async function fetchEvolutionRequest(
   const method = options.method || "GET";
   const timeoutMs = options.timeoutMs || 6000;
 
-  const candidateEndpoints: Array<{ url: string; headers: Record<string, string> }> = [];
+  const candidateEndpoints: Array<{ url: string; headers: Record<string, string>; label: string }> = [];
 
-  // 1. coolify-proxy (Traefik) con headers anti-redirect
+  // 0. localhost:8080 — funciona si Evolution API expone puerto en el host del VPS
+  candidateEndpoints.push({
+    url: `http://localhost:8080${cleanPath}`,
+    headers: { apikey: apiKey },
+    label: "localhost:8080",
+  });
+  candidateEndpoints.push({
+    url: `http://127.0.0.1:8080${cleanPath}`,
+    headers: { apikey: apiKey },
+    label: "127.0.0.1:8080",
+  });
+
+  // 1. EVOLUTION_INTERNAL_URL si fue configurada en el entorno (máxima prioridad)
+  if (process.env.EVOLUTION_INTERNAL_URL) {
+    const cleanInternal = process.env.EVOLUTION_INTERNAL_URL.replace(/\/+$/, "");
+    candidateEndpoints.unshift({
+      url: `${cleanInternal}${cleanPath}`,
+      headers: { apikey: apiKey },
+      label: `INTERNAL:${cleanInternal}`,
+    });
+  }
+
+  // 2. coolify-proxy (Traefik) con headers anti-redirect
   candidateEndpoints.push({
     url: `http://coolify-proxy:80${cleanPath}`,
     headers: {
@@ -235,36 +257,33 @@ export async function fetchEvolutionRequest(
       "X-Forwarded-Port": "443",
       apikey: apiKey,
     },
+    label: "coolify-proxy:80",
   });
 
-  // 2. EVOLUTION_INTERNAL_URL si fue configurada en el entorno
-  if (process.env.EVOLUTION_INTERNAL_URL) {
-    const cleanInternal = process.env.EVOLUTION_INTERNAL_URL.replace(/\/+$/, "");
-    candidateEndpoints.push({
-      url: `${cleanInternal}${cleanPath}`,
-      headers: { apikey: apiKey },
-    });
-  }
-
-  // 3. Contenedores internos en red Docker coolify
+  // 3. Contenedor interno Docker de Coolify (nombre generado por Coolify)
   candidateEndpoints.push({
     url: `http://api-qe0f2p00ggzokragtimc4w9u:8080${cleanPath}`,
     headers: { apikey: apiKey },
+    label: "docker:api-qe0f",
   });
   candidateEndpoints.push({
     url: `http://evolution-api:8080${cleanPath}`,
     headers: { apikey: apiKey },
+    label: "docker:evolution-api",
   });
 
-  // 4. URL Base Pública
+  // 4. URL Base Pública (fallback final — puede fallar por Hairpin NAT)
   if (baseUrl) {
     const cleanBase = baseUrl.replace(/\/+$/, "");
     candidateEndpoints.push({
       url: `${cleanBase}${cleanPath}`,
       headers: { apikey: apiKey },
+      label: `public:${cleanBase}`,
     });
   }
 
+  // Timeout individual corto (2.5s) para fallar rápido y probar el siguiente candidato
+  const perCandidateTimeout = Math.min(timeoutMs, 2500);
   let lastError = "No se pudo conectar con Evolution API";
 
   for (const candidate of candidateEndpoints) {
@@ -281,29 +300,35 @@ export async function fetchEvolutionRequest(
         method,
         headers,
         body: options.body ? JSON.stringify(options.body) : undefined,
-        redirect: "manual", // No seguir 301 para evitar bucle de hairpin NAT hacia la IP externa
-        signal: AbortSignal.timeout(timeoutMs),
+        redirect: "manual",
+        signal: AbortSignal.timeout(perCandidateTimeout),
       });
 
       // Si nos devuelve redirect, ignorar este candidato
       if (res.status === 301 || res.status === 302 || res.status === 307 || res.status === 308) {
+        console.log(`[Evolution Fetch] ${candidate.label} → ${res.status} redirect — probando siguiente`);
         continue;
       }
 
-      // Si 404, el endpoint no encontró el recurso en ESTE servidor — probar siguiente candidato
+      // Si 404, el recurso no existe en ESTE servidor — probar siguiente candidato
       if (res.status === 404) {
-        lastError = `404 en ${candidate.url} — probando siguiente candidato`;
+        console.log(`[Evolution Fetch] ${candidate.label} → 404 not found — probando siguiente`);
+        lastError = `404 en ${candidate.label}`;
         continue;
       }
 
       const resData = await res.json().catch(() => ({}));
+      console.log(`[Evolution Fetch] ✅ Éxito con ${candidate.label} → HTTP ${res.status}`);
       return { ok: res.ok, status: res.status, data: resData };
     } catch (err: any) {
-      lastError = err.message || String(err);
+      const errMsg = err.message || String(err);
+      console.log(`[Evolution Fetch] ${candidate.label} → Error: ${errMsg.substring(0, 60)}`);
+      lastError = errMsg;
       // Probar el siguiente candidato
     }
   }
 
+  console.error(`[Evolution Fetch] ❌ Todos los candidatos fallaron. Último error: ${lastError}`);
   return { ok: false, status: 0, data: null, error: lastError };
 }
 
