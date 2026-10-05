@@ -270,17 +270,29 @@ export async function fetchEvolutionRequest(
     label: "coolify-proxy:80",
   });
 
-  // 3. Contenedor interno Docker de Coolify (nombre generado por Coolify)
-  candidateEndpoints.push({
-    url: `http://api-qe0f2p00ggzokragtimc4w9u:8080${cleanPath}`,
-    headers: { apikey: apiKey },
-    label: "docker:api-qe0f",
-  });
-  candidateEndpoints.push({
-    url: `http://evolution-api:8080${cleanPath}`,
-    headers: { apikey: apiKey },
-    label: "docker:evolution-api",
-  });
+  // 3. Contenedores internos Docker de Coolify (múltiples patrones de nombres de servicio/contenedor)
+  const dockerHostnames = [
+    "qe0f2p00ggzokragtimc4w9u-api",
+    "qe0f2p00ggzokragtimc4w9u-api-1",
+    "api-qe0f2p00ggzokragtimc4w9u",
+    "api-qe0f2p00ggzokragtimc4w9u-1",
+    "evolution-api-qe0f2p00ggzokragtimc4w9u-api",
+    "evolution-api-qe0f2p00ggzokragtimc4w9u-api-1",
+    "evolution-api-qe0f2p00ggzokragtimc4w9u",
+    "qe0f2p00ggzokragtimc4w9u",
+    "api",
+    "evolution-api",
+    "host.docker.internal",
+    "172.17.0.1",
+  ];
+
+  for (const host of dockerHostnames) {
+    candidateEndpoints.push({
+      url: `http://${host}:8080${cleanPath}`,
+      headers: { apikey: apiKey },
+      label: `docker:${host}`,
+    });
+  }
 
   // 4. URL Base Pública (fallback final — puede fallar por Hairpin NAT)
   if (baseUrl) {
