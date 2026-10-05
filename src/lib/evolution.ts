@@ -179,24 +179,24 @@ export function parseEvolutionPayload(payload: EvolutionWebhookPayload): ParsedW
  * Obtiene dinámicamente las credenciales de Evolution API leyendo process.env con fallback a la base de datos (SystemSetting)
  */
 export async function getEvolutionCredentials(): Promise<{ baseUrl: string; apiKey: string }> {
-  let baseUrl = process.env.EVOLUTION_API_URL || "";
+  let baseUrl = process.env.EVOLUTION_INTERNAL_URL || process.env.EVOLUTION_API_URL || "http://10.0.2.4:8080";
   let apiKey = process.env.EVOLUTION_API_KEY || "";
 
-  if (!baseUrl || !apiKey) {
+  if (!apiKey) {
     try {
       const { prisma } = await import("@/lib/prisma");
-      const settings = await prisma.systemSetting.findMany({
-        where: { key: { in: ["evolution_api_url", "evolution_api_key"] } },
+      const setting = await prisma.systemSetting.findUnique({
+        where: { key: "evolution_api_key" },
       });
-      const settingMap = new Map(settings.map((s) => [s.key, s.value]));
-      if (!baseUrl) baseUrl = settingMap.get("evolution_api_url") || "";
-      if (!apiKey) apiKey = settingMap.get("evolution_api_key") || "";
+      if (setting?.value) apiKey = setting.value;
     } catch (err) {
       console.warn("[Evolution API Config] Warning al buscar SystemSetting:", err);
     }
   }
 
-  if (baseUrl && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+  // Sanitizar URL eliminando prefijos erróneos o slashes finales
+  baseUrl = baseUrl.replace(/^public:/i, "").trim().replace(/\/+$/, "");
+  if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
     baseUrl = `http://${baseUrl}`;
   }
 
@@ -204,12 +204,7 @@ export async function getEvolutionCredentials(): Promise<{ baseUrl: string; apiK
 }
 
 /**
- * Realiza peticiones HTTP a Evolution API con tolerancia completa a fallos de red en Coolify/Vultr.
- * Resuelve el problema de Hairpin NAT probando múltiples rutas en orden:
- * 1. coolify-proxy (Traefik en puerto 80) con cabeceras Host y X-Forwarded-Proto para evitar loop de redirección 301
- * 2. URL interna específica si se configuró EVOLUTION_INTERNAL_URL (ej: http://evolution-api:8080)
- * 3. Nombres de contenedor Docker comunes en la red interna de Coolify
- * 4. URL Base pública (https://evolucion.ubicame.cc)
+ * Realiza peticiones HTTP directas y ultrarrápidas a Evolution API por su IP interna en la red Docker.
  */
 export async function fetchEvolutionRequest(
   path: string,
@@ -222,136 +217,63 @@ export async function fetchEvolutionRequest(
   const { baseUrl, apiKey } = await getEvolutionCredentials();
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   const method = options.method || "GET";
-  const timeoutMs = options.timeoutMs || 6000;
+  const timeoutMs = options.timeoutMs || 8000;
 
-  const candidateEndpoints: Array<{ url: string; headers: Record<string, string>; label: string }> = [];
+  const targetUrl = `${baseUrl}${cleanPath}`;
 
-  // 0. localhost:8080 — funciona si Evolution API expone puerto en el host del VPS
-  candidateEndpoints.push({
-    url: `http://localhost:8080${cleanPath}`,
-    headers: { apikey: apiKey },
-    label: "localhost:8080",
-  });
-  candidateEndpoints.push({
-    url: `http://127.0.0.1:8080${cleanPath}`,
-    headers: { apikey: apiKey },
-    label: "127.0.0.1:8080",
-  });
-
-  // 1. EVOLUTION_INTERNAL_URL si fue configurada en el entorno (máxima prioridad)
-  if (process.env.EVOLUTION_INTERNAL_URL) {
-    const cleanInternal = process.env.EVOLUTION_INTERNAL_URL.replace(/\/+$/, "");
-    candidateEndpoints.unshift({
-      url: `${cleanInternal}${cleanPath}`,
-      headers: { apikey: apiKey },
-      label: `INTERNAL:${cleanInternal}`,
-    });
-  }
-
-  // 2. coolify-proxy (Traefik) HTTPS puerto 443 — ruta principal de Coolify
-  // Requiere NODE_TLS_REJECT_UNAUTHORIZED=0 en las variables de entorno de Coolify
-  candidateEndpoints.push({
-    url: `https://coolify-proxy:443${cleanPath}`,
-    headers: {
-      Host: "evolucion.ubicame.cc",
+  try {
+    const headers: Record<string, string> = {
       apikey: apiKey,
-    },
-    label: "coolify-proxy:443-https",
-  });
-  // También probar puerto 80 (puede redirigir pero a veces tiene ruta directa)
-  candidateEndpoints.push({
-    url: `http://coolify-proxy:80${cleanPath}`,
-    headers: {
-      Host: "evolucion.ubicame.cc",
-      "X-Forwarded-Proto": "https",
-      "X-Forwarded-Port": "443",
-      apikey: apiKey,
-    },
-    label: "coolify-proxy:80",
-  });
-
-  // 3. Contenedores internos Docker de Coolify (múltiples patrones de nombres de servicio/contenedor)
-  const dockerHostnames = [
-    "qe0f2p00ggzokragtimc4w9u-api",
-    "qe0f2p00ggzokragtimc4w9u-api-1",
-    "api-qe0f2p00ggzokragtimc4w9u",
-    "api-qe0f2p00ggzokragtimc4w9u-1",
-    "evolution-api-qe0f2p00ggzokragtimc4w9u-api",
-    "evolution-api-qe0f2p00ggzokragtimc4w9u-api-1",
-    "evolution-api-qe0f2p00ggzokragtimc4w9u",
-    "qe0f2p00ggzokragtimc4w9u",
-    "api",
-    "evolution-api",
-    "host.docker.internal",
-    "172.17.0.1",
-  ];
-
-  for (const host of dockerHostnames) {
-    candidateEndpoints.push({
-      url: `http://${host}:8080${cleanPath}`,
-      headers: { apikey: apiKey },
-      label: `docker:${host}`,
-    });
-  }
-
-  // 4. URL Base Pública (fallback final — puede fallar por Hairpin NAT)
-  if (baseUrl) {
-    const cleanBase = baseUrl.replace(/\/+$/, "");
-    candidateEndpoints.push({
-      url: `${cleanBase}${cleanPath}`,
-      headers: { apikey: apiKey },
-      label: `public:${cleanBase}`,
-    });
-  }
-
-  // Timeout individual corto (2.5s) para fallar rápido y probar el siguiente candidato
-  const perCandidateTimeout = Math.min(timeoutMs, 2500);
-  let lastError = "No se pudo conectar con Evolution API";
-
-  for (const candidate of candidateEndpoints) {
-    try {
-      const headers: Record<string, string> = {
-        apikey: apiKey,
-        ...candidate.headers,
-      };
-      if (options.body) {
-        headers["Content-Type"] = "application/json";
-      }
-
-      const res = await fetch(candidate.url, {
-        method,
-        headers,
-        body: options.body ? JSON.stringify(options.body) : undefined,
-        redirect: "manual",
-        signal: AbortSignal.timeout(perCandidateTimeout),
-      });
-
-      // Si nos devuelve redirect, ignorar este candidato
-      if (res.status === 301 || res.status === 302 || res.status === 307 || res.status === 308) {
-        console.log(`[Evolution Fetch] ${candidate.label} → ${res.status} redirect — probando siguiente`);
-        continue;
-      }
-
-      // Si 404, el recurso no existe en ESTE servidor — probar siguiente candidato
-      if (res.status === 404) {
-        console.log(`[Evolution Fetch] ${candidate.label} → 404 not found — probando siguiente`);
-        lastError = `404 en ${candidate.label}`;
-        continue;
-      }
-
-      const resData = await res.json().catch(() => ({}));
-      console.log(`[Evolution Fetch] ✅ Éxito con ${candidate.label} → HTTP ${res.status}`);
-      return { ok: res.ok, status: res.status, data: resData };
-    } catch (err: any) {
-      const errMsg = err.message || String(err);
-      console.log(`[Evolution Fetch] ${candidate.label} → Error: ${errMsg.substring(0, 60)}`);
-      lastError = errMsg;
-      // Probar el siguiente candidato
+    };
+    if (options.body) {
+      headers["Content-Type"] = "application/json";
     }
-  }
 
-  console.error(`[Evolution Fetch] ❌ Todos los candidatos fallaron. Último error: ${lastError}`);
-  return { ok: false, status: 0, data: null, error: lastError };
+    const res = await fetch(targetUrl, {
+      method,
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    const resData = await res.json().catch(() => ({}));
+    return {
+      ok: res.ok,
+      status: res.status,
+      data: resData,
+      error: res.ok ? undefined : (resData.message || resData.error || `HTTP ${res.status}`),
+    };
+  } catch (err: any) {
+    const errMsg = err.message || String(err);
+    console.error(`[Evolution Fetch Error] ${targetUrl} → ${errMsg}`);
+
+    // Fallback de contingencia directa a la IP fija 10.0.2.4:8080 si la URL configurada falló
+    if (!targetUrl.includes("10.0.2.4:8080")) {
+      try {
+        const fallbackUrl = `http://10.0.2.4:8080${cleanPath}`;
+        const headers: Record<string, string> = { apikey: apiKey };
+        if (options.body) headers["Content-Type"] = "application/json";
+
+        const res = await fetch(fallbackUrl, {
+          method,
+          headers,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        const resData = await res.json().catch(() => ({}));
+        return {
+          ok: res.ok,
+          status: res.status,
+          data: resData,
+          error: res.ok ? undefined : (resData.message || resData.error || `HTTP ${res.status}`),
+        };
+      } catch (fallbackErr: any) {
+        console.error(`[Evolution Fetch Fallback Error] http://10.0.2.4:8080${cleanPath} → ${fallbackErr.message}`);
+      }
+    }
+
+    return { ok: false, status: 0, data: null, error: errMsg };
+  }
 }
 
 /**
@@ -481,7 +403,6 @@ export async function sendWhatsAppPresence({
 
     return { success: result.ok, error: result.error };
   } catch (error: any) {
-    // La presencia es cosmética y NUNCA debe detener la ejecución
     return { success: false, error: error.message };
   }
 }
@@ -503,8 +424,6 @@ export async function getWhatsAppConnectionState(instanceName: string): Promise<
   return { state, raw: result.data };
 }
 
-
-
 /**
  * Solicita el código QR en Base64 o Pairing Code para conectar una instancia en Evolution API v2
  */
@@ -517,38 +436,28 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
   alreadyConnected?: boolean;
   error?: string;
 }> {
-  const { baseUrl, apiKey } = await getEvolutionCredentials();
+  const { apiKey } = await getEvolutionCredentials();
 
-  if (!baseUrl || !apiKey) {
-    return { success: false, error: "EVOLUTION_API_URL o EVOLUTION_API_KEY no configurados" };
+  if (!apiKey) {
+    return { success: false, error: "EVOLUTION_API_KEY no configurada" };
   }
 
-  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
-
   try {
-    // Solicitar conexión/QR directamente con GET /instance/connect/{instance} (timeout ágil de 4s)
-    const connectEndpoint = `${cleanBaseUrl}/instance/connect/${instanceName}`;
-    let response = await fetch(connectEndpoint, {
+    // 1. Solicitar conexión/QR directamente con GET /instance/connect/{instance}
+    let response = await fetchEvolutionRequest(`/instance/connect/${instanceName}`, {
       method: "GET",
-      headers: { apikey: apiKey },
-      cache: "no-store",
-      signal: AbortSignal.timeout(4000),
+      timeoutMs: 6000,
     });
 
-    let resData = await response.json().catch(() => ({}));
+    let resData = response.data || {};
 
-    // 3. Si la instancia NO existe (HTTP 404 o mensaje 'not found'), intentamos crearla con POST /instance/create
+    // 2. Si la instancia NO existe (HTTP 404 o mensaje 'not found'), intentamos crearla con POST /instance/create
     if (response.status === 404 || resData.error?.includes("not found") || resData.message?.includes("not found")) {
-      const createEndpoint = `${cleanBaseUrl}/instance/create`;
       const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://ubicame.cc"}/api/webhook/whatsapp`;
 
-      const createRes = await fetch(createEndpoint, {
+      const createRes = await fetchEvolutionRequest(`/instance/create`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: apiKey,
-        },
-        body: JSON.stringify({
+        body: {
           instanceName,
           token: apiKey,
           qrcode: true,
@@ -556,15 +465,13 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
           webhook: webhookUrl,
           webhook_by_events: false,
           events: ["MESSAGES_UPSERT", "SEND_MESSAGE", "CONNECTION_UPDATE"],
-        }),
-        signal: AbortSignal.timeout(10000),
+        },
+        timeoutMs: 10000,
       });
 
-      const createData = await createRes.json().catch(() => ({}));
+      const createData = createRes.data || {};
       const strData = JSON.stringify(createData).toLowerCase();
 
-      // Fallback para nombre duplicado (HTTP 403 Forbidden o 409 Conflict o "already in use" / "already exists"):
-      // No lanzar error 502/500, sino realizar fallback inmediato a /instance/connect
       if (
         createRes.status === 403 ||
         createRes.status === 409 ||
@@ -574,13 +481,11 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
         strData.includes("forbidden")
       ) {
         console.log(`[Evolution API] Instancia "${instanceName}" ya existente (HTTP ${createRes.status}). Ejecutando fallback a /instance/connect...`);
-        const retryRes = await fetch(connectEndpoint, {
+        const retryRes = await fetchEvolutionRequest(`/instance/connect/${instanceName}`, {
           method: "GET",
-          headers: { apikey: apiKey },
-          cache: "no-store",
-          signal: AbortSignal.timeout(10000),
+          timeoutMs: 8000,
         });
-        resData = await retryRes.json().catch(() => ({}));
+        resData = retryRes.data || {};
       } else if (!createRes.ok) {
         return {
           success: false,
@@ -591,7 +496,7 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
       }
     }
 
-    // 4. Evaluar si la respuesta de connect o create devolvió un estado ya abierto
+    // 3. Evaluar si la respuesta de connect o create devolvió un estado ya abierto
     const state = resData.instance?.state || resData.state || "connecting";
     if (state === "open" || state === "connected") {
       ensureWhatsAppWebhook(instanceName).catch((err) => {
@@ -604,7 +509,7 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
       };
     }
 
-    // 5. Extraer y sanitizar Base64 de la respuesta (data.base64 o data.qrcode.base64 o data.code)
+    // 4. Extraer y sanitizar Base64 de la respuesta
     let rawBase64: string | null =
       resData.base64 ||
       resData.qrcode?.base64 ||
@@ -629,11 +534,7 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
     };
   } catch (error: any) {
     console.error("[Evolution API Connect Exception]:", error);
-    const isFetchFailed = error.name === "TypeError" || error.message?.includes("fetch failed");
-    const friendlyError = isFetchFailed
-      ? `Imposible conectar con el servidor de Evolution API (${cleanBaseUrl}). Asegúrate de configurar la URL pública o IP accesible desde tu máquina de desarrollo.`
-      : error.message || "Error al conectar con Evolution API";
-    return { success: false, error: friendlyError };
+    return { success: false, error: error.message || "Error al conectar con Evolution API" };
   }
 }
 
@@ -641,72 +542,38 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
  * Desconecta (Logout) una instancia de WhatsApp en Evolution API v2
  */
 export async function logoutWhatsAppInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
-  const { baseUrl, apiKey } = await getEvolutionCredentials();
+  const res = await fetchEvolutionRequest(`/instance/logout/${instanceName}`, {
+    method: "DELETE",
+    timeoutMs: 8000,
+  });
 
-  if (!baseUrl || !apiKey) {
-    return { success: false, error: "EVOLUTION_API_URL o EVOLUTION_API_KEY no configurados" };
-  }
-
-  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
-  const logoutEndpoint = `${cleanBaseUrl}/instance/logout/${instanceName}`;
-
-  try {
-    const response = await fetch(logoutEndpoint, {
+  if (!res.ok) {
+    const delRes = await fetchEvolutionRequest(`/instance/delete/${instanceName}`, {
       method: "DELETE",
-      headers: { apikey: apiKey },
-      signal: AbortSignal.timeout(8000),
+      timeoutMs: 8000,
     });
-
-    if (!response.ok) {
-      // Intentar borrado directo con /instance/delete como fallback
-      const deleteEndpoint = `${cleanBaseUrl}/instance/delete/${instanceName}`;
-      const delResponse = await fetch(deleteEndpoint, {
-        method: "DELETE",
-        headers: { apikey: apiKey },
-        signal: AbortSignal.timeout(8000),
-      }).catch(() => null);
-
-      if (!delResponse || !delResponse.ok) {
-        const errText = await response.text().catch(() => "Error al cerrar sesión");
-        return { success: false, error: errText };
-      }
+    if (!delRes.ok) {
+      return { success: false, error: res.error || "Error al cerrar sesión" };
     }
-
-    return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
   }
+
+  return { success: true };
 }
 
 /**
  * Elimina por completo una instancia en Evolution API v2
  */
 export async function deleteWhatsAppInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
-  const { baseUrl, apiKey } = await getEvolutionCredentials();
+  const res = await fetchEvolutionRequest(`/instance/delete/${instanceName}`, {
+    method: "DELETE",
+    timeoutMs: 8000,
+  });
 
-  if (!baseUrl || !apiKey) {
-    return { success: false, error: "EVOLUTION_API_URL o EVOLUTION_API_KEY no configurados" };
+  if (!res.ok) {
+    return { success: false, error: res.error || "Error al eliminar instancia" };
   }
 
-  const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
-  const endpoint = `${cleanBaseUrl}/instance/delete/${instanceName}`;
-
-  try {
-    const response = await fetch(endpoint, {
-      method: "DELETE",
-      headers: { apikey: apiKey },
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "Error al eliminar instancia");
-      return { success: false, error: errText };
-    }
-
-    return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
+  return { success: true };
 }
 
 
