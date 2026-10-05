@@ -1,7 +1,7 @@
 import { getSuperAdminSession } from "@/lib/auth";
 import { prismaControl, prismaTenant } from "@/lib/db";
-import { SuperAdminLoginForm } from "./components/SuperAdminLoginForm";
-import { SuperAdminDashboard } from "./components/SuperAdminDashboard";
+import { SuperAdminLoginForm } from "@/app/super-admin/components/SuperAdminLoginForm";
+import { SuperAdminDashboard } from "@/app/super-admin/components/SuperAdminDashboard";
 
 export const dynamic = "force-dynamic";
 
