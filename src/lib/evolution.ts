@@ -1,5 +1,6 @@
 /**
  * Evolution API v2.3.7 Integration Helper for MenuQR Pro
+ * Optimizado para comunicación directa y ultrarrápida por red interna Docker (IP: 10.0.2.4:8080).
  */
 
 export interface EvolutionWebhookPayload {
@@ -72,20 +73,21 @@ export interface SendMessageOptions {
   delay?: number;
 }
 
+export interface SendPresenceOptions {
+  instance?: string;
+  to: string;
+  presence: "composing" | "recording" | "paused";
+  delay?: number;
+}
+
 /**
  * Valida la autenticación del Webhook de forma flexible y tolerante.
- * 
- * Regla de Oro:
- * - Si EVOLUTION_STRICT_AUTH no es explícitamente "true", SIEMPRE retorna { valid: true },
- *   logueando advertencias detalladas en consola para evitar cualquier error 401 durante pruebas.
- * - Si EVOLUTION_STRICT_AUTH === "true", exige coincidencia exacta de 'apikey' o 'x-webhook-secret'.
  */
 export function verifyWebhookAuth(headers: Headers): { valid: boolean; reason?: string } {
   const webhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
   const apiKeySecret = process.env.EVOLUTION_API_KEY;
   const isStrict = String(process.env.EVOLUTION_STRICT_AUTH).toLowerCase() === "true";
 
-  // Buscar el header de autenticación en múltiples variaciones conocidas de Evolution API
   const incomingHeaderRaw =
     headers.get("apikey") ||
     headers.get("x-webhook-secret") ||
@@ -95,39 +97,31 @@ export function verifyWebhookAuth(headers: Headers): { valid: boolean; reason?: 
 
   const incomingClean = incomingHeaderRaw ? incomingHeaderRaw.replace(/^Bearer\s+/i, "").trim() : null;
 
-  // Registrar en logs para trazabilidad
   console.log(`[Evolution Auth Check] Strictly Enforced: ${isStrict} | Header Recibido: ${incomingClean ? incomingClean.substring(0, 5) + "***" : "AUSENTE"}`);
 
-  // Si no hay ningún secreto configurado en el entorno
   if (!webhookSecret && !apiKeySecret) {
-    const msg = "Ni EVOLUTION_WEBHOOK_SECRET ni EVOLUTION_API_KEY están configurados en el archivo .env.";
-    console.warn(`[Evolution Auth Warning] ${msg} Permitiendo petición.`);
+    console.warn("[Evolution Auth Warning] Ni EVOLUTION_WEBHOOK_SECRET ni EVOLUTION_API_KEY configurados en env. Permitiendo petición.");
     return { valid: true, reason: "No secrets configured in env" };
   }
 
-  // Verificar si coincide con alguno de los secretos de entorno válidos
   const matchesWebhookSecret = webhookSecret ? incomingClean === webhookSecret.trim() : false;
   const matchesApiKeySecret = apiKeySecret ? incomingClean === apiKeySecret.trim() : false;
 
-  const isMatched = matchesWebhookSecret || matchesApiKeySecret;
-
-  if (isMatched) {
+  if (matchesWebhookSecret || matchesApiKeySecret) {
     console.log("[Evolution Auth Success] ✅ Cabecera de autenticación validada correctamente.");
     return { valid: true };
   }
 
-  // Si no hubo coincidencia:
   const reasonText = !incomingClean
-    ? "Header de autenticación (apikey / x-webhook-secret) ausente en la petición HTTP."
-    : `Header recibido ('${incomingClean.substring(0, 4)}***') no coincide con los secretos del entorno.`;
+    ? "Header de autenticación ausente en la petición HTTP."
+    : `Header recibido ('${incomingClean.substring(0, 4)}***') no coincide con secretos.`;
 
   if (isStrict) {
-    console.warn(`[Evolution Auth Blocked 401] ❌ Petición rechazada debido a EVOLUTION_STRICT_AUTH=true. Razón: ${reasonText}`);
+    console.warn(`[Evolution Auth Blocked 401] ❌ Rechazado: ${reasonText}`);
     return { valid: false, reason: reasonText };
   }
 
-  // MODO PERMISIVO (Bypass por defecto cuando strict no es true)
-  console.warn(`[Evolution Auth Permissive Bypass] ⚠️ ${reasonText} PERMITIENDO acceso para pruebas en producción (EVOLUTION_STRICT_AUTH=false).`);
+  console.warn(`[Evolution Auth Permissive Bypass] ⚠️ ${reasonText} PERMITIENDO acceso para pruebas.`);
   return { valid: true, reason: `Permissive Mode: ${reasonText}` };
 }
 
@@ -146,7 +140,6 @@ export function parseEvolutionPayload(payload: EvolutionWebhookPayload): ParsedW
   const isGroup = remoteJid.endsWith("@g.us");
   const phone = remoteJid.replace(/@.*$/, "");
 
-  // Extraer el contenido del mensaje contemplando todos los subtipos de la v2.3.7
   const messageObj = data.message;
   let text = "";
 
@@ -176,7 +169,8 @@ export function parseEvolutionPayload(payload: EvolutionWebhookPayload): ParsedW
 }
 
 /**
- * Obtiene dinámicamente las credenciales de Evolution API leyendo process.env con fallback a la base de datos (SystemSetting)
+ * Obtiene dinámicamente las credenciales de Evolution API.
+ * Por defecto apunta directo a la IP interna numérica pura 10.0.2.4:8080 en Coolify.
  */
 export async function getEvolutionCredentials(): Promise<{ baseUrl: string; apiKey: string }> {
   let baseUrl = process.env.EVOLUTION_INTERNAL_URL || process.env.EVOLUTION_API_URL || "http://10.0.2.4:8080";
@@ -194,7 +188,7 @@ export async function getEvolutionCredentials(): Promise<{ baseUrl: string; apiK
     }
   }
 
-  // Sanitizar URL eliminando prefijos erróneos o slashes finales
+  // Sanitizar URL eliminando prefijos erróneos (public:) o slashes finales
   baseUrl = baseUrl.replace(/^public:/i, "").trim().replace(/\/+$/, "");
   if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
     baseUrl = `http://${baseUrl}`;
@@ -204,7 +198,7 @@ export async function getEvolutionCredentials(): Promise<{ baseUrl: string; apiK
 }
 
 /**
- * Realiza peticiones HTTP directas y ultrarrápidas a Evolution API por su IP interna en la red Docker.
+ * Realiza peticiones HTTP directas y de baja latencia a Evolution API sin bucles ni reintentos redundantes.
  */
 export async function fetchEvolutionRequest(
   path: string,
@@ -217,7 +211,7 @@ export async function fetchEvolutionRequest(
   const { baseUrl, apiKey } = await getEvolutionCredentials();
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   const method = options.method || "GET";
-  const timeoutMs = options.timeoutMs || 8000;
+  const timeoutMs = options.timeoutMs || 4000;
 
   const targetUrl = `${baseUrl}${cleanPath}`;
 
@@ -245,39 +239,13 @@ export async function fetchEvolutionRequest(
     };
   } catch (err: any) {
     const errMsg = err.message || String(err);
-    console.error(`[Evolution Fetch Error] ${targetUrl} → ${errMsg}`);
-
-    // Fallback de contingencia directa a la IP fija 10.0.2.4:8080 si la URL configurada falló
-    if (!targetUrl.includes("10.0.2.4:8080")) {
-      try {
-        const fallbackUrl = `http://10.0.2.4:8080${cleanPath}`;
-        const headers: Record<string, string> = { apikey: apiKey };
-        if (options.body) headers["Content-Type"] = "application/json";
-
-        const res = await fetch(fallbackUrl, {
-          method,
-          headers,
-          body: options.body ? JSON.stringify(options.body) : undefined,
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        const resData = await res.json().catch(() => ({}));
-        return {
-          ok: res.ok,
-          status: res.status,
-          data: resData,
-          error: res.ok ? undefined : (resData.message || resData.error || `HTTP ${res.status}`),
-        };
-      } catch (fallbackErr: any) {
-        console.error(`[Evolution Fetch Fallback Error] http://10.0.2.4:8080${cleanPath} → ${fallbackErr.message}`);
-      }
-    }
-
+    console.error(`[Evolution Fetch Direct Error] ${targetUrl} → ${errMsg}`);
     return { ok: false, status: 0, data: null, error: errMsg };
   }
 }
 
 /**
- * Configura o sincroniza el Webhook y ajustes de recepción en Evolution API para que los mensajes entrantes lleguen al servidor
+ * Configura o sincroniza el Webhook y ajustes de recepción en Evolution API.
  */
 export async function ensureWhatsAppWebhook(instanceName: string): Promise<{ success: boolean; data?: any; error?: string }> {
   const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://ubicame.cc"}/api/webhook/whatsapp`;
@@ -301,10 +269,10 @@ export async function ensureWhatsAppWebhook(instanceName: string): Promise<{ suc
         ],
       },
     },
-    timeoutMs: 6000,
+    timeoutMs: 4000,
   });
 
-  // 2. Configurar Ajustes de Instancia (Auto-lectura y Always Online)
+  // 2. Configurar Ajustes de Instancia (Always Online)
   await fetchEvolutionRequest(`/settings/set/${instanceName}`, {
     method: "POST",
     body: {
@@ -316,7 +284,7 @@ export async function ensureWhatsAppWebhook(instanceName: string): Promise<{ suc
       readStatus: false,
       syncFullHistory: false,
     },
-    timeoutMs: 5000,
+    timeoutMs: 3000,
   }).catch(() => {});
 
   if (!webhookRes.ok) {
@@ -331,7 +299,7 @@ export async function ensureWhatsAppWebhook(instanceName: string): Promise<{ suc
 }
 
 /**
- * Envía un mensaje de texto plano a través de Evolution API v2.3.7
+ * Envía un mensaje de texto plano a través de Evolution API v2.3.7.
  */
 export async function sendWhatsAppText({
   instance,
@@ -355,7 +323,7 @@ export async function sendWhatsAppText({
         linkPreview: true,
       },
     },
-    timeoutMs: 7000,
+    timeoutMs: 5000,
   });
 
   if (!result.ok) {
@@ -371,15 +339,8 @@ export async function sendWhatsAppText({
   return { success: true, data: result.data };
 }
 
-export interface SendPresenceOptions {
-  instance?: string;
-  to: string;
-  presence: "composing" | "recording" | "paused";
-  delay?: number;
-}
-
 /**
- * Envía el estado de presencia (escribiendo/composing) a WhatsApp vía Evolution API v2
+ * Envía el estado de presencia (escribiendo/composing) a WhatsApp vía Evolution API v2.
  */
 export async function sendWhatsAppPresence({
   instance,
@@ -398,7 +359,7 @@ export async function sendWhatsAppPresence({
         presence,
         delay,
       },
-      timeoutMs: 3000,
+      timeoutMs: 2500,
     });
 
     return { success: result.ok, error: result.error };
@@ -408,12 +369,12 @@ export async function sendWhatsAppPresence({
 }
 
 /**
- * Obtiene el estado de conexión de una instancia en Evolution API v2
+ * Obtiene el estado de conexión de una instancia en Evolution API v2.
  */
 export async function getWhatsAppConnectionState(instanceName: string): Promise<{ state: "open" | "connecting" | "close" | "unknown"; raw?: any; error?: string }> {
   const result = await fetchEvolutionRequest(`/instance/connectionState/${instanceName}`, {
     method: "GET",
-    timeoutMs: 4000,
+    timeoutMs: 3000,
   });
 
   if (!result.ok) {
@@ -425,7 +386,7 @@ export async function getWhatsAppConnectionState(instanceName: string): Promise<
 }
 
 /**
- * Solicita el código QR en Base64 o Pairing Code para conectar una instancia en Evolution API v2
+ * Solicita el código QR en Base64 o Pairing Code para conectar una instancia en Evolution API v2.
  */
 export async function connectWhatsAppInstance(instanceName: string): Promise<{
   success: boolean;
@@ -446,12 +407,12 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
     // 1. Solicitar conexión/QR directamente con GET /instance/connect/{instance}
     let response = await fetchEvolutionRequest(`/instance/connect/${instanceName}`, {
       method: "GET",
-      timeoutMs: 6000,
+      timeoutMs: 4000,
     });
 
     let resData = response.data || {};
 
-    // 2. Si la instancia NO existe (HTTP 404 o mensaje 'not found'), intentamos crearla con POST /instance/create
+    // 2. Si la instancia NO existe (HTTP 404 o mensaje 'not found'), crearla con POST /instance/create
     if (response.status === 404 || resData.error?.includes("not found") || resData.message?.includes("not found")) {
       const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://ubicame.cc"}/api/webhook/whatsapp`;
 
@@ -466,7 +427,7 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
           webhook_by_events: false,
           events: ["MESSAGES_UPSERT", "SEND_MESSAGE", "CONNECTION_UPDATE"],
         },
-        timeoutMs: 10000,
+        timeoutMs: 6000,
       });
 
       const createData = createRes.data || {};
@@ -480,10 +441,10 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
         strData.includes("in use") ||
         strData.includes("forbidden")
       ) {
-        console.log(`[Evolution API] Instancia "${instanceName}" ya existente (HTTP ${createRes.status}). Ejecutando fallback a /instance/connect...`);
+        console.log(`[Evolution API] Instancia "${instanceName}" ya existente (HTTP ${createRes.status}). Conectando directamente...`);
         const retryRes = await fetchEvolutionRequest(`/instance/connect/${instanceName}`, {
           method: "GET",
-          timeoutMs: 8000,
+          timeoutMs: 4000,
         });
         resData = retryRes.data || {};
       } else if (!createRes.ok) {
@@ -496,7 +457,7 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
       }
     }
 
-    // 3. Evaluar si la respuesta de connect o create devolvió un estado ya abierto
+    // 3. Evaluar si la respuesta devolvió un estado ya abierto
     const state = resData.instance?.state || resData.state || "connecting";
     if (state === "open" || state === "connected") {
       ensureWhatsAppWebhook(instanceName).catch((err) => {
@@ -539,18 +500,18 @@ export async function connectWhatsAppInstance(instanceName: string): Promise<{
 }
 
 /**
- * Desconecta (Logout) una instancia de WhatsApp en Evolution API v2
+ * Desconecta (Logout) una instancia de WhatsApp en Evolution API v2.
  */
 export async function logoutWhatsAppInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
   const res = await fetchEvolutionRequest(`/instance/logout/${instanceName}`, {
     method: "DELETE",
-    timeoutMs: 8000,
+    timeoutMs: 4000,
   });
 
   if (!res.ok) {
     const delRes = await fetchEvolutionRequest(`/instance/delete/${instanceName}`, {
       method: "DELETE",
-      timeoutMs: 8000,
+      timeoutMs: 4000,
     });
     if (!delRes.ok) {
       return { success: false, error: res.error || "Error al cerrar sesión" };
@@ -561,12 +522,12 @@ export async function logoutWhatsAppInstance(instanceName: string): Promise<{ su
 }
 
 /**
- * Elimina por completo una instancia en Evolution API v2
+ * Elimina por completo una instancia en Evolution API v2.
  */
 export async function deleteWhatsAppInstance(instanceName: string): Promise<{ success: boolean; error?: string }> {
   const res = await fetchEvolutionRequest(`/instance/delete/${instanceName}`, {
     method: "DELETE",
-    timeoutMs: 8000,
+    timeoutMs: 4000,
   });
 
   if (!res.ok) {
@@ -575,6 +536,3 @@ export async function deleteWhatsAppInstance(instanceName: string): Promise<{ su
 
   return { success: true };
 }
-
-
-
