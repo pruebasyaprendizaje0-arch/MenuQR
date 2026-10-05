@@ -197,8 +197,80 @@ export async function getEvolutionCredentials(): Promise<{ baseUrl: string; apiK
   return { baseUrl, apiKey };
 }
 
+import https from "node:https";
+import http from "node:http";
+
 /**
- * Realiza peticiones HTTP directas y de baja latencia a Evolution API sin bucles ni reintentos redundantes.
+ * Realiza una petición directa al proxy interno de Coolify (Traefik) simulando el dominio
+ * pero sin salir a internet, evitando el problema de Hairpin NAT de Docker.
+ */
+function requestViaCoolifyProxy(
+  path: string,
+  method: string,
+  body?: any,
+  apiKey?: string,
+  timeoutMs = 3000
+): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
+  return new Promise((resolve) => {
+    const isPostOrPut = method === "POST" || method === "PUT";
+    const bodyStr = body ? JSON.stringify(body) : "";
+
+    const req = https.request(
+      {
+        host: "coolify-proxy",
+        port: 443,
+        path: path.startsWith("/") ? path : `/${path}`,
+        method: method,
+        servername: "evolucion.ubicame.cc", // SNI para que Traefik sirva el router correcto
+        rejectUnauthorized: false,
+        headers: {
+          host: "evolucion.ubicame.cc",
+          apikey: apiKey || "",
+          ...(isPostOrPut ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) } : {}),
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let raw = "";
+        res.on("data", (chunk) => (raw += chunk));
+        res.on("end", () => {
+          let parsed: any = {};
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            parsed = { raw };
+          }
+          const ok = (res.statusCode || 0) >= 200 && (res.statusCode || 0) < 400;
+          resolve({
+            ok,
+            status: res.statusCode || 0,
+            data: parsed,
+            error: ok ? undefined : parsed.message || parsed.error || `HTTP ${res.statusCode}`,
+          });
+        });
+      }
+    );
+
+    req.on("error", (err) => {
+      resolve({ ok: false, status: 0, data: null, error: err.message });
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ ok: false, status: 0, data: null, error: "TIMEOUT_COOLIFY_PROXY" });
+    });
+
+    if (bodyStr) {
+      req.write(bodyStr);
+    }
+    req.end();
+  });
+}
+
+/**
+ * Realiza peticiones HTTP directas y de baja latencia a Evolution API.
+ * 1. Intenta por el proxy interno coolify-proxy:443 (misma red nativa Coolify, sin configurar nada).
+ * 2. Si falla, intenta por baseUrl directa (10.0.2.4:8080).
  */
 export async function fetchEvolutionRequest(
   path: string,
@@ -211,10 +283,16 @@ export async function fetchEvolutionRequest(
   const { baseUrl, apiKey } = await getEvolutionCredentials();
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
   const method = options.method || "GET";
-  const timeoutMs = options.timeoutMs || 4000;
+  const timeoutMs = options.timeoutMs || 3000;
 
+  // 1. Intentar primero a través de Traefik (coolify-proxy) en la red nativa de Coolify
+  const proxyRes = await requestViaCoolifyProxy(cleanPath, method, options.body, apiKey, Math.min(timeoutMs, 2500));
+  if (proxyRes.ok) {
+    return proxyRes;
+  }
+
+  // 2. Si Traefik no respondió o dio error, intentar la URL interna / IP fija
   const targetUrl = `${baseUrl}${cleanPath}`;
-
   try {
     const headers: Record<string, string> = {
       apikey: apiKey,
@@ -239,8 +317,7 @@ export async function fetchEvolutionRequest(
     };
   } catch (err: any) {
     const errMsg = err.message || String(err);
-    console.error(`[Evolution Fetch Direct Error] ${targetUrl} → ${errMsg}`);
-    return { ok: false, status: 0, data: null, error: errMsg };
+    return { ok: false, status: 0, data: null, error: proxyRes.error || errMsg };
   }
 }
 
