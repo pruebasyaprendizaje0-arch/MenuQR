@@ -1615,30 +1615,7 @@ export function AdminDashboard({
               <QrCode className="h-4 w-4" />
               Código QR
             </button>
-            <button
-              onClick={() => setActiveTab("whatsapp")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "whatsapp" 
-                  ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-400 border-l-4 border-emerald-500 font-bold" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <MessageSquare className="h-4 w-4 text-emerald-400" />
-              <span>📱 Conectar WhatsApp</span>
-            </button>
-            {bLabels.showAiSettings && (
-              <button
-                onClick={() => setActiveTab("ai-settings")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "ai-settings" 
-                    ? "bg-gradient-to-r from-teal-600/20 to-emerald-500/20 text-teal-300 border-l-4 border-teal-500 font-bold" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <Bot className="h-4 w-4 text-teal-400" />
-                <span>🤖 Asistente IA (BYOK)</span>
-              </button>
-            )}
+            
             <button
               onClick={() => setActiveTab("orders")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -6426,13 +6403,7 @@ export function AdminDashboard({
           </div>
         )}
 
-        {activeTab === "whatsapp" && (
-          <WhatsAppConnectTab restaurantId={restaurant.id} restaurantSlug={restaurant.slug} />
-        )}
-
-        {activeTab === "ai-settings" && (
-          <AISettingsTab restaurantId={restaurant.id} restaurantSlug={restaurant.slug} />
-        )}
+        
       </main>
 
       {/* Column: Persistent Pedidos en Curso */}
