@@ -248,7 +248,17 @@ export async function fetchEvolutionRequest(
     });
   }
 
-  // 2. coolify-proxy (Traefik) con headers anti-redirect
+  // 2. coolify-proxy (Traefik) HTTPS puerto 443 — ruta principal de Coolify
+  // Requiere NODE_TLS_REJECT_UNAUTHORIZED=0 en las variables de entorno de Coolify
+  candidateEndpoints.push({
+    url: `https://coolify-proxy:443${cleanPath}`,
+    headers: {
+      Host: "evolucion.ubicame.cc",
+      apikey: apiKey,
+    },
+    label: "coolify-proxy:443-https",
+  });
+  // También probar puerto 80 (puede redirigir pero a veces tiene ruta directa)
   candidateEndpoints.push({
     url: `http://coolify-proxy:80${cleanPath}`,
     headers: {
