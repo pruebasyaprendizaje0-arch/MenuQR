@@ -1,8 +1,9 @@
-import { POST as handleWhatsappWebhook } from "@/app/api/webhook/whatsapp/route";
+import { NextResponse } from "next/server";
 
-/**
- * Endpoint de alias para compatibilidad con la ruta /api/whatsapp/webhook
- */
-export async function POST(req: any) {
-  return handleWhatsappWebhook(req);
+export async function POST() {
+  return NextResponse.json({ status: "disabled" }, { status: 200 });
+}
+
+export async function GET() {
+  return NextResponse.json({ status: "disabled" }, { status: 200 });
 }

@@ -476,8 +476,6 @@ function MapEmbedConfigField({
 
 import { TableSplitMonitor } from "./TableSplitMonitor";
 import BatchDishModal from "./BatchDishModal";
-import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
-import { AISettingsTab } from "./AISettingsTab";
 
 
 export type VisitStats = {
@@ -501,7 +499,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "ai-settings" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
   const isLikelyStore = /licor|tienda|boutique|farmacia|ferreter|repuesto|minimarket|comercio/i.test(restaurant.name || "");
   const defaultBusinessType = (restaurant as any).businessType && (restaurant as any).businessType !== "RESTAURANT"
     ? (restaurant as any).businessType

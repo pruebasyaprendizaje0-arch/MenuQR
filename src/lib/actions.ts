@@ -12,12 +12,6 @@ import { recordSlugChange } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { saveUploadedFile } from "@/lib/storage";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
-import {
-  getWhatsAppConnectionState,
-  connectWhatsAppInstance,
-  logoutWhatsAppInstance,
-} from "@/lib/evolution";
-import { sendOrderStatusNotification } from "@/lib/whatsapp/fsm";
 
 
 /**
@@ -1568,75 +1562,18 @@ export async function toggleWhatsAppBotAction(restaurantId: string, enabled: boo
   return { success: true, enabled: restaurant.whatsappBotEnabled };
 }
 
-export async function getWhatsAppInstanceStatusAction(restaurantId: string) {
-  const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) {
-    const auth = await verifyRestaurantOwnership(restaurantId);
-    if (!auth.authorized) return { error: auth.error };
-  }
-
-  const restaurant = await prismaTenant.restaurant.findUnique({
-    where: { id: restaurantId },
-    select: { slug: true, name: true, whatsapp: true },
-  });
-  if (!restaurant) return { error: "Restaurante no encontrado." };
-
-  const result = await getWhatsAppConnectionState(restaurant.slug);
-  return {
-    success: true,
-    state: result.state,
-    restaurantSlug: restaurant.slug,
-    whatsappNumber: restaurant.whatsapp,
-  };
+export async function getWhatsAppInstanceStatusAction(_restaurantId: string) {
+  return { success: true, state: "close" as const };
 }
 
-export async function getWhatsAppQRCodeAction(restaurantId: string) {
-  const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) {
-    const auth = await verifyRestaurantOwnership(restaurantId);
-    if (!auth.authorized) return { error: auth.error };
-  }
-
-  const restaurant = await prismaTenant.restaurant.findUnique({
-    where: { id: restaurantId },
-    select: { slug: true },
-  });
-  if (!restaurant) return { error: "Restaurante no encontrado." };
-
-  const result = await connectWhatsAppInstance(restaurant.slug);
-  if (!result.success) {
-    return { error: result.error || "No se pudo obtener el código QR de Evolution API." };
-  }
-
-  return {
-    success: true,
-    base64: result.base64,
-    pairingCode: result.pairingCode,
-    state: result.state,
-  };
+export async function getWhatsAppQRCodeAction(_restaurantId: string) {
+  return { error: "WhatsApp Evolution integration disabled." };
 }
 
-export async function disconnectWhatsAppInstanceAction(restaurantId: string) {
-  const isSuperAdmin = await getSuperAdminSession();
-  if (!isSuperAdmin) {
-    const auth = await verifyRestaurantOwnership(restaurantId);
-    if (!auth.authorized) return { error: auth.error };
-  }
-
-  const restaurant = await prismaTenant.restaurant.findUnique({
-    where: { id: restaurantId },
-    select: { slug: true },
-  });
-  if (!restaurant) return { error: "Restaurante no encontrado." };
-
-  const result = await logoutWhatsAppInstance(restaurant.slug);
-  if (!result.success) {
-    return { error: result.error || "No se pudo cerrar la sesión de WhatsApp." };
-  }
-
-  revalidatePath("/admin");
+export async function disconnectWhatsAppInstanceAction(_restaurantId: string) {
   return { success: true };
 }
+
 
 
 
@@ -2227,15 +2164,6 @@ export async function updateOrderStatusAction(
         restaurant: { select: { slug: true } }
       }
     });
-
-    if (updatedOrder.customerPhone && updatedOrder.restaurantId) {
-      sendOrderStatusNotification(
-        updatedOrder.restaurantId,
-        updatedOrder.customerPhone,
-        updatedOrder.orderNumber,
-        status
-      ).catch((err) => console.error("Error enviando notificación transaccional de WhatsApp:", err));
-    }
 
     revalidatePath(`/admin`);
     revalidatePath(`/${updatedOrder.restaurant.slug}`);

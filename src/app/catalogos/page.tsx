@@ -323,7 +323,7 @@ export default function CatalogosLandingPage() {
             <ul className="space-y-3 text-xs text-slate-200">
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-amber-400" /> Productos y categorías ilimitadas</li>
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-amber-400" /> Control de SKUs, variantes de talla/color y stock</li>
-              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-amber-400" /> Bot de WhatsApp automático 24/7 (Evolution API)</li>
+              <li className="flex items-center gap-2"><Check className="w-4 h-4 text-amber-400" /> Pedidos y reservas directas por WhatsApp</li>
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-amber-400" /> Importación masiva de inventario desde Excel</li>
               <li className="flex items-center gap-2"><Check className="w-4 h-4 text-amber-400" /> Módulos de cupones de descuento y analíticas</li>
             </ul>
