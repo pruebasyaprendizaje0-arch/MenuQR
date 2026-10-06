@@ -60,6 +60,10 @@ export async function GET(
           expiracionHoras: config.expiracionHoras,
           sectores: [],
         },
+      }, {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        },
       });
     }
 
@@ -93,6 +97,10 @@ export async function GET(
         limiteDiasReGiro: config.limiteDiasReGiro,
         expiracionHoras: config.expiracionHoras,
         sectores: publicSectors,
+      },
+    }, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
       },
     });
   } catch (error: any) {

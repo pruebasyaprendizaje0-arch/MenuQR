@@ -98,10 +98,12 @@ import {
   FileText,
   CheckSquare,
   Square,
-  Bot
+  Bot,
+  Smartphone
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
+import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 
 type SeasonRate = {
@@ -225,6 +227,7 @@ type Restaurant = {
   serviceOnTable: boolean;
   serviceOnTakeout: boolean;
   whatsapp?: string;
+  whatsappBotEnabled?: boolean;
   city?: string | null;
   province?: string | null;
   parish?: string | null;
@@ -499,7 +502,14 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+
+  // Si el bot de WhatsApp no está habilitado por SuperAdmin, bloquear acceso a la pestaña
+  useEffect(() => {
+    if (activeTab === "whatsapp" && !restaurant.whatsappBotEnabled) {
+      setActiveTab("metrics");
+    }
+  }, [activeTab, restaurant.whatsappBotEnabled]);
   const isLikelyStore = /licor|tienda|boutique|farmacia|ferreter|repuesto|minimarket|comercio/i.test(restaurant.name || "");
   const defaultBusinessType = (restaurant as any).businessType && (restaurant as any).businessType !== "RESTAURANT"
     ? (restaurant as any).businessType
@@ -1613,6 +1623,20 @@ export function AdminDashboard({
               <QrCode className="h-4 w-4" />
               Código QR
             </button>
+ 
+            {restaurant.whatsappBotEnabled && (
+              <button
+                onClick={() => setActiveTab("whatsapp")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "whatsapp" 
+                    ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-400 border-l-4 border-emerald-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <Smartphone className="h-4 w-4 text-emerald-400" />
+                Conectar WhatsApp
+              </button>
+            )}
             
             <button
               onClick={() => setActiveTab("orders")}
@@ -2730,6 +2754,27 @@ export function AdminDashboard({
                             !disabledModules.includes("split-bill") ? "translate-x-5" : "translate-x-0"
                           }`}
                         />
+                      </button>
+                    </div>
+
+                    {/* Acceso Rápido / Configuración Visibilidad Botón Ruleta */}
+                    <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                          <Gift className="h-4 w-4 text-rose-400" />
+                          <span>Botón Flotante de Ruleta (¡Gira y Gana!)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-snug">
+                          Activa o desactiva la visibilidad del botón flotante en la carta digital y ajusta los premios y probabilidades.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("ruleta")}
+                        className="px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                      >
+                        <Gift className="h-3.5 w-3.5" />
+                        <span>Gestionar Ruleta</span>
                       </button>
                     </div>
                   </div>
@@ -5085,6 +5130,16 @@ export function AdminDashboard({
             </div>
           </div>
         )}
+
+        {/* WhatsApp Connect Tab */}
+        {activeTab === "whatsapp" && restaurant.whatsappBotEnabled && (
+          <div className="space-y-6 animate-fade-in">
+            <WhatsAppConnectTab
+              restaurantId={restaurant.id}
+              restaurantSlug={restaurant.slug}
+            />
+          </div>
+        )}
         {activeTab === "orders" && (
           <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -6695,6 +6750,18 @@ export function AdminDashboard({
           <QrCode className="h-5 w-5" />
           <span className="text-[9px] font-bold uppercase tracking-wider">QR</span>
         </button>
+
+        {/* WhatsApp Tab */}
+        {restaurant.whatsappBotEnabled && (
+          <button
+            onClick={() => setActiveTab("whatsapp")}
+            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+            style={{ color: activeTab === "whatsapp" ? "#10b981" : "#94a3b8" }}
+          >
+            <Smartphone className="h-5 w-5" />
+            <span className="text-[9px] font-bold uppercase tracking-wider">WhatsApp</span>
+          </button>
+        )}
 
         {/* Orders Tab */}
         <button

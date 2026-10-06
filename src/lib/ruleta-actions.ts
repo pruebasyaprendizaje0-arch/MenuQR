@@ -565,3 +565,111 @@ export async function getRuletaGirosAction(
     return { success: false, error: error?.message || "Error al obtener historial" };
   }
 }
+
+/**
+ * Alternar visibilidad del botón de la ruleta en la carta digital (Activar/Desactivar)
+ */
+export async function toggleRuletaVisibilityAction(restaurantId: string, activa: boolean) {
+  const session = await getUserSession();
+  const superAdmin = await getSuperAdminSession();
+
+  if (!session && !superAdmin) {
+    return { success: false, error: "No autorizado" };
+  }
+
+  // Validar permisos si no es Super Admin
+  if (session && !superAdmin) {
+    const rest = await prisma.restaurant.findFirst({
+      where: { id: restaurantId, userId: session.userId },
+      select: { id: true, slug: true },
+    });
+    if (!rest) {
+      return { success: false, error: "No tienes permiso para editar este negocio." };
+    }
+  }
+
+  const targetActiva = Boolean(activa);
+
+  try {
+    const configDelegate = (prisma as any).ruletaConfig;
+    let updatedConfig: any = null;
+
+    if (configDelegate?.upsert) {
+      updatedConfig = await configDelegate.upsert({
+        where: { restaurantId },
+        update: {
+          activa: targetActiva,
+        },
+        create: {
+          restaurantId,
+          activa: targetActiva,
+          titulo: "¡Gira la Ruleta y Gana!",
+          descripcion: "Prueba tu suerte y obtén un beneficio exclusivo para tu consumo hoy.",
+          colorPrimario: "#111827",
+          colorSecundario: "#ef4444",
+          colorFondo: "#0f172a",
+          premios: JSON.stringify(DEFAULT_RULETA_PREMIOS),
+          limiteDiasReGiro: 1,
+          maxGirosIpDia: 5,
+          expiracionHoras: 24,
+        },
+      });
+    } else {
+      // Fallback SQL nativo
+      const existing: any[] = await prisma.$queryRawUnsafe(
+        `SELECT id FROM "RuletaConfig" WHERE "restaurantId" = $1 LIMIT 1`,
+        restaurantId
+      );
+
+      if (existing && existing.length > 0) {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "RuletaConfig" SET "activa" = $1, "updatedAt" = NOW() WHERE "restaurantId" = $2`,
+          targetActiva,
+          restaurantId
+        );
+      } else {
+        const newId = crypto.randomUUID();
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO "RuletaConfig" ("id", "restaurantId", "activa", "titulo", "descripcion", "colorPrimario", "colorSecundario", "colorFondo", "premios", "limiteDiasReGiro", "maxGirosIpDia", "expiracionHoras", "createdAt", "updatedAt") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
+          newId,
+          restaurantId,
+          targetActiva,
+          "¡Gira la Ruleta y Gana!",
+          "Prueba tu suerte y obtén un beneficio exclusivo para tu consumo hoy.",
+          "#111827",
+          "#ef4444",
+          "#0f172a",
+          JSON.stringify(DEFAULT_RULETA_PREMIOS),
+          1,
+          5,
+          24
+        );
+      }
+      updatedConfig = { restaurantId, activa: targetActiva };
+    }
+
+    const rest = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { slug: true },
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/[slug]", "page");
+    if (rest?.slug) {
+      revalidatePath(`/${rest.slug}`, "page");
+      revalidatePath(`/ruleta/${rest.slug}`, "page");
+    }
+
+    return {
+      success: true,
+      activa: targetActiva,
+      message: targetActiva
+        ? "¡Botón de Ruleta ACTIVADO en la carta digital!"
+        : "¡Botón de Ruleta DESACTIVADO de la carta digital!",
+    };
+  } catch (error: any) {
+    console.error("Error al alternar visibilidad de la ruleta:", error);
+    return { success: false, error: error?.message || "Error al actualizar visibilidad de la ruleta" };
+  }
+}
+

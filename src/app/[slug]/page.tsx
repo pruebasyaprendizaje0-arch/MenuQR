@@ -163,6 +163,9 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
           where: { isActive: true },
           orderBy: { startDate: "asc" },
         },
+        ruletaConfig: {
+          select: { activa: true },
+        },
       },
     });
 
@@ -235,6 +238,7 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
       createdAt: toIso(restaurant.createdAt),
       updatedAt: toIso(restaurant.updatedAt),
       isOwner: !!session || isSuperAdmin,
+      isRuletaActiva: (restaurant as any).ruletaConfig ? Boolean((restaurant as any).ruletaConfig.activa) : true,
       categories: (restaurant.categories || []).map((cat: any) => ({
         ...cat,
         createdAt: toIso(cat.createdAt),

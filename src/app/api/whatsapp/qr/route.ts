@@ -20,11 +20,23 @@ export async function GET(req: NextRequest) {
 
     const restaurant = await prisma.restaurant.findUnique({
       where: { id: restaurantId },
-      select: { id: true, name: true, slug: true },
+      select: { id: true, name: true, slug: true, whatsappBotEnabled: true },
     });
 
     if (!restaurant) {
       return NextResponse.json({ error: "Restaurante no encontrado" }, { status: 404 });
+    }
+
+    // Si el SuperAdmin tiene desactivado el bot para este negocio, bloquear acceso
+    if (!restaurant.whatsappBotEnabled) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "El servicio de WhatsApp está desactivado para este negocio en el panel de SuperAdmin.",
+          disabledBySuperAdmin: true,
+        },
+        { status: 403 }
+      );
     }
 
     let session = await prisma.whatsAppSession.findUnique({
@@ -71,6 +83,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "El parámetro restaurantId es obligatorio" },
         { status: 400 }
+      );
+    }
+
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true, name: true, slug: true, whatsappBotEnabled: true },
+    });
+
+    if (!restaurant) {
+      return NextResponse.json({ error: "Restaurante no encontrado" }, { status: 404 });
+    }
+
+    if (!restaurant.whatsappBotEnabled) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "El servicio de WhatsApp está desactivado para este negocio en el panel de SuperAdmin.",
+          disabledBySuperAdmin: true,
+        },
+        { status: 403 }
       );
     }
 

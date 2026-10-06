@@ -18,6 +18,7 @@ import {
   Smartphone,
   ExternalLink,
   Eye,
+  EyeOff,
   Sliders,
   Tag,
   Palette,
@@ -28,6 +29,7 @@ import {
   getRuletaAdminConfigAction,
   getRuletaGirosAction,
   validarCuponAction,
+  toggleRuletaVisibilityAction,
 } from "@/lib/ruleta-actions";
 import RuletaNegocio from "@/components/Ruleta/RuletaNegocio";
 
@@ -56,6 +58,7 @@ const TIPO_OPCIONES = [
 export default function RuletaAdminTab({ restaurant }: RuletaAdminTabProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [togglingVisibility, setTogglingVisibility] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -65,6 +68,36 @@ export default function RuletaAdminTab({ restaurant }: RuletaAdminTabProps) {
   const [descripcion, setDescripcion] = useState(
     "Prueba tu suerte y obtén un beneficio exclusivo para tu consumo hoy."
   );
+
+  // Alternar visibilidad de la ruleta al instante (sin requerir validar probabilidades de premios)
+  const handleToggleVisibility = async (newVal: boolean) => {
+    setActiva(newVal);
+    setTogglingVisibility(true);
+    setErrorMsg("");
+    setSuccessMsg("");
+
+    try {
+      const res = await toggleRuletaVisibilityAction(restaurant.id, newVal);
+      if (res.success) {
+        setActiva(Boolean(res.activa));
+        setSuccessMsg(
+          res.activa
+            ? "¡El botón de la ruleta ahora está VISIBLE en la carta digital! 🎡"
+            : "¡El botón de la ruleta ahora está OCULTO en la carta digital! 🚫"
+        );
+        setTimeout(() => setSuccessMsg(""), 4000);
+      } else {
+        setActiva(!newVal);
+        setErrorMsg(res.error || "No se pudo cambiar la visibilidad de la ruleta.");
+      }
+    } catch (err: any) {
+      setActiva(!newVal);
+      setErrorMsg(err?.message || "Error al conectar con el servidor.");
+    } finally {
+      setTogglingVisibility(false);
+    }
+  };
+
   const [colorPrimario, setColorPrimario] = useState(restaurant.themeColor || "#EF4444");
   const [colorSecundario, setColorSecundario] = useState("#F59E0B");
   const [colorFondo, setColorFondo] = useState("#0F172A");
@@ -335,6 +368,77 @@ export default function RuletaAdminTab({ restaurant }: RuletaAdminTabProps) {
         </div>
       </div>
 
+      {/* Control Maestro de Visibilidad del Botón Flotante en la Carta */}
+      <div className={`p-6 rounded-3xl border transition-all duration-300 shadow-xl ${
+        activa
+          ? "bg-gradient-to-r from-emerald-950/60 via-slate-900 to-emerald-950/40 border-emerald-500/40"
+          : "bg-slate-900/80 border-slate-800"
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className={`p-3.5 rounded-2xl shrink-0 transition-colors ${
+              activa 
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" 
+                : "bg-slate-800 text-slate-500 border border-slate-700"
+            }`}>
+              {activa ? <Eye className="w-6 h-6 animate-pulse" /> : <EyeOff className="w-6 h-6" />}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-black text-white">
+                  Visibilidad del Botón de la Ruleta en la Carta Digital
+                </h3>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                  activa
+                    ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                    : "bg-slate-800 border-slate-700 text-slate-400"
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${activa ? "bg-emerald-400 animate-ping" : "bg-slate-500"}`} />
+                  {activa ? "Botón Activo y Visible" : "Botón Oculto"}
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                {activa ? (
+                  <>
+                    El botón flotante <strong className="text-amber-300 font-bold">&quot;🎁 RULETA ¡GIRA Y GANA!&quot;</strong> se muestra en la esquina inferior izquierda de tu carta digital (<span className="text-slate-400 font-mono text-[11px]">/{restaurant.slug}</span>) y en el carrito de compras.
+                  </>
+                ) : (
+                  <>
+                    El botón flotante <strong className="text-slate-400">está completamente oculto</strong> en tu carta digital. Tus comensales no verán la ruleta ni el botón flotante en la pantalla.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+            {togglingVisibility && (
+              <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 animate-pulse">
+                <RotateCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                Guardando en vivo...
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => handleToggleVisibility(!activa)}
+              disabled={togglingVisibility}
+              aria-label="Alternar visibilidad del botón de la ruleta"
+              className={`relative inline-flex h-8 w-16 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:opacity-50 ${
+                activa ? "bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.4)]" : "bg-slate-700"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow-lg ring-0 transition duration-300 ease-in-out ${
+                  activa ? "translate-x-8" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Notificaciones */}
       {successMsg && (
         <div className="p-4 rounded-2xl bg-emerald-950/70 border border-emerald-500/30 text-emerald-300 text-sm font-bold flex items-center gap-2 shadow-lg">
@@ -369,7 +473,8 @@ export default function RuletaAdminTab({ restaurant }: RuletaAdminTabProps) {
                 <input
                   type="checkbox"
                   checked={activa}
-                  onChange={(e) => setActiva(e.target.checked)}
+                  disabled={togglingVisibility}
+                  onChange={(e) => handleToggleVisibility(e.target.checked)}
                   className="sr-only peer"
                 />
                 <div className="w-12 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>

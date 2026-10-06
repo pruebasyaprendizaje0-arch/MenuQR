@@ -253,7 +253,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   const [isRuletaOpen, setIsRuletaOpen] = useState(false);
-  const [isRuletaActiva, setIsRuletaActiva] = useState(true);
+  const [isRuletaActiva, setIsRuletaActiva] = useState<boolean>(
+    (restaurant as any).isRuletaActiva ?? true
+  );
   const [ruletaContext, setRuletaContext] = useState<{ isPostCheckout?: boolean; orderNumber?: string | number } | null>(null);
   const [orderSuccessInfo, setOrderSuccessInfo] = useState<{ orderNumber: string | number } | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
@@ -264,7 +266,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   useEffect(() => {
     async function checkRuletaConfig() {
       try {
-        const res = await fetch(`/api/ruleta/config/${restaurant.slug}`);
+        const res = await fetch(`/api/ruleta/config/${restaurant.slug}`, {
+          cache: "no-store",
+        });
         const data = await res.json();
         if (data && typeof data.activa === "boolean") {
           setIsRuletaActiva(data.activa);
