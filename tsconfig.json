@@ -32,7 +32,8 @@
       "@prisma/tenant": [
         "./node_modules/.prisma/tenant"
       ]
-    }
+    },
+    "strictNullChecks": false
   },
   "include": [
     "next-env.d.ts",

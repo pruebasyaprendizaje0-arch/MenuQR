@@ -1,7 +1,7 @@
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { Sparkles, ArrowLeft } from "lucide-react";
+import { Sparkles, ArrowLeft, ChefHat, Users, LayoutDashboard } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +41,39 @@ export default async function AdminLayout({
           </div>
         </div>
       )}
+
+      {/* Barra de Accesos Rápidos Operativos (Admin / Cocina / Mesas) */}
+      <div className="bg-slate-900 border-b border-slate-800 text-xs py-2 px-4 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center space-x-2">
+          <Link
+            href="/admin"
+            className="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition font-medium"
+          >
+            <LayoutDashboard className="w-3.5 h-3.5 text-slate-400" />
+            <span>Panel Admin</span>
+          </Link>
+          <Link
+            href="/cocina"
+            target="_blank"
+            className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/20 transition font-bold"
+          >
+            <ChefHat className="w-3.5 h-3.5 text-orange-400" />
+            <span>Módulo Cocina</span>
+          </Link>
+          <Link
+            href="/mesas"
+            target="_blank"
+            className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition font-bold"
+          >
+            <Users className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Módulo Mesero</span>
+          </Link>
+        </div>
+        <div className="text-[11px] text-slate-400 hidden sm:block">
+          Sincronización en tiempo real vía Socket.IO y Postgres
+        </div>
+      </div>
+
       {children}
     </>
   );
