@@ -30,8 +30,6 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export async function ensureDbTables(): Promise<void> {
-  if (globalForPg.tablesInitialized) return;
-
   try {
     const initSqlPath = path.join(process.cwd(), "init.sql");
     if (fs.existsSync(initSqlPath)) {
@@ -85,6 +83,13 @@ export async function ensureDbTables(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_pedido_items_pedido ON pedido_items(pedido_id);
       `);
     }
+
+    // Migraciones seguras para comensales en mesa abierta y llamada a mesero
+    await pool.query(`
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_nombre VARCHAR(200);
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_telefono VARCHAR(50);
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS solicita_mesero BOOLEAN DEFAULT false;
+    `);
 
     // Sincronizar negocios a partir de la tabla Restaurant de Prisma si existe
     await pool.query(`

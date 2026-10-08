@@ -53,7 +53,7 @@ export function SmartLogo({
       alt={alt || name}
       loading="eager"
       // @ts-ignore
-      fetchpriority="high"
+      fetchPriority="high"
       decoding="async"
       onError={() => setHasError(true)}
       className={`${className} shrink-0 bg-slate-900`}
@@ -94,7 +94,7 @@ export function SmartCover({
             alt={alt || name}
             loading="eager"
             // @ts-ignore
-            fetchpriority="high"
+            fetchPriority="high"
             decoding="async"
             onLoad={() => setIsLoaded(true)}
             onError={() => setHasError(true)}

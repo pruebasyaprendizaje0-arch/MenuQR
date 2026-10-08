@@ -36,6 +36,9 @@ export async function GET(req: NextRequest) {
         p.camarero_id,
         p.total::float as total,
         p.created_at,
+        p.cliente_nombre,
+        p.cliente_telefono,
+        p.solicita_mesero,
         c.nombre as camarero_nombre,
         COALESCE(
           json_agg(
@@ -70,7 +73,7 @@ export async function GET(req: NextRequest) {
     }
 
     query += `
-      GROUP BY p.id, c.nombre
+      GROUP BY p.id, c.nombre, p.cliente_nombre, p.cliente_telefono, p.solicita_mesero
       ORDER BY p.created_at ASC
     `;
 
@@ -92,7 +95,7 @@ export async function POST(req: NextRequest) {
     await ensureDbTables();
 
     const body = await req.json();
-    const { negocio_id, mesa, camarero_id, items } = body;
+    const { negocio_id, mesa, camarero_id, items, cliente_nombre, cliente_telefono } = body;
 
     if (!negocio_id || !mesa) {
       return NextResponse.json(
@@ -148,13 +151,20 @@ export async function POST(req: NextRequest) {
           insertedItems.push(itemRows[0]);
         }
 
-        // Actualizar total del pedido
+        // Actualizar total del pedido y vincular nombre si aplica
         const { rows: updatedOrderRows } = await client.query(
           `UPDATE pedidos 
-           SET total = total + $1 
-           WHERE id = $2 
-           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at`,
-          [itemsAddTotal, orderId]
+           SET total = total + $1,
+               cliente_nombre = COALESCE($2, cliente_nombre),
+               cliente_telefono = COALESCE($3, cliente_telefono)
+           WHERE id = $4 
+           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero`,
+          [
+            itemsAddTotal,
+            cliente_nombre ? String(cliente_nombre).trim() : null,
+            cliente_telefono ? String(cliente_telefono).trim() : null,
+            orderId,
+          ]
         );
 
         await client.query("COMMIT");
@@ -212,10 +222,17 @@ export async function POST(req: NextRequest) {
         }
 
         const { rows: newOrderRows } = await client.query(
-          `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total)
-           VALUES ($1, $2, $3, 'nuevo', $4)
-           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at`,
-          [negocio_id, String(mesa), finalCamareroId, initialTotal]
+          `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono)
+           VALUES ($1, $2, $3, 'nuevo', $4, $5, $6)
+           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero`,
+          [
+            negocio_id,
+            String(mesa),
+            finalCamareroId,
+            initialTotal,
+            cliente_nombre ? String(cliente_nombre).trim() : null,
+            cliente_telefono ? String(cliente_telefono).trim() : null,
+          ]
         );
 
         orderId = newOrderRows[0].id;

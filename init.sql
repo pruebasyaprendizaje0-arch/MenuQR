@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS pedidos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   negocio_id UUID REFERENCES negocios(id),
   mesa VARCHAR(20),
+  cliente_nombre VARCHAR(200),
+  cliente_telefono VARCHAR(50),
+  solicita_mesero BOOLEAN DEFAULT false,
   estado VARCHAR(20) DEFAULT 'nuevo',
   camarero_id UUID REFERENCES camareros(id),
   total DECIMAL(10,2) DEFAULT 0,
@@ -46,3 +49,9 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_negocio_estado ON pedidos(negocio_id, est
 CREATE INDEX IF NOT EXISTS idx_pedidos_mesa_estado ON pedidos(negocio_id, mesa, estado);
 CREATE INDEX IF NOT EXISTS idx_pedidos_camarero_fecha ON pedidos(camarero_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_pedido_items_pedido ON pedido_items(pedido_id);
+
+-- Migraciones idempotentes para columnas de mesa abierta y comensales
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_nombre VARCHAR(200);
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_telefono VARCHAR(50);
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS solicita_mesero BOOLEAN DEFAULT false;
+

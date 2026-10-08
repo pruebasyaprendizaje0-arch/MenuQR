@@ -36,7 +36,10 @@ import {
   Gift,
   Star,
   ArrowRight,
-  Zap
+  Zap,
+  Bell,
+  X,
+  CreditCard
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -262,6 +265,26 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
 
+  // Opción 3: Estado de Mesa Abierta Sincronizada Comensal ↔ Mesero
+  const [openTableSession, setOpenTableSession] = useState<{
+    tableName: string;
+    customerName: string;
+    customerPhone?: string;
+    startedAt: string;
+  } | null>(null);
+  const [liveTableOrder, setLiveTableOrder] = useState<any | null>(null);
+  const [isLlamandoMesero, setIsLlamandoMesero] = useState(false);
+  const [llamadaMeseroEnviada, setLlamadaMeseroEnviada] = useState(false);
+  const [isBillModalOpen, setIsBillModalOpen] = useState(false);
+  const [isTableDetailModalOpen, setIsTableDetailModalOpen] = useState(false);
+  const [billPaymentMethod, setBillPaymentMethod] = useState<"cash" | "qr" | "card">("cash");
+  const [billTipPercent, setBillTipPercent] = useState<number>(0);
+  const [isSubmittingBill, setIsSubmittingBill] = useState(false);
+  const [orderFinalizedNotice, setOrderFinalizedNotice] = useState<string | null>(null);
+  const [extraRoundSuccessToast, setExtraRoundSuccessToast] = useState(false);
+  const [addedItemToast, setAddedItemToast] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Check if ruleta is enabled by the restaurant admin
   useEffect(() => {
     async function checkRuletaConfig() {
@@ -421,8 +444,102 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       if (mesa) {
         setSelectedTable(mesa);
       }
+
+      // Restaurar sesión de mesa abierta de localStorage si existe
+      try {
+        const stored = localStorage.getItem(`menuqr_open_table_${restaurant.slug}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.tableName && parsed?.customerName) {
+            setOpenTableSession(parsed);
+            if (!mesa) {
+              setSelectedTable(parsed.tableName);
+            }
+            setCustomerName(parsed.customerName);
+            if (parsed.customerPhone) {
+              setCustomerPhone(parsed.customerPhone);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Error leyendo sesión de mesa abierta:", e);
+      }
     }
-  }, []);
+  }, [restaurant.slug]);
+
+  // Sincronización en tiempo real y polling bidireccional (Comensal ↔ Mesero)
+  useEffect(() => {
+    const activeMesa =
+      openTableSession?.tableName ||
+      (selectedTable && selectedTable !== "Llevar" && selectedTable !== "Domicilio"
+        ? selectedTable
+        : null);
+
+    if (!activeMesa) {
+      setLiveTableOrder(null);
+      return;
+    }
+
+    let isPollingMounted = true;
+    const fetchLiveTable = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      try {
+        const res = await fetch(
+          `/api/pedidos?negocio_id=${restaurant.id}&mesa=${encodeURIComponent(activeMesa)}&activos=false`,
+          { cache: "no-store" }
+        );
+        const data = await res.json();
+        if (isPollingMounted && data.ok && Array.isArray(data.pedidos)) {
+          const activeOrder = data.pedidos.find(
+            (p: any) => String(p.mesa) === String(activeMesa) && p.estado !== "pagado"
+          );
+
+          if (activeOrder) {
+            setLiveTableOrder(activeOrder);
+            if (activeOrder.cliente_nombre && !customerName) {
+              setCustomerName(activeOrder.cliente_nombre);
+            }
+          } else if (openTableSession) {
+            // Si la mesa estaba abierta pero ya no tiene pedido activo, revisar si se pagó
+            const paidOrder = data.pedidos.find(
+              (p: any) => String(p.mesa) === String(activeMesa) && p.estado === "pagado"
+            );
+            if (paidOrder) {
+              setOrderFinalizedNotice(
+                `🎉 ¡La cuenta de la Mesa #${activeMesa} ha sido pagada y cerrada con éxito! Muchas gracias por visitarnos.`
+              );
+              try {
+                localStorage.removeItem(`menuqr_open_table_${restaurant.slug}`);
+              } catch {}
+              setOpenTableSession(null);
+              setLiveTableOrder(null);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Error sincronizando mesa abierta:", err);
+      }
+    };
+
+    fetchLiveTable();
+    const interval = setInterval(fetchLiveTable, 6000);
+    const handleVisibility = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        fetchLiveTable();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibility);
+    }
+
+    return () => {
+      isPollingMounted = false;
+      clearInterval(interval);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibility);
+      }
+    };
+  }, [openTableSession, selectedTable, restaurant.id, restaurant.slug, customerName]);
 
   useEffect(() => {
     if (restaurant.categories.length > 0) {
@@ -482,6 +599,14 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       }
       return [...prevCart, { dish, quantity: 1 }];
     });
+
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setAddedItemToast(dish.name);
+    toastTimeoutRef.current = setTimeout(() => {
+      setAddedItemToast(null);
+    }, 2200);
   };
 
   const removeFromCart = (dishId: string) => {
@@ -646,12 +771,56 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return;
     }
 
+    // Si es pedido en mesa, sincronizar con el KDS de cocina / mesero en PostgreSQL
+    if (isTableOrder) {
+      try {
+        await fetch("/api/pedidos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            negocio_id: restaurant.id,
+            mesa: selectedTable,
+            items: cart.map((i) => ({
+              nombre: i.dish.name,
+              cantidad: i.quantity,
+              precio: i.dish.price,
+              notas: null,
+            })),
+            cliente_nombre: customerName.trim(),
+            cliente_telefono: customerPhone.trim() || null,
+          }),
+        });
+      } catch (kdsErr) {
+        console.warn("Error enviando a KDS /api/pedidos:", kdsErr);
+      }
+
+      // Persistir sesión de mesa abierta (Opción 3)
+      const sessionData = {
+        tableName: selectedTable,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim() || undefined,
+        startedAt: openTableSession?.startedAt || new Date().toISOString(),
+      };
+      try {
+        localStorage.setItem(`menuqr_open_table_${restaurant.slug}`, JSON.stringify(sessionData));
+      } catch {}
+      setOpenTableSession(sessionData);
+    }
+
+    const isExtraRound = Boolean(isTableOrder && openTableSession);
+
     let message = isTableOrder 
-      ? `¡Hola! Me gustaría hacer un pedido para la *Mesa #${selectedTable}* (Comensal: *${customerName.trim()}*) en *${restaurant.name}*:\n\n`
+      ? isExtraRound
+        ? `¡Hola! *RONDA EXTRA / AÑADIDO* para la *Mesa #${selectedTable}* (Comensal: *${customerName.trim()}*) en *${restaurant.name}*:\n\n`
+        : `¡Hola! Me gustaría hacer un pedido para la *Mesa #${selectedTable}* (Comensal: *${customerName.trim()}*) en *${restaurant.name}*:\n\n`
       : `¡Hola! Me gustaría hacer un pedido en *${restaurant.name}*:\n\n`;
 
     message += `*Número de Pedido:* #${result.orderNumber || 1}\n`;
-    message += isTableOrder ? `*Detalle de Comanda (${customerName.trim()}):*\n` : `*Detalle del Pedido:*\n`;
+    message += isTableOrder
+      ? isExtraRound
+        ? `*Detalle de Ronda Extra (${customerName.trim()}):*\n`
+        : `*Detalle de Comanda (${customerName.trim()}):*\n`
+      : `*Detalle del Pedido:*\n`;
     message += `-----------------------------------\n`;
     
     cart.forEach((item) => {
@@ -674,6 +843,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     } else if (isTableOrder) {
       message += `*Mesa:* #${selectedTable} 🪑\n`;
       message += `*Comensal:* ${customerName.trim()} 👤\n`;
+      if (isExtraRound) {
+        message += `*Tipo de Comanda:* ➕ Ronda Adicional en Mesa Abierta\n`;
+      }
       if (customerPhone.trim()) {
         message += `*WhatsApp / Teléfono:* ${customerPhone.trim()}\n`;
       }
@@ -749,11 +921,133 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodedMessage}`;
     window.open(whatsappUrl, "_blank");
     
-    // Clear cart and close checkout, show post-order reward modal
+    // Vaciar solo los items del carrito para permitir pedir rondas extras
     setCart([]);
     setIsCheckoutOpen(false);
     setIsSubmittingOrder(false);
-    setOrderSuccessInfo({ orderNumber: result.orderNumber || 1 });
+
+    if (isTableOrder) {
+      setExtraRoundSuccessToast(true);
+      setTimeout(() => setExtraRoundSuccessToast(false), 5000);
+    } else {
+      setOrderSuccessInfo({ orderNumber: result.orderNumber || 1 });
+    }
+  };
+
+  // Opción 3: Acción para "Llamar al Mesero"
+  const handleLlamarMesero = async () => {
+    const mesaTarget = openTableSession?.tableName || selectedTable;
+    if (!mesaTarget) {
+      setIsTableModalOpen(true);
+      return;
+    }
+
+    setIsLlamandoMesero(true);
+    try {
+      const res = await fetch("/api/pedidos/llamar-mesero", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          negocio_id: restaurant.id,
+          mesa: mesaTarget,
+          comensal: customerName || openTableSession?.customerName || "Comensal",
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setLlamadaMeseroEnviada(true);
+        if (liveTableOrder) {
+          setLiveTableOrder({ ...liveTableOrder, solicita_mesero: true });
+        }
+        setTimeout(() => setLlamadaMeseroEnviada(false), 8000);
+      }
+    } catch (e) {
+      console.error("Error al llamar mesero:", e);
+    } finally {
+      setIsLlamandoMesero(false);
+    }
+  };
+
+  // Opción 3: Acción para "Pedir la Cuenta"
+  const handleSolicitarCuenta = async () => {
+    const mesaTarget = openTableSession?.tableName || selectedTable;
+    if (!mesaTarget) return;
+
+    setIsSubmittingBill(true);
+    try {
+      const currentTotal = liveTableOrder ? Number(liveTableOrder.total) : cartTotal;
+      const tipAmount = currentTotal * (billTipPercent / 100);
+      const finalBillTotal = currentTotal + tipAmount;
+      const comensalName = customerName || openTableSession?.customerName || "Comensal";
+
+      const res = await fetch("/api/pedidos/pedir-cuenta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          negocio_id: restaurant.id,
+          mesa: mesaTarget,
+          comensal: comensalName,
+          metodo_pago:
+            billPaymentMethod === "cash"
+              ? "Efectivo"
+              : billPaymentMethod === "qr"
+              ? "QR / Transferencia"
+              : "Tarjeta en mesa",
+          propina: tipAmount,
+          total: finalBillTotal,
+        }),
+      });
+      const data = await res.json();
+
+      // Enviar por WhatsApp la notificación de solicitud de cuenta
+      let billMessage = `¡Hola! Por favor la cuenta para la *Mesa #${mesaTarget}* (Comensal: *${comensalName}*) en *${restaurant.name}*:\n\n`;
+      billMessage += `• *Consumo Acumulado:* $${currentTotal.toFixed(2)}\n`;
+      if (tipAmount > 0) {
+        billMessage += `• *Propina (${billTipPercent}%):* $${tipAmount.toFixed(2)}\n`;
+      }
+      billMessage += `• *Total a Pagar:* $${finalBillTotal.toFixed(2)}\n`;
+      billMessage += `• *Método de Pago:* ${
+        billPaymentMethod === "cash"
+          ? "Efectivo"
+          : billPaymentMethod === "qr"
+          ? "QR de Cobro / Transferencia"
+          : "Tarjeta en mesa"
+      }\n\n`;
+      billMessage += `_Muchas gracias por la excelente atención._`;
+
+      const rawPhone = (restaurant.whatsappNumber || (restaurant as any).whatsapp || "").toString();
+      let formattedPhone = rawPhone.replace(/\D/g, "");
+      if (formattedPhone) {
+        if (!formattedPhone.startsWith("593") && formattedPhone.startsWith("0")) {
+          formattedPhone = "593" + formattedPhone.substring(1);
+        } else if (!formattedPhone.startsWith("593") && formattedPhone.length === 9) {
+          formattedPhone = "593" + formattedPhone;
+        } else if (formattedPhone.length === 10 && formattedPhone.startsWith("09")) {
+          formattedPhone = "593" + formattedPhone.substring(1);
+        }
+        const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(billMessage)}`;
+        window.open(waUrl, "_blank");
+      }
+
+      setIsBillModalOpen(false);
+      if (liveTableOrder) {
+        setLiveTableOrder({ ...liveTableOrder, estado: "por_pagar" });
+      }
+    } catch (e) {
+      console.error("Error al solicitar cuenta:", e);
+    } finally {
+      setIsSubmittingBill(false);
+    }
+  };
+
+  const handleCerrarMesaManualmente = () => {
+    if (confirm("¿Deseas cerrar tu sesión en esta mesa? Se desvinculará tu mesa abierta en este navegador.")) {
+      try {
+        localStorage.removeItem(`menuqr_open_table_${restaurant.slug}`);
+      } catch {}
+      setOpenTableSession(null);
+      setLiveTableOrder(null);
+    }
   };
 
   return (
@@ -2003,7 +2297,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           >
             <div className="flex items-center gap-2 text-sm">
               <ShoppingCart className="h-5 w-5" />
-              <span>Ver Pedido ({cartCount})</span>
+              <span>
+                {openTableSession
+                  ? `➕ Ronda Extra (${cartCount})`
+                  : `Ver Pedido (${cartCount})`}
+              </span>
             </div>
             <span className="text-sm bg-white/20 px-3 py-1 rounded-lg">${cartTotal.toFixed(2)}</span>
           </button>
@@ -2099,7 +2397,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 style={{ backgroundColor: restaurant.themeColor }}
               >
                 <Send className="h-4.5 w-4.5" />
-                Continuar Pedido (${cartTotal.toFixed(2)})
+                {openTableSession
+                  ? `➕ Pedir Ronda Extra ($${cartTotal.toFixed(2)})`
+                  : `Continuar Pedido ($${cartTotal.toFixed(2)})`}
               </button>
             </div>
           </div>
@@ -2738,7 +3038,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               style={{ backgroundColor: restaurant.themeColor }}
             >
               <Send className="h-4 w-4" />
-              Confirmar y Enviar Pedido
+              {openTableSession && Boolean(selectedTable && selectedTable !== "" && selectedTable !== "Llevar" && selectedTable !== "Domicilio")
+                ? "➕ Enviar Ronda Extra a Cocina"
+                : "Confirmar y Enviar Pedido"}
             </button>
           </div>
         </div>
@@ -2932,12 +3234,415 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         </div>
       )}
 
+      {/* Opción 3: Floating Open Table Hub Dock (Mesa Abierta Sincronizada) */}
+      {openTableSession && (
+        <div className="fixed bottom-20 md:bottom-6 left-3 right-3 sm:left-6 sm:right-auto sm:max-w-md z-40 bg-slate-900/95 backdrop-blur-2xl border-2 border-emerald-500/50 rounded-3xl p-3.5 sm:p-4 shadow-2xl shadow-emerald-950/60 animate-in slide-in-from-bottom-5 duration-300">
+          {/* Header Row: Mesa, Comensal y Estado */}
+          <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-800/80">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block shrink-0" />
+              <div className="truncate">
+                <span className="font-black text-sm text-white tracking-tight">
+                  🪑 Mesa #{openTableSession.tableName}
+                </span>
+                <span className="text-xs font-semibold text-emerald-400 ml-1.5 truncate">
+                  👤 {openTableSession.customerName}
+                </span>
+              </div>
+            </div>
+
+            {/* Status Pill */}
+            {liveTableOrder?.solicita_mesero ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-red-500 text-white animate-pulse flex items-center gap-1 shrink-0 shadow-md">
+                <Bell className="w-3 h-3 text-white animate-spin" />
+                ¡Mesero Llamado!
+              </span>
+            ) : liveTableOrder?.estado === "por_pagar" ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
+                💳 Por Pagar
+              </span>
+            ) : liveTableOrder?.estado === "listo" ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0 flex items-center gap-1">
+                🍽️ ¡Listo en Mesa!
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-teal-500/20 text-teal-300 border border-teal-500/40 shrink-0">
+                🍳 En Cocina
+              </span>
+            )}
+          </div>
+
+          {/* Consumo Acumulado y Botones de Acción */}
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold leading-none">
+                Consumo:
+              </span>
+              <span className="text-xl font-black font-mono text-emerald-400">
+                ${liveTableOrder ? Number(liveTableOrder.total).toFixed(2) : "0.00"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {/* Botón Ver Comanda */}
+              <button
+                type="button"
+                onClick={() => setIsTableDetailModalOpen(true)}
+                className="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold border border-slate-700 transition active:scale-95 flex items-center gap-1 shadow-sm"
+                title="Ver lista de platos consumidos"
+              >
+                <Utensils className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Comanda</span>
+              </button>
+
+              {/* Botón Llamar al Mesero */}
+              <button
+                type="button"
+                onClick={handleLlamarMesero}
+                disabled={isLlamandoMesero}
+                className={`px-3 py-2 rounded-xl text-xs font-black transition active:scale-95 flex items-center gap-1 shadow-md ${
+                  llamadaMeseroEnviada
+                    ? "bg-emerald-600 text-white"
+                    : "bg-red-600 hover:bg-red-500 text-white"
+                }`}
+                title="Llamar al camarero a la mesa"
+              >
+                {isLlamandoMesero ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : llamadaMeseroEnviada ? (
+                  <Check className="w-3.5 h-3.5" />
+                ) : (
+                  <Bell className="w-3.5 h-3.5 animate-bounce" />
+                )}
+                <span>{llamadaMeseroEnviada ? "¡Llamado!" : "Mesero"}</span>
+              </button>
+
+              {/* Botón Pedir la Cuenta */}
+              <button
+                type="button"
+                onClick={() => setIsBillModalOpen(true)}
+                className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs transition active:scale-95 shadow-md flex items-center gap-1"
+                title="Pedir la cuenta al mesero"
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>Pedir Cuenta</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Feedback Toasts */}
+          {extraRoundSuccessToast && (
+            <div className="mt-2 py-1.5 px-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold text-center animate-fade-in flex items-center justify-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+              <span>¡Ronda extra enviada a Cocina! Tu mesa sigue abierta.</span>
+            </div>
+          )}
+
+          {llamadaMeseroEnviada && (
+            <div className="mt-2 py-1.5 px-3 rounded-xl bg-red-500/20 border border-red-500/40 text-red-200 text-[11px] font-bold text-center animate-fade-in flex items-center justify-center gap-1.5">
+              <Bell className="w-3.5 h-3.5 text-red-400 animate-spin" />
+              <span>¡Mesero avisado! Enseguida se acerca a tu mesa.</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal: Detalle de Comanda de Mesa Abierta */}
+      {isTableDetailModalOpen && openTableSession && (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  🪑 Mesa #{openTableSession.tableName} • Consumo
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Comensal: <span className="text-emerald-400 font-semibold">{openTableSession.customerName}</span>
+                  {liveTableOrder?.camarero_nombre && (
+                    <span> • Atendido por: {liveTableOrder.camarero_nombre}</span>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={() => setIsTableDetailModalOpen(false)}
+                className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {liveTableOrder?.items && liveTableOrder.items.length > 0 ? (
+                liveTableOrder.items.map((it: any) => (
+                  <div
+                    key={it.id || `${it.nombre}-${Math.random()}`}
+                    className={`p-3 rounded-2xl border flex items-center justify-between text-xs transition ${
+                      it.es_añadido
+                        ? "bg-amber-950/30 border-amber-600/40 text-amber-200"
+                        : "bg-slate-950/60 border-slate-800 text-slate-200"
+                    }`}
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-amber-400">
+                          {it.cantidad}x
+                        </span>
+                        <span className="font-bold text-white">{it.nombre}</span>
+                        {it.es_añadido && (
+                          <span className="bg-amber-500 text-slate-950 font-black text-[9px] px-1.5 py-0.5 rounded uppercase">
+                            AÑADIDO
+                          </span>
+                        )}
+                      </div>
+                      {it.notas && (
+                        <p className="text-[10px] text-amber-300 italic">💬 {it.notas}</p>
+                      )}
+                    </div>
+                    <span className="font-mono font-black text-sm text-slate-100">
+                      ${(it.cantidad * it.precio).toFixed(2)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="py-8 text-center text-slate-400 space-y-2">
+                  <Utensils className="w-8 h-8 mx-auto text-slate-600" />
+                  <p className="text-xs">Aún no hay comandas registradas en esta mesa.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-slate-800 bg-slate-950 space-y-3">
+              <div className="flex items-center justify-between text-base font-black text-white">
+                <span>Total Acumulado:</span>
+                <span className="font-mono text-2xl text-emerald-400">
+                  ${liveTableOrder ? Number(liveTableOrder.total).toFixed(2) : "0.00"}
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setIsTableDetailModalOpen(false)}
+                  className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold transition"
+                >
+                  ➕ Pedir Más Platos (Ronda Extra)
+                </button>
+                <button
+                  onClick={() => {
+                    setIsTableDetailModalOpen(false);
+                    setIsBillModalOpen(true);
+                  }}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 text-xs font-black transition active:scale-95 shadow-md flex items-center justify-center gap-1.5"
+                >
+                  <DollarSign className="w-4 h-4" />
+                  Pedir la Cuenta
+                </button>
+              </div>
+
+              <button
+                onClick={handleCerrarMesaManualmente}
+                className="w-full text-center text-[11px] text-slate-500 hover:text-slate-400 underline font-medium"
+              >
+                Cerrar o cambiar de mesa en este dispositivo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Pedir la Cuenta de Mesa Abierta */}
+      {isBillModalOpen && openTableSession && (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-slide-in">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div>
+                <h3 className="text-xl font-black text-white flex items-center gap-2">
+                  🧾 Solicitar la Cuenta
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Mesa #{openTableSession.tableName} • Comensal: <strong className="text-white">{openTableSession.customerName}</strong>
+                </p>
+              </div>
+              <button
+                onClick={() => setIsBillModalOpen(false)}
+                className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Consumo Subtotal */}
+            <div className="bg-slate-950/70 border border-slate-850 p-4 rounded-2xl space-y-2">
+              <div className="flex justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
+                <span>Consumo Total en Mesa:</span>
+                <span className="font-mono text-base font-black text-white">
+                  ${liveTableOrder ? Number(liveTableOrder.total).toFixed(2) : "0.00"}
+                </span>
+              </div>
+            </div>
+
+            {/* Método de Pago */}
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-300 uppercase tracking-wider block">
+                ¿Cómo deseas pagar?
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBillPaymentMethod("cash")}
+                  className={`py-3 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-1 text-center transition ${
+                    billPaymentMethod === "cash"
+                      ? "bg-emerald-600 text-white border-transparent shadow-lg"
+                      : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span>Efectivo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBillPaymentMethod("qr")}
+                  className={`py-3 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-1 text-center transition ${
+                    billPaymentMethod === "qr"
+                      ? "bg-emerald-600 text-white border-transparent shadow-lg"
+                      : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>QR / Transf.</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBillPaymentMethod("card")}
+                  className={`py-3 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-1 text-center transition ${
+                    billPaymentMethod === "card"
+                      ? "bg-emerald-600 text-white border-transparent shadow-lg"
+                      : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>Tarjeta</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Propina Voluntaria */}
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-300 uppercase tracking-wider block">
+                Propina al Servicio (Voluntaria):
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {[0, 5, 10, 15].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => setBillTipPercent(pct)}
+                    className={`py-2 rounded-xl text-xs font-black border transition ${
+                      billTipPercent === pct
+                        ? "bg-amber-500 text-slate-950 border-transparent shadow-md"
+                        : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {pct === 0 ? "0%" : `${pct}%`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Total Final Calculado */}
+            {(() => {
+              const base = liveTableOrder ? Number(liveTableOrder.total) : 0;
+              const tip = base * (billTipPercent / 100);
+              const totalFin = base + tip;
+
+              return (
+                <div className="pt-3 border-t border-slate-800 space-y-1">
+                  {tip > 0 && (
+                    <div className="flex justify-between text-xs text-slate-400">
+                      <span>Propina ({billTipPercent}%):</span>
+                      <span className="font-mono text-slate-300">${tip.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-lg font-black text-white">
+                    <span>Total a Pagar:</span>
+                    <span className="font-mono text-2xl text-emerald-400">${totalFin.toFixed(2)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Botón de Confirmación */}
+            <button
+              onClick={handleSolicitarCuenta}
+              disabled={isSubmittingBill}
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-sm uppercase tracking-wider transition active:scale-95 shadow-xl flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isSubmittingBill ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Enviando Solicitud...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>Pedir Cuenta al Mesero</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Cuenta Pagada con Éxito */}
+      {orderFinalizedNotice && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl animate-bounce-subtle">
+            <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 text-emerald-400 grid place-items-center text-3xl mx-auto shadow-lg">
+              🎉
+            </div>
+            <h3 className="text-xl font-black text-white">¡Cuenta Pagada y Cerrada!</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              {orderFinalizedNotice}
+            </p>
+            <button
+              onClick={() => {
+                setOrderFinalizedNotice(null);
+                setSelectedTable("");
+                setCustomerName("");
+              }}
+              className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider transition active:scale-95 shadow-lg"
+            >
+              ¡Muchas Gracias! Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast de confirmación al añadir producto */}
+      {addedItemToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[160] bg-slate-900/95 border-2 border-emerald-500/60 text-white px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-md flex items-center gap-2.5 animate-in fade-in slide-in-from-top-4 duration-200">
+          <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+            <Check className="w-3.5 h-3.5" />
+          </div>
+          <span className="text-xs font-black truncate max-w-[200px]">¡{addedItemToast} añadido!</span>
+          <button
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className="ml-1 text-[11px] font-black text-amber-400 hover:text-amber-300 uppercase tracking-wider shrink-0 cursor-pointer"
+          >
+            Ver Pedido →
+          </button>
+        </div>
+      )}
+
       {/* Floating Bottom Navigation Bar for Mobile */}
       <div className="fixed bottom-0 left-0 right-0 z-[100] md:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pointer-events-none">
         <div className="max-w-md mx-auto bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center justify-around shadow-[0_10px_30px_rgba(0,0,0,0.8)] pointer-events-auto">
           {/* Profile Tab */}
           <button
-            onClick={() => setCurrentTab("profile")}
+            onClick={() => {
+              setCurrentTab("profile");
+              if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
             className="flex flex-col items-center gap-1 py-1.5 px-3 rounded-xl transition duration-200 active:scale-95"
             style={{ color: currentTab === "profile" ? restaurant.themeColor : "#94a3b8" }}
           >
@@ -2947,7 +3652,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
           {/* Menu Tab */}
           <button
-            onClick={() => setCurrentTab("menu")}
+            onClick={() => {
+              setCurrentTab("menu");
+              if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
             className="flex flex-col items-center gap-1 py-1.5 px-3 rounded-xl transition duration-200 active:scale-95"
             style={{ color: currentTab === "menu" ? restaurant.themeColor : "#94a3b8" }}
           >

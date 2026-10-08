@@ -14,10 +14,10 @@ export async function PUT(
 
     const { id } = await context.params;
     const body = await req.json();
-    const { estado } = body;
+    const { estado, solicita_mesero } = body;
 
     const validStates = ["nuevo", "en_cocina", "listo", "por_pagar", "pagado"];
-    if (!estado || !validStates.includes(estado)) {
+    if (estado && !validStates.includes(estado)) {
       return NextResponse.json(
         {
           ok: false,
@@ -29,10 +29,11 @@ export async function PUT(
 
     const { rows: updatedRows } = await pool.query(
       `UPDATE pedidos 
-       SET estado = $1 
-       WHERE id = $2 
-       RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at`,
-      [estado, id]
+       SET estado = COALESCE($1, estado),
+           solicita_mesero = COALESCE($2, solicita_mesero)
+       WHERE id = $3 
+       RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, solicita_mesero`,
+      [estado || null, typeof solicita_mesero === "boolean" ? solicita_mesero : null, id]
     );
 
     if (updatedRows.length === 0) {

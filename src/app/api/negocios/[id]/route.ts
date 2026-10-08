@@ -25,7 +25,7 @@ export async function GET(
 
     // Obtener camareros
     const { rows: camareros } = await pool.query(
-      "SELECT id, nombre, pin, activo FROM camareros WHERE negocio_id = $1 AND activo = true ORDER BY nombre ASC",
+      "SELECT id, negocio_id, nombre, pin, activo FROM camareros WHERE negocio_id = $1 AND activo = true ORDER BY nombre ASC",
       [id]
     );
 
