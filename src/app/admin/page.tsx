@@ -169,6 +169,7 @@ export default async function AdminPage() {
     serviceOnTable: (restaurant as any).serviceOnTable ?? true,
     serviceOnTakeout: (restaurant as any).serviceOnTakeout ?? false,
     whatsappBotEnabled: Boolean((restaurant as any).whatsappBotEnabled ?? false),
+    testMode: Boolean((restaurant as any).testMode ?? false),
     categories: (restaurant.categories || []).map((c: any) => ({
       ...c,
       dishes: (c.dishes || []).map((d: any) => ({
@@ -181,6 +182,7 @@ export default async function AdminPage() {
       ...o,
       createdAt: toIso(o.createdAt),
       updatedAt: toIso(o.updatedAt),
+      isTest: Boolean(o.isTest ?? false),
       items: o.items || []
     })),
     seasonRates: ((restaurant as any).seasonRates ?? []).map((sr: any) => ({
@@ -233,12 +235,8 @@ export default async function AdminPage() {
     console.warn("No se pudo cargar la configuración de pago de suscripciones.", error);
   }
 
-  let visitStats = {
-    total: 0,
-    today: 0,
-    week: 0,
-    month: 0,
-  };
+  let visitStatsReal = { total: 0, today: 0, week: 0, month: 0 };
+  let visitStatsTest = { total: 0, today: 0, week: 0, month: 0 };
 
   try {
     if (restaurant?.id) {
@@ -251,17 +249,23 @@ export default async function AdminPage() {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-      const [totalVisits, todayVisits, weekVisits, monthVisits] = await Promise.all([
+      const [
+        totalReal, todayReal, weekReal, monthReal,
+        totalTest, todayTest, weekTest, monthTest,
+      ] = await Promise.all([
+        // Métricas Reales (isTest = false)
         prisma.analyticsEvent.count({
           where: {
             restaurantId: restaurant.id,
             eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: false,
           },
         }),
         prisma.analyticsEvent.count({
           where: {
             restaurantId: restaurant.id,
             eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: false,
             createdAt: { gte: startOfToday },
           },
         }),
@@ -269,6 +273,7 @@ export default async function AdminPage() {
           where: {
             restaurantId: restaurant.id,
             eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: false,
             createdAt: { gte: sevenDaysAgo },
           },
         }),
@@ -276,27 +281,62 @@ export default async function AdminPage() {
           where: {
             restaurantId: restaurant.id,
             eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: false,
+            createdAt: { gte: thirtyDaysAgo },
+          },
+        }),
+
+        // Métricas de Prueba (isTest = true)
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: true,
+          },
+        }),
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: true,
+            createdAt: { gte: startOfToday },
+          },
+        }),
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: true,
+            createdAt: { gte: sevenDaysAgo },
+          },
+        }),
+        prisma.analyticsEvent.count({
+          where: {
+            restaurantId: restaurant.id,
+            eventType: { in: ["RESTAURANT_VIEW", "MENU_VIEW", "QR_SCAN"] },
+            isTest: true,
             createdAt: { gte: thirtyDaysAgo },
           },
         }),
       ]);
 
-      visitStats = {
-        total: totalVisits,
-        today: todayVisits,
-        week: weekVisits,
-        month: monthVisits,
-      };
+      visitStatsReal = { total: totalReal, today: todayReal, week: weekReal, month: monthReal };
+      visitStatsTest = { total: totalTest, today: todayTest, week: weekTest, month: monthTest };
     }
   } catch (error) {
     console.warn("No se pudieron cargar las estadísticas de visitas:", error);
   }
 
+  const isCurrentTestMode = Boolean((restaurant as any)?.testMode ?? false);
+  const defaultVisitStats = isCurrentTestMode ? visitStatsTest : visitStatsReal;
+
   return (
     <AdminDashboard
       restaurant={serializedRestaurant as unknown as Parameters<typeof AdminDashboard>[0]["restaurant"]}
       subscriptionPaymentDetails={subscriptionPaymentDetails}
-      visitStats={visitStats}
+      visitStats={defaultVisitStats}
+      visitStatsReal={visitStatsReal}
+      visitStatsTest={visitStatsTest}
     />
   );
 }

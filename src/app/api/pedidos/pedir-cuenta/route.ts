@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
     const { rows: existing } = await pool.query(
       `SELECT id, total::float as total, cliente_nombre FROM pedidos 
-       WHERE negocio_id = $1 AND mesa = $2 AND estado != 'pagado'
+       WHERE negocio_id = $1 AND mesa = $2 AND estado NOT IN ('pagado', 'cancelado')
        ORDER BY created_at DESC LIMIT 1`,
       [negocio_id, String(mesa)]
     );

@@ -60,6 +60,18 @@ export default function SocketHandler(
         }
       });
 
+      socket.on("item_cancelado", (data: any) => {
+        if (data?.negocio_id) {
+          socket.to(`negocio_${data.negocio_id}`).emit("item_cancelado", data);
+        }
+      });
+
+      socket.on("pedido_cancelado", (data: any) => {
+        if (data?.negocio_id) {
+          socket.to(`negocio_${data.negocio_id}`).emit("pedido_cancelado", data);
+        }
+      });
+
       socket.on("disconnect", () => {
         // Desconexión normal
       });

@@ -84,11 +84,22 @@ export async function ensureDbTables(): Promise<void> {
       `);
     }
 
-    // Migraciones seguras para comensales en mesa abierta y llamada a mesero
+    // Migraciones seguras para comensales en mesa abierta, llamada a mesero y cancelación de pedidos/platos
     await pool.query(`
       ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_nombre VARCHAR(200);
       ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_telefono VARCHAR(50);
       ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS solicita_mesero BOOLEAN DEFAULT false;
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelacion VARCHAR(255);
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(50);
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ;
+
+      ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS motivo_cancelacion VARCHAR(255);
+      ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(50);
+      ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ;
+      CREATE INDEX IF NOT EXISTS idx_pedido_items_estado ON pedido_items(estado_item);
+
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS es_prueba BOOLEAN DEFAULT false;
+      CREATE INDEX IF NOT EXISTS idx_pedidos_es_prueba ON pedidos(negocio_id, es_prueba);
     `);
 
     // Sincronizar negocios a partir de la tabla Restaurant de Prisma si existe

@@ -67,3 +67,48 @@ export function emitPedidoActualizado(negocio_id: string, pedido: any): void {
     console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'pedido_actualizado'`);
   }
 }
+
+/**
+ * Emite evento 'item_cancelado' a la sala del negocio
+ */
+export function emitItemCancelado(
+  negocio_id: string,
+  data: {
+    pedido_id: string;
+    mesa: string;
+    plato_nombre: string;
+    motivo: string;
+    cancelado_por: "cocina" | "mesero";
+  }
+): void {
+  const io = getIO();
+  if (io) {
+    const room = `negocio_${negocio_id}`;
+    io.to(room).emit("item_cancelado", data);
+    console.log(`[Socket.IO] 'item_cancelado' emitido a la sala ${room}:`, data);
+  } else {
+    console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'item_cancelado'`);
+  }
+}
+
+/**
+ * Emite evento 'pedido_cancelado' a la sala del negocio
+ */
+export function emitPedidoCancelado(
+  negocio_id: string,
+  data: {
+    pedido_id: string;
+    mesa: string;
+    motivo: string;
+    cancelado_por: "cocina" | "mesero";
+  }
+): void {
+  const io = getIO();
+  if (io) {
+    const room = `negocio_${negocio_id}`;
+    io.to(room).emit("pedido_cancelado", data);
+    console.log(`[Socket.IO] 'pedido_cancelado' emitido a la sala ${room}:`, data);
+  } else {
+    console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'pedido_cancelado'`);
+  }
+}

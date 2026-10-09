@@ -51,12 +51,12 @@ export async function GET(req: NextRequest) {
               'es_añadido', pi.es_añadido,
               'estado_item', pi.estado_item
             ) ORDER BY pi.es_añadido ASC, pi.nombre ASC
-          ) FILTER (WHERE pi.id IS NOT NULL),
+          ) FILTER (WHERE pi.id IS NOT NULL AND (pi.estado_item IS NULL OR pi.estado_item != 'cancelado')),
           '[]'
         ) as items
       FROM pedidos p
       LEFT JOIN camareros c ON p.camarero_id = c.id
-      LEFT JOIN pedido_items pi ON pi.pedido_id = p.id
+      LEFT JOIN pedido_items pi ON pi.pedido_id = p.id AND (pi.estado_item IS NULL OR pi.estado_item != 'cancelado')
       WHERE p.negocio_id = $1
     `;
 
@@ -64,7 +64,8 @@ export async function GET(req: NextRequest) {
 
     if (soloActivos) {
       params.push("pagado");
-      query += ` AND p.estado != $${params.length}`;
+      params.push("cancelado");
+      query += ` AND p.estado NOT IN ($${params.length - 1}, $${params.length})`;
     }
 
     if (mesa) {
@@ -111,10 +112,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 1. Verificar si la mesa ya tiene un pedido activo (!= 'pagado')
+    // 1. Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
     const { rows: existingOrders } = await pool.query(
       `SELECT * FROM pedidos 
-       WHERE negocio_id = $1 AND mesa = $2 AND estado != 'pagado'
+       WHERE negocio_id = $1 AND mesa = $2 AND estado NOT IN ('pagado', 'cancelado')
        ORDER BY created_at DESC LIMIT 1`,
       [negocio_id, String(mesa)]
     );
@@ -182,7 +183,7 @@ export async function POST(req: NextRequest) {
         // Obtener todos los items actualizados del pedido
         const { rows: allItems } = await pool.query(
           `SELECT id, nombre, cantidad, precio::float, notas, es_añadido, estado_item 
-           FROM pedido_items WHERE pedido_id = $1 ORDER BY es_añadido ASC, nombre ASC`,
+           FROM pedido_items WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado') ORDER BY es_añadido ASC, nombre ASC`,
           [orderId]
         );
 
@@ -221,10 +222,22 @@ export async function POST(req: NextRequest) {
           if (defaultCam[0]) finalCamareroId = defaultCam[0].id;
         }
 
+        // Verificar si el negocio está en modo pruebas
+        let esPrueba = false;
+        try {
+          const { rows: restTest } = await client.query(
+            `SELECT "testMode" FROM "Restaurant" WHERE id = $1 LIMIT 1`,
+            [negocio_id]
+          );
+          if (restTest[0] && restTest[0].testMode === true) {
+            esPrueba = true;
+          }
+        } catch {}
+
         const { rows: newOrderRows } = await client.query(
-          `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono)
-           VALUES ($1, $2, $3, 'nuevo', $4, $5, $6)
-           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero`,
+          `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, es_prueba)
+           VALUES ($1, $2, $3, 'nuevo', $4, $5, $6, $7)
+           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, es_prueba`,
           [
             negocio_id,
             String(mesa),
@@ -232,6 +245,7 @@ export async function POST(req: NextRequest) {
             initialTotal,
             cliente_nombre ? String(cliente_nombre).trim() : null,
             cliente_telefono ? String(cliente_telefono).trim() : null,
+            esPrueba,
           ]
         );
 

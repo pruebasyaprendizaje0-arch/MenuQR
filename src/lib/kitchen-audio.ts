@@ -237,6 +237,21 @@ class KitchenAudioManager {
       }
     } catch {}
   }
+
+  /**
+   * 5. ALERTA DE CANCELACIÓN DE PLATO O PEDIDO:
+   * Timbre de atención descendente de alerta (880Hz -> 659Hz -> 523Hz) y vibración de advertencia
+   */
+  public playCancelacion(): void {
+    this.playTone([880.0, 659.25], 0.28, "sawtooth", 0.35);
+    setTimeout(() => this.playTone([587.33, 440.0], 0.45, "triangle", 0.4), 200);
+
+    try {
+      if (typeof window !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate([250, 100, 250]);
+      }
+    } catch {}
+  }
 }
 
 export const kitchenAudio = new KitchenAudioManager();

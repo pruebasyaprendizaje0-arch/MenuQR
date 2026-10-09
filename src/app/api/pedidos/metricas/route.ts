@@ -18,6 +18,19 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    let testMode = true;
+    try {
+      const { rows: restRows } = await pool.query(
+        `SELECT "testMode" FROM "Restaurant" WHERE id = $1 LIMIT 1`,
+        [negocioId]
+      );
+      if (restRows[0] && restRows[0].testMode === false) {
+        testMode = false;
+      }
+    } catch {}
+
+    const filterPrueba = !testMode ? "AND (p.es_prueba IS FALSE OR p.es_prueba IS NULL)" : "";
+
     const { rows: metricas } = await pool.query(
       `SELECT 
         c.id as camarero_id,
@@ -31,6 +44,8 @@ export async function GET(req: NextRequest) {
       FROM camareros c
       LEFT JOIN pedidos p ON p.camarero_id = c.id 
         AND p.negocio_id = $1 
+        AND p.estado != 'cancelado'
+        ${filterPrueba}
         AND DATE(p.created_at) = CURRENT_DATE
       WHERE c.negocio_id = $1
       GROUP BY c.id, c.nombre

@@ -48,7 +48,7 @@ interface Pedido {
   id: string;
   negocio_id: string;
   mesa: string;
-  estado: "nuevo" | "en_cocina" | "listo" | "por_pagar" | "pagado";
+  estado: "nuevo" | "en_cocina" | "listo" | "por_pagar" | "pagado" | "cancelado";
   camarero_id?: string;
   camarero_nombre?: string;
   cliente_nombre?: string;
@@ -123,6 +123,34 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   const initialLoadedRef = useRef(false);
   const pedidosRef = useRef<Pedido[]>([]);
   pedidosRef.current = pedidos;
+
+  // Estados de Cancelación de Plato Individual (Opción 2)
+  const [itemToCancel, setItemToCancel] = useState<{
+    pedidoId: string;
+    mesa: string;
+    item: PedidoItem;
+  } | null>(null);
+  const [cancelItemReason, setCancelItemReason] = useState("Error de digitación del mesero");
+  const [cancelItemCustomReason, setCancelItemCustomReason] = useState("");
+  const [isSubmittingItemCancel, setIsSubmittingItemCancel] = useState(false);
+
+  // Estados de Cancelación de Comanda Completa
+  const [orderToCancel, setOrderToCancel] = useState<{
+    pedidoId: string;
+    mesa: string;
+  } | null>(null);
+  const [cancelOrderReason, setCancelOrderReason] = useState("Cliente se retiró del local");
+  const [cancelOrderCustomReason, setCancelOrderCustomReason] = useState("");
+  const [isSubmittingOrderCancel, setIsSubmittingOrderCancel] = useState(false);
+
+  // Alerta sonora y visual recibida desde Cocina
+  const [cancellationAlert, setCancellationAlert] = useState<{
+    id: string;
+    mesa: string;
+    plato_nombre?: string;
+    motivo: string;
+    cancelado_por: "cocina" | "mesero";
+  } | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
 
@@ -296,6 +324,37 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       );
     });
 
+    socket.on("item_cancelado", (data: any) => {
+      if (data?.cancelado_por === "cocina") {
+        if (soundEnabled) {
+          kitchenAudio.playCancelacion();
+        }
+        setCancellationAlert({
+          id: String(Date.now()),
+          mesa: data.mesa,
+          plato_nombre: data.plato_nombre,
+          motivo: data.motivo,
+          cancelado_por: "cocina",
+        });
+      }
+    });
+
+    socket.on("pedido_cancelado", (data: any) => {
+      setPedidos((prev) => prev.filter((p) => p.id !== data.pedido_id));
+      if (data?.cancelado_por === "cocina") {
+        if (soundEnabled) {
+          kitchenAudio.playCancelacion();
+        }
+        setCancellationAlert({
+          id: String(Date.now()),
+          mesa: data.mesa,
+          motivo: data.motivo,
+          cancelado_por: "cocina",
+        });
+      }
+      refreshMetricas();
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -343,11 +402,99 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
   const getPedidoForMesa = (numMesa: number) => {
     return pedidos.find(
-      (p) => String(p.mesa) === String(numMesa) && p.estado !== "pagado"
+      (p) => String(p.mesa) === String(numMesa) && p.estado !== "pagado" && p.estado !== "cancelado"
     );
   };
 
   const activePedido = activeMesaNumber ? getPedidoForMesa(activeMesaNumber) : null;
+
+  // Manejar confirmación de cancelación de plato individual (Mesero)
+  const handleConfirmCancelItem = async () => {
+    if (!itemToCancel) return;
+    setIsSubmittingItemCancel(true);
+
+    const motivo =
+      cancelItemReason === "Otro" && cancelItemCustomReason.trim()
+        ? cancelItemCustomReason.trim()
+        : cancelItemReason;
+
+    try {
+      const res = await fetch(`/api/pedidos/${itemToCancel.pedidoId}/cancelar-item`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId: itemToCancel.item.id,
+          motivo,
+          cancelado_por: "mesero",
+          marcar_agotado: false,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setPedidos((prev) => {
+          if (data.pedido_cancelado) {
+            return prev.filter((p) => p.id !== itemToCancel.pedidoId);
+          }
+          return prev.map((p) =>
+            p.id === itemToCancel.pedidoId
+              ? {
+                  ...p,
+                  total: data.pedido.total,
+                  items: p.items.filter((i) => i.id !== itemToCancel.item.id),
+                }
+              : p
+          );
+        });
+        setItemToCancel(null);
+        refreshMetricas();
+      } else {
+        alert(data.error || "No se pudo cancelar el plato");
+      }
+    } catch (err) {
+      console.error("Error al cancelar plato:", err);
+      alert("Error de conexión al cancelar plato");
+    } finally {
+      setIsSubmittingItemCancel(false);
+    }
+  };
+
+  // Manejar confirmación de cancelación de comanda completa (Mesero)
+  const handleConfirmCancelOrder = async () => {
+    if (!orderToCancel) return;
+    setIsSubmittingOrderCancel(true);
+
+    const motivo =
+      cancelOrderReason === "Otro" && cancelOrderCustomReason.trim()
+        ? cancelOrderCustomReason.trim()
+        : cancelOrderReason;
+
+    try {
+      const res = await fetch(`/api/pedidos/${orderToCancel.pedidoId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          motivo,
+          cancelado_por: "mesero",
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setPedidos((prev) => prev.filter((p) => p.id !== orderToCancel.pedidoId));
+        setOrderToCancel(null);
+        setActiveMesaNumber(null);
+        refreshMetricas();
+      } else {
+        alert(data.error || "No se pudo anular la comanda");
+      }
+    } catch (err) {
+      console.error("Error al anular pedido:", err);
+      alert("Error de conexión al anular comanda");
+    } finally {
+      setIsSubmittingOrderCancel(false);
+    }
+  };
 
   const handleCerrarCuenta = async (pedidoId: string) => {
     try {
@@ -710,6 +857,45 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
         </div>
       </header>
 
+      {/* BANNER DE ALERTA DE COCINA (CANCELACIÓN DE PLATO O PEDIDO) */}
+      {cancellationAlert && (
+        <div className="bg-gradient-to-r from-rose-950 via-red-900 to-slate-950 border-b-2 border-rose-500 text-white px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-2xl animate-fadeIn sticky top-[57px] z-30">
+          <div className="flex items-center space-x-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 animate-bounce" />
+            <div>
+              <p className="font-extrabold text-xs uppercase tracking-wider text-rose-300 flex items-center gap-2">
+                <span>⚠️ Atención Mesa {cancellationAlert.mesa} — Cocina</span>
+                <span className="bg-rose-500/30 text-rose-200 text-[10px] px-2 py-0.5 rounded-full font-mono">
+                  AVISO IMPORTANTE
+                </span>
+              </p>
+              <p className="text-xs text-slate-200 mt-0.5">
+                {cancellationAlert.plato_nombre
+                  ? `Cocina canceló "${cancellationAlert.plato_nombre}" (${cancellationAlert.motivo}). Acércate a la mesa para ofrecer una alternativa al cliente.`
+                  : `Cocina canceló la comanda completa (${cancellationAlert.motivo}). Mesa disponible.`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setActiveMesaNumber(parseInt(cancellationAlert.mesa) || null);
+                setCancellationAlert(null);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow active:scale-95"
+            >
+              Ver Mesa {cancellationAlert.mesa}
+            </button>
+            <button
+              onClick={() => setCancellationAlert(null)}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+            >
+              Cerrar ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* LEYENDA RÁPIDA DE ESTADOS */}
       <div className="bg-slate-900/60 border-b border-slate-800/80 px-4 py-2.5">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between text-xs gap-3">
@@ -992,8 +1178,21 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                             <p className="text-[11px] text-amber-300 italic">💬 {item.notas}</p>
                           )}
                         </div>
-                        <div className="text-right font-mono font-bold text-sm text-slate-100">
-                          ${(item.cantidad * item.precio).toFixed(2)}
+                        <div className="flex items-center gap-2.5">
+                          <div className="text-right font-mono font-bold text-sm text-slate-100">
+                            ${(item.cantidad * item.precio).toFixed(2)}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setItemToCancel({ pedidoId: activePedido.id, mesa: String(activePedido.mesa), item });
+                              setCancelItemReason("Error de digitación del mesero");
+                              setCancelItemCustomReason("");
+                            }}
+                            title="Eliminar plato de la comanda"
+                            className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-700/60 hover:bg-rose-950/40 transition active:scale-95"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -1133,8 +1332,23 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
               {activePedido && (
                 <button
+                  onClick={() => {
+                    setOrderToCancel({ pedidoId: activePedido.id, mesa: String(activePedido.mesa) });
+                    setCancelOrderReason("Cliente se retiró del local");
+                    setCancelOrderCustomReason("");
+                  }}
+                  className="py-3 px-3.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/80 text-rose-300 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition active:scale-95"
+                  title="Anular toda la comanda y liberar mesa"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-400" />
+                  <span>Anular Pedido</span>
+                </button>
+              )}
+
+              {activePedido && (
+                <button
                   onClick={() => handlePagarYLiberar(activePedido.id)}
-                  className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-rose-950/50 hover:border-rose-600 border border-slate-700 text-slate-200 hover:text-rose-300 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition active:scale-95"
+                  className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-emerald-950/60 hover:border-emerald-600 border border-slate-700 text-slate-200 hover:text-emerald-300 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition active:scale-95"
                 >
                   <DollarSign className="w-4 h-4" />
                   <span>Pagar y Liberar</span>
@@ -1267,6 +1481,184 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition"
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ELIMINAR PLATO INDIVIDUAL (MESERO) */}
+      {itemToCancel && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-slate-100">
+            <button
+              onClick={() => setItemToCancel(null)}
+              disabled={isSubmittingItemCancel}
+              className="absolute top-4 right-4 p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Eliminar Plato — Mesa {itemToCancel.mesa}</h3>
+                <p className="text-xs text-rose-300 font-bold">
+                  {itemToCancel.item.cantidad}x {itemToCancel.item.nombre} (${(itemToCancel.item.cantidad * itemToCancel.item.precio).toFixed(2)})
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
+                Motivo de la eliminación:
+              </label>
+              <div className="grid grid-cols-1 gap-2 text-xs">
+                {[
+                  "Error de digitación del mesero",
+                  "El cliente cambió de opinión",
+                  "Plato duplicado por error",
+                  "Demora en preparación",
+                  "Otro",
+                ].map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => setCancelItemReason(reason)}
+                    className={`p-2.5 rounded-xl border text-left font-medium transition flex items-center justify-between ${
+                      cancelItemReason === reason
+                        ? "bg-rose-950/60 border-rose-500 text-rose-200"
+                        : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                    }`}
+                  >
+                    <span>{reason}</span>
+                    {cancelItemReason === reason && <Check className="w-4 h-4 text-rose-400" />}
+                  </button>
+                ))}
+              </div>
+
+              {cancelItemReason === "Otro" && (
+                <input
+                  type="text"
+                  placeholder="Especifica el motivo..."
+                  value={cancelItemCustomReason}
+                  onChange={(e) => setCancelItemCustomReason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-rose-500 mt-2"
+                />
+              )}
+            </div>
+
+            <p className="text-[11px] text-emerald-300/90 italic bg-emerald-950/20 p-2.5 rounded-xl border border-emerald-900/40">
+              💰 La cuenta total de la mesa se descontará automáticamente y cocina será informada en vivo.
+            </p>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setItemToCancel(null)}
+                disabled={isSubmittingItemCancel}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancelItem}
+                disabled={isSubmittingItemCancel}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-rose-600/20 transition active:scale-95 disabled:opacity-50"
+              >
+                {isSubmittingItemCancel ? "Eliminando..." : "Eliminar Plato"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ANULAR COMANDA COMPLETA (MESERO) */}
+      {orderToCancel && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-slate-100">
+            <button
+              onClick={() => setOrderToCancel(null)}
+              disabled={isSubmittingOrderCancel}
+              className="absolute top-4 right-4 p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">Anular Comanda — Mesa {orderToCancel.mesa}</h3>
+                <p className="text-xs text-slate-400">
+                  Esta acción cancelará toda la comanda y liberará la mesa.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
+                Motivo de anulación:
+              </label>
+              <div className="grid grid-cols-1 gap-2 text-xs">
+                {[
+                  "Cliente se retiró del local",
+                  "Error al abrir comanda / Mesa equivocada",
+                  "Comanda duplicada",
+                  "Problema con el pedido",
+                  "Otro",
+                ].map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => setCancelOrderReason(reason)}
+                    className={`p-2.5 rounded-xl border text-left font-medium transition flex items-center justify-between ${
+                      cancelOrderReason === reason
+                        ? "bg-rose-950/60 border-rose-500 text-rose-200"
+                        : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                    }`}
+                  >
+                    <span>{reason}</span>
+                    {cancelOrderReason === reason && <Check className="w-4 h-4 text-rose-400" />}
+                  </button>
+                ))}
+              </div>
+
+              {cancelOrderReason === "Otro" && (
+                <input
+                  type="text"
+                  placeholder="Especifica el motivo..."
+                  value={cancelOrderCustomReason}
+                  onChange={(e) => setCancelOrderCustomReason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-rose-500 mt-2"
+                />
+              )}
+            </div>
+
+            <p className="text-[11px] text-rose-300/90 italic bg-rose-950/30 p-2.5 rounded-xl border border-rose-900/40">
+              ⚠️ La mesa quedará libre al instante y cocina recibirá una alerta para detener la preparación.
+            </p>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setOrderToCancel(null)}
+                disabled={isSubmittingOrderCancel}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancelOrder}
+                disabled={isSubmittingOrderCancel}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-rose-600/25 transition active:scale-95 disabled:opacity-50"
+              >
+                {isSubmittingOrderCancel ? "Anulando..." : "Anular Toda la Comanda"}
               </button>
             </div>
           </div>

@@ -16,11 +16,23 @@ export async function trackAnalyticsEvent(
 ) {
   try {
     const metaString = metadata ? JSON.stringify(metadata) : null;
+    let isTest = false;
+    if (restaurantId) {
+      try {
+        const rest = await prismaTenant.restaurant.findUnique({
+          where: { id: restaurantId },
+          select: { testMode: true },
+        });
+        if (rest?.testMode) isTest = true;
+      } catch {}
+    }
+
     await prismaTenant.analyticsEvent.create({
       data: {
         eventType,
         restaurantId: restaurantId || null,
         metadata: metaString,
+        isTest,
       },
     });
   } catch (err) {

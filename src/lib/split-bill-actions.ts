@@ -183,11 +183,18 @@ export async function createTableSessionAction(restaurantId: string, tableName: 
 
     if (!orders.length) return { error: "No hay pedidos activos para esta mesa." };
 
+    const rest = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { testMode: true },
+    });
+    const isTest = rest?.testMode ?? false;
+
     const created = await prisma.tableSession.create({
       data: {
         restaurantId,
         tableName: table,
         totalAmount: money(orders.reduce((s, o) => s + o.total, 0)),
+        isTest,
         orders: { create: orders.map(o => ({ orderId: o.id })) }
       },
       include: {

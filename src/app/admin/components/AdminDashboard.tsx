@@ -30,7 +30,10 @@ import {
   getRestaurantCouponsAction,
   createCouponAction,
   deleteCouponAction,
-  toggleCouponStatusAction
+  toggleCouponStatusAction,
+  toggleRestaurantTestModeAction,
+  purgeTestDataAction,
+  getComprehensiveBusinessBackupAction
 } from "@/lib/actions";
 import { SmartLogo } from "@/components/SmartImage";
 import { 
@@ -99,7 +102,9 @@ import {
   CheckSquare,
   Square,
   Bot,
-  Smartphone
+  Smartphone,
+  FlaskConical,
+  RefreshCw
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
@@ -174,6 +179,7 @@ type Order = {
   tip: number;
   total: number;
   paymentMethod: string;
+  isTest?: boolean;
   createdAt: string;
   updatedAt: string;
   items: OrderItem[];
@@ -228,6 +234,7 @@ type Restaurant = {
   serviceOnTakeout: boolean;
   whatsapp?: string;
   whatsappBotEnabled?: boolean;
+  testMode?: boolean;
   city?: string | null;
   province?: string | null;
   parish?: string | null;
@@ -491,11 +498,15 @@ export type VisitStats = {
 export function AdminDashboard({ 
   restaurant, 
   subscriptionPaymentDetails,
-  visitStats
+  visitStats,
+  visitStatsReal,
+  visitStatsTest,
 }: { 
   restaurant: Restaurant; 
   subscriptionPaymentDetails?: SubscriptionPaymentDetails;
   visitStats?: VisitStats;
+  visitStatsReal?: VisitStats;
+  visitStatsTest?: VisitStats;
 }) {
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
@@ -503,6 +514,230 @@ export function AdminDashboard({
   }, []);
 
   const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+
+  // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
+  const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
+  const [metricViewMode, setMetricViewMode] = useState<"REAL" | "TEST" | "ALL">(
+    restaurant.testMode ? "TEST" : "REAL"
+  );
+  const [isTogglingMode, setIsTogglingMode] = useState(false);
+  const [isPurgingData, setIsPurgingData] = useState(false);
+  const [showPurgeModal, setShowPurgeModal] = useState(false);
+  const [purgeConfirmInput, setPurgeConfirmInput] = useState("");
+  const [purgeSuccessBanner, setPurgeSuccessBanner] = useState("");
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [exportDataSource, setExportDataSource] = useState<"REAL" | "TEST" | "ALL">("REAL");
+  const [exportTimeframe, setExportTimeframe] = useState<"ALL" | "MONTH" | "WEEK" | "TODAY">("ALL");
+  const [exportSuccessMsg, setExportSuccessMsg] = useState("");
+
+  const handleToggleTestMode = async () => {
+    const nextMode = !isTestMode;
+    setIsTogglingMode(true);
+    try {
+      const res = await toggleRestaurantTestModeAction(restaurant.id, nextMode);
+      if (res.error) {
+        alert(res.error);
+        return;
+      }
+      setIsTestMode(nextMode);
+      setMetricViewMode(nextMode ? "TEST" : "REAL");
+    } catch (err: any) {
+      alert("Error al alternar modo: " + err.message);
+    } finally {
+      setIsTogglingMode(false);
+    }
+  };
+
+  const handlePurgeTestData = async () => {
+    if (purgeConfirmInput.trim().toUpperCase() !== "ELIMINAR") {
+      alert("Escribe la palabra ELIMINAR para confirmar la purga.");
+      return;
+    }
+    setIsPurgingData(true);
+    try {
+      const res = await purgeTestDataAction(restaurant.id);
+      if (res.error) {
+        alert(res.error);
+        return;
+      }
+      setShowPurgeModal(false);
+      setPurgeConfirmInput("");
+      setPurgeSuccessBanner("¡Datos de prueba eliminados correctamente!");
+      setTimeout(() => {
+        window.location.reload();
+      }, 1200);
+    } catch (err: any) {
+      alert("Error al purgar datos: " + err.message);
+    } finally {
+      setIsPurgingData(false);
+    }
+  };
+
+  const handleGenerateExcelBackup = async (sourceFilter: "REAL" | "TEST" | "ALL" = exportDataSource) => {
+    setIsExportingExcel(true);
+    try {
+      const res = await getComprehensiveBusinessBackupAction(restaurant.id, sourceFilter);
+      if (res.error || !res.orders) {
+        alert(res.error || "No se pudieron obtener los datos para el respaldo.");
+        return;
+      }
+
+      const ordersData = res.orders;
+      const waitersData = res.waiters || [];
+      const analyticsData = res.analytics || [];
+
+      const now = new Date();
+      const filteredOrders = ordersData.filter((o: any) => {
+        if (exportTimeframe === "ALL") return true;
+        const oDate = new Date(o.createdAt);
+        if (exportTimeframe === "TODAY") {
+          return oDate.toDateString() === now.toDateString();
+        }
+        if (exportTimeframe === "WEEK") {
+          const sevenDaysAgo = new Date();
+          sevenDaysAgo.setDate(now.getDate() - 7);
+          return oDate >= sevenDaysAgo;
+        }
+        if (exportTimeframe === "MONTH") {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(now.getDate() - 30);
+          return oDate >= thirtyDaysAgo;
+        }
+        return true;
+      });
+
+      const totalFacturacion = filteredOrders.reduce((sum: number, o: any) => sum + (o.status !== "CANCELLED" ? o.total : 0), 0);
+      const totalSubtotal = filteredOrders.reduce((sum: number, o: any) => sum + (o.status !== "CANCELLED" ? o.subtotal : 0), 0);
+      const totalIva = filteredOrders.reduce((sum: number, o: any) => sum + (o.status !== "CANCELLED" ? o.iva : 0), 0);
+      const totalServicio = filteredOrders.reduce((sum: number, o: any) => sum + (o.status !== "CANCELLED" ? o.serviceCharge : 0), 0);
+      const totalPropinas = filteredOrders.reduce((sum: number, o: any) => sum + (o.status !== "CANCELLED" ? o.tip : 0), 0);
+      const ordersCompleted = filteredOrders.filter((o: any) => o.status !== "CANCELLED").length;
+      const ordersCancelled = filteredOrders.filter((o: any) => o.status === "CANCELLED").length;
+      const ticketPromedio = ordersCompleted > 0 ? totalFacturacion / ordersCompleted : 0;
+
+      const resumenRows = [
+        { "MÉTRICA / INDICADOR": "NOMBRE DEL NEGOCIO", "VALOR": restaurant.name },
+        { "MÉTRICA / INDICADOR": "SLUG / ENLACE", "VALOR": restaurant.slug },
+        { "MÉTRICA / INDICADOR": "FECHA DE GENERACIÓN DEL RESPALDO", "VALOR": new Date().toLocaleString() },
+        { "MÉTRICA / INDICADOR": "ALCANCE DEL REPORTE", "VALOR": exportTimeframe === "ALL" ? "Histórico Total" : exportTimeframe === "MONTH" ? "Últimos 30 días" : exportTimeframe === "WEEK" ? "Últimos 7 días" : "Hoy" },
+        { "MÉTRICA / INDICADOR": "ORIGEN DE DATOS", "VALOR": sourceFilter === "REAL" ? "Ventas y Visitas Reales (Producción)" : sourceFilter === "TEST" ? "Datos de Prueba (Sandbox)" : "Consolidado Completo" },
+        { "MÉTRICA / INDICADOR": "ESTADO DEL MODO PRUEBAS", "VALOR": isTestMode ? "Activo (Sandbox)" : "Inactivo (Producción)" },
+        { "MÉTRICA / INDICADOR": "----------------------------------------", "VALOR": "----------------------------------------" },
+        { "MÉTRICA / INDICADOR": "FACTURACIÓN TOTAL ($)", "VALOR": `$${totalFacturacion.toFixed(2)}` },
+        { "MÉTRICA / INDICADOR": "SUBTOTAL TOTAL ($)", "VALOR": `$${totalSubtotal.toFixed(2)}` },
+        { "MÉTRICA / INDICADOR": "TOTAL IVA RECAUDADO (15%) ($)", "VALOR": `$${totalIva.toFixed(2)}` },
+        { "MÉTRICA / INDICADOR": "TOTAL SERVICIO (10%) ($)", "VALOR": `$${totalServicio.toFixed(2)}` },
+        { "MÉTRICA / INDICADOR": "TOTAL PROPINAS VOLUNTARIAS ($)", "VALOR": `$${totalPropinas.toFixed(2)}` },
+        { "MÉTRICA / INDICADOR": "TOTAL DE PEDIDOS REGISTRADOS", "VALOR": filteredOrders.length },
+        { "MÉTRICA / INDICADOR": "PEDIDOS COMPLETADOS / ACTIVOS", "VALOR": ordersCompleted },
+        { "MÉTRICA / INDICADOR": "PEDIDOS CANCELADOS", "VALOR": ordersCancelled },
+        { "MÉTRICA / INDICADOR": "TICKET PROMEDIO POR PEDIDO ($)", "VALOR": `$${ticketPromedio.toFixed(2)}` },
+        { "MÉTRICA / INDICADOR": "----------------------------------------", "VALOR": "----------------------------------------" },
+        { "MÉTRICA / INDICADOR": "TOTAL VISITAS / ESCANEOS EN REGISTRO", "VALOR": analyticsData.length },
+        { "MÉTRICA / INDICADOR": "TASA DE CONVERSIÓN ESTIMADA", "VALOR": analyticsData.length > 0 ? `${((ordersCompleted / analyticsData.length) * 100).toFixed(1)}%` : "N/A" },
+      ];
+
+      const pedidosRows = filteredOrders.map((o: any) => ({
+        "Nº Pedido": o.orderNumber ? `#${o.orderNumber}` : o.id.slice(0, 8),
+        "Fecha y Hora": new Date(o.createdAt).toLocaleString(),
+        "Mesa": o.tableName,
+        "Cliente": o.customerName,
+        "Teléfono": o.customerPhone,
+        "Estado": o.status,
+        "Método de Pago": o.paymentMethod,
+        "Subtotal ($)": Number(o.subtotal.toFixed(2)),
+        "IVA ($)": Number(o.iva.toFixed(2)),
+        "Servicio ($)": Number(o.serviceCharge.toFixed(2)),
+        "Propina ($)": Number(o.tip.toFixed(2)),
+        "Descuento ($)": Number(o.discountAmount.toFixed(2)),
+        "Total Final ($)": Number(o.total.toFixed(2)),
+        "Tipo": o.isTest ? "Prueba (Sandbox)" : "Real (Producción)",
+      }));
+
+      const platosRows: any[] = [];
+      filteredOrders.forEach((o: any) => {
+        (o.items || []).forEach((it: any) => {
+          platosRows.push({
+            "Nº Pedido": o.orderNumber ? `#${o.orderNumber}` : o.id.slice(0, 8),
+            "Fecha": new Date(o.createdAt).toLocaleDateString(),
+            "Mesa": o.tableName,
+            "Plato / Producto": it.dishName,
+            "Cantidad": it.quantity,
+            "Precio Unitario ($)": Number(it.price.toFixed(2)),
+            "Total Ítem ($)": Number((it.price * it.quantity).toFixed(2)),
+            "Estado Pedido": o.status,
+            "Tipo": o.isTest ? "Prueba" : "Real",
+          });
+        });
+      });
+
+      const camarerosRows = waitersData.map((w: any) => ({
+        "Camarero / Mesero": w.camarero_nombre,
+        "Total Pedidos": w.total_pedidos || 0,
+        "Total Facturado ($)": Number((w.total_facturado || 0).toFixed(2)),
+        "Mesas Atendidas": w.mesas_atendidas || 0,
+      }));
+
+      const traficoRows = analyticsData.map((a: any) => ({
+        "ID Evento": a.id.slice(0, 8),
+        "Fecha y Hora": new Date(a.createdAt).toLocaleString(),
+        "Tipo de Evento": a.eventType === "QR_SCAN" ? "Escaneo de Código QR" : a.eventType === "MENU_VIEW" ? "Consulta de Menú Digital" : a.eventType === "RESTAURANT_VIEW" ? "Vista de Restaurante" : a.eventType,
+        "Tipo": a.isTest ? "Prueba" : "Real",
+      }));
+
+      const wb = XLSX.utils.book_new();
+
+      const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
+      wsResumen["!cols"] = [{ wch: 45 }, { wch: 40 }];
+      XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen_Ejecutivo");
+
+      if (pedidosRows.length > 0) {
+        const wsPedidos = XLSX.utils.json_to_sheet(pedidosRows);
+        wsPedidos["!cols"] = [
+          { wch: 12 }, { wch: 22 }, { wch: 14 }, { wch: 24 }, { wch: 16 },
+          { wch: 16 }, { wch: 18 }, { wch: 12 }, { wch: 10 }, { wch: 12 },
+          { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 25 },
+        ];
+        XLSX.utils.book_append_sheet(wb, wsPedidos, "Historial_Pedidos");
+      }
+
+      if (platosRows.length > 0) {
+        const wsPlatos = XLSX.utils.json_to_sheet(platosRows);
+        wsPlatos["!cols"] = [
+          { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 32 },
+          { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 12 },
+        ];
+        XLSX.utils.book_append_sheet(wb, wsPlatos, "Platos_Vendidos");
+      }
+
+      if (camarerosRows.length > 0) {
+        const wsCamareros = XLSX.utils.json_to_sheet(camarerosRows);
+        wsCamareros["!cols"] = [{ wch: 25 }, { wch: 16 }, { wch: 20 }, { wch: 16 }];
+        XLSX.utils.book_append_sheet(wb, wsCamareros, "Rendimiento_Meseros");
+      }
+
+      if (traficoRows.length > 0) {
+        const wsTrafico = XLSX.utils.json_to_sheet(traficoRows);
+        wsTrafico["!cols"] = [{ wch: 14 }, { wch: 22 }, { wch: 32 }, { wch: 12 }];
+        XLSX.utils.book_append_sheet(wb, wsTrafico, "Trafico_Visitas_QR");
+      }
+
+      const fileDate = new Date().toISOString().split("T")[0];
+      const sourceSuffix = sourceFilter === "REAL" ? "REAL" : sourceFilter === "TEST" ? "PRUEBAS" : "TOTAL";
+      const fileName = `Respaldo_MenuQR_${restaurant.slug}_${sourceSuffix}_${fileDate}.xlsx`;
+
+      XLSX.writeFile(wb, fileName);
+      setExportSuccessMsg(`¡Respaldo descargado con éxito: ${fileName}!`);
+      setShowExportModal(false);
+      setTimeout(() => setExportSuccessMsg(""), 5000);
+    } catch (err: any) {
+      console.error("Error generando Excel:", err);
+      alert("Error al generar el archivo Excel: " + err.message);
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
 
   // Si el bot de WhatsApp no está habilitado por SuperAdmin, bloquear acceso a la pestaña
   useEffect(() => {
@@ -1435,14 +1670,6 @@ export function AdminDashboard({
     }
   };
 
-  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
-    const res = await updateOrderStatusAction(orderId, newStatus);
-    if (res.error) {
-      alert(res.error);
-    } else {
-      window.location.reload();
-    }
-  };
 
   const handleSaveTables = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1724,10 +1951,10 @@ export function AdminDashboard({
         </div>
       </aside>
 
-      {/* Main Layout Container (Content + Persistent Sidebar) */}
-      <div className="flex-1 flex flex-col lg:flex-row min-w-0 overflow-y-auto lg:overflow-visible pb-28 md:pb-0">
+      {/* Main Layout Container (Full Width) */}
+      <div className="flex-1 min-w-0 overflow-y-auto pb-28 md:pb-0">
         {/* Main Content Area */}
-        <main className="flex-1 p-6 pb-28 md:p-10 max-w-4xl overflow-y-auto space-y-6">
+        <main className="w-full max-w-7xl mx-auto p-6 pb-28 md:p-10 space-y-6">
         {/* Subscription / Plan Banner */}
         {(() => {
           const trialEnds = currentTrialEndsAt;
@@ -1785,8 +2012,13 @@ export function AdminDashboard({
 
         {/* Métricas y Pedidos Tab */}
         {activeTab === "metrics" && (() => {
-          const orders = restaurant.orders || [];
-          const nonCancelled = orders.filter(o => o.status !== "CANCELLED");
+          const allOrders = restaurant.orders || [];
+          const filteredOrders = allOrders.filter(o => {
+            if (metricViewMode === "REAL") return !(o as any).isTest;
+            if (metricViewMode === "TEST") return Boolean((o as any).isTest);
+            return true;
+          });
+          const nonCancelled = filteredOrders.filter(o => o.status !== "CANCELLED");
           
           const today = new Date().toDateString();
           const todayOrders = nonCancelled.filter(o => new Date(o.createdAt).toDateString() === today);
@@ -1832,20 +2064,193 @@ export function AdminDashboard({
             }
           });
 
-          const pendingOrders = orders.filter(o => o.status === "PENDING" || o.status === "PREPARING");
+          const pendingOrders = filteredOrders.filter(o => o.status === "PENDING" || o.status === "PREPARING");
+
+          // Active Visit Stats based on metricViewMode
+          const activeVisitStats = (() => {
+            if (metricViewMode === "REAL") return visitStatsReal || { total: 0, today: 0, week: 0, month: 0 };
+            if (metricViewMode === "TEST") return visitStatsTest || { total: 0, today: 0, week: 0, month: 0 };
+            return {
+              total: (visitStatsReal?.total || 0) + (visitStatsTest?.total || 0),
+              today: (visitStatsReal?.today || 0) + (visitStatsTest?.today || 0),
+              week: (visitStatsReal?.week || 0) + (visitStatsTest?.week || 0),
+              month: (visitStatsReal?.month || 0) + (visitStatsTest?.month || 0),
+            };
+          })();
+
+          const testOrdersCount = allOrders.filter(o => (o as any).isTest).length;
+          const realOrdersCount = allOrders.filter(o => !(o as any).isTest).length;
+          const testVisitsCount = visitStatsTest?.total || 0;
+          const realVisitsCount = visitStatsReal?.total || 0;
 
           return (
             <div className="space-y-8 animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
-              {/* Metrics Header */}
-              <div>
-                <h2 className="text-2xl font-bold text-white">Dashboard de Métricas</h2>
-                <p className="text-slate-400 text-sm">Resumen de facturación, visitas al negocio, platos estrella y mesas de mayor consumo.</p>
+              {/* Notificaciones de éxito de Purga o Exportación */}
+              {purgeSuccessBanner && (
+                <div className="p-4 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-sm rounded-2xl flex items-center justify-between shadow-lg">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <span>{purgeSuccessBanner}</span>
+                  </div>
+                  <button onClick={() => setPurgeSuccessBanner("")} className="text-emerald-400 hover:text-white text-xs font-bold px-2 py-1">✕</button>
+                </div>
+              )}
+
+              {exportSuccessMsg && (
+                <div className="p-4 bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-sm rounded-2xl flex items-center gap-2.5 shadow-lg">
+                  <FileSpreadsheet className="w-5 h-5 text-cyan-400 shrink-0" />
+                  <span>{exportSuccessMsg}</span>
+                </div>
+              )}
+
+              {/* Master Banner: Modo Pruebas (Sandbox) vs Modo Real (Producción) */}
+              <div className={`rounded-2xl p-6 border shadow-2xl relative overflow-hidden transition-all duration-300 ${
+                isTestMode
+                  ? "bg-gradient-to-br from-amber-950/40 via-purple-950/30 to-slate-900 border-amber-500/40 shadow-amber-950/20"
+                  : "bg-gradient-to-br from-emerald-950/40 via-teal-950/20 to-slate-900 border-emerald-500/30 shadow-emerald-950/20"
+              }`}>
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="flex items-start gap-4">
+                    <div className={`h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+                      isTestMode
+                        ? "bg-amber-500/20 border-amber-500/30 text-amber-400 shadow-lg shadow-amber-500/20"
+                        : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400 shadow-lg shadow-emerald-500/20"
+                    }`}>
+                      {isTestMode ? <FlaskConical className="h-6 w-6 animate-pulse" /> : <Sparkles className="h-6 w-6" />}
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h3 className="text-lg font-black text-white">
+                          {isTestMode ? "🧪 Entorno de Pruebas (Modo Sandbox)" : "🚀 Entorno Real (Producción en Vivo)"}
+                        </h3>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                          isTestMode
+                            ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                            : "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                        }`}>
+                          {isTestMode ? "Modo Pruebas Activo" : "Producción Activa"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                        {isTestMode
+                          ? "Los pedidos y comandas generados en el Menú QR, Mesas y Cocina se marcan como pruebas. Practica y capacita a tu equipo con libertad sin alterar la contabilidad real de tu negocio."
+                          : "Tu restaurante está operando en la vida real. Todo pedido generado refleja ventas auténticas y clientes reales en el negocio."}
+                      </p>
+                      {isTestMode && (
+                        <div className="flex items-center gap-3 pt-1 text-[11px] text-amber-300/90 font-medium flex-wrap">
+                          <span>📦 <strong>{testOrdersCount}</strong> pedidos de prueba registrados</span>
+                          <span>•</span>
+                          <span>👁️ <strong>{testVisitsCount.toLocaleString()}</strong> visitas en pruebas</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap items-center gap-3 shrink-0">
+                    {/* Switch Mode Button */}
+                    <button
+                      onClick={handleToggleTestMode}
+                      disabled={isTogglingMode}
+                      className={`px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-lg flex items-center gap-2 ${
+                        isTestMode
+                          ? "bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-emerald-500/20 font-extrabold"
+                          : "bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30"
+                      }`}
+                    >
+                      {isTogglingMode ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : isTestMode ? (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          Pasar a Vida Real (Producción)
+                        </>
+                      ) : (
+                        <>
+                          <FlaskConical className="w-4 h-4" />
+                          Activar Modo Pruebas
+                        </>
+                      )}
+                    </button>
+
+                    {/* Purge Test Data Button (Only when test orders or test visits exist) */}
+                    {isTestMode && (testOrdersCount > 0 || testVisitsCount > 0) && (
+                      <button
+                        onClick={() => setShowPurgeModal(true)}
+                        className="px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 flex items-center gap-2 shadow-lg shadow-rose-950/20"
+                      >
+                        <Trash2 className="w-4 h-4 text-rose-400" />
+                        Vaciar Datos de Prueba
+                      </button>
+                    )}
+
+                    {/* Excel Export Button */}
+                    <button
+                      onClick={() => setShowExportModal(true)}
+                      className="px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 flex items-center gap-2 shadow-lg"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                      Descargar Respaldo Excel
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Metrics Header with Filter Pills */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">Dashboard de Métricas</h2>
+                  <p className="text-slate-400 text-sm">Resumen de facturación, visitas al negocio, platos estrella y mesas de mayor consumo.</p>
+                </div>
+
+                {/* Filter Segmented Control */}
+                <div className="flex items-center gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded-xl shrink-0">
+                  <button
+                    onClick={() => setMetricViewMode("REAL")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      metricViewMode === "REAL"
+                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    Métricas Reales ({realOrdersCount})
+                  </button>
+                  <button
+                    onClick={() => setMetricViewMode("TEST")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      metricViewMode === "TEST"
+                        ? "bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    Pruebas ({testOrdersCount})
+                  </button>
+                  <button
+                    onClick={() => setMetricViewMode("ALL")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                      metricViewMode === "ALL"
+                        ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <span>Todas ({allOrders.length})</span>
+                  </button>
+                </div>
               </div>
 
               {/* Metrics Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                 <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Facturación Diaria</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold">Facturación Diaria</span>
+                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                      metricViewMode === "REAL" ? "bg-emerald-500/10 text-emerald-400" : metricViewMode === "TEST" ? "bg-amber-500/10 text-amber-400" : "bg-cyan-500/10 text-cyan-400"
+                    }`}>
+                      {metricViewMode === "REAL" ? "REAL" : metricViewMode === "TEST" ? "PRUEBA" : "TODAS"}
+                    </span>
+                  </div>
                   <p className="text-2xl font-black text-white mt-1">${todayBilling.toFixed(2)}</p>
                   <span className="text-[10px] text-slate-500 block mt-1">{todayOrders.length} pedidos hoy</span>
                 </div>
@@ -1875,6 +2280,11 @@ export function AdminDashboard({
                           <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                           En Vivo
                         </span>
+                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                          metricViewMode === "REAL" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : metricViewMode === "TEST" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" : "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                        }`}>
+                          {metricViewMode === "REAL" ? "Visitas Reales" : metricViewMode === "TEST" ? "Visitas Pruebas" : "Total Visitas"}
+                        </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">
                         Tráfico de clientes que consultan la carta digital y escanean el código QR.
@@ -1885,7 +2295,7 @@ export function AdminDashboard({
                   <div className="flex items-center gap-2 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 shrink-0">
                     <span className="text-xs text-slate-400 uppercase font-bold">Total Histórico:</span>
                     <span className="text-lg font-black text-cyan-400">
-                      {(visitStats?.total || 0).toLocaleString()}
+                      {(activeVisitStats?.total || 0).toLocaleString()}
                     </span>
                     <span className="text-[11px] text-slate-500">visitas</span>
                   </div>
@@ -1900,7 +2310,7 @@ export function AdminDashboard({
                         <Eye className="h-3.5 w-3.5" />
                       </span>
                     </div>
-                    <p className="text-2xl font-black text-white mt-1.5">{(visitStats?.today || 0).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.today || 0).toLocaleString()}</p>
                     <span className="text-[10px] text-slate-500 block mt-1">Visitantes hoy en el menú</span>
                   </div>
 
@@ -1911,7 +2321,7 @@ export function AdminDashboard({
                         <Globe className="h-3.5 w-3.5" />
                       </span>
                     </div>
-                    <p className="text-2xl font-black text-white mt-1.5">{(visitStats?.week || 0).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.week || 0).toLocaleString()}</p>
                     <span className="text-[10px] text-slate-500 block mt-1">Últimos 7 días</span>
                   </div>
 
@@ -1922,17 +2332,17 @@ export function AdminDashboard({
                         <Sparkles className="h-3.5 w-3.5" />
                       </span>
                     </div>
-                    <p className="text-2xl font-black text-white mt-1.5">{(visitStats?.month || 0).toLocaleString()}</p>
+                    <p className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.month || 0).toLocaleString()}</p>
                     <span className="text-[10px] text-slate-500 block mt-1">Últimos 30 días</span>
                   </div>
                 </div>
 
                 {/* Conversion Insight if data available */}
-                {(visitStats?.today || 0) > 0 && todayOrders.length > 0 && (
+                {(activeVisitStats?.today || 0) > 0 && todayOrders.length > 0 && (
                   <div className="flex items-center gap-2 bg-emerald-950/20 border border-emerald-500/20 p-3 rounded-xl text-xs text-emerald-300">
                     <TrendingUp className="h-4 w-4 text-emerald-400 shrink-0" />
                     <span>
-                      <strong>Tasa de conversión de hoy:</strong> {(((todayOrders.length) / (visitStats?.today || 1)) * 100).toFixed(1)}% de las visitas de hoy se convirtieron en pedidos ({todayOrders.length} pedidos / {visitStats?.today} visitas).
+                      <strong>Tasa de conversión de hoy:</strong> {(((todayOrders.length) / (activeVisitStats?.today || 1)) * 100).toFixed(1)}% de las visitas de hoy se convirtieron en pedidos ({todayOrders.length} pedidos / {activeVisitStats?.today} visitas).
                     </span>
                   </div>
                 )}
@@ -6459,141 +6869,6 @@ export function AdminDashboard({
         
       </main>
 
-      {/* Column: Persistent Pedidos en Curso */}
-      <aside className="w-full lg:w-96 bg-slate-900/30 border-t lg:border-t-0 lg:border-l border-slate-800 p-6 pb-28 lg:pb-6 space-y-6 shrink-0 lg:max-h-screen lg:overflow-y-auto lg:sticky lg:top-0" style={{ fontFamily: 'var(--font-outfit)' }}>
-        {(() => {
-          const orders = restaurant.orders || [];
-          const pendingOrders = orders.filter(o => o.status === "PENDING" || o.status === "PREPARING");
-
-          return (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <ShoppingBag className="h-5 w-5 text-red-500" />
-                  Pedidos en Curso ({pendingOrders.length})
-                </h3>
-                <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400 bg-slate-950 px-2.5 py-1 rounded-full">
-                  Cocina
-                </span>
-              </div>
-
-              {pendingOrders.length === 0 ? (
-                <div className="py-10 text-center text-slate-500 text-sm italic border border-slate-800/60 rounded-2xl bg-slate-950/30">
-                  No hay pedidos activos.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {pendingOrders.map((order) => (
-                    <div 
-                      key={order.id} 
-                      className="bg-slate-950 border border-slate-850 p-4 rounded-2xl space-y-4 flex flex-col justify-between"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-start">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[10px] font-extrabold text-slate-300 uppercase bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800">
-                                {order.tableName === "Llevar" 
-                                  ? "🛍️ Llevar" 
-                                  : order.tableName === "Domicilio" 
-                                    ? "🛵 Domicilio" 
-                                    : `🪑 Mesa #${order.tableName}`}
-                              </span>
-                              {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
-                                <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
-                                  👤 {order.customerName}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[9px] text-slate-500">{isMounted ? new Date(order.createdAt).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }) : "--:--"}</p>
-                          </div>
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                            order.status === "PENDING" ? "bg-yellow-500/10 text-yellow-500" : "bg-blue-500/10 text-blue-500"
-                          }`}>
-                            {order.status === "PENDING" ? "Pendiente" : "En Cocina"}
-                          </span>
-                        </div>
-
-                        {/* Customer info */}
-                        {(order.customerName || order.customerPhone) && (
-                          <div className="text-[11px] text-slate-400 bg-slate-900/50 p-2.5 rounded-xl space-y-1 border border-slate-800/40">
-                            {order.customerName && (
-                              <p>
-                                <strong className="text-slate-300">
-                                  {order.tableName !== "Llevar" && order.tableName !== "Domicilio" ? "Comensal:" : "Cliente:"}
-                                </strong>{" "}
-                                <span className="text-white font-bold">{order.customerName}</span>
-                              </p>
-                            )}
-                            {order.customerPhone && (
-                              <p>
-                                <strong>WhatsApp:</strong>{" "}
-                                <a 
-                                  href={`https://wa.me/${order.customerPhone.replace(/\D/g, "")}`} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                  className="text-red-400 hover:underline"
-                                >
-                                  {order.customerPhone}
-                                </a>
-                              </p>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Items List */}
-                        <div className="border-t border-b border-slate-900 py-2 space-y-1 max-h-36 overflow-y-auto">
-                          {order.items.map((it) => (
-                            <div key={it.id} className="flex justify-between text-xs text-slate-350">
-                              <span>{it.quantity}x {it.dishName}</span>
-                              <span className="text-slate-450">${(it.price * it.quantity).toFixed(2)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        {/* Totals */}
-                        <div className="flex justify-between text-xs font-bold text-slate-350">
-                          <span>Total:</span>
-                          <span className="text-white font-extrabold">${order.total.toFixed(2)}</span>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex gap-2">
-                          {order.status === "PENDING" && (
-                            <button
-                              onClick={() => handleUpdateStatus(order.id, "PREPARING")}
-                              className="flex-1 py-2 rounded-xl text-[10px] font-black uppercase text-slate-950 bg-yellow-500 hover:bg-yellow-400 transition"
-                            >
-                              Preparar
-                            </button>
-                          )}
-                          {order.status === "PREPARING" && (
-                            <button
-                              onClick={() => handleUpdateStatus(order.id, "COMPLETED")}
-                              className="flex-1 py-2 rounded-xl text-[10px] font-black uppercase text-white bg-green-600 hover:bg-green-500 transition"
-                            >
-                              Entregar
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleUpdateStatus(order.id, "CANCELLED")}
-                            className="px-2.5 py-2 rounded-xl text-[10px] font-black uppercase text-red-400 bg-red-950/20 border border-red-900/30 hover:bg-red-900/25 transition shrink-0"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-      </aside>
-
       {/* Modal de solicitud de pago manual */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
@@ -6693,6 +6968,228 @@ export function AdminDashboard({
             <p className="text-[10px] text-center text-slate-500 leading-normal">
               La activación se realiza manualmente después de verificar el comprobante de pago.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Purga / Vaciado de Datos de Prueba */}
+      {showPurgeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-rose-500/30 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-6 shadow-2xl relative overflow-hidden">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-white">¿Eliminar Datos de Prueba?</h3>
+                <p className="text-xs text-rose-300 font-medium">Acción irreversible para iniciar la operación limpia</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-slate-950/80 border border-slate-800 p-4 space-y-2.5 text-xs text-slate-300">
+              <p className="font-semibold text-white">Esta acción eliminará de forma permanente:</p>
+              <ul className="list-disc list-inside space-y-1 text-slate-400">
+                <li>Todos los pedidos de prueba registrados en Mesas, Cocina y Menú.</li>
+                <li>Todas las visitas y escaneos QR generados durante la etapa de pruebas.</li>
+                <li>Las sesiones y cuentas divididas de prueba.</li>
+              </ul>
+              <div className="pt-2 border-t border-slate-800 text-emerald-400 font-medium">
+                ✅ <strong>Tus datos maestros quedarán 100% a salvo:</strong> Tu menú, categorías, platos, precios, fotos, camareros, cupones y configuraciones NO se tocarán.
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-400 block">
+                Para confirmar, escribe la palabra <strong className="text-rose-400">ELIMINAR</strong> a continuación:
+              </label>
+              <input
+                type="text"
+                value={purgeConfirmInput}
+                onChange={(e) => setPurgeConfirmInput(e.target.value)}
+                placeholder="Escribe ELIMINAR"
+                className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500/60 px-4 py-2.5 rounded-xl text-white text-xs font-bold tracking-wider uppercase outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPurgeModal(false);
+                  setPurgeConfirmInput("");
+                }}
+                disabled={isPurgingData}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handlePurgeTestData}
+                disabled={isPurgingData || purgeConfirmInput.trim().toUpperCase() !== "ELIMINAR"}
+                className="px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2 shadow-lg shadow-rose-600/20"
+              >
+                {isPurgingData ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Eliminando datos...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    Confirmar y Purgar Pruebas
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Descarga de Respaldo Excel (.xlsx) */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 max-w-lg w-full space-y-6 shadow-2xl relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white">Respaldo de Información (Excel)</h3>
+                  <p className="text-xs text-slate-400">Descarga un libro .xlsx con todas las métricas del negocio</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="h-8 w-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Selector de Origen de Datos */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Origen de Datos a Exportar</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExportDataSource("REAL")}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition ${
+                      exportDataSource === "REAL"
+                        ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Ventas Reales
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportDataSource("TEST")}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition ${
+                      exportDataSource === "TEST"
+                        ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Datos de Prueba
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportDataSource("ALL")}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition ${
+                      exportDataSource === "ALL"
+                        ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-300"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Consolidado
+                  </button>
+                </div>
+              </div>
+
+              {/* Selector de Periodo */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Periodo de Tiempo</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: "ALL", label: "Todo el Historial" },
+                    { id: "MONTH", label: "Últimos 30 días" },
+                    { id: "WEEK", label: "Últimos 7 días" },
+                    { id: "TODAY", label: "Hoy" },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setExportTimeframe(p.id as any)}
+                      className={`py-2 px-2 text-center rounded-xl text-xs font-bold border transition ${
+                        exportTimeframe === p.id
+                          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Preview de lo que incluye */}
+              <div className="rounded-2xl bg-slate-950/80 border border-slate-800 p-4 space-y-2 text-xs text-slate-300">
+                <p className="font-semibold text-white">El archivo descargado incluirá 5 pestañas organizadas:</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-400">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>1. Resumen Ejecutivo (KPIs y Totales)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>2. Historial Detallado de Pedidos</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>3. Platos Vendidos y Consumo</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>4. Rendimiento y Cuadre de Meseros</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 sm:col-span-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>5. Registro de Visitas y Tráfico QR</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-white transition"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGenerateExcelBackup(exportDataSource)}
+                disabled={isExportingExcel}
+                className="px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 disabled:opacity-40 transition flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+              >
+                {isExportingExcel ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Generando Excel...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    Descargar Archivo (.xlsx)
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

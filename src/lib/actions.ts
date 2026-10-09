@@ -12,6 +12,7 @@ import { recordSlugChange } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { saveUploadedFile } from "@/lib/storage";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
+import { pool } from "@/lib/db-pool";
 
 
 /**
@@ -1985,6 +1986,12 @@ export async function createOrderAction(data: {
 
     // Save order within transaction (PASO 23)
     const order = await prisma.$transaction(async (tx) => {
+      const rest = await tx.restaurant.findUnique({
+        where: { id: data.restaurantId },
+        select: { testMode: true },
+      });
+      const isTestOrder = rest?.testMode ?? false;
+
       const newOrder = await tx.order.create({
         data: {
           restaurantId: data.restaurantId,
@@ -2003,6 +2010,7 @@ export async function createOrderAction(data: {
           discountAmount: finalDiscount,
           total: finalTotal,
           paymentMethod: rawMethod,
+          isTest: isTestOrder,
           items: {
             create: verifiedOrderItems.map((item) => ({
               dishName: item.dishName,
@@ -3200,6 +3208,168 @@ export async function getRestaurantVisitStatsAction(restaurantId: string) {
   } catch (error: any) {
     console.error("Error fetching visit stats:", error);
     return { error: "No se pudieron obtener las estadísticas de visitas." };
+  }
+}
+
+/**
+ * Alterna entre Modo Pruebas (Sandbox) y Modo Real (Producción)
+ */
+export async function toggleRestaurantTestModeAction(restaurantId: string, testMode: boolean) {
+  try {
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) {
+      return { error: auth.error || "No autorizado para cambiar el modo del restaurante." };
+    }
+
+    await prismaTenant.restaurant.update({
+      where: { id: restaurantId },
+      data: { testMode },
+    });
+
+    revalidatePath("/admin");
+    return { success: true, testMode };
+  } catch (error: any) {
+    console.error("Error al alternar modo de pruebas:", error);
+    return { error: error?.message || "No se pudo actualizar el modo del restaurante." };
+  }
+}
+
+/**
+ * Elimina de forma segura y permanente los datos de prueba (pedidos y analítica de prueba)
+ * SIN tocar menús, platos, camareros, logos ni configuraciones.
+ */
+export async function purgeTestDataAction(restaurantId: string) {
+  try {
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) {
+      return { error: auth.error || "No autorizado para purgar datos de este restaurante." };
+    }
+
+    // 1. Eliminar pedidos de prueba en PostgreSQL pool (cascada a pedido_items)
+    await pool.query(
+      `DELETE FROM pedidos WHERE negocio_id = $1 AND (es_prueba = true OR es_prueba IS NULL)`,
+      [restaurantId]
+    );
+
+    // 2. Eliminar órdenes de prueba en Prisma (cascada a OrderItem y TableSessionOrder)
+    await prismaTenant.order.deleteMany({
+      where: {
+        restaurantId,
+        isTest: true,
+      },
+    });
+
+    // 3. Eliminar eventos de analítica de prueba en Prisma
+    await prismaTenant.analyticsEvent.deleteMany({
+      where: {
+        restaurantId,
+        isTest: true,
+      },
+    });
+
+    // 4. Eliminar sesiones de mesa de prueba
+    await prismaTenant.tableSession.deleteMany({
+      where: {
+        restaurantId,
+        isTest: true,
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error al purgar datos de prueba:", error);
+    return { error: error?.message || "No se pudieron eliminar los datos de prueba." };
+  }
+}
+
+/**
+ * Genera el paquete de datos completo para exportar el respaldo a Excel (.xlsx)
+ */
+export async function getComprehensiveBusinessBackupAction(
+  restaurantId: string,
+  filter?: "REAL" | "TEST" | "ALL"
+) {
+  try {
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) {
+      return { error: auth.error || "No autorizado." };
+    }
+
+    const mode = filter || "ALL";
+    const orderWhere: any = { restaurantId };
+    if (mode === "REAL") orderWhere.isTest = false;
+    if (mode === "TEST") orderWhere.isTest = true;
+
+    const [orders, analyticsEvents, waiterResults] = await Promise.all([
+      prismaTenant.order.findMany({
+        where: orderWhere,
+        orderBy: { createdAt: "desc" },
+        include: { items: true },
+      }),
+      prismaTenant.analyticsEvent.findMany({
+        where: {
+          restaurantId,
+          ...(mode === "REAL" ? { isTest: false } : mode === "TEST" ? { isTest: true } : {}),
+        },
+        orderBy: { createdAt: "desc" },
+        take: 3000,
+      }),
+      pool.query(
+        `SELECT 
+          c.nombre as camarero_nombre,
+          COUNT(p.id)::int as total_pedidos,
+          COALESCE(SUM(p.total), 0)::float as total_facturado,
+          COUNT(DISTINCT p.mesa)::int as mesas_atendidas
+        FROM camareros c
+        LEFT JOIN pedidos p ON p.camarero_id = c.id 
+          AND p.negocio_id = $1 
+          AND p.estado != 'cancelado'
+          ${mode === "REAL" ? "AND (p.es_prueba IS FALSE OR p.es_prueba IS NULL)" : mode === "TEST" ? "AND p.es_prueba = true" : ""}
+        WHERE c.negocio_id = $1
+        GROUP BY c.id, c.nombre
+        ORDER BY total_facturado DESC`,
+        [restaurantId]
+      ),
+    ]);
+
+    return {
+      success: true,
+      orders: orders.map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        createdAt: o.createdAt.toISOString(),
+        tableName: o.tableName,
+        customerName: o.customerName || "Cliente en Mesa",
+        customerPhone: o.customerPhone || "N/A",
+        status: o.status,
+        subtotal: o.subtotal,
+        iva: o.iva,
+        serviceCharge: o.serviceCharge,
+        tip: o.tip,
+        deliveryCost: o.deliveryCost,
+        discountAmount: o.discountAmount,
+        total: o.total,
+        paymentMethod: o.paymentMethod,
+        isTest: o.isTest,
+        items: o.items.map((i) => ({
+          dishName: i.dishName,
+          price: i.price,
+          quantity: i.quantity,
+          subtotal: i.price * i.quantity,
+        })),
+      })),
+      waiters: waiterResults.rows,
+      analytics: analyticsEvents.map((a) => ({
+        id: a.id,
+        eventType: a.eventType,
+        isTest: a.isTest,
+        createdAt: a.createdAt.toISOString(),
+      })),
+    };
+  } catch (error: any) {
+    console.error("Error obteniendo datos de respaldo:", error);
+    return { error: error?.message || "Error al obtener los datos de respaldo." };
   }
 }
 

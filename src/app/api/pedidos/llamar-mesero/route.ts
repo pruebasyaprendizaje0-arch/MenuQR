@@ -50,11 +50,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, message: "Mesa no tiene pedidos activos" });
       }
       // Si la mesa aún no tiene comanda pero el cliente ya llama al mesero para ordenar
+      let esPrueba = false;
+      try {
+        const { rows: restTest } = await pool.query(
+          `SELECT "testMode" FROM "Restaurant" WHERE id = $1 LIMIT 1`,
+          [negocio_id]
+        );
+        if (restTest[0] && restTest[0].testMode === true) {
+          esPrueba = true;
+        }
+      } catch {}
+
       const { rows: newPedido } = await pool.query(
-        `INSERT INTO pedidos (negocio_id, mesa, cliente_nombre, solicita_mesero, estado, total)
-         VALUES ($1, $2, $3, true, 'nuevo', 0)
+        `INSERT INTO pedidos (negocio_id, mesa, cliente_nombre, solicita_mesero, estado, total, es_prueba)
+         VALUES ($1, $2, $3, true, 'nuevo', 0, $4)
          RETURNING id`,
-        [negocio_id, String(mesa), finalNombre]
+        [negocio_id, String(mesa), finalNombre, esPrueba]
       );
       pedidoId = newPedido[0].id;
     }
