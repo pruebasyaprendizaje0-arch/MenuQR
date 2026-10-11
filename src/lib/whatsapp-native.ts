@@ -14,6 +14,13 @@ import { Boom } from "@hapi/boom";
 import pino from "pino";
 import crypto from "crypto";
 import { prisma } from "./prisma";
+import { 
+  getOrSeedRestaurantTemplates, 
+  matchTemplate, 
+  renderTemplateContent, 
+  type TemplateVariables 
+} from "./whatsapp-templates";
+import { queryWhatsAppAI } from "./whatsapp-ai";
 
 // ==========================================
 // 1. HELPERS DE CIFRADO Y SEGURIDAD (AES-256)
@@ -311,9 +318,8 @@ export async function getOrInitWhatsAppSocket(
           ).trim();
 
           if (!text) continue;
-          const lowerText = text.toLowerCase();
 
-          // Consultar datos reales del restaurante en PostgreSQL
+          // Consultar datos reales del restaurante en PostgreSQL incluyendo campos de IA
           const restaurant = await prisma.restaurant.findUnique({
             where: { id: restaurantId },
             select: {
@@ -332,86 +338,49 @@ export async function getOrInitWhatsAppSocket(
               bankAccountName: true,
               bankAccountDocument: true,
               whatsapp: true,
+              aiProvider: true,
+              aiApiKey: true,
+              aiModel: true,
+              aiPromptContext: true,
+              aiFallbackEnabled: true,
             },
           });
 
           if (!restaurant || !restaurant.whatsappBotEnabled) continue;
 
-          const isGreetingOrMenu =
-            lowerText === "hola" ||
-            lowerText === "menu" ||
-            lowerText === "menú" ||
-            lowerText === "buenas" ||
-            lowerText === "buenas tardes" ||
-            lowerText === "buenos dias" ||
-            lowerText.startsWith("hola") ||
-            lowerText.includes("menu");
+          // 1. Obtener las plantillas activas del restaurante (o crearlas por defecto)
+          const templates = await getOrSeedRestaurantTemplates(restaurantId);
 
-          if (isGreetingOrMenu) {
-            let menuMsg = `👋 *¡Hola! Bienvenido a ${restaurant.name}* 🍽️\n\n`;
-            menuMsg += `¿En qué podemos ayudarte hoy? Por favor elige una de las siguientes opciones respondiendo con el número (del 1 al 5):\n\n`;
-            menuMsg += `1️⃣ *Ver Carta Digital y Pedir:* Consulta platos, precios y arma tu orden.\n`;
-            menuMsg += `2️⃣ *Horarios de Atención:* Conoce nuestras horas de servicio.\n`;
-            menuMsg += `3️⃣ *Ubicación y Cómo Llegar:* Dirección y mapa de nuestro local.\n`;
-            menuMsg += `4️⃣ *Datos de Transferencia:* Cuentas bancarias para pagos directos.\n`;
-            menuMsg += `5️⃣ *Agente Humano:* Hablar con un asesor de nuestro equipo.\n\n`;
-            menuMsg += `━━━━━━━━━━━━━━━━━━━━\n`;
-            menuMsg += `_Responde únicamente con el número de tu opción (ejemplo: *1*)._`;
+          const vars: TemplateVariables = {
+            nombre: restaurant.name,
+            link_menu: `https://menuqr.ubicame.cc/${restaurant.slug}`,
+            horario: restaurant.localSchedule || restaurant.schedule || "Lunes a Domingo de 09:00 a 22:00",
+            direccion: `${restaurant.address || "Local principal"}${restaurant.city ? `, ${restaurant.city}` : ""}`,
+            maps: restaurant.googleBusinessUrl || "Consultar en el local",
+            datos_banco: restaurant.bankName && restaurant.bankAccountNumber
+              ? `• *Banco:* ${restaurant.bankName}\n• *Tipo de Cuenta:* ${restaurant.bankAccountType || "Ahorros"}\n• *Número:* ${restaurant.bankAccountNumber}${restaurant.bankAccountName ? `\n• *Titular:* ${restaurant.bankAccountName}` : ""}${restaurant.bankAccountDocument ? `\n• *C.I. / RUC:* ${restaurant.bankAccountDocument}` : ""}`
+              : "Por favor consulta los datos de cuenta actualizados directamente con nuestro personal en el local.",
+          };
 
-            await sock.sendMessage(remoteJid, { text: menuMsg }, { quoted: msg });
-            continue;
-          }
-
-          // Respuesta interactiva a las opciones del 1 al 5
-          if (lowerText === "1" || lowerText.includes("carta") || lowerText.includes("pedir")) {
-            let reply = `🍽️ *Carta Digital Interactiva de ${restaurant.name}*\n\n`;
-            reply += `Explora nuestro menú completo con fotos, descripciones, promociones y arma tu pedido con carrito de compras aquí:\n`;
-            reply += `👉 *https://menuqr.ubicame.cc/${restaurant.slug}*\n\n`;
-            reply += `_(Los pedidos ingresados en el enlace se envían automáticamente a nuestra cocina)_`;
+          // 2. Intentar coincidencia con las plantillas configuradas por el restaurante
+          const matched = matchTemplate(text, templates);
+          if (matched) {
+            const reply = renderTemplateContent(matched.content, vars);
             await sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
             continue;
           }
 
-          if (lowerText === "2" || lowerText.includes("horario")) {
-            const horario = restaurant.localSchedule || restaurant.schedule || "Lunes a Domingo de 09:00 a 22:00";
-            let reply = `🕒 *Horarios de Atención - ${restaurant.name}*\n\n`;
-            reply += `${horario}\n\n`;
-            reply += `👉 Puedes realizar pedidos online en: https://menuqr.ubicame.cc/${restaurant.slug}`;
-            await sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
+          // 3. Cascada a IA (si el negocio configuró su propia API Key y habilitó IA)
+          const aiResponse = await queryWhatsAppAI(restaurant, text);
+          if (aiResponse) {
+            await sock.sendMessage(remoteJid, { text: aiResponse }, { quoted: msg });
             continue;
           }
 
-          if (lowerText === "3" || lowerText.includes("ubicacion") || lowerText.includes("ubicación")) {
-            let reply = `📍 *Ubicación de ${restaurant.name}*\n\n`;
-            reply += `🏠 *Dirección:* ${restaurant.address || "Local principal"}${restaurant.city ? `, ${restaurant.city}` : ""}\n`;
-            if (restaurant.googleBusinessUrl) {
-              reply += `🗺️ *Google Maps:* ${restaurant.googleBusinessUrl}\n`;
-            }
-            reply += `\n¡Te esperamos con los brazos abiertos!`;
-            await sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
-            continue;
-          }
-
-          if (lowerText === "4" || lowerText.includes("transferencia") || lowerText.includes("banco") || lowerText.includes("cuenta")) {
-            let reply = `💳 *Datos Bancarios para Transferencias*\n\n`;
-            if (restaurant.bankName && restaurant.bankAccountNumber) {
-              reply += `• *Banco:* ${restaurant.bankName}\n`;
-              reply += `• *Tipo de Cuenta:* ${restaurant.bankAccountType || "Ahorros"}\n`;
-              reply += `• *Número:* ${restaurant.bankAccountNumber}\n`;
-              if (restaurant.bankAccountName) reply += `• *Titular:* ${restaurant.bankAccountName}\n`;
-              if (restaurant.bankAccountDocument) reply += `• *C.I. / RUC:* ${restaurant.bankAccountDocument}\n`;
-            } else {
-              reply += `Por favor consulta los datos de cuenta actualizados directamente con nuestro personal en el local o en el proceso de checkout.\n`;
-            }
-            reply += `\n_Una vez realizada la transferencia, envía el comprobante por este chat._`;
-            await sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
-            continue;
-          }
-
-          if (lowerText === "5" || lowerText.includes("humano") || lowerText.includes("asesor") || lowerText.includes("ayuda")) {
-            let reply = `👨‍💼 *Atención Personalizada - ${restaurant.name}*\n\n`;
-            reply += `Un miembro de nuestro equipo atenderá este chat a la brevedad posible.\n`;
-            reply += `Por favor descríbenos tu consulta detalladamente para poder asistirte mejor.`;
+          // 4. Si no hubo coincidencia y no hay IA disponible, enviar plantilla de Fallback o Bienvenida
+          const fallbackTmpl = templates.find((t) => t.key === "fallback") || templates.find((t) => t.key === "welcome");
+          if (fallbackTmpl) {
+            const reply = renderTemplateContent(fallbackTmpl.content, vars);
             await sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
             continue;
           }

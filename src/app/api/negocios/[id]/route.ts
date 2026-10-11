@@ -45,6 +45,9 @@ export async function GET(
           price: true,
           imageUrl: true,
           isAvailable: true,
+          stock: true,
+          minStock: true,
+          trackStock: true,
           category: {
             select: { name: true },
           },

@@ -30,6 +30,7 @@ import {
   AlertTriangle,
   Trash2,
   Ban,
+  Package,
 } from "lucide-react";
 import { kitchenAudio } from "@/lib/kitchen-audio";
 import { QRCodeSVG } from "qrcode.react";
@@ -61,6 +62,9 @@ interface Producto {
   name: string;
   price: number;
   isAvailable: boolean;
+  stock?: number | null;
+  minStock?: number | null;
+  trackStock?: boolean;
   category?: { name: string };
 }
 
@@ -380,7 +384,13 @@ export function CocinaClient({ initialSlug }: { initialSlug: string }) {
       setProductos((prev) =>
         prev.map((p) =>
           p.id === prodActualizado.id
-            ? { ...p, isAvailable: prodActualizado.isAvailable }
+            ? {
+                ...p,
+                isAvailable: prodActualizado.isAvailable,
+                stock: prodActualizado.stock !== undefined ? prodActualizado.stock : p.stock,
+                minStock: prodActualizado.minStock !== undefined ? prodActualizado.minStock : p.minStock,
+                trackStock: prodActualizado.trackStock !== undefined ? prodActualizado.trackStock : p.trackStock,
+              }
             : p
         )
       );
@@ -581,6 +591,52 @@ export function CocinaClient({ initialSlug }: { initialSlug: string }) {
       console.error("Error actualizando producto:", err);
       setProductos((prev) =>
         prev.map((p) => (p.id === productoId ? { ...p, isAvailable: currentVal } : p))
+      );
+    }
+  };
+
+  // Ajustar stock rápido desde Cocina (+5, -1)
+  const quickUpdateCocinaStock = async (productoId: string, delta: number) => {
+    if (!negocio?.id) return;
+    const currentProd = productos.find((p) => p.id === productoId);
+    if (!currentProd) return;
+
+    const currentStock = currentProd.stock ?? 0;
+    const newStock = Math.max(0, currentStock + delta);
+    const newAvailable = newStock > 0 ? (currentProd.isAvailable || delta > 0) : false;
+
+    setProductos((prev) =>
+      prev.map((p) =>
+        p.id === productoId
+          ? { ...p, stock: newStock, isAvailable: newAvailable, trackStock: true }
+          : p
+      )
+    );
+
+    try {
+      await fetch(`/api/productos/${productoId}/disponible`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stock: newStock,
+          isAvailable: newAvailable,
+          negocio_id: negocio.id,
+        }),
+      });
+
+      if (socketRef.current) {
+        socketRef.current.emit("producto_actualizado", {
+          id: productoId,
+          stock: newStock,
+          isAvailable: newAvailable,
+          trackStock: true,
+          negocio_id: negocio.id,
+        });
+      }
+    } catch (err) {
+      console.error("Error actualizando stock desde cocina:", err);
+      setProductos((prev) =>
+        prev.map((p) => (p.id === productoId ? currentProd : p))
       );
     }
   };
@@ -851,6 +907,48 @@ export function CocinaClient({ initialSlug }: { initialSlug: string }) {
                     }`}
                   >
                     <span className="font-medium max-w-[140px] truncate">{p.name}</span>
+
+                    {/* Stock badge & quick buttons for tracked dishes */}
+                    {p.trackStock && (
+                      <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-750 px-1.5 py-0.5 rounded-md text-[11px]">
+                        {(p.stock ?? 0) <= 0 ? (
+                          <span className="font-bold text-rose-400 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                            0 disp.
+                          </span>
+                        ) : (p.stock ?? 0) <= (p.minStock ?? 0) ? (
+                          <span className="font-bold text-amber-400 flex items-center gap-1 animate-pulse" title={`Stock mínimo: ${p.stock} porciones disponibles`}>
+                            <AlertTriangle className="w-3 h-3 text-amber-400" />
+                            {p.stock} disp.
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-emerald-400 flex items-center gap-1">
+                            <Package className="w-3 h-3 text-emerald-400" />
+                            {p.stock} disp.
+                          </span>
+                        )}
+
+                        <div className="flex items-center border-l border-slate-800 pl-1 ml-0.5 gap-0.5">
+                          <button
+                            type="button"
+                            title="Descontar 1 porción"
+                            onClick={() => quickUpdateCocinaStock(p.id, -1)}
+                            className="px-1 py-0.2 text-[10px] text-slate-400 hover:text-white hover:bg-slate-800 rounded font-bold"
+                          >
+                            -1
+                          </button>
+                          <button
+                            type="button"
+                            title="Reponer +5 porciones preparadas"
+                            onClick={() => quickUpdateCocinaStock(p.id, 5)}
+                            className="px-1 py-0.2 text-[10px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/50 rounded font-bold"
+                          >
+                            +5
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <button
                       onClick={() => toggleProducto(p.id, p.isAvailable)}
                       className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase transition flex items-center gap-1 ${

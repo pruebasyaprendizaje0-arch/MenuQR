@@ -39,12 +39,14 @@ import {
   Zap,
   Bell,
   X,
-  CreditCard
+  CreditCard,
+  ShieldCheck
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import RuletaNegocio from "@/components/Ruleta/RuletaNegocio";
 import { getBusinessLabels } from "@/lib/business-labels";
+import { parseTableFromUrl } from "@/lib/table-token";
 
 type Dish = {
   id: string;
@@ -53,6 +55,9 @@ type Dish = {
   price: number;
   imageUrl: string | null;
   isAvailable: boolean;
+  stock?: number | null;
+  minStock?: number | null;
+  trackStock?: boolean;
 };
 
 type Category = {
@@ -271,7 +276,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     customerName: string;
     customerPhone?: string;
     startedAt: string;
+    isVerified?: boolean;
   } | null>(null);
+  const [isTableVerified, setIsTableVerified] = useState<boolean>(false);
   const [liveTableOrder, setLiveTableOrder] = useState<any | null>(null);
   const [isLlamandoMesero, setIsLlamandoMesero] = useState(false);
   const [llamadaMeseroEnviada, setLlamadaMeseroEnviada] = useState(false);
@@ -440,9 +447,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const mesa = params.get("mesa") || params.get("table");
-      if (mesa) {
-        setSelectedTable(mesa);
+      const parsedTable = parseTableFromUrl(params, restaurant.id);
+      if (parsedTable.tableName) {
+        setSelectedTable(parsedTable.tableName);
+        setIsTableVerified(parsedTable.isVerified);
       }
 
       // Restaurar sesión de mesa abierta de localStorage si existe
@@ -452,8 +460,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           const parsed = JSON.parse(stored);
           if (parsed?.tableName && parsed?.customerName) {
             setOpenTableSession(parsed);
-            if (!mesa) {
+            if (!parsedTable.tableName) {
               setSelectedTable(parsed.tableName);
+            }
+            if (typeof parsed.isVerified === "boolean") {
+              setIsTableVerified(parsed.isVerified);
             }
             setCustomerName(parsed.customerName);
             if (parsed.customerPhone) {
@@ -463,6 +474,22 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         }
       } catch (e) {
         console.warn("Error leyendo sesión de mesa abierta:", e);
+      }
+
+      // Restaurar datos de contacto guardados (Nombre y WhatsApp para agilizar checkout y CRM)
+      try {
+        const savedCustomer = localStorage.getItem("menuqr_saved_customer");
+        if (savedCustomer) {
+          const parsed = JSON.parse(savedCustomer);
+          if (parsed?.name) {
+            setCustomerName((prev) => prev || parsed.name);
+          }
+          if (parsed?.phone) {
+            setCustomerPhone((prev) => prev || parsed.phone);
+          }
+        }
+      } catch (e) {
+        console.warn("Error leyendo cliente guardado:", e);
       }
     }
   }, [restaurant.slug]);
@@ -590,15 +617,31 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   };
 
   const addToCart = (dish: Dish) => {
+    if (dish.trackStock && ((dish.stock ?? 0) <= 0 || !dish.isAvailable)) {
+      alert(`¡Lo sentimos! "${dish.name}" se encuentra agotado.`);
+      return;
+    }
+
+    let reachedStockLimit = false;
+
     setCart((prevCart) => {
       const existing = prevCart.find((item) => item.dish.id === dish.id);
       if (existing) {
+        if (dish.trackStock && existing.quantity >= (dish.stock ?? 0)) {
+          reachedStockLimit = true;
+          return prevCart;
+        }
         return prevCart.map((item) =>
           item.dish.id === dish.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
       return [...prevCart, { dish, quantity: 1 }];
     });
+
+    if (reachedStockLimit) {
+      alert(`Solo quedan ${dish.stock} porción(es) disponibles de "${dish.name}".`);
+      return;
+    }
 
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
@@ -709,9 +752,32 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return;
     }
 
-    // Check diner name requirement for table orders to guarantee multi-diner independent ordering
-    if (isTableOrder && !customerName.trim()) {
-      alert(`⚠️ Por favor ingresa tu Nombre de Comensal para la Mesa #${selectedTable}.\n\nEsto asegura que la cocina y el camarero identifiquen claramente tus platos y tu cuenta individual si hay varios comensales en la misma mesa.`);
+    // 1. Validar Nombre del cliente (obligatorio para comanda y CRM)
+    const trimmedCustomerName = customerName.trim();
+    if (!trimmedCustomerName) {
+      alert(
+        isTableOrder
+          ? `⚠️ Por favor ingresa tu Nombre de Comensal para la Mesa #${selectedTable}.\n\nEsto asegura que la cocina y el camarero identifiquen claramente tus platos y tu cuenta individual.`
+          : `⚠️ Por favor ingresa tu Nombre o Alias.\n\nEs necesario para identificar tu pedido y registrar tus consumos en el restaurante.`
+      );
+      setIsSubmittingOrder(false);
+      return;
+    }
+
+    // 2. Validar WhatsApp / Teléfono del cliente (obligatorio para rastreo en vivo y registro en CRM)
+    const trimmedCustomerPhone = customerPhone.trim();
+    const cleanCustomerDigits = trimmedCustomerPhone.replace(/\D/g, "");
+    if (!trimmedCustomerPhone || cleanCustomerDigits.length < 8) {
+      alert(
+        `📱 Por favor ingresa tu número de WhatsApp o teléfono (mínimo 8 dígitos, ej: 0991234567).\n\nEs requerido para enviarte el estado de tu pedido y registrar tus beneficios y puntos de fidelización en ${restaurant.name}.`
+      );
+      setIsSubmittingOrder(false);
+      return;
+    }
+
+    // 3. Validar Dirección de Envío si es a Domicilio
+    if (isDeliveryOrder && !deliveryAddress.trim()) {
+      alert(`📍 Por favor ingresa tu Dirección de Envío para el pedido a domicilio.`);
       setIsSubmittingOrder(false);
       return;
     }
@@ -771,6 +837,17 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return;
     }
 
+    // Persistir datos del cliente en localStorage para futuros pedidos
+    try {
+      localStorage.setItem(
+        "menuqr_saved_customer",
+        JSON.stringify({
+          name: trimmedCustomerName,
+          phone: trimmedCustomerPhone,
+        })
+      );
+    } catch {}
+
     // Si es pedido en mesa, sincronizar con el KDS de cocina / mesero en PostgreSQL
     if (isTableOrder) {
       try {
@@ -800,6 +877,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim() || undefined,
         startedAt: openTableSession?.startedAt || new Date().toISOString(),
+        isVerified: isTableVerified || openTableSession?.isVerified || false,
       };
       try {
         localStorage.setItem(`menuqr_open_table_${restaurant.slug}`, JSON.stringify(sessionData));
@@ -1942,16 +2020,29 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           </div>
 
                           <div className="flex items-center justify-between pt-2.5 border-t border-white/5 mt-1">
-                            <span className="text-base font-black text-amber-400">
-                              ${formatPrice(dish.price)}
-                            </span>
-                            <button
-                              onClick={() => addToCart(dish)}
-                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 active:scale-95 transition-all duration-200"
-                            >
-                              <Plus className="h-3.5 w-3.5" />
-                              <span>Pedir</span>
-                            </button>
+                            <div className="flex flex-col">
+                              <span className="text-base font-black text-amber-400">
+                                ${formatPrice(dish.price)}
+                              </span>
+                              {dish.trackStock && (dish.stock ?? 0) <= (dish.minStock ?? 0) && (dish.stock ?? 0) > 0 && (
+                                <span className="text-[10px] text-amber-400 font-bold flex items-center gap-0.5 animate-pulse">
+                                  🔥 ¡Últimas {dish.stock}!
+                                </span>
+                              )}
+                            </div>
+                            {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
+                              <button
+                                onClick={() => addToCart(dish)}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 active:scale-95 transition-all duration-200"
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                                <span>Pedir</span>
+                              </button>
+                            ) : (
+                              <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2.5 py-1 rounded-full">
+                                Agotado
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2015,10 +2106,17 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             />
                           </div>
                           <div className="flex items-center justify-between pt-2">
-                            <span className="text-xs font-black text-white" style={{ color: restaurant.themeColor }}>
-                              ${formatPrice(dish.price)}
-                            </span>
-                            {dish.isAvailable ? (
+                            <div className="flex flex-col">
+                              <span className="text-xs font-black text-white" style={{ color: restaurant.themeColor }}>
+                                ${formatPrice(dish.price)}
+                              </span>
+                              {dish.trackStock && (dish.stock ?? 0) <= (dish.minStock ?? 0) && (dish.stock ?? 0) > 0 && (
+                                <span className="text-[9px] text-amber-400 font-bold flex items-center gap-0.5 animate-pulse">
+                                  🔥 ¡Últimas {dish.stock}!
+                                </span>
+                              )}
+                            </div>
+                            {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
                               <button
                                 onClick={() => addToCart(dish)}
                                 className="p-1.5 rounded-xl text-white shadow-lg transition transform active:scale-90 duration-200"
@@ -2061,7 +2159,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           <div 
                             key={dish.id}
                             className={`relative group overflow-hidden bg-gradient-to-br from-slate-900/80 to-slate-950/85 backdrop-blur-md rounded-[2rem] p-5 flex gap-5 transition-all duration-300 border ${
-                              dish.isAvailable 
+                              dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0)
                                 ? "border-amber-500/20 hover:border-amber-500/40 hover:shadow-[0_0_20px_rgba(245,158,11,0.08)]" 
                                 : "opacity-50 border-slate-900"
                             }`}
@@ -2097,9 +2195,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 />
                               </div>
                               <div className="flex items-center justify-between pt-2">
-                                <span className="text-base font-black text-amber-400">${formatPrice(dish.price)}</span>
+                                <div className="flex flex-col">
+                                  <span className="text-base font-black text-amber-400">${formatPrice(dish.price)}</span>
+                                  {dish.trackStock && (dish.stock ?? 0) <= (dish.minStock ?? 0) && (dish.stock ?? 0) > 0 && (
+                                    <span className="text-[10px] text-amber-400 font-bold flex items-center gap-0.5 animate-pulse">
+                                      🔥 ¡Últimas {dish.stock}!
+                                    </span>
+                                  )}
+                                </div>
                                 <div>
-                                  {dish.isAvailable ? (
+                                  {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
                                     <button
                                       onClick={() => addToCart(dish)}
                                       className="inline-flex items-center gap-1 text-[11px] font-black px-4 py-2 rounded-xl text-white shadow-lg transition transform active:scale-95 duration-200"
@@ -2121,7 +2226,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         <div 
                           key={dish.id}
                           className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-3xl p-4 flex gap-4 transition-all duration-300 relative group overflow-hidden ${
-                            dish.isAvailable ? "hover:border-slate-800" : "opacity-50"
+                            dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? "hover:border-slate-800" : "opacity-50"
                           }`}
                         >
                           <div className="h-24 w-24 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
@@ -2157,9 +2262,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                               />
                             </div>
                             <div className="flex items-center justify-between pt-1">
-                              <span className="text-sm font-black text-white" style={{ color: restaurant.themeColor }}>${formatPrice(dish.price)}</span>
+                              <div className="flex flex-col">
+                                <span className="text-sm font-black text-white" style={{ color: restaurant.themeColor }}>${formatPrice(dish.price)}</span>
+                                {dish.trackStock && (dish.stock ?? 0) <= (dish.minStock ?? 0) && (dish.stock ?? 0) > 0 && (
+                                  <span className="text-[10px] text-amber-400 font-bold flex items-center gap-0.5 animate-pulse">
+                                    🔥 ¡Últimas {dish.stock}!
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex justify-end pt-2">
-                                {dish.isAvailable ? (
+                                {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
                                   <button
                                     onClick={() => addToCart(dish)}
                                     className="inline-flex items-center gap-1 text-[11px] font-bold px-3 py-1.5 rounded-full text-white shadow-lg transition-transform active:scale-95 duration-200"
@@ -2670,36 +2782,62 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                   {/* Customer Name and Phone inputs for Table and Takeout */}
                   {selectedTable !== "Domicilio" && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                      <div className="space-y-1.5">
-                        <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center justify-between">
-                          <span>{isTableSelected ? "Tu Nombre de Comensal *" : "Nombre o Alias (Para Retirar)"}</span>
-                          {isTableSelected && (
+                    <div className="space-y-3 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                            <span>{isTableSelected ? "Tu Nombre de Comensal *" : "Nombre o Alias (Para Retirar) *"}</span>
                             <span className="text-[10px] text-amber-400 font-bold lowercase tracking-normal bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
                               Requerido
                             </span>
-                          )}
-                        </span>
-                        <input
-                          type="text"
-                          required={isTableSelected}
-                          placeholder={isTableSelected ? "Ej. Carlos / María / Juan" : "Ej. Juan Pérez"}
-                          value={customerName}
-                          onChange={(e) => setCustomerName(e.target.value)}
-                          className="w-full bg-slate-950/60 border border-slate-850 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs"
-                        />
+                          </span>
+                          <input
+                            type="text"
+                            required
+                            placeholder={isTableSelected ? "Ej. Carlos / María / Juan" : "Ej. Juan Pérez"}
+                            value={customerName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setCustomerName(val);
+                              try {
+                                const prev = JSON.parse(localStorage.getItem("menuqr_saved_customer") || "{}");
+                                localStorage.setItem("menuqr_saved_customer", JSON.stringify({ ...prev, name: val }));
+                              } catch {}
+                            }}
+                            className="w-full bg-slate-950/60 border border-slate-850 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                            <span>Tu WhatsApp o Teléfono *</span>
+                            <span className="text-[10px] text-emerald-400 font-bold lowercase tracking-normal bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                              Requerido
+                            </span>
+                          </span>
+                          <input
+                            type="tel"
+                            required
+                            placeholder="Ej. 0991234567"
+                            value={customerPhone}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setCustomerPhone(val);
+                              try {
+                                const prev = JSON.parse(localStorage.getItem("menuqr_saved_customer") || "{}");
+                                localStorage.setItem("menuqr_saved_customer", JSON.stringify({ ...prev, phone: val }));
+                              } catch {}
+                            }}
+                            className="w-full bg-slate-950/60 border border-slate-850 focus:border-emerald-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-1.5">
-                        <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">
-                          Teléfono o WhatsApp (opcional)
-                        </span>
-                        <input
-                          type="tel"
-                          placeholder="Ej. 0991234567"
-                          value={customerPhone}
-                          onChange={(e) => setCustomerPhone(e.target.value)}
-                          className="w-full bg-slate-950/60 border border-slate-850 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs"
-                        />
+
+                      {/* Loyalty & Tracking incentive banner */}
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 flex items-center gap-2.5 text-xs text-emerald-300">
+                        <span className="text-sm shrink-0">🎁</span>
+                        <p className="text-[11px] text-emerald-200/90 leading-tight">
+                          Tu WhatsApp permite enviarte el <strong>rastreo en vivo</strong> de cocina y registrar tus <strong>puntos de cliente</strong> en el restaurante.
+                        </p>
                       </div>
                     </div>
                   )}
@@ -2753,28 +2891,62 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   ) : null}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu Nombre o Alias</span>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ej. Juan Pérez"
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
-                    />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                        <span>Tu Nombre o Alias *</span>
+                        <span className="text-[10px] text-amber-400 font-bold lowercase tracking-normal bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                          Requerido
+                        </span>
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej. Juan Pérez"
+                        value={customerName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCustomerName(val);
+                          try {
+                            const prev = JSON.parse(localStorage.getItem("menuqr_saved_customer") || "{}");
+                            localStorage.setItem("menuqr_saved_customer", JSON.stringify({ ...prev, name: val }));
+                          } catch {}
+                        }}
+                        className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                        <span>Tu Teléfono o WhatsApp *</span>
+                        <span className="text-[10px] text-emerald-400 font-bold lowercase tracking-normal bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                          Requerido
+                        </span>
+                      </span>
+                      <input
+                        type="tel"
+                        required
+                        placeholder="Ej. 0991234567"
+                        value={customerPhone}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCustomerPhone(val);
+                          try {
+                            const prev = JSON.parse(localStorage.getItem("menuqr_saved_customer") || "{}");
+                            localStorage.setItem("menuqr_saved_customer", JSON.stringify({ ...prev, phone: val }));
+                          } catch {}
+                        }}
+                        className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider block">Tu Teléfono o WhatsApp</span>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="Ej. 0991234567"
-                      value={customerPhone}
-                      onChange={(e) => setCustomerPhone(e.target.value)}
-                      className="w-full bg-slate-950/60 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-xs"
-                    />
+
+                  {/* Loyalty & Delivery value banner */}
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 flex items-center gap-2.5 text-xs text-emerald-300">
+                    <span className="text-sm shrink-0">🛵</span>
+                    <p className="text-[11px] text-emerald-200/90 leading-tight">
+                      El repartidor te contactará a este WhatsApp y acumularás <strong>puntos de cliente</strong> en cada pedido.
+                    </p>
                   </div>
                 </div>
                 <div className="space-y-1.5">
@@ -3241,11 +3413,27 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-800/80">
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block shrink-0" />
-              <div className="truncate">
-                <span className="font-black text-sm text-white tracking-tight">
+              <div className="flex items-center gap-1.5 flex-wrap truncate">
+                <span className="font-black text-sm text-white tracking-tight flex items-center gap-1">
                   🪑 Mesa #{openTableSession.tableName}
                 </span>
-                <span className="text-xs font-semibold text-emerald-400 ml-1.5 truncate">
+                {(openTableSession.isVerified ?? isTableVerified) ? (
+                  <span 
+                    className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-0.5 shrink-0" 
+                    title="Mesa verificada por código QR físico"
+                  >
+                    <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+                    QR Seguro
+                  </span>
+                ) : (
+                  <span 
+                    className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold text-slate-400 bg-slate-800/80 border border-slate-700/60 shrink-0"
+                    title="Mesa ingresada manualmente (sin escaneo de QR físico)"
+                  >
+                    Mesa Manual
+                  </span>
+                )}
+                <span className="text-xs font-semibold text-emerald-400 ml-1 truncate">
                   👤 {openTableSession.customerName}
                 </span>
               </div>

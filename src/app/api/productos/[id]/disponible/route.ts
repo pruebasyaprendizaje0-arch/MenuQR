@@ -11,15 +11,24 @@ export async function PATCH(
   try {
     const { id } = await context.params;
     const body = await req.json();
-    const { isAvailable, negocio_id } = body;
+    const { isAvailable, negocio_id, stock } = body;
 
-    let updatedDish: any = { id, isAvailable: Boolean(isAvailable) };
+    const dataToUpdate: any = { isAvailable: Boolean(isAvailable) };
+    if (typeof stock === "number") {
+      dataToUpdate.stock = Math.max(0, Math.floor(stock));
+      dataToUpdate.trackStock = true;
+      if (dataToUpdate.stock <= 0) {
+        dataToUpdate.isAvailable = false;
+      }
+    }
+
+    let updatedDish: any = { id, ...dataToUpdate };
 
     try {
       const dish = await prisma.dish.update({
         where: { id },
-        data: { isAvailable: Boolean(isAvailable) },
-        select: { id: true, name: true, isAvailable: true, restaurantId: true },
+        data: dataToUpdate,
+        select: { id: true, name: true, isAvailable: true, stock: true, minStock: true, trackStock: true, restaurantId: true },
       });
       updatedDish = dish;
     } catch (prismaErr) {
@@ -29,7 +38,10 @@ export async function PATCH(
     if (negocio_id) {
       emitProductoActualizado(negocio_id, {
         id,
-        isAvailable: Boolean(isAvailable),
+        isAvailable: updatedDish.isAvailable,
+        stock: updatedDish.stock,
+        minStock: updatedDish.minStock,
+        trackStock: updatedDish.trackStock,
         negocio_id,
       });
     }

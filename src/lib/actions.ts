@@ -831,24 +831,56 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   const sku = (formData.get("sku") as string)?.trim() || null;
   const stockRaw = formData.get("stock") as string;
   const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
+  const minStockRaw = formData.get("minStock") as string;
+  const minStock = minStockRaw !== null && minStockRaw !== undefined && minStockRaw.trim() !== "" ? parseInt(minStockRaw, 10) : 0;
+  const trackStock = formData.get("trackStock") === "true";
   const isService = formData.get("isService") === "true";
   const variants = (formData.get("variants") as string)?.trim() || null;
 
-  await prisma.dish.create({
-    data: {
-      name,
-      description,
-      price,
-      imageUrl: finalImageUrl || null,
-      isAvailable,
-      sku,
-      stock: isNaN(stock as number) ? null : stock,
-      isService,
-      variants,
-      categoryId,
-      restaurantId: category.restaurantId,
-    },
-  });
+  // Si trackStock está activo y el stock indicado es 0 o menor, se marca no disponible de inicio
+  const effectiveIsAvailable = trackStock && typeof stock === "number" && stock <= 0 ? false : isAvailable;
+
+  const createData: any = {
+    name,
+    description,
+    price,
+    imageUrl: finalImageUrl || null,
+    isAvailable: effectiveIsAvailable,
+    sku,
+    stock: isNaN(stock as number) ? null : stock,
+    minStock: isNaN(minStock as number) ? 0 : minStock,
+    trackStock,
+    isService,
+    variants,
+    categoryId,
+    restaurantId: category.restaurantId,
+  };
+
+  let createdDish: any;
+  try {
+    createdDish = await prisma.dish.create({
+      data: createData,
+    });
+  } catch (err: any) {
+    if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
+      const { minStock: _ms, trackStock: _ts, ...fallbackData } = createData;
+      createdDish = await prisma.dish.create({
+        data: fallbackData,
+      });
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2 WHERE "id" = $3`,
+          isNaN(minStock as number) ? 0 : minStock,
+          trackStock,
+          createdDish.id
+        );
+      } catch (rawErr) {
+        console.warn("Could not execute fallback raw update for minStock/trackStock in createDish:", rawErr);
+      }
+    } else {
+      throw err;
+    }
+  }
 
   revalidatePath(`/${category.restaurant.slug}`);
   revalidatePath("/admin");
@@ -1009,8 +1041,14 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   const sku = (formData.get("sku") as string)?.trim() || null;
   const stockRaw = formData.get("stock") as string;
   const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
+  const minStockRaw = formData.get("minStock") as string;
+  const minStock = minStockRaw !== null && minStockRaw !== undefined && minStockRaw.trim() !== "" ? parseInt(minStockRaw, 10) : 0;
+  const trackStock = formData.get("trackStock") === "true";
   const isService = formData.get("isService") === "true";
   const variants = (formData.get("variants") as string)?.trim() || null;
+
+  // Si trackStock está activo y el stock indicado es 0 o menor, se marca agotado
+  const effectiveIsAvailable = trackStock && typeof stock === "number" && stock <= 0 ? false : isAvailable;
 
   const updateData: {
     name: string;
@@ -1020,6 +1058,8 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     isAvailable: boolean;
     sku?: string | null;
     stock?: number | null;
+    minStock?: number | null;
+    trackStock?: boolean;
     isService?: boolean;
     variants?: string | null;
     categoryId?: string;
@@ -1028,9 +1068,11 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     description,
     price,
     imageUrl: finalImageUrl || null,
-    isAvailable,
+    isAvailable: effectiveIsAvailable,
     sku,
     stock: isNaN(stock as number) ? null : stock,
+    minStock: isNaN(minStock as number) ? 0 : minStock,
+    trackStock,
     isService,
     variants,
   };
@@ -1044,15 +1086,43 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     }
   }
 
-  const updated = await prisma.dish.update({
-    where: { id: dishId },
-    data: updateData,
-    include: {
-      category: {
-        include: { restaurant: true },
+  let updated: any;
+  try {
+    updated = await prisma.dish.update({
+      where: { id: dishId },
+      data: updateData,
+      include: {
+        category: {
+          include: { restaurant: true },
+        },
       },
-    },
-  });
+    });
+  } catch (err: any) {
+    if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
+      const { minStock: _ms, trackStock: _ts, ...fallbackData } = updateData;
+      updated = await prisma.dish.update({
+        where: { id: dishId },
+        data: fallbackData,
+        include: {
+          category: {
+            include: { restaurant: true },
+          },
+        },
+      });
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2 WHERE "id" = $3`,
+          isNaN(minStock as number) ? 0 : minStock,
+          trackStock,
+          dishId
+        );
+      } catch (rawErr) {
+        console.warn("Could not execute fallback raw update for minStock/trackStock in updateDish:", rawErr);
+      }
+    } else {
+      throw err;
+    }
+  }
 
   revalidatePath(`/${updated.category.restaurant.slug}`);
   revalidatePath("/admin");
@@ -1112,6 +1182,76 @@ export async function toggleDishAvailabilityAction(dishId: string, isAvailable: 
   } catch (error) {
     console.error("Error toggling dish availability:", error);
     return { error: "El plato no existe o ya fue eliminado." };
+  }
+}
+
+export async function quickUpdateDishStockAction(dishId: string, newStock: number) {
+  try {
+    await refreshUserSession();
+    const dish = await prisma.dish.findUnique({
+      where: { id: dishId },
+      include: {
+        category: {
+          include: { restaurant: true },
+        },
+      },
+    });
+    if (!dish) return { error: "El plato no existe o ya fue eliminado." };
+
+    const auth = await verifyRestaurantOwnership(dish.restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
+    const parsedStock = Math.max(0, Math.floor(newStock));
+    const isNowAvailable = parsedStock > 0;
+
+    let updated: any;
+    try {
+      updated = await prisma.dish.update({
+        where: { id: dishId },
+        data: {
+          stock: parsedStock,
+          trackStock: true,
+          isAvailable: isNowAvailable,
+        },
+        include: {
+          category: {
+            include: { restaurant: true },
+          },
+        },
+      });
+    } catch (err: any) {
+      if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
+        updated = await prisma.dish.update({
+          where: { id: dishId },
+          data: {
+            stock: parsedStock,
+            isAvailable: isNowAvailable,
+          },
+          include: {
+            category: {
+              include: { restaurant: true },
+            },
+          },
+        });
+        try {
+          await prisma.$executeRawUnsafe(
+            `UPDATE "Dish" SET "trackStock" = true WHERE "id" = $1`,
+            dishId
+          );
+        } catch (rawErr) {
+          console.warn("Could not execute fallback raw update for trackStock:", rawErr);
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    revalidatePath(`/${updated.category.restaurant.slug}`);
+    revalidatePath("/admin");
+    return { success: true, dish: updated };
+  } catch (error) {
+    console.error("Error actualizando stock rápido:", error);
+    return { error: "No se pudo actualizar el stock del plato." };
   }
 }
 
@@ -1805,6 +1945,19 @@ export async function createOrderAction(data: {
         return { error: `El producto "${dbDish.name}" no está disponible actualmente.` };
       }
 
+      // Stock check para platos con control de inventario activo
+      if (dbDish.trackStock) {
+        const availableStock = dbDish.stock ?? 0;
+        if (availableStock <= 0) {
+          return { error: `El producto "${dbDish.name}" se encuentra agotado.` };
+        }
+        if (item.quantity > availableStock) {
+          return {
+            error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
+          };
+        }
+      }
+
       const serverPrice = dbDish.price;
       calculatedSubtotal += serverPrice * item.quantity;
 
@@ -2051,10 +2204,44 @@ export async function createOrderAction(data: {
         });
       }
 
+      // Descontar inventario para platos con control de stock y apagar si llega a 0
+      for (const item of data.items) {
+        const dbDish = dishMap.get(item.dishId);
+        if (dbDish && dbDish.trackStock) {
+          const currentStock = dbDish.stock ?? 0;
+          const updatedStock = Math.max(0, currentStock - item.quantity);
+          const isStillAvailable = updatedStock > 0;
+
+          await tx.dish.update({
+            where: { id: dbDish.id },
+            data: {
+              stock: updatedStock,
+              isAvailable: isStillAvailable,
+            },
+          });
+        }
+      }
+
       if (data.customerPhone && data.customerPhone.trim()) {
         const rawPhone = data.customerPhone.trim().slice(0, 50);
+        const cleanDigits = rawPhone.replace(/\D/g, "");
+
+        const phoneVariants = Array.from(
+          new Set([
+            rawPhone,
+            cleanDigits,
+            `+${cleanDigits}`,
+            cleanDigits.startsWith("593") ? `0${cleanDigits.slice(3)}` : null,
+            cleanDigits.startsWith("0") ? `593${cleanDigits.slice(1)}` : null,
+            cleanDigits.startsWith("0") ? `+593${cleanDigits.slice(1)}` : null,
+          ].filter(Boolean) as string[])
+        );
+
         const existing = await tx.customer.findFirst({
-          where: { restaurantId: data.restaurantId, phone: rawPhone },
+          where: {
+            restaurantId: data.restaurantId,
+            phone: { in: phoneVariants },
+          },
         });
         const earnedPoints = Math.max(1, Math.floor(finalTotal));
 
@@ -2119,6 +2306,7 @@ export async function createOrderAction(data: {
       revalidatePath(`/${restaurant.slug}`);
       revalidatePath(`/${restaurant.slug}/rastreo`);
       revalidatePath(`/${restaurant.slug}/repartidor`);
+      revalidatePath(`/cocina`);
     } catch {
       // Safe fallback when executed outside Next request context
     }

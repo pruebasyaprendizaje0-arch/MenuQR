@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getBusinessLabels } from "@/lib/business-labels";
 import { 
   logoutUserAction, 
@@ -14,6 +14,7 @@ import {
   updateDishAction, 
   deleteDishAction, 
   toggleDishAvailabilityAction, 
+  quickUpdateDishStockAction, 
   updateOrderStatusAction, 
   updateRestaurantTablesAction, 
   updateRestaurantChargesConfigAction, 
@@ -104,12 +105,18 @@ import {
   Bot,
   Smartphone,
   FlaskConical,
-  RefreshCw
+  RefreshCw,
+  Package,
+  AlertTriangle,
+  Printer,
+  ShieldCheck
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
 import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
+import { AISettingsTab } from "./AISettingsTab";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
+import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
 
 type SeasonRate = {
   id: string;
@@ -145,6 +152,9 @@ type Dish = {
   imageUrl: string | null;
   isAvailable: boolean;
   categoryId: string;
+  stock?: number | null;
+  minStock?: number | null;
+  trackStock?: boolean;
 };
 
 type Category = {
@@ -513,7 +523,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription" | "ai-settings">("metrics");
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
@@ -892,6 +902,10 @@ export function AdminDashboard({
   const [tablesConfig, setTablesConfig] = useState(restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10");
   const [savingTables, setSavingTables] = useState(false);
   const [tablesMessage, setTablesMessage] = useState("");
+  const [qrSubTab, setQrSubTab] = useState<"general" | "tables">("general");
+  const [selectedQrTable, setSelectedQrTable] = useState<string>("");
+  const [isBatchPrinting, setIsBatchPrinting] = useState<boolean>(false);
+  const [copiedTableLink, setCopiedTableLink] = useState<boolean>(false);
 
   const [ivaPercent, setIvaPercent] = useState(restaurant.ivaPercent);
   const [servicePercent, setServicePercent] = useState(restaurant.servicePercent);
@@ -1194,6 +1208,9 @@ export function AdminDashboard({
       Descripcion: string;
       Precio: number;
       Disponible: string;
+      Controla_Stock: string;
+      Stock_Disponible: number | string;
+      Stock_Minimo: number | string;
       URL_Imagen: string;
     }> = [];
 
@@ -1207,6 +1224,9 @@ export function AdminDashboard({
           Descripcion: dish.description || "",
           Precio: typeof dish.price === "number" ? dish.price : parseFloat((dish.price as any) || "0"),
           Disponible: dish.isAvailable ? "SI" : "NO",
+          Controla_Stock: dish.trackStock ? "SI" : "NO",
+          Stock_Disponible: dish.trackStock ? (dish.stock ?? 0) : "N/A",
+          Stock_Minimo: dish.trackStock ? (dish.minStock ?? 0) : "N/A",
           URL_Imagen: dish.imageUrl || "",
         });
       });
@@ -1642,6 +1662,25 @@ export function AdminDashboard({
   const [dishAvailable, setDishAvailable] = useState(true);
   const [dishImageUrl, setDishImageUrl] = useState("");
   const [dishSuggested, setDishSuggested] = useState(false);
+  const [dishTrackStock, setDishTrackStock] = useState(false);
+  const [dishStock, setDishStock] = useState("10");
+  const [dishMinStock, setDishMinStock] = useState("3");
+  const [dishStockFilter, setDishStockFilter] = useState<"ALL" | "TRACKED" | "LOW_STOCK" | "OUT_OF_STOCK">("ALL");
+
+  const allDishesList = useMemo(() => categoriesList.flatMap((c) => c.dishes), [categoriesList]);
+  const trackedDishesCount = useMemo(() => allDishesList.filter((d) => d.trackStock).length, [allDishesList]);
+  const lowStockDishesCount = useMemo(
+    () => allDishesList.filter((d) => Boolean(d.trackStock) && (d.stock ?? 0) <= (d.minStock ?? 0) && (d.stock ?? 0) > 0).length,
+    [allDishesList]
+  );
+  const outOfStockDishesCount = useMemo(
+    () => allDishesList.filter((d) => !d.isAvailable || (Boolean(d.trackStock) && (d.stock ?? 0) <= 0)).length,
+    [allDishesList]
+  );
+  const totalStockUnits = useMemo(
+    () => allDishesList.filter((d) => d.trackStock).reduce((acc, d) => acc + (d.stock ?? 0), 0),
+    [allDishesList]
+  );
 
   // States for Season Rate Dialogs
   const [editingSeasonRate, setEditingSeasonRate] = useState<SeasonRate | null>(null);
@@ -1661,8 +1700,128 @@ export function AdminDashboard({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const tablesList = useMemo(() => {
+    if (!tablesConfig) return ["1", "2", "3", "4", "5"];
+    const list = tablesConfig.split(",").map((t) => t.trim()).filter(Boolean);
+    return list.length > 0 ? list : ["1", "2", "3", "4", "5"];
+  }, [tablesConfig]);
+
+  const activeTableForQr = selectedQrTable && tablesList.includes(selectedQrTable)
+    ? selectedQrTable
+    : tablesList[0] || "1";
+
+  const activeTableQrUrl = useMemo(() => {
+    const origin = isMounted && typeof window !== "undefined" ? window.location.origin : "";
+    return buildTableQrUrl(origin, restaurant.slug, activeTableForQr, restaurant.id);
+  }, [isMounted, restaurant.slug, activeTableForQr, restaurant.id]);
+
+  const handleCopyTableLink = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedTableLink(true);
+    setTimeout(() => setCopiedTableLink(false), 2000);
+  };
+
+  const downloadTableQR = (tableName: string) => {
+    const qrCanvas = document.getElementById(`qr-canvas-table-${tableName}`) as HTMLCanvasElement;
+    if (!qrCanvas) return;
+
+    const posterCanvas = document.createElement("canvas");
+    posterCanvas.width = 400;
+    posterCanvas.height = 620;
+    const ctx = posterCanvas.getContext("2d");
+    if (!ctx) return;
+
+    // Fondo blanco
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, 400, 620);
+
+    // Barra superior decorativa
+    ctx.fillStyle = restaurant.themeColor || "#0f172a";
+    ctx.fillRect(0, 0, 400, 10);
+
+    // Encabezado
+    ctx.fillStyle = "#64748b";
+    ctx.textAlign = "center";
+    ctx.font = "bold 13px sans-serif";
+    ctx.fillText("MENÚ DIGITAL • PEDIDO EN MESA", 200, 45);
+
+    ctx.font = "black 22px sans-serif";
+    ctx.fillStyle = restaurant.themeColor || "#0f172a";
+    ctx.fillText(restaurant.name, 200, 75);
+
+    // Badge de Mesa
+    ctx.fillStyle = "#f1f5f9";
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(110, 92, 180, 38, 10);
+      ctx.fill();
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    } else {
+      ctx.fillRect(110, 92, 180, 38);
+    }
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillText(`MESA #${tableName}`, 200, 117);
+
+    // Dibujar Código QR de la mesa
+    ctx.drawImage(qrCanvas, 75, 145, 250, 250);
+
+    // Tarjeta informativa inferior
+    ctx.fillStyle = "#f8fafc";
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(35, 410, 330, 130, 12);
+      ctx.fill();
+      ctx.strokeStyle = "#e2e8f0";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else {
+      ctx.fillRect(35, 410, 330, 130);
+    }
+
+    ctx.fillStyle = "#059669";
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText("🛡️ MESA VERIFICADA • QR ANTI-SPOOFING", 200, 435);
+
+    ctx.fillStyle = "#334155";
+    ctx.font = "bold 12px sans-serif";
+    ctx.fillText("1. Escanea este código con tu cámara", 200, 462);
+    ctx.fillText("2. Elige tus platos y envía tu comanda", 200, 484);
+    ctx.fillText("3. Llama al mesero o pide la cuenta desde tu mesa", 200, 506);
+
+    // Pie
+    ctx.font = "normal 10px sans-serif";
+    ctx.fillStyle = "#94a3b8";
+    ctx.fillText("Desarrollado con MenuQR Pro", 200, 580);
+
+    // Descarga
+    try {
+      const pngUrl = posterCanvas.toDataURL("image/png");
+      const downloadLink = document.createElement("a");
+      downloadLink.href = pngUrl;
+      downloadLink.download = `QR-Mesa-${tableName}-${restaurant.slug}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+    } catch (e) {
+      console.error("Error al descargar póster de mesa:", e);
+    }
+  };
+
   const handleToggleDish = async (dishId: string, currentStatus: boolean) => {
     const res = await toggleDishAvailabilityAction(dishId, !currentStatus);
+    if (res && 'error' in res && res.error) {
+      alert(res.error);
+    } else {
+      window.location.reload();
+    }
+  };
+
+  const handleQuickUpdateStock = async (dishId: string, newStock: number) => {
+    const res = await quickUpdateDishStockAction(dishId, newStock);
     if (res && 'error' in res && res.error) {
       alert(res.error);
     } else {
@@ -2140,7 +2299,7 @@ export function AdminDashboard({
                         <div className="flex items-center gap-3 pt-1 text-[11px] text-amber-300/90 font-medium flex-wrap">
                           <span>📦 <strong>{testOrdersCount}</strong> pedidos de prueba registrados</span>
                           <span>•</span>
-                          <span>👁️ <strong>{testVisitsCount.toLocaleString()}</strong> visitas en pruebas</span>
+                          <span suppressHydrationWarning>👁️ <strong suppressHydrationWarning>{testVisitsCount.toLocaleString()}</strong> visitas en pruebas</span>
                         </div>
                       )}
                     </div>
@@ -2294,7 +2453,7 @@ export function AdminDashboard({
 
                   <div className="flex items-center gap-2 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 shrink-0">
                     <span className="text-xs text-slate-400 uppercase font-bold">Total Histórico:</span>
-                    <span className="text-lg font-black text-cyan-400">
+                    <span suppressHydrationWarning className="text-lg font-black text-cyan-400">
                       {(activeVisitStats?.total || 0).toLocaleString()}
                     </span>
                     <span className="text-[11px] text-slate-500">visitas</span>
@@ -2310,7 +2469,7 @@ export function AdminDashboard({
                         <Eye className="h-3.5 w-3.5" />
                       </span>
                     </div>
-                    <p className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.today || 0).toLocaleString()}</p>
+                    <p suppressHydrationWarning className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.today || 0).toLocaleString()}</p>
                     <span className="text-[10px] text-slate-500 block mt-1">Visitantes hoy en el menú</span>
                   </div>
 
@@ -2321,7 +2480,7 @@ export function AdminDashboard({
                         <Globe className="h-3.5 w-3.5" />
                       </span>
                     </div>
-                    <p className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.week || 0).toLocaleString()}</p>
+                    <p suppressHydrationWarning className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.week || 0).toLocaleString()}</p>
                     <span className="text-[10px] text-slate-500 block mt-1">Últimos 7 días</span>
                   </div>
 
@@ -2332,7 +2491,7 @@ export function AdminDashboard({
                         <Sparkles className="h-3.5 w-3.5" />
                       </span>
                     </div>
-                    <p className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.month || 0).toLocaleString()}</p>
+                    <p suppressHydrationWarning className="text-2xl font-black text-white mt-1.5">{(activeVisitStats?.month || 0).toLocaleString()}</p>
                     <span className="text-[10px] text-slate-500 block mt-1">Últimos 30 días</span>
                   </div>
                 </div>
@@ -2743,7 +2902,6 @@ export function AdminDashboard({
                 await updateRestaurantAction(restaurant.id, formData);
                 alert("Configuración del negocio actualizada correctamente.");
               }}
-              encType="multipart/form-data"
               className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 space-y-6 backdrop-blur-md"
             >
               {/* Selector de Giro de Negocio / Presets por Vertical */}
@@ -4497,6 +4655,9 @@ export function AdminDashboard({
                     setDishImageUrl("");
                     setDishAvailable(true);
                     setDishSuggested(false);
+                    setDishTrackStock(false);
+                    setDishStock("10");
+                    setDishMinStock("3");
                     setDishCatId(categoriesList[0]?.id || "");
                     setIsDishModalOpen(true);
                   }}
@@ -4507,6 +4668,119 @@ export function AdminDashboard({
                 </button>
               </div>
             </div>
+
+            {/* Resumen de Inventario y Control de Stock */}
+            {categoriesList.length > 0 && (
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 backdrop-blur-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                      <Package className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span>Control de Porciones e Inventario Diario</span>
+                        {lowStockDishesCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                            ⚠️ {lowStockDishesCount} en Stock Crítico
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Monitorea porciones disponibles, alertas de reposición y platos agotados en tiempo real.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Filtros rápidos por estado de stock */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setDishStockFilter("ALL")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                        dishStockFilter === "ALL"
+                          ? "bg-slate-700 text-white shadow-sm"
+                          : "bg-slate-950/70 text-slate-400 hover:text-white border border-slate-800"
+                      }`}
+                    >
+                      Todos ({allDishesList.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDishStockFilter("TRACKED")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                        dishStockFilter === "TRACKED"
+                          ? "bg-emerald-600 text-white shadow-sm"
+                          : "bg-emerald-950/20 text-emerald-400 hover:bg-emerald-900/30 border border-emerald-900/40"
+                      }`}
+                    >
+                      <Package className="h-3.5 w-3.5" />
+                      Con Stock ({trackedDishesCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDishStockFilter("LOW_STOCK")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                        dishStockFilter === "LOW_STOCK"
+                          ? "bg-amber-600 text-white shadow-sm"
+                          : "bg-amber-950/20 text-amber-300 hover:bg-amber-900/30 border border-amber-900/40"
+                      }`}
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Stock Crítico ({lowStockDishesCount})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDishStockFilter("OUT_OF_STOCK")}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                        dishStockFilter === "OUT_OF_STOCK"
+                          ? "bg-rose-600 text-white shadow-sm"
+                          : "bg-rose-950/20 text-rose-300 hover:bg-rose-900/30 border border-rose-900/40"
+                      }`}
+                    >
+                      <EyeOff className="h-3.5 w-3.5" />
+                      Agotados ({outOfStockDishesCount})
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3 KPI Cards de Inventario */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  <div className="bg-slate-950/80 border border-slate-800/80 p-3.5 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Porciones Disponibles</span>
+                      <p className="text-xl font-black text-emerald-400 mt-0.5">{totalStockUnits} porciones</p>
+                      <span className="text-[10px] text-slate-500">en {trackedDishesCount} platos monitoreados</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
+                      <Package className="h-5 w-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-slate-800/80 p-3.5 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Stock Crítico / Alerta</span>
+                      <p className="text-xl font-black text-amber-400 mt-0.5">{lowStockDishesCount} platos</p>
+                      <span className="text-[10px] text-slate-500">por debajo del stock mínimo</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
+                      <AlertTriangle className="h-5 w-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-slate-800/80 p-3.5 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Platos Agotados</span>
+                      <p className="text-xl font-black text-rose-400 mt-0.5">{outOfStockDishesCount} platos</p>
+                      <span className="text-[10px] text-slate-500">stock en 0 o desactivados</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-rose-500/10 text-rose-400">
+                      <EyeOff className="h-5 w-5" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {categoriesList.length === 0 ? (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 text-center text-amber-300">
@@ -4521,11 +4795,27 @@ export function AdminDashboard({
                       <span className="text-red-500">#</span> {cat.name}
                     </h3>
                     
-                    {cat.dishes.length === 0 ? (
-                      <p className="text-slate-500 text-xs italic">No hay platos en esta categoría.</p>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {cat.dishes.map((dish) => (
+                    {(() => {
+                      const displayedDishes = cat.dishes.filter((dish) => {
+                        if (dishStockFilter === "TRACKED") return Boolean(dish.trackStock);
+                        if (dishStockFilter === "LOW_STOCK") return Boolean(dish.trackStock) && (dish.stock ?? 0) <= (dish.minStock ?? 0) && (dish.stock ?? 0) > 0;
+                        if (dishStockFilter === "OUT_OF_STOCK") return !dish.isAvailable || (Boolean(dish.trackStock) && (dish.stock ?? 0) <= 0);
+                        return true;
+                      });
+
+                      if (displayedDishes.length === 0) {
+                        return (
+                          <p className="text-slate-500 text-xs italic">
+                            {cat.dishes.length === 0 
+                              ? "No hay platos en esta categoría." 
+                              : "No hay platos en esta categoría que coincidan con el filtro seleccionado."}
+                          </p>
+                        );
+                      }
+
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {displayedDishes.map((dish) => (
                           <div 
                             key={dish.id} 
                             className={`bg-slate-900/40 border rounded-2xl p-4 flex gap-4 transition-all ${
@@ -4573,6 +4863,53 @@ export function AdminDashboard({
                                     )}
                                   </button>
 
+                                  {/* Stock Badge & Quick Stepper if trackStock is true */}
+                                  {dish.trackStock && (
+                                    <div className="inline-flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-2 py-1 rounded-full text-xs">
+                                      {(dish.stock ?? 0) <= 0 ? (
+                                        <span className="flex items-center gap-1 text-[11px] font-bold text-rose-400">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                                          Agotado (0)
+                                        </span>
+                                      ) : (dish.stock ?? 0) <= (dish.minStock ?? 0) ? (
+                                        <span className="flex items-center gap-1 text-[11px] font-bold text-amber-400" title={`Alerta de stock mínimo: quedan ${dish.stock} porciones`}>
+                                          <AlertTriangle className="h-3 w-3 text-amber-400" />
+                                          Stock Crítico: {dish.stock}
+                                        </span>
+                                      ) : (
+                                        <span className="flex items-center gap-1 text-[11px] font-medium text-emerald-400">
+                                          <Package className="h-3 w-3 text-emerald-400" />
+                                          Stock: {dish.stock}
+                                        </span>
+                                      )}
+
+                                      <div className="flex items-center gap-0.5 border-l border-slate-800 pl-1">
+                                        <button
+                                          type="button"
+                                          title="Restar 1 porción"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleQuickUpdateStock(dish.id, Math.max(0, (dish.stock ?? 0) - 1));
+                                          }}
+                                          className="px-1 py-0.5 text-[10px] text-slate-400 hover:text-white hover:bg-slate-800 rounded font-bold transition"
+                                        >
+                                          -1
+                                        </button>
+                                        <button
+                                          type="button"
+                                          title="Reponer +5 porciones"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleQuickUpdateStock(dish.id, (dish.stock ?? 0) + 5);
+                                          }}
+                                          className="px-1 py-0.5 text-[10px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40 rounded font-bold transition"
+                                        >
+                                          +5
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+
                                   {/* Sugerido / Plato del Día toggle */}
                                   <button
                                     type="button"
@@ -4600,6 +4937,9 @@ export function AdminDashboard({
                                       setDishImageUrl(dish.imageUrl || "");
                                       setDishAvailable(dish.isAvailable);
                                       setDishSuggested(suggestedDishIds.includes(dish.id));
+                                      setDishTrackStock(Boolean(dish.trackStock));
+                                      setDishStock((dish.stock ?? 10).toString());
+                                      setDishMinStock((dish.minStock ?? 3).toString());
                                       setDishCatId(dish.categoryId);
                                       setIsDishModalOpen(true);
                                     }}
@@ -4629,7 +4969,8 @@ export function AdminDashboard({
                           </div>
                         ))}
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -4646,6 +4987,9 @@ export function AdminDashboard({
                     action={async (formData) => {
                       // Append explicitly isAvailable since toggle has client state
                       formData.append("isAvailable", dishAvailable.toString());
+                      formData.append("trackStock", dishTrackStock.toString());
+                      formData.append("stock", dishStock);
+                      formData.append("minStock", dishMinStock);
                       
                       if (editingDish) {
                         const res = await updateDishAction(editingDish.id, formData);
@@ -4814,6 +5158,58 @@ export function AdminDashboard({
                               : `Marcar como ${bLabels.itemSingle} Destacado / Oferta Recomendada`}
                           </span>
                         </label>
+                      </div>
+
+                      {/* Control de Stock Operativo */}
+                      <div className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label htmlFor="dishTrackStock" className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer">
+                            <Package className="h-4 w-4 text-amber-400" />
+                            <span>Controlar inventario / porciones diarias</span>
+                          </label>
+                          <input
+                            type="checkbox"
+                            id="dishTrackStock"
+                            checked={dishTrackStock}
+                            onChange={(e) => setDishTrackStock(e.target.checked)}
+                            className="h-4 w-4 text-amber-500 focus:ring-amber-400 border-slate-800 rounded bg-slate-900 cursor-pointer"
+                          />
+                        </div>
+
+                        {dishTrackStock && (
+                          <div className="pt-2 border-t border-slate-850/80 space-y-2.5">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                                  Stock disponible (porciones)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={dishStock}
+                                  onChange={(e) => setDishStock(e.target.value)}
+                                  className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-300 mb-1 flex items-center gap-1">
+                                  <AlertTriangle className="h-3 w-3 text-amber-400" />
+                                  Stock mínimo (alerta)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={dishMinStock}
+                                  onChange={(e) => setDishMinStock(e.target.value)}
+                                  className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-slate-400 leading-relaxed">
+                              💡 Si las porciones llegan a <strong>0</strong>, el plato se marcará automáticamente como <strong>Agotado</strong>. Al llegar al mínimo ({dishMinStock || 0}), verás una alerta visual preventiva.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -5437,107 +5833,549 @@ export function AdminDashboard({
         {/* Código QR Tab */}
         {activeTab === "qr" && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-white">Generador de Código QR</h2>
-              <p className="text-slate-400 text-sm">Descarga e imprime este código QR para colocar en las mesas. Al escanearlo, tus clientes verán el menú digital.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-              {/* QR display card */}
-              <div className="md:col-span-1 bg-white p-6 rounded-[2rem] flex flex-col items-center justify-center shadow-2xl relative overflow-hidden group border border-slate-100">
-                {restaurant.logoUrl && (
-                  <img 
-                    src={restaurant.logoUrl} 
-                    alt="" 
-                    className="absolute inset-0 w-full h-full object-cover filter blur-xl opacity-10 pointer-events-none scale-110"
-                  />
-                )}
-
-                {/* Dish thumbnails row */}
-                {dishBase64s.length > 0 && (
-                  <div className="flex gap-2 mb-4 z-10">
-                    {dishBase64s.map((src, idx) => (
-                      <div
-                        key={idx}
-                        className="h-14 w-14 rounded-2xl overflow-hidden border-2 border-slate-100 shadow-md shrink-0"
-                        style={{ boxShadow: `0 4px 12px -2px ${restaurant.themeColor}40` }}
-                      >
-                        <img src={src} alt="" className="w-full h-full object-cover" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Title */}
-                <div className="text-center mb-4 z-10">
-                  <span className="text-[9px] uppercase tracking-widest font-extrabold text-slate-400 block mb-0.5">Menú Digital</span>
-                  <h4 className="text-[11px] font-semibold text-slate-500">Escanea para ver el menú de</h4>
-                  <p className="text-base font-black mt-0.5" style={{ color: restaurant.themeColor }}>{restaurant.name}</p>
-                </div>
-
-                <div className="bg-white p-1.5 rounded-2xl border border-slate-200 z-10 shadow-sm">
-                  <QRCodeCanvas
-                    id="qr-canvas"
-                    value={publicUrl}
-                    size={180}
-                    level={"H"}
-                    includeMargin={true}
-                    imageSettings={logoBase64 ? {
-                      src: logoBase64,
-                      x: undefined,
-                      y: undefined,
-                      height: 36,
-                      width: 36,
-                      excavate: true,
-                    } : undefined}
-                  />
-                </div>
-                <button
-                  onClick={downloadQR}
-                  className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-xs font-black uppercase text-white bg-slate-900 hover:bg-slate-850 transition-all text-center z-10 shadow-md"
-                >
-                  Descargar para imprimir
-                </button>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <QrCode className="h-6 w-6 text-emerald-400" />
+                  Generador de Códigos QR
+                </h2>
+                <p className="text-slate-400 text-sm">
+                  Descarga e imprime códigos QR para colocar en las mesas o fachada. Incluye firma criptográfica anti-manipulación.
+                </p>
               </div>
 
-              {/* QR instructions and details */}
-              <div className="md:col-span-2 space-y-6 bg-slate-900/50 border border-slate-800/80 p-6 rounded-3xl backdrop-blur-md">
-                <div>
-                  <h3 className="font-bold text-white text-lg">Enlace del Menú</h3>
-                  <div className="mt-3 flex gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={publicUrl}
-                      className="w-full bg-slate-950 border border-slate-850 px-4 py-3 rounded-xl text-slate-300 text-sm focus:outline-none"
+              {/* Selector de Sub-pestañas */}
+              <div className="flex items-center gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-2xl shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setQrSubTab("general")}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                    qrSubTab === "general"
+                      ? "bg-slate-800 text-white shadow-sm"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <QrCode className="h-4 w-4 text-emerald-400" />
+                  <span>QR General del Menú</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQrSubTab("tables")}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                    qrSubTab === "tables"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Utensils className="h-4 w-4" />
+                  <span>QRs por Mesa</span>
+                  <span className="text-[10px] bg-black/30 text-white px-2 py-0.5 rounded-full font-black">
+                    {tablesList.length}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* SUB-PESTAÑA 1: QR GENERAL DEL NEGOCIO */}
+            {qrSubTab === "general" && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start animate-fade-in">
+                {/* QR display card */}
+                <div className="md:col-span-1 bg-white p-6 rounded-[2rem] flex flex-col items-center justify-center shadow-2xl relative overflow-hidden group border border-slate-100">
+                  {restaurant.logoUrl && (
+                    <img 
+                      src={restaurant.logoUrl} 
+                      alt="" 
+                      className="absolute inset-0 w-full h-full object-cover filter blur-xl opacity-10 pointer-events-none scale-110"
                     />
+                  )}
+
+                  {/* Dish thumbnails row */}
+                  {dishBase64s.length > 0 && (
+                    <div className="flex gap-2 mb-4 z-10">
+                      {dishBase64s.map((src, idx) => (
+                        <div
+                          key={idx}
+                          className="h-14 w-14 rounded-2xl overflow-hidden border-2 border-slate-100 shadow-md shrink-0"
+                          style={{ boxShadow: `0 4px 12px -2px ${restaurant.themeColor}40` }}
+                        >
+                          <img src={src} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {/* Title */}
+                  <div className="text-center mb-4 z-10">
+                    <span className="text-[9px] uppercase tracking-widest font-extrabold text-slate-400 block mb-0.5">Menú Digital</span>
+                    <h4 className="text-[11px] font-semibold text-slate-500">Escanea para ver el menú de</h4>
+                    <p className="text-base font-black mt-0.5" style={{ color: restaurant.themeColor }}>{restaurant.name}</p>
+                  </div>
+
+                  <div className="bg-white p-1.5 rounded-2xl border border-slate-200 z-10 shadow-sm">
+                    <QRCodeCanvas
+                      id="qr-canvas"
+                      value={publicUrl}
+                      size={180}
+                      level={"H"}
+                      includeMargin={true}
+                      imageSettings={logoBase64 ? {
+                        src: logoBase64,
+                        x: undefined,
+                        y: undefined,
+                        height: 36,
+                        width: 36,
+                        excavate: true,
+                      } : undefined}
+                    />
+                  </div>
+                  <button
+                    onClick={downloadQR}
+                    className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-xs font-black uppercase text-white bg-slate-900 hover:bg-slate-850 transition-all text-center z-10 shadow-md"
+                  >
+                    Descargar para imprimir
+                  </button>
+                </div>
+
+                {/* QR instructions and details */}
+                <div className="md:col-span-2 space-y-6 bg-slate-900/50 border border-slate-800/80 p-6 rounded-3xl backdrop-blur-md">
+                  <div>
+                    <h3 className="font-bold text-white text-lg">Enlace del Menú</h3>
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={publicUrl}
+                        className="w-full bg-slate-950 border border-slate-850 px-4 py-3 rounded-xl text-slate-300 text-sm focus:outline-none"
+                      />
+                      <button
+                        onClick={handleCopyLink}
+                        className="px-4 py-3 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-750 transition flex items-center gap-1.5 shrink-0"
+                      >
+                        {copied ? (
+                          <>
+                            <Check className="h-4 w-4 text-green-400" />
+                            Copiado
+                          </>
+                        ) : (
+                          "Copiar Enlace"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-800/80 pt-6 space-y-4 text-sm text-slate-300">
+                    <h4 className="font-bold text-white">¿Cómo funciona?</h4>
+                    <ul className="list-disc pl-5 space-y-2 text-slate-400">
+                      <li>Coloca el código QR en un portarretratos, sticker o en las mesas de tu restaurante.</li>
+                      <li>Los comensales lo escanean con su teléfono celular sin descargar aplicaciones.</li>
+                      <li>Arman su pedido directamente en la web seleccionando los platos de tu carta.</li>
+                      <li>El pedido se envía formateado a tu WhatsApp de forma instantánea.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUB-PESTAÑA 2: QRS INDIVIDUALES POR MESA CON TOKEN CRIPTOGRÁFICO Y BATCH PRINT */}
+            {qrSubTab === "tables" && (
+              <div className="space-y-6 animate-fade-in">
+                {/* Table selector & Batch Print Toolbar */}
+                <div className="bg-slate-900/60 border border-slate-800/80 p-4 sm:p-5 rounded-3xl backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Seguridad Criptográfica Anti-Tamper Activa
+                    </span>
+                    <h3 className="text-base font-bold text-white">Gestión de Códigos QR por Mesa</h3>
+                    <p className="text-xs text-slate-400">
+                      Cada código contiene una firma HMAC. Si un cliente altera la URL para pedir a nombre de otra mesa, queda sin verificar.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 flex-wrap">
                     <button
-                      onClick={handleCopyLink}
-                      className="px-4 py-3 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-750 transition flex items-center gap-1.5 shrink-0"
+                      type="button"
+                      onClick={() => setIsBatchPrinting(true)}
+                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/40 transition active:scale-95 flex items-center gap-2"
                     >
-                      {copied ? (
-                        <>
-                          <Check className="h-4 w-4 text-green-400" />
-                          Copiado
-                        </>
-                      ) : (
-                        "Copiar Enlace"
-                      )}
+                      <Printer className="h-4 w-4" />
+                      <span>Imprimir Salón Completo (A4)</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="border-t border-slate-800/80 pt-6 space-y-4 text-sm text-slate-300">
-                  <h4 className="font-bold text-white">¿Cómo funciona?</h4>
-                  <ul className="list-disc pl-5 space-y-2 text-slate-400">
-                    <li>Coloca el código QR en un portarretratos, sticker o en las mesas de tu restaurante.</li>
-                    <li>Los comensales lo escanean con su teléfono celular sin descargar aplicaciones.</li>
-                    <li>Arman su pedido directamente en la web seleccionando los platos de tu carta.</li>
-                    <li>El pedido se envía formateado a tu WhatsApp de forma instantánea.</li>
-                  </ul>
+                {/* Table Pills / Quick Switcher */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+                  {tablesList.map((tbl) => {
+                    const isSelected = tbl === activeTableForQr;
+                    return (
+                      <button
+                        key={tbl}
+                        type="button"
+                        onClick={() => setSelectedQrTable(tbl)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold shrink-0 transition flex items-center gap-1.5 ${
+                          isSelected
+                            ? "bg-emerald-500 text-slate-950 shadow-md font-black"
+                            : "bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800"
+                        }`}
+                      >
+                        <span>🪑 Mesa #{tbl}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Main Table Preview & Details Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+                  {/* Card Display for Table */}
+                  <div className="md:col-span-1 bg-white p-6 rounded-[2rem] flex flex-col items-center justify-center shadow-2xl relative overflow-hidden group border border-slate-100">
+                    {/* Header */}
+                    <div className="text-center mb-3 z-10 w-full">
+                      <span className="text-[10px] uppercase tracking-widest font-extrabold text-slate-400 block mb-0.5">
+                        Menú Digital en Mesa
+                      </span>
+                      <div 
+                        className="inline-block text-white px-4 py-1 rounded-xl text-sm font-black mb-1.5 shadow-sm"
+                        style={{ backgroundColor: restaurant.themeColor || "#0f172a" }}
+                      >
+                        MESA #{activeTableForQr}
+                      </div>
+                      <p className="text-xs font-bold text-slate-600 truncate">{restaurant.name}</p>
+                    </div>
+
+                    {/* QR Canvas */}
+                    <div className="bg-white p-2 rounded-2xl border-2 border-slate-200 z-10 shadow-sm relative">
+                      <QRCodeCanvas
+                        id={`qr-canvas-table-${activeTableForQr}`}
+                        value={activeTableQrUrl}
+                        size={190}
+                        level={"H"}
+                        includeMargin={true}
+                        imageSettings={logoBase64 ? {
+                          src: logoBase64,
+                          x: undefined,
+                          y: undefined,
+                          height: 36,
+                          width: 36,
+                          excavate: true,
+                        } : undefined}
+                      />
+                    </div>
+
+                    {/* Token chip */}
+                    <div className="mt-3 py-1 px-3 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-mono font-bold flex items-center gap-1 z-10">
+                      <ShieldCheck className="h-3 w-3 text-emerald-600" />
+                      <span>Token: {generateTableToken(restaurant.id, activeTableForQr)}</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => downloadTableQR(activeTableForQr)}
+                      className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-xs font-black uppercase text-white bg-slate-900 hover:bg-slate-800 transition-all text-center z-10 shadow-md"
+                    >
+                      <Download className="h-4 w-4 text-emerald-400" />
+                      Descargar Póster Mesa #{activeTableForQr}
+                    </button>
+                  </div>
+
+                  {/* Details, Links & Table Hub Info */}
+                  <div className="md:col-span-2 space-y-5 bg-slate-900/50 border border-slate-800/80 p-6 rounded-3xl backdrop-blur-md">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-bold text-white text-base flex items-center gap-2">
+                          <span>Enlace Seguro de Mesa #{activeTableForQr}</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Verificado
+                          </span>
+                        </h4>
+                        <a
+                          href={activeTableQrUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold transition"
+                        >
+                          Probar en Menú
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={activeTableQrUrl}
+                          className="w-full bg-slate-950 border border-slate-850 px-4 py-2.5 rounded-xl text-slate-300 font-mono text-xs focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleCopyTableLink(activeTableQrUrl)}
+                          className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-750 transition flex items-center gap-1.5 shrink-0"
+                        >
+                          {copiedTableLink ? (
+                            <>
+                              <Check className="h-4 w-4 text-green-400" />
+                              Copiado
+                            </>
+                          ) : (
+                            "Copiar"
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                      <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-1">
+                        <span className="text-emerald-400 text-xs font-black flex items-center gap-1">
+                          <ShieldCheck className="h-3.5 w-3.5" /> Anti-Spoofing
+                        </span>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          La URL contiene una firma determinística. Si alguien cambia el número de mesa manualmente, queda sin verificar.
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-1">
+                        <span className="text-amber-400 text-xs font-black flex items-center gap-1">
+                          <Utensils className="h-3.5 w-3.5" /> Comanda y Rondas
+                        </span>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          El comensal puede agregar rondas adicionales a la misma mesa sin duplicar comensales en cocina.
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-1">
+                        <span className="text-blue-400 text-xs font-black flex items-center gap-1">
+                          <DollarSign className="h-3.5 w-3.5" /> Cuenta y Mesero
+                        </span>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Botones para alertar al mesero con sonido y solicitar la cuenta dividida en partes iguales o por platos.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Todas las mesas en lista rápida */}
+                    <div className="border-t border-slate-800/80 pt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h5 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                          Catálogo de Mesas ({tablesList.length})
+                        </h5>
+                        <button
+                          type="button"
+                          onClick={() => setIsBatchPrinting(true)}
+                          className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
+                        >
+                          <Printer className="h-3.5 w-3.5" />
+                          Imprimir todas en A4
+                        </button>
+                      </div>
+
+                      <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                        {tablesList.map((tbl) => {
+                          const tblUrl = buildTableQrUrl(isMounted && typeof window !== "undefined" ? window.location.origin : "", restaurant.slug, tbl, restaurant.id);
+                          const token = generateTableToken(restaurant.id, tbl);
+                          const isCurrent = tbl === activeTableForQr;
+                          return (
+                            <div
+                              key={tbl}
+                              className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border transition ${
+                                isCurrent
+                                  ? "bg-emerald-950/30 border-emerald-500/40 text-white"
+                                  : "bg-slate-950/50 border-slate-850 text-slate-300 hover:border-slate-700"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-bold text-xs shrink-0 px-2 py-0.5 rounded-lg bg-slate-800 text-emerald-400">
+                                  #{tbl}
+                                </span>
+                                <span className="text-xs font-mono text-slate-400 truncate text-[11px]">
+                                  Token: {token}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedQrTable(tbl)}
+                                  className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+                                >
+                                  Ver
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyTableLink(tblUrl)}
+                                  className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+                                  title="Copiar enlace directo"
+                                >
+                                  Copiar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadTableQR(tbl)}
+                                  className="px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1"
+                                  title="Descargar póster individual"
+                                >
+                                  <Download className="h-3 w-3" />
+                                  PNG
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hidden canvases for non-selected tables so individual download or batch generation works reliably */}
+                <div className="hidden" aria-hidden="true">
+                  {tablesList.map((tbl) => {
+                    if (tbl === activeTableForQr) return null;
+                    const tblUrl = buildTableQrUrl(isMounted && typeof window !== "undefined" ? window.location.origin : "", restaurant.slug, tbl, restaurant.id);
+                    return (
+                      <QRCodeCanvas
+                        key={tbl}
+                        id={`qr-canvas-table-${tbl}`}
+                        value={tblUrl}
+                        size={190}
+                        level={"H"}
+                        includeMargin={true}
+                        imageSettings={logoBase64 ? {
+                          src: logoBase64,
+                          x: undefined,
+                          y: undefined,
+                          height: 36,
+                          width: 36,
+                          excavate: true,
+                        } : undefined}
+                      />
+                    );
+                  })}
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* MODAL DE IMPRESIÓN POR LOTES EN HOJA A4 */}
+            {isBatchPrinting && (
+              <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md overflow-y-auto p-4 sm:p-6 flex flex-col items-center">
+                {/* Print Toolbar (Hidden on actual print) */}
+                <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 p-4 rounded-2xl flex items-center justify-between gap-4 mb-6 sticky top-2 z-50 shadow-2xl print:hidden">
+                  <div>
+                    <h3 className="font-bold text-white text-base flex items-center gap-2">
+                      <Printer className="h-5 w-5 text-emerald-400" />
+                      Plantilla de Impresión de Salón A4 ({tablesList.length} Mesas)
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Optimizado para portarretratos de acrílico o stickers con marcas de corte punteadas.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 active:scale-95"
+                    >
+                      <Printer className="h-4 w-4" />
+                      <span>Imprimir Ahora</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsBatchPrinting(false)}
+                      className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+                </div>
+
+                {/* Printable Canvas Sheet */}
+                <div id="print-table-batch" className="w-full max-w-4xl bg-white text-slate-950 p-6 sm:p-8 rounded-3xl shadow-2xl print:shadow-none print:p-0 print:m-0 print:max-w-none print:w-full">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-6 print:grid-cols-2 print:gap-4">
+                    {tablesList.map((tbl) => {
+                      const tblUrl = buildTableQrUrl(isMounted && typeof window !== "undefined" ? window.location.origin : "", restaurant.slug, tbl, restaurant.id);
+                      const token = generateTableToken(restaurant.id, tbl);
+                      return (
+                        <div
+                          key={tbl}
+                          className="border-2 border-dashed border-slate-300 rounded-2xl p-4 flex flex-col items-center justify-between text-center bg-white page-break-inside-avoid relative"
+                          style={{ minHeight: "310px" }}
+                        >
+                          {/* Top Header */}
+                          <div>
+                            <span className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 block mb-0.5">
+                              Menú Digital
+                            </span>
+                            <h4 className="text-sm font-black text-slate-900 truncate" style={{ color: restaurant.themeColor || "#0f172a" }}>
+                              {restaurant.name}
+                            </h4>
+                            <div className="mt-1 inline-block bg-slate-900 text-white text-xs font-black px-3 py-0.5 rounded-lg shadow-sm">
+                              MESA #{tbl}
+                            </div>
+                          </div>
+
+                          {/* QR Code */}
+                          <div className="my-2 bg-white p-1 rounded-xl border border-slate-200">
+                            <QRCodeCanvas
+                              value={tblUrl}
+                              size={140}
+                              level={"H"}
+                              includeMargin={true}
+                              imageSettings={logoBase64 ? {
+                                src: logoBase64,
+                                x: undefined,
+                                y: undefined,
+                                height: 28,
+                                width: 28,
+                                excavate: true,
+                              } : undefined}
+                            />
+                          </div>
+
+                          {/* Instructions & Security Token */}
+                          <div className="w-full">
+                            <p className="text-[10px] font-bold text-slate-700 leading-tight mb-1">
+                              Escanea para ordenar y pedir la cuenta
+                            </p>
+                            <div className="flex items-center justify-between text-[8px] text-slate-400 border-t border-slate-100 pt-1 font-mono">
+                              <span>Token: {token}</span>
+                              <span>MenuQR Pro</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Print Stylesheet */}
+                <style dangerouslySetInnerHTML={{ __html: `
+                  @media print {
+                    body {
+                      background: #ffffff !important;
+                      color: #000000 !important;
+                    }
+                    body * {
+                      visibility: hidden;
+                    }
+                    #print-table-batch, #print-table-batch * {
+                      visibility: visible;
+                    }
+                    #print-table-batch {
+                      position: absolute;
+                      left: 0;
+                      top: 0;
+                      width: 100% !important;
+                      max-width: 100% !important;
+                      padding: 0 !important;
+                      margin: 0 !important;
+                    }
+                    .page-break-inside-avoid {
+                      break-inside: avoid;
+                      page-break-inside: avoid;
+                    }
+                  }
+                `}} />
+              </div>
+            )}
           </div>
         )}
 
@@ -5545,6 +6383,16 @@ export function AdminDashboard({
         {activeTab === "whatsapp" && restaurant.whatsappBotEnabled && (
           <div className="space-y-6 animate-fade-in">
             <WhatsAppConnectTab
+              restaurantId={restaurant.id}
+              restaurantSlug={restaurant.slug}
+            />
+          </div>
+        )}
+
+        {/* Asistente IA (BYOK) Tab */}
+        {activeTab === "ai-settings" && (
+          <div className="space-y-6 animate-fade-in">
+            <AISettingsTab
               restaurantId={restaurant.id}
               restaurantSlug={restaurant.slug}
             />
@@ -5662,7 +6510,7 @@ export function AdminDashboard({
                           <td className="py-3.5 uppercase font-medium text-[10px]">
                             {order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
                           </td>
-                          <td className="py-3.5 text-slate-400">
+                          <td suppressHydrationWarning className="py-3.5 text-slate-400">
                             {new Date(order.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
                           </td>
                           <td className="py-3.5">
@@ -5830,7 +6678,7 @@ export function AdminDashboard({
                         <Award className="h-3.5 w-3.5" />
                       </span>
                     </div>
-                    <p className="text-2xl font-black text-emerald-400 mt-1">{totalPointsSum.toLocaleString()} pts</p>
+                    <p suppressHydrationWarning className="text-2xl font-black text-emerald-400 mt-1">{totalPointsSum.toLocaleString()} pts</p>
                     <span className="text-[10px] text-slate-500 block mt-0.5">Emitidos en el sistema</span>
                   </div>
                 </div>

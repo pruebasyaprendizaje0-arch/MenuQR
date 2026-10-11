@@ -126,6 +126,7 @@ model Restaurant {
   whatsappSession WhatsAppSession?
   whatsappLogs   WhatsAppLog[]
   whatsappInstance WhatsAppInstance?
+  whatsappTemplates WhatsAppTemplate[]
   whatsappBotEnabled Boolean @default(true)
   aiProvider        String?    @default("NONE") // "NONE" | "OPENAI" | "GEMINI"
   aiApiKey          String?
@@ -169,6 +170,8 @@ model Dish {
   // Campos de producto/servicio para comercio
   sku          String?
   stock        Int?
+  minStock     Int?       @default(0)
+  trackStock   Boolean    @default(false)
   isService    Boolean    @default(false)
   variants     String?    @db.Text
 
@@ -552,6 +555,22 @@ model WhatsAppInstance {
 
   @@index([restaurantId])
   @@index([instanceName])
+}
+
+model WhatsAppTemplate {
+  id           String     @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  key          String     // "welcome", "option_1", "option_2", etc.
+  title        String     // Título visible para el negocio
+  trigger      String?    // Palabras clave o números separados por comas
+  content      String     @db.Text
+  order        Int        @default(0)
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([restaurantId])
 }
 
 
