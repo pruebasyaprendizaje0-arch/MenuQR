@@ -46,12 +46,15 @@ export default function CatalogosLandingPage() {
             </Link>
 
             {/* Navigation Context Switcher */}
-            <div className="hidden md:inline-flex p-1 bg-slate-900 rounded-full border border-slate-800 text-xs font-semibold">
+            <div className="hidden md:inline-flex p-1 bg-slate-900 rounded-full border border-slate-800 text-xs font-semibold gap-1">
               <Link href="/" className="px-4 py-1.5 rounded-full text-slate-400 hover:text-white transition">
                 🍔 Para Restaurantes
               </Link>
               <Link href="/catalogos" className="px-4 py-1.5 rounded-full bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20">
                 🛍️ Para Tiendas y Comercios
+              </Link>
+              <Link href="/marketplace" className="px-4 py-1.5 rounded-full text-amber-400 hover:text-amber-300 font-bold transition flex items-center gap-1">
+                ✨ Marketplace
               </Link>
             </div>
           </div>

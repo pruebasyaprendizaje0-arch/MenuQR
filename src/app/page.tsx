@@ -3,6 +3,8 @@ import { UtensilsCrossed, Sparkles, QrCode, MessageSquare, ShieldCheck, ArrowRig
 import { prismaControl, prismaTenant } from "@/lib/db";
 import { LandingSearch } from "./components/LandingSearch";
 import { ScrollVideoBackground } from "./components/ScrollVideoBackground";
+import { MarketplaceShowcase } from "./components/MarketplaceShowcase";
+import { getMarketplaceDishesAction } from "@/lib/suggested-dishes-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +22,10 @@ export default async function LandingPage() {
         locality: true,
         description: true,
         themeColor: true,
+        latitude: true,
+        longitude: true,
+        parish: true,
+        sector: true,
       },
       orderBy: {
         createdAt: "desc",
@@ -28,6 +34,21 @@ export default async function LandingPage() {
   } catch (error) {
     console.error("Error fetching restaurants on root landing page:", error);
     restaurants = [];
+  }
+
+  // Query Marketplace suggested dishes & products
+  let marketplaceData = { dishes: [] as any[], total: 0, restaurantCount: 0, storeCount: 0 };
+  try {
+    const mRes = await getMarketplaceDishesAction({
+      type: "all",
+      onlySuggested: true,
+      limit: 8,
+    });
+    if (mRes.success) {
+      marketplaceData = mRes;
+    }
+  } catch (error) {
+    console.warn("Error fetching marketplace data for landing:", error);
   }
 
   let whatsappSupport = "";
@@ -115,18 +136,24 @@ export default async function LandingPage() {
           </div>
 
           {/* Cross-navigation Context Switcher */}
-          <div className="hidden md:inline-flex p-1 bg-slate-900/90 rounded-full border border-slate-800 text-xs font-semibold">
+          <div className="hidden md:inline-flex p-1 bg-slate-900/90 rounded-full border border-slate-800 text-xs font-semibold gap-1">
             <Link href="/" className="px-4 py-1.5 rounded-full bg-red-600 text-white font-bold shadow-md shadow-red-600/20">
               🍔 Para Restaurantes
             </Link>
             <Link href="/catalogos" className="px-4 py-1.5 rounded-full text-slate-400 hover:text-white transition">
               🛍️ Para Tiendas y Comercios
             </Link>
+            <Link href="/marketplace" className="px-4 py-1.5 rounded-full text-amber-400 hover:text-amber-300 font-bold transition flex items-center gap-1">
+              ✨ Marketplace
+            </Link>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <Link href="/catalogos" className="md:hidden text-xs font-semibold text-amber-400 hover:underline">
+          <Link href="/marketplace" className="text-xs font-bold text-amber-400 hover:underline flex items-center gap-1">
+            ✨ Marketplace
+          </Link>
+          <Link href="/catalogos" className="md:hidden text-xs font-semibold text-slate-300 hover:underline">
             Comercios
           </Link>
           <Link 
@@ -179,11 +206,20 @@ export default async function LandingPage() {
         {/* Dedicated Spacing Block: Exposes the full-screen background video in the center */}
         <div className="py-20 md:py-36 w-full pointer-events-none"></div>
 
+        {/* Vitrina de Platos y Productos Sugeridos (Marketplace Showcase) */}
+        {marketplaceData.dishes.length > 0 && (
+          <MarketplaceShowcase
+            initialDishes={marketplaceData.dishes}
+            restaurantCount={marketplaceData.restaurantCount}
+            storeCount={marketplaceData.storeCount}
+          />
+        )}
+
         {/* Directory Search & Filter Section */}
         <div className="w-full space-y-6 pt-4">
-          <div className="flex items-center justify-center gap-2 text-amber-500 text-xs font-black uppercase tracking-widest">
-            <Sparkles className="h-4 w-4" />
-            <span>Negocios Registrados ({restaurants.length})</span>
+          <div className="flex items-center justify-center gap-2 text-amber-400 text-xs font-black uppercase tracking-widest">
+            <Sparkles className="h-4 w-4 text-amber-400" />
+            <span>Directorio de Restaurantes y Menús Digitales</span>
           </div>
 
           <LandingSearch restaurants={restaurants} />
@@ -191,32 +227,32 @@ export default async function LandingPage() {
 
         {/* Features grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full text-left pt-12">
-          <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-4 hover:border-red-500/30 transition duration-300">
-            <div className="h-12 w-12 bg-red-950/50 border border-red-900/50 rounded-2xl flex items-center justify-center text-red-500">
+          <div className="bg-slate-900/95 border border-slate-700/80 p-6 rounded-3xl space-y-4 hover:border-red-500/50 shadow-xl backdrop-blur-xl transition duration-300">
+            <div className="h-12 w-12 bg-red-950/70 border border-red-800/60 rounded-2xl flex items-center justify-center text-red-400">
               <QrCode className="h-6 w-6" />
             </div>
             <h3 className="font-extrabold text-white text-lg">Códigos QR Ilimitados</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
+            <p className="text-slate-300 text-xs leading-relaxed">
               Genera e imprime códigos QR para cada mesa o punto de venta. Tus clientes escanean y ven el menú al instante sin descargar apps.
             </p>
           </div>
 
-          <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-4 hover:border-amber-500/30 transition duration-300">
-            <div className="h-12 w-12 bg-amber-950/50 border border-amber-900/50 rounded-2xl flex items-center justify-center text-amber-500">
+          <div className="bg-slate-900/95 border border-slate-700/80 p-6 rounded-3xl space-y-4 hover:border-amber-500/50 shadow-xl backdrop-blur-xl transition duration-300">
+            <div className="h-12 w-12 bg-amber-950/70 border border-amber-800/60 rounded-2xl flex items-center justify-center text-amber-400">
               <MessageSquare className="h-6 w-6" />
             </div>
             <h3 className="font-extrabold text-white text-lg">Pedidos a tu WhatsApp</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
+            <p className="text-slate-300 text-xs leading-relaxed">
               El cliente arma su carrito de compras y te envía el pedido formateado con detalle, número de mesa, recargos y total directo a tu número.
             </p>
           </div>
 
-          <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-4 hover:border-orange-500/30 transition duration-300">
-            <div className="h-12 w-12 bg-orange-950/50 border border-orange-900/50 rounded-2xl flex items-center justify-center text-orange-500">
+          <div className="bg-slate-900/95 border border-slate-700/80 p-6 rounded-3xl space-y-4 hover:border-orange-500/50 shadow-xl backdrop-blur-xl transition duration-300">
+            <div className="h-12 w-12 bg-orange-950/70 border border-orange-800/60 rounded-2xl flex items-center justify-center text-orange-400">
               <ShieldCheck className="h-6 w-6" />
             </div>
             <h3 className="font-extrabold text-white text-lg">Panel de Gestión Fácil</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
+            <p className="text-slate-300 text-xs leading-relaxed">
               Administra tus categorías, productos, precios, fotos, horarios y datos bancarios desde un panel intuitivo sin depender de programadores.
             </p>
           </div>

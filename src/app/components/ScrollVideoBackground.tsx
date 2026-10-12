@@ -66,7 +66,7 @@ export function ScrollVideoBackground() {
         style={{ filter: "contrast(1.05) brightness(0.9)" }}
       />
       {/* Subtle overlay to prevent harsh contrast but keep video bright */}
-      <div className="absolute inset-0 bg-gradient-to-b from-slate-950/75 via-transparent to-slate-950/85 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-slate-950/80 via-slate-950/50 to-slate-950/90 pointer-events-none" />
     </div>
   );
 }
