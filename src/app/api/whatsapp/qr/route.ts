@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getOrInitWhatsAppSocket, disconnectWhatsApp } from "@/lib/whatsapp-native";
+import { 
+  getOrInitWhatsAppSocket, 
+  disconnectWhatsApp, 
+  isWhatsAppSocketActive 
+} from "@/lib/whatsapp-native";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -43,11 +47,34 @@ export async function GET(req: NextRequest) {
       where: { restaurantId },
     });
 
-    // Si el panel admin entra y la sesión está desconectada, inicializamos el socket para generar el QR
-    if (autoInit && (!session || session.status === "DISCONNECTED")) {
-      getOrInitWhatsAppSocket(restaurantId).catch((err) => {
+    const isSocketAlive = isWhatsAppSocketActive(restaurantId);
+    const isQrStale = Boolean(
+      session?.qr && 
+      session.updatedAt && 
+      (Date.now() - new Date(session.updatedAt).getTime() > 75000)
+    );
+
+    // Detección proactiva de inicialización necesaria:
+    // 1. No existe sesión o está explícitamente DISCONNECTED.
+    // 2. Existe sesión con credenciales autenticadas pero el socket en memoria murió por reinicio de servidor (rehidratar).
+    // 3. La sesión está pendiente de vincular pero no hay socket vivo o el QR expiró (> 75s).
+    const needsInit = autoInit && (
+      !session ||
+      session.status === "DISCONNECTED" ||
+      (session.creds && !isSocketAlive) ||
+      (!session.creds && (!isSocketAlive || isQrStale))
+    );
+
+    if (needsInit) {
+      const forceFresh = !session?.creds && (!isSocketAlive || isQrStale);
+      getOrInitWhatsAppSocket(restaurantId, forceFresh).catch((err) => {
         console.error(`[WhatsApp API] Error inicializando socket para ${restaurantId}:`, err);
       });
+
+      // Pausa breve de 500ms para permitir que Baileys emita el primer evento si es nuevo QR
+      if (forceFresh) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
 
       // Refrescar el registro de inmediato
       session = await prisma.whatsAppSession.findUnique({
@@ -55,15 +82,25 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Normalizar status para la vista: si el QR caducó y no hay socket, indicar que está conectando
+    let reportedStatus = session?.status || "DISCONNECTED";
+    let reportedQr = session?.qr || null;
+
+    if (reportedStatus === "QR_READY" && isQrStale && !isWhatsAppSocketActive(restaurantId)) {
+      reportedStatus = "CONNECTING";
+      reportedQr = null;
+    }
+
     return NextResponse.json({
       success: true,
       restaurantId,
       restaurantName: restaurant.name,
       restaurantSlug: restaurant.slug,
-      status: session?.status || "DISCONNECTED",
-      qr: session?.qr || null,
+      status: reportedStatus,
+      qr: reportedQr,
       phoneNumber: session?.phoneNumber || null,
       updatedAt: session?.updatedAt || null,
+      isSocketAlive: isWhatsAppSocketActive(restaurantId),
     });
   } catch (error: any) {
     console.error("[WhatsApp API GET] Error:", error);
@@ -113,6 +150,9 @@ export async function POST(req: NextRequest) {
 
     if (action === "connect" || action === "restart") {
       await getOrInitWhatsAppSocket(restaurantId, true);
+      // Breve espera de 800ms para permitir que Baileys emita el primer QR
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
       const session = await prisma.whatsAppSession.findUnique({
         where: { restaurantId },
       });
@@ -120,6 +160,7 @@ export async function POST(req: NextRequest) {
         success: true,
         status: session?.status || "CONNECTING",
         qr: session?.qr || null,
+        isSocketAlive: isWhatsAppSocketActive(restaurantId),
       });
     }
 

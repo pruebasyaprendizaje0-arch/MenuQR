@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, Fragment } from "react";
 import { getBusinessLabels } from "@/lib/business-labels";
 import { 
   logoutUserAction, 
@@ -109,10 +109,14 @@ import {
   Package,
   AlertTriangle,
   Printer,
-  ShieldCheck
+  ShieldCheck,
+  Boxes,
+  Receipt
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
+import InventoryAdminTab from "./InventoryAdminTab";
+import OrderTicketModal from "./OrderTicketModal";
 import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
 import { AISettingsTab } from "./AISettingsTab";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
@@ -152,6 +156,9 @@ type Dish = {
   imageUrl: string | null;
   isAvailable: boolean;
   categoryId: string;
+  sku?: string | null;
+  barcode?: string | null;
+  costPrice?: number | null;
   stock?: number | null;
   minStock?: number | null;
   trackStock?: boolean;
@@ -187,6 +194,9 @@ type Order = {
   iva: number;
   serviceCharge: number;
   tip: number;
+  deliveryCost?: number;
+  couponCode?: string | null;
+  discountAmount?: number;
   total: number;
   paymentMethod: string;
   isTest?: boolean;
@@ -523,7 +533,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription" | "ai-settings">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription" | "ai-settings">("metrics");
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
@@ -540,6 +550,122 @@ export function AdminDashboard({
   const [exportDataSource, setExportDataSource] = useState<"REAL" | "TEST" | "ALL">("REAL");
   const [exportTimeframe, setExportTimeframe] = useState<"ALL" | "MONTH" | "WEEK" | "TODAY">("ALL");
   const [exportSuccessMsg, setExportSuccessMsg] = useState("");
+
+  // --- Estados de Desglose de Pedidos y Ticket / Comanda ---
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [ticketModalOrder, setTicketModalOrder] = useState<Order | null>(null);
+
+  const handlePrintThermalReceipt = (order: Order) => {
+    const printWindow = window.open("", "_blank", "width=420,height=650");
+    if (!printWindow) {
+      alert("Por favor habilita las ventanas emergentes (pop-ups) en tu navegador para imprimir el ticket.");
+      return;
+    }
+    const formattedDate = new Date(order.createdAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    const channelLabel = order.tableName === "Llevar" 
+      ? "🛍 PARA LLEVAR" 
+      : order.tableName === "Domicilio" 
+        ? "🛵 A DOMICILIO" 
+        : `🪑 MESA #${order.tableName}`;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8"/>
+          <title>Ticket #${order.orderNumber || order.id.slice(0, 6)}</title>
+          <style>
+            @page { margin: 0; size: 80mm auto; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+              width: 76mm;
+              margin: 0 auto;
+              padding: 8px 4px;
+              color: #000;
+              font-size: 11px;
+              line-height: 1.3;
+            }
+            .center { text-align: center; }
+            .right { text-align: right; }
+            .bold { font-weight: bold; }
+            .dashed { border-top: 1px dashed #000; margin: 6px 0; }
+            .double { border-top: 2px solid #000; margin: 6px 0; }
+            .flex { display: flex; justify-content: space-between; }
+            .title { font-size: 15px; font-weight: bold; text-transform: uppercase; }
+            .channel-badge {
+              font-size: 13px;
+              font-weight: bold;
+              border: 1.5px solid #000;
+              padding: 3px 6px;
+              display: inline-block;
+              margin: 4px 0;
+              border-radius: 4px;
+            }
+            .item-row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 12px; }
+            .item-name { max-width: 52mm; word-break: break-word; }
+            .total-row { font-size: 15px; font-weight: bold; margin: 4px 0; }
+            @media print {
+              body { width: 100%; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="center">
+            <div class="title">${restaurant.name}</div>
+            <div>${formattedDate}</div>
+            <div class="channel-badge">${channelLabel}</div>
+            <div class="bold" style="font-size: 13px;">ORDEN #${order.orderNumber || order.id.slice(0, 6)}</div>
+          </div>
+
+          <div class="dashed"></div>
+
+          ${order.customerName ? `<div><strong>Cliente:</strong> ${order.customerName}</div>` : ""}
+          ${order.customerPhone ? `<div><strong>Teléfono:</strong> ${order.customerPhone}</div>` : ""}
+          ${order.customerAddress ? `<div><strong>Dirección:</strong> ${order.customerAddress}</div>` : ""}
+          <div><strong>Método de Pago:</strong> ${order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Transferencia"}</div>
+
+          <div class="dashed"></div>
+          <div class="bold item-row" style="font-size: 10px; text-transform: uppercase;">
+            <span>CANT / PRODUCTO</span>
+            <span>TOTAL</span>
+          </div>
+          <div class="dashed"></div>
+
+          ${(order.items || []).map((it) => `
+            <div class="item-row">
+              <span class="item-name"><strong>${it.quantity}x</strong> ${it.dishName}</span>
+              <span class="right bold">$${(it.price * it.quantity).toFixed(2)}</span>
+            </div>
+          `).join("")}
+
+          <div class="dashed"></div>
+
+          <div class="flex"><span>Subtotal:</span><span>$${Number(order.subtotal || 0).toFixed(2)}</span></div>
+          ${(order.deliveryCost || 0) > 0 ? `<div class="flex"><span>Envío / Delivery:</span><span>+$${Number(order.deliveryCost).toFixed(2)}</span></div>` : ""}
+          ${(order.discountAmount || 0) > 0 ? `<div class="flex"><span>Descuento cupón:</span><span>-$${Number(order.discountAmount).toFixed(2)}</span></div>` : ""}
+          ${(order.iva || 0) > 0 ? `<div class="flex"><span>IVA:</span><span>+$${Number(order.iva).toFixed(2)}</span></div>` : ""}
+
+          <div class="double"></div>
+          <div class="flex total-row">
+            <span>TOTAL A COBRAR:</span>
+            <span>$${Number(order.total).toFixed(2)}</span>
+          </div>
+          <div class="dashed"></div>
+
+          <div class="center" style="font-size: 10px; margin-top: 8px;">
+            ¡Muchas gracias por su compra!<br/>
+            Comprobante emitido con MenuQR Pro
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
 
   const handleToggleTestMode = async () => {
     const nextMode = !isTestMode;
@@ -671,8 +797,8 @@ export function AdminDashboard({
           platosRows.push({
             "Nº Pedido": o.orderNumber ? `#${o.orderNumber}` : o.id.slice(0, 8),
             "Fecha": new Date(o.createdAt).toLocaleDateString(),
-            "Mesa": o.tableName,
-            "Plato / Producto": it.dishName,
+            "Mesa / Canal": o.tableName === "Domicilio" ? "Domicilio" : o.tableName === "Llevar" || !o.tableName ? "Para Llevar" : bLabels.isGastro ? `Mesa #${o.tableName}` : `Canal: ${o.tableName}`,
+            [bLabels.itemSingle]: it.dishName,
             "Cantidad": it.quantity,
             "Precio Unitario ($)": Number(it.price.toFixed(2)),
             "Total Ítem ($)": Number((it.price * it.quantity).toFixed(2)),
@@ -715,13 +841,13 @@ export function AdminDashboard({
       if (platosRows.length > 0) {
         const wsPlatos = XLSX.utils.json_to_sheet(platosRows);
         wsPlatos["!cols"] = [
-          { wch: 12 }, { wch: 14 }, { wch: 12 }, { wch: 32 },
+          { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 32 },
           { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 12 },
         ];
-        XLSX.utils.book_append_sheet(wb, wsPlatos, "Platos_Vendidos");
+        XLSX.utils.book_append_sheet(wb, wsPlatos, bLabels.isGastro ? "Platos_Vendidos" : "Productos_Vendidos");
       }
 
-      if (camarerosRows.length > 0) {
+      if (bLabels.isGastro && camarerosRows.length > 0) {
         const wsCamareros = XLSX.utils.json_to_sheet(camarerosRows);
         wsCamareros["!cols"] = [{ wch: 25 }, { wch: 16 }, { wch: 20 }, { wch: 16 }];
         XLSX.utils.book_append_sheet(wb, wsCamareros, "Rendimiento_Meseros");
@@ -1207,6 +1333,9 @@ export function AdminDashboard({
       Nombre: string;
       Descripcion: string;
       Precio: number;
+      Costo_Compra: number | string;
+      Margen_Estimado: number | string;
+      Codigo_Barras_SKU: string;
       Disponible: string;
       Controla_Stock: string;
       Stock_Disponible: number | string;
@@ -1218,11 +1347,18 @@ export function AdminDashboard({
 
     cats.forEach((cat) => {
       (cat.dishes || []).forEach((dish) => {
+        const itemPrice = typeof dish.price === "number" ? dish.price : parseFloat((dish.price as any) || "0");
+        const itemCost = typeof dish.costPrice === "number" ? dish.costPrice : parseFloat((dish.costPrice as any) || "0");
+        const profitMargin = itemPrice > 0 && itemCost > 0 ? Number((itemPrice - itemCost).toFixed(2)) : "N/A";
+
         allDishes.push({
           Categoria: cat.name,
           Nombre: dish.name,
           Descripcion: dish.description || "",
-          Precio: typeof dish.price === "number" ? dish.price : parseFloat((dish.price as any) || "0"),
+          Precio: itemPrice,
+          Costo_Compra: itemCost > 0 ? itemCost : "N/A",
+          Margen_Estimado: profitMargin,
+          Codigo_Barras_SKU: dish.barcode || dish.sku || "",
           Disponible: dish.isAvailable ? "SI" : "NO",
           Controla_Stock: dish.trackStock ? "SI" : "NO",
           Stock_Disponible: dish.trackStock ? (dish.stock ?? 0) : "N/A",
@@ -1233,7 +1369,7 @@ export function AdminDashboard({
     });
 
     if (allDishes.length === 0) {
-      alert("No hay platos registrados en el menú para exportar.");
+      alert(`No hay ${bLabels.items.toLowerCase()} registrados en el catálogo para exportar.`);
       return;
     }
 
@@ -1244,14 +1380,20 @@ export function AdminDashboard({
       { wch: 32 }, // Nombre
       { wch: 48 }, // Descripcion
       { wch: 12 }, // Precio
+      { wch: 14 }, // Costo_Compra
+      { wch: 16 }, // Margen_Estimado
+      { wch: 20 }, // Codigo_Barras_SKU
       { wch: 14 }, // Disponible
+      { wch: 14 }, // Controla_Stock
+      { wch: 16 }, // Stock_Disponible
+      { wch: 14 }, // Stock_Minimo
       { wch: 38 }, // URL_Imagen
     ];
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Platos");
+    XLSX.utils.book_append_sheet(workbook, worksheet, bLabels.items);
 
-    const fileName = `platos_${restaurant.slug}_${new Date().toISOString().split("T")[0]}.xlsx`;
+    const fileName = `catalogo_${restaurant.slug}_${bLabels.items.toLowerCase()}_${new Date().toISOString().split("T")[0]}.xlsx`;
     XLSX.writeFile(workbook, fileName);
   };
 
@@ -1665,6 +1807,8 @@ export function AdminDashboard({
   const [dishTrackStock, setDishTrackStock] = useState(false);
   const [dishStock, setDishStock] = useState("10");
   const [dishMinStock, setDishMinStock] = useState("3");
+  const [dishCostPrice, setDishCostPrice] = useState("0");
+  const [dishBarcode, setDishBarcode] = useState("");
   const [dishStockFilter, setDishStockFilter] = useState<"ALL" | "TRACKED" | "LOW_STOCK" | "OUT_OF_STOCK">("ALL");
 
   const allDishesList = useMemo(() => categoriesList.flatMap((c) => c.dishes), [categoriesList]);
@@ -1679,6 +1823,14 @@ export function AdminDashboard({
   );
   const totalStockUnits = useMemo(
     () => allDishesList.filter((d) => d.trackStock).reduce((acc, d) => acc + (d.stock ?? 0), 0),
+    [allDishesList]
+  );
+  const totalInventoryRetailValue = useMemo(
+    () => allDishesList.filter((d) => d.trackStock).reduce((acc, d) => acc + ((d.stock ?? 0) * (d.price || 0)), 0),
+    [allDishesList]
+  );
+  const totalInventoryCostValue = useMemo(
+    () => allDishesList.filter((d) => d.trackStock).reduce((acc, d) => acc + ((d.stock ?? 0) * ((d.costPrice as any) || 0)), 0),
     [allDishesList]
   );
 
@@ -1959,6 +2111,19 @@ export function AdminDashboard({
               <Soup className="h-4 w-4" />
               {bLabels.items}
             </button>
+            {bLabels.showInventory && (
+              <button
+                onClick={() => setActiveTab("inventory")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "inventory" 
+                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <Boxes className="h-4 w-4 text-amber-400" />
+                <span>{bLabels.inventoryTabTitle}</span>
+              </button>
+            )}
             {bLabels.showSeasons && (
               <button
                 onClick={() => setActiveTab("seasons")}
@@ -2515,31 +2680,109 @@ export function AdminDashboard({
                     <TrendingUp className="h-5 w-5" />
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold block">Plato Más Vendido</span>
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold block">{bLabels.topItemTitle}</span>
                     <span className="text-sm font-bold text-white">{topDishName}</span>
-                    {topDishQty > 0 && <span className="text-[10px] text-slate-500 block mt-0.5">{topDishQty} unidades vendidas</span>}
+                    {topDishQty > 0 && <span className="text-[10px] text-slate-500 block mt-0.5">{topDishQty} {bLabels.stockUnitPlural} vendidas</span>}
                   </div>
                 </div>
 
                 <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex items-center gap-4">
-                  <div className="h-10 w-10 bg-red-500/10 text-red-500 rounded-xl flex items-center justify-center shrink-0">
-                    <Users className="h-5 w-5" />
+                  <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    bLabels.isGastro 
+                      ? "bg-red-500/10 text-red-500" 
+                      : lowStockDishesCount > 0 
+                        ? "bg-amber-500/10 text-amber-400" 
+                        : "bg-emerald-500/10 text-emerald-400"
+                  }`}>
+                    {bLabels.isGastro ? (
+                      <Users className="h-5 w-5" />
+                    ) : lowStockDishesCount > 0 ? (
+                      <AlertTriangle className="h-5 w-5" />
+                    ) : (
+                      <Package className="h-5 w-5" />
+                    )}
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold block">Mesa que Más Vende</span>
-                    <span className="text-sm font-bold text-white">
-                      {topTableName !== "Ninguna" && topTableName !== "Llevar" && topTableName !== "Domicilio" 
-                        ? `Mesa #${topTableName}` 
-                        : topTableName === "Llevar" 
-                          ? "Para llevar" 
-                          : topTableName === "Domicilio" 
-                            ? "Domicilio" 
-                            : "Ninguna"}
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold block">
+                      {bLabels.isGastro ? bLabels.topChannelTitle : "Salud de Inventario / Bodega"}
                     </span>
-                    {topTableTotal > 0 && <span className="text-[10px] text-slate-500 block mt-0.5">${topTableTotal.toFixed(2)} facturados</span>}
+                    <span className="text-sm font-bold text-white">
+                      {bLabels.isGastro ? (
+                        topTableName !== "Ninguna" && topTableName !== "Llevar" && topTableName !== "Domicilio" 
+                          ? `Mesa #${topTableName}` 
+                          : topTableName === "Llevar" 
+                            ? "Para llevar" 
+                            : topTableName === "Domicilio" 
+                              ? "Domicilio" 
+                              : "Ninguna"
+                      ) : (
+                        lowStockDishesCount > 0 
+                          ? `⚠️ ${lowStockDishesCount} en Stock Crítico`
+                          : `✅ ${totalStockUnits} ${bLabels.stockUnitPlural} disponibles`
+                      )}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block mt-0.5">
+                      {bLabels.isGastro 
+                        ? (topTableTotal > 0 ? `$${topTableTotal.toFixed(2)} facturados` : "Sin pedidos registrados")
+                        : (topTableName !== "Ninguna" ? `Canal principal: ${topTableName} ($${topTableTotal.toFixed(2)})` : `${outOfStockDishesCount} agotados`)}
+                    </span>
                   </div>
                 </div>
               </div>
+
+              {/* Widget de Métricas de Inventario y Almacén (Opción 2) */}
+              {(!bLabels.isGastro || trackedDishesCount > 0) && (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                        <Package className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">{bLabels.stockSectionTitle}</h4>
+                        <p className="text-[11px] text-slate-400">Control de existencias, reposición y valorización del catálogo.</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-slate-800 text-slate-300 font-bold px-2.5 py-1 rounded-full self-start sm:self-auto">
+                      {trackedDishesCount} {bLabels.items.toLowerCase()} con stock monitoreado
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-950/60 border border-slate-800/60 p-3 rounded-xl">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Existencias Totales</span>
+                      <p className="text-lg font-black text-emerald-400 mt-0.5">{totalStockUnits} {bLabels.stockUnitPlural}</p>
+                      <span className="text-[10px] text-slate-500 block">disponibles ahora</span>
+                    </div>
+
+                    <div className="bg-slate-950/60 border border-slate-800/60 p-3 rounded-xl">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Stock Crítico</span>
+                      <p className={`text-lg font-black mt-0.5 ${lowStockDishesCount > 0 ? "text-amber-400" : "text-slate-400"}`}>
+                        {lowStockDishesCount} {bLabels.items.toLowerCase()}
+                      </p>
+                      <span className="text-[10px] text-slate-500 block">por debajo del mínimo</span>
+                    </div>
+
+                    <div className="bg-slate-950/60 border border-slate-800/60 p-3 rounded-xl">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Agotados / Quiebre</span>
+                      <p className={`text-lg font-black mt-0.5 ${outOfStockDishesCount > 0 ? "text-rose-400" : "text-slate-400"}`}>
+                        {outOfStockDishesCount} {bLabels.items.toLowerCase()}
+                      </p>
+                      <span className="text-[10px] text-slate-500 block">stock en 0 o inactivos</span>
+                    </div>
+
+                    <div className="bg-slate-950/60 border border-slate-800/60 p-3 rounded-xl">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Valor de Bodega</span>
+                      <p className="text-lg font-black text-cyan-400 mt-0.5">
+                        ${totalInventoryRetailValue.toFixed(2)}
+                      </p>
+                      <span className="text-[10px] text-slate-500 block">
+                        {totalInventoryCostValue > 0 ? `Costo: $${totalInventoryCostValue.toFixed(2)}` : "A precio de venta"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* SEO & GEO Health Score Checklist */}
               {(() => {
@@ -3349,6 +3592,7 @@ export function AdminDashboard({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                     {[
+                      { id: "inventory", label: "Inventario & Compras", desc: "Control de stock, insumos, conversión de cajas y proveedores", icon: Boxes },
                       { id: "ruleta", label: "Ruleta de Premios", desc: "Juego de fidelización y entrega de premios", icon: Gift },
                       { id: "seasons", label: "Tarifas y Temporadas", desc: "Ajuste de precios por festivos o temporadas altas", icon: CalendarDays },
                       { id: "coupons", label: "Cupones de Descuento", desc: "Códigos promocionales de descuento para clientes", icon: Tag },
@@ -4652,10 +4896,12 @@ export function AdminDashboard({
                     setDishName("");
                     setDishDescription("");
                     setDishPrice("0");
+                    setDishCostPrice("0");
+                    setDishBarcode("");
                     setDishImageUrl("");
                     setDishAvailable(true);
                     setDishSuggested(false);
-                    setDishTrackStock(false);
+                    setDishTrackStock(!bLabels.isGastro);
                     setDishStock("10");
                     setDishMinStock("3");
                     setDishCatId(categoriesList[0]?.id || "");
@@ -4679,7 +4925,7 @@ export function AdminDashboard({
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                        <span>Control de Porciones e Inventario Diario</span>
+                        <span>{bLabels.stockSectionTitle}</span>
                         {lowStockDishesCount > 0 && (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
                             ⚠️ {lowStockDishesCount} en Stock Crítico
@@ -4687,7 +4933,9 @@ export function AdminDashboard({
                         )}
                       </h3>
                       <p className="text-xs text-slate-400">
-                        Monitorea porciones disponibles, alertas de reposición y platos agotados en tiempo real.
+                        {bLabels.isGastro
+                          ? "Monitorea porciones preparadas, raciones del día y platos agotados en cocina."
+                          : "Control de existencias físicas, valorización de bodega y alertas de reposición a proveedores."}
                       </p>
                     </div>
                   </div>
@@ -4744,13 +4992,15 @@ export function AdminDashboard({
                   </div>
                 </div>
 
-                {/* 3 KPI Cards de Inventario */}
+                {/* KPI Cards de Inventario Adaptativos */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                   <div className="bg-slate-950/80 border border-slate-800/80 p-3.5 rounded-xl flex items-center justify-between">
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Porciones Disponibles</span>
-                      <p className="text-xl font-black text-emerald-400 mt-0.5">{totalStockUnits} porciones</p>
-                      <span className="text-[10px] text-slate-500">en {trackedDishesCount} platos monitoreados</span>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                        {bLabels.isGastro ? "Porciones Disponibles" : "Unidades en Almacén"}
+                      </span>
+                      <p className="text-xl font-black text-emerald-400 mt-0.5">{totalStockUnits} {bLabels.stockUnitPlural}</p>
+                      <span className="text-[10px] text-slate-500">en {trackedDishesCount} {bLabels.items.toLowerCase()} monitoreados</span>
                     </div>
                     <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
                       <Package className="h-5 w-5" />
@@ -4760,7 +5010,7 @@ export function AdminDashboard({
                   <div className="bg-slate-950/80 border border-slate-800/80 p-3.5 rounded-xl flex items-center justify-between">
                     <div>
                       <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Stock Crítico / Alerta</span>
-                      <p className="text-xl font-black text-amber-400 mt-0.5">{lowStockDishesCount} platos</p>
+                      <p className="text-xl font-black text-amber-400 mt-0.5">{lowStockDishesCount} {bLabels.items.toLowerCase()}</p>
                       <span className="text-[10px] text-slate-500">por debajo del stock mínimo</span>
                     </div>
                     <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
@@ -4770,8 +5020,8 @@ export function AdminDashboard({
 
                   <div className="bg-slate-950/80 border border-slate-800/80 p-3.5 rounded-xl flex items-center justify-between">
                     <div>
-                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Platos Agotados</span>
-                      <p className="text-xl font-black text-rose-400 mt-0.5">{outOfStockDishesCount} platos</p>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">{bLabels.items} Agotados</span>
+                      <p className="text-xl font-black text-rose-400 mt-0.5">{outOfStockDishesCount} {bLabels.items.toLowerCase()}</p>
                       <span className="text-[10px] text-slate-500">stock en 0 o desactivados</span>
                     </div>
                     <div className="p-2 rounded-lg bg-rose-500/10 text-rose-400">
@@ -4779,6 +5029,27 @@ export function AdminDashboard({
                     </div>
                   </div>
                 </div>
+
+                {/* Banner de Valorización de Inventario (Opción 2) */}
+                {(!bLabels.isGastro || totalInventoryRetailValue > 0) && totalInventoryRetailValue > 0 && (
+                  <div className="p-3 bg-gradient-to-r from-cyan-950/30 via-slate-950 to-slate-950 border border-cyan-500/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2.5 text-cyan-300">
+                      <span className="p-1.5 bg-cyan-500/10 rounded-lg text-cyan-400 font-bold">$</span>
+                      <div>
+                        <span className="font-bold">Valorización Total de Bodega:</span>
+                        <span className="text-slate-400 ml-1.5">
+                          En venta: <strong className="text-emerald-400">${totalInventoryRetailValue.toFixed(2)}</strong>
+                          {totalInventoryCostValue > 0 && (
+                            <> · Costo de compra: <strong className="text-slate-300">${totalInventoryCostValue.toFixed(2)}</strong> (Margen estimado: <strong className="text-cyan-300">${(totalInventoryRetailValue - totalInventoryCostValue).toFixed(2)}</strong>)</>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-[10px] bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0 self-start sm:self-auto">
+                      {bLabels.isGastro ? "Carta Valorizada" : "Bodega Retail"}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -4886,7 +5157,7 @@ export function AdminDashboard({
                                       <div className="flex items-center gap-0.5 border-l border-slate-800 pl-1">
                                         <button
                                           type="button"
-                                          title="Restar 1 porción"
+                                          title={`Restar 1 ${bLabels.stockUnitSingular}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleQuickUpdateStock(dish.id, Math.max(0, (dish.stock ?? 0) - 1));
@@ -4897,7 +5168,7 @@ export function AdminDashboard({
                                         </button>
                                         <button
                                           type="button"
-                                          title="Reponer +5 porciones"
+                                          title={`Reponer +5 ${bLabels.stockUnitPlural}`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleQuickUpdateStock(dish.id, (dish.stock ?? 0) + 5);
@@ -4934,6 +5205,8 @@ export function AdminDashboard({
                                       setDishName(dish.name);
                                       setDishDescription(dish.description || "");
                                       setDishPrice(dish.price.toString());
+                                      setDishCostPrice(((dish.costPrice as any) ?? 0).toString());
+                                      setDishBarcode(dish.barcode || dish.sku || "");
                                       setDishImageUrl(dish.imageUrl || "");
                                       setDishAvailable(dish.isAvailable);
                                       setDishSuggested(suggestedDishIds.includes(dish.id));
@@ -4990,6 +5263,8 @@ export function AdminDashboard({
                       formData.append("trackStock", dishTrackStock.toString());
                       formData.append("stock", dishStock);
                       formData.append("minStock", dishMinStock);
+                      formData.append("costPrice", dishCostPrice);
+                      formData.append("barcode", dishBarcode);
                       
                       if (editingDish) {
                         const res = await updateDishAction(editingDish.id, formData);
@@ -5044,7 +5319,7 @@ export function AdminDashboard({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">Precio ($)</label>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Precio de Venta ($)</label>
                         <div className="relative">
                           <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">$</span>
                           <input
@@ -5058,6 +5333,54 @@ export function AdminDashboard({
                           />
                         </div>
                       </div>
+
+                      {/* Elementos clave de Producto/Stock (Opción 2) */}
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Costo de Compra ($) <span className="text-[10px] text-slate-500">(opcional)</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">$</span>
+                          <input
+                            type="number"
+                            name="costPrice"
+                            step="0.01"
+                            value={dishCostPrice}
+                            onChange={(e) => setDishCostPrice(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full bg-slate-950 border border-slate-850 block pl-8 pr-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Código de Barras / SKU <span className="text-[10px] text-slate-500">(opcional)</span>
+                        </label>
+                        <input
+                          type="text"
+                          name="barcode"
+                          value={dishBarcode}
+                          onChange={(e) => setDishBarcode(e.target.value)}
+                          placeholder="ej: 786123456789 o PROD-001"
+                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
+                        />
+                      </div>
+
+                      {parseFloat(dishPrice) > 0 && parseFloat(dishCostPrice) > 0 && (
+                        <div className="col-span-2 p-3 bg-emerald-950/30 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300">
+                          <div className="flex items-center gap-2">
+                            <TrendingUp className="h-4 w-4 text-emerald-400" />
+                            <span>Margen Comercial Estimado:</span>
+                          </div>
+                          <div className="font-bold flex items-center gap-2">
+                            <span>+${(parseFloat(dishPrice) - parseFloat(dishCostPrice)).toFixed(2)} / {bLabels.stockUnitSingular}</span>
+                            <span className="bg-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-black">
+                              {(((parseFloat(dishPrice) - parseFloat(dishCostPrice)) / parseFloat(dishPrice)) * 100).toFixed(1)}% margen
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div>
@@ -5165,7 +5488,11 @@ export function AdminDashboard({
                         <div className="flex items-center justify-between">
                           <label htmlFor="dishTrackStock" className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer">
                             <Package className="h-4 w-4 text-amber-400" />
-                            <span>Controlar inventario / porciones diarias</span>
+                            <span>
+                              {bLabels.isGastro
+                                ? "Controlar raciones diarias (porciones)"
+                                : `Controlar existencias e inventario físico de bodega`}
+                            </span>
                           </label>
                           <input
                             type="checkbox"
@@ -5181,7 +5508,7 @@ export function AdminDashboard({
                             <div className="grid grid-cols-2 gap-3">
                               <div>
                                 <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                                  Stock disponible (porciones)
+                                  Stock disponible ({bLabels.stockUnitPlural})
                                 </label>
                                 <input
                                   type="number"
@@ -5194,7 +5521,7 @@ export function AdminDashboard({
                               <div>
                                 <label className="block text-[11px] font-medium text-slate-300 mb-1 flex items-center gap-1">
                                   <AlertTriangle className="h-3 w-3 text-amber-400" />
-                                  Stock mínimo (alerta)
+                                  Stock mínimo / alerta ({bLabels.stockUnitPlural})
                                 </label>
                                 <input
                                   type="number"
@@ -5206,7 +5533,7 @@ export function AdminDashboard({
                               </div>
                             </div>
                             <p className="text-[10px] text-slate-400 leading-relaxed">
-                              💡 Si las porciones llegan a <strong>0</strong>, el plato se marcará automáticamente como <strong>Agotado</strong>. Al llegar al mínimo ({dishMinStock || 0}), verás una alerta visual preventiva.
+                              💡 Si las {bLabels.stockUnitPlural} llegan a <strong>0</strong>, el {bLabels.itemSingle.toLowerCase()} se marcará automáticamente como <strong>Agotado</strong>. Al llegar al mínimo ({dishMinStock || 0}), verás una alerta preventiva de reposición.
                             </p>
                           </div>
                         )}
@@ -5830,6 +6157,11 @@ export function AdminDashboard({
           <RuletaAdminTab restaurant={restaurant} />
         )}
 
+        {/* Inventario & Compras Tab */}
+        {activeTab === "inventory" && (
+          <InventoryAdminTab restaurant={restaurant} />
+        )}
+
         {/* Código QR Tab */}
         {activeTab === "qr" && (
           <div className="space-y-6">
@@ -6436,12 +6768,12 @@ export function AdminDashboard({
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider">
-                      <th className="pb-3 pt-1 pl-2">Pedido / Mesa</th>
-                      <th className="pb-3 pt-1">Cliente & Dirección</th>
-                      <th className="pb-3 pt-1">Pago</th>
-                      <th className="pb-3 pt-1">Fecha / Hora</th>
+                      <th className="pb-3 pt-1 pl-2">Pedido / Canal</th>
+                      <th className="pb-3 pt-1">Artículos Pedidos (Detalle)</th>
+                      <th className="pb-3 pt-1">Cliente & Entrega</th>
+                      <th className="pb-3 pt-1">Pago & Fecha</th>
                       <th className="pb-3 pt-1">Estado de Pedido</th>
-                      <th className="pb-3 pt-1 text-right pr-2">Acciones / Total</th>
+                      <th className="pb-3 pt-1 text-right pr-2">Total & Comanda</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 text-xs">
@@ -6458,105 +6790,277 @@ export function AdminDashboard({
                       }
 
                       return allOrders.map((order) => (
-                        <tr key={order.id} className="text-slate-300 hover:bg-slate-800/20 transition-all">
-                          <td className="py-3.5 pl-2 font-semibold">
-                            <div className="space-y-1">
-                              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono text-[10px] font-bold block w-fit">
-                                #{order.orderNumber || order.id.substring(0, 6)}
-                              </span>
-                              <span className="font-extrabold text-white block">
-                                {order.tableName === "Llevar" 
-                                  ? "🛍 Para Llevar" 
-                                  : order.tableName === "Domicilio" 
-                                    ? "🛵 Domicilio" 
-                                    : `🪑 Mesa #${order.tableName}`}
-                              </span>
-                              {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
-                                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
-                                  👤 Comensal: {order.customerName}
+                        <React.Fragment key={order.id}>
+                          <tr className="text-slate-300 hover:bg-slate-800/20 transition-all">
+                            <td className="py-3.5 pl-2 font-semibold align-top">
+                              <div className="space-y-1">
+                                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono text-[10px] font-bold block w-fit">
+                                  #{order.orderNumber || order.id.substring(0, 6)}
                                 </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-3.5">
-                            {order.customerName ? (
-                              <div className="space-y-0.5 max-w-[220px]">
-                                <p className="font-bold text-white">
-                                  {order.customerName}
-                                  {order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
-                                    <span className="text-[10px] text-amber-400 font-normal ml-1.5">(Comensal)</span>
-                                  )}
-                                </p>
-                                {order.customerPhone && (
-                                  <a 
-                                    href={`https://wa.me/${order.customerPhone.replace(/\D/g, "")}`}
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="text-red-400 hover:underline text-[10px] block"
-                                  >
-                                    📱 {order.customerPhone}
-                                  </a>
-                                )}
-                                {order.customerAddress && (
-                                  <p className="text-slate-400 text-[10px] truncate" title={order.customerAddress}>
-                                    📍 {order.customerAddress}
-                                  </p>
+                                <span className={`inline-flex items-center gap-1 font-bold text-xs px-2.5 py-1 rounded-xl border ${
+                                  order.tableName === "Llevar"
+                                    ? "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                                    : order.tableName === "Domicilio"
+                                    ? "bg-sky-500/15 text-sky-300 border-sky-500/30"
+                                    : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                                }`}>
+                                  {order.tableName === "Llevar" 
+                                    ? "🛍 Para Llevar" 
+                                    : order.tableName === "Domicilio" 
+                                      ? "🛵 A Domicilio" 
+                                      : `🪑 Mesa #${order.tableName}`}
+                                </span>
+                                {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
+                                  <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
+                                    👤 {order.customerName}
+                                  </span>
                                 )}
                               </div>
-                            ) : (
-                              <span className="text-slate-500 italic">N/A</span>
-                            )}
-                          </td>
-                          <td className="py-3.5 uppercase font-medium text-[10px]">
-                            {order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
-                          </td>
-                          <td suppressHydrationWarning className="py-3.5 text-slate-400">
-                            {new Date(order.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                          </td>
-                          <td className="py-3.5">
-                            <select
-                              value={order.status}
-                              onChange={async (e) => {
-                                const newStatus = e.target.value;
-                                await updateOrderStatusAction(order.id, newStatus);
-                                window.location.reload();
-                              }}
-                              className={`px-2.5 py-1 rounded-xl text-xs font-black uppercase border focus:outline-none transition ${
-                                order.status === "PENDING"
-                                  ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
-                                  : order.status === "PREPARING"
-                                    ? "bg-blue-500/20 text-blue-300 border-blue-500/40"
-                                    : order.status === "IN_TRANSIT"
-                                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                                      : order.status === "DELIVERED" || order.status === "COMPLETED"
-                                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                                        : "bg-red-500/20 text-red-300 border-red-500/40"
-                              }`}
-                            >
-                              <option value="PENDING" className="bg-slate-900 text-yellow-300">⏳ Pendiente</option>
-                              <option value="PREPARING" className="bg-slate-900 text-blue-300">🍳 En Cocina</option>
-                              <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🛵 En Transporte</option>
-                              <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Entregado</option>
-                              <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelado</option>
-                            </select>
-                          </td>
-                          <td className="py-3.5 text-right pr-2">
-                            <div className="space-y-1">
-                              <span className="font-extrabold text-white text-sm block">
-                                ${order.total.toFixed(2)}
+                            </td>
+
+                            {/* Columna de Artículos Pedidos con preview y acordeón */}
+                            <td className="py-3.5 align-top">
+                              <div className="space-y-1.5 max-w-[280px]">
+                                <div className="flex flex-wrap gap-1">
+                                  {(order.items || []).slice(0, 3).map((it) => (
+                                    <span
+                                      key={it.id}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-medium text-slate-200"
+                                    >
+                                      <strong className="text-amber-400 font-bold">{it.quantity}×</strong>
+                                      <span className="truncate max-w-[140px]">{it.dishName}</span>
+                                    </span>
+                                  ))}
+                                  {(order.items || []).length > 3 && (
+                                    <span className="text-[10px] font-bold text-slate-400 px-1.5 py-0.5 rounded bg-slate-800">
+                                      +{(order.items || []).length - 3} más
+                                    </span>
+                                  )}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedOrderId(expandedOrderId === order.id ? null : order.id)
+                                  }
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300 hover:underline pt-0.5"
+                                >
+                                  {expandedOrderId === order.id ? (
+                                    <>
+                                      <ChevronUp className="h-3 w-3" />
+                                      <span>Ocultar desglose</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronDown className="h-3 w-3" />
+                                      <span>Ver desglose completo ({(order.items || []).length} ítems)</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </td>
+
+                            <td className="py-3.5 align-top">
+                              {order.customerName ? (
+                                <div className="space-y-1 max-w-[200px]">
+                                  <p className="font-bold text-white text-xs">
+                                    {order.customerName}
+                                  </p>
+                                  {order.customerPhone && (
+                                    <a 
+                                      href={`https://wa.me/${order.customerPhone.replace(/\D/g, "")}`}
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="text-emerald-400 hover:underline text-[11px] font-semibold flex items-center gap-1"
+                                    >
+                                      <MessageSquare className="h-3 w-3" />
+                                      <span>{order.customerPhone}</span>
+                                    </a>
+                                  )}
+                                  {order.customerAddress && (
+                                    <div className="flex items-start gap-1 text-slate-400 text-[10px]">
+                                      <MapPin className="h-3 w-3 text-rose-500 shrink-0 mt-0.5" />
+                                      <span className="line-clamp-2" title={order.customerAddress}>
+                                        {order.customerAddress}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 italic text-[11px]">Cliente Mostrador</span>
+                              )}
+                            </td>
+
+                            <td className="py-3.5 align-top">
+                              <span className="uppercase font-bold text-[10px] block text-slate-300">
+                                {order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
                               </span>
-                              <a
-                                href={`/${restaurant.slug}/rastreo?order=${order.orderNumber || order.id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] text-amber-400 hover:underline inline-flex items-center gap-1 font-semibold"
+                              <span suppressHydrationWarning className="text-slate-500 text-[10px] block mt-0.5">
+                                {new Date(order.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                              </span>
+                            </td>
+
+                            <td className="py-3.5 align-top">
+                              <select
+                                value={order.status}
+                                onChange={async (e) => {
+                                  const newStatus = e.target.value;
+                                  await updateOrderStatusAction(order.id, newStatus);
+                                  window.location.reload();
+                                }}
+                                className={`px-2.5 py-1 rounded-xl text-xs font-black uppercase border focus:outline-none transition ${
+                                  order.status === "PENDING"
+                                    ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+                                    : order.status === "PREPARING"
+                                      ? "bg-blue-500/20 text-blue-300 border-blue-500/40"
+                                      : order.status === "IN_TRANSIT"
+                                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                                        : order.status === "DELIVERED" || order.status === "COMPLETED"
+                                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                          : "bg-red-500/20 text-red-300 border-red-500/40"
+                                }`}
                               >
-                                <span>Ver Rastreo</span>
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            </div>
-                          </td>
-                        </tr>
+                                <option value="PENDING" className="bg-slate-900 text-yellow-300">⏳ Pendiente</option>
+                                <option value="PREPARING" className="bg-slate-900 text-blue-300">🍳 En Cocina / Empaque</option>
+                                <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🛵 En Transporte</option>
+                                <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Entregado</option>
+                                <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelado</option>
+                              </select>
+                            </td>
+
+                            <td className="py-3.5 text-right pr-2 align-top">
+                              <div className="space-y-1.5 flex flex-col items-end">
+                                <span className="font-extrabold text-white text-sm block font-mono">
+                                  ${order.total.toFixed(2)}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setTicketModalOrder(order)}
+                                  className="px-3 py-1 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-[11px] shadow-sm transition flex items-center gap-1.5 active:scale-95"
+                                  title="Ver comanda de despacho, checklist e imprimir ticket"
+                                >
+                                  <Receipt className="h-3 w-3" />
+                                  <span>Ver Ticket</span>
+                                </button>
+
+                                <a
+                                  href={`/${restaurant.slug}/rastreo?order=${order.orderNumber || order.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[10px] text-slate-400 hover:text-amber-400 inline-flex items-center gap-1 font-semibold"
+                                >
+                                  <span>Rastreo</span>
+                                  <ExternalLink className="h-2.5 w-2.5" />
+                                </a>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Sub-fila expandida con el desglose en vivo del pedido (Opción 1) */}
+                          {expandedOrderId === order.id && (
+                            <tr key={`${order.id}-expanded`} className="bg-slate-950/90 border-b border-slate-800 animate-in fade-in duration-150">
+                              <td colSpan={6} className="p-4 sm:p-5">
+                                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                                    <div className="flex items-center gap-2">
+                                      <Receipt className="h-4 w-4 text-amber-400" />
+                                      <h4 className="font-bold text-white text-sm">
+                                        Desglose Detallado del Pedido #{order.orderNumber || order.id.substring(0, 6)}
+                                      </h4>
+                                      <span className="text-[10px] text-slate-400 font-mono">
+                                        ({(order.items || []).length} productos)
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handlePrintThermalReceipt(order)}
+                                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 active:scale-95"
+                                      >
+                                        <Printer className="h-3.5 w-3.5 text-amber-400" />
+                                        <span>Imprimir Ticket</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setTicketModalOrder(order)}
+                                        className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                                      >
+                                        <CheckSquare className="h-3.5 w-3.5" />
+                                        <span>Checklist & Despacho</span>
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                    <div className="lg:col-span-2 space-y-2">
+                                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                                        Lista de Ítems:
+                                      </span>
+                                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl divide-y divide-slate-855 overflow-hidden">
+                                        {(order.items || []).map((it) => (
+                                          <div key={it.id} className="p-3 flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-2.5">
+                                              <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 font-black text-xs font-mono">
+                                                {it.quantity}x
+                                              </span>
+                                              <span className="font-bold text-white text-xs">{it.dishName}</span>
+                                            </div>
+                                            <div className="text-right font-mono text-xs">
+                                              <span className="text-white font-bold">${(it.price * it.quantity).toFixed(2)}</span>
+                                              <span className="text-[10px] text-slate-500 block">(${Number(it.price).toFixed(2)} c/u)</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
+                                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                                        Totales y Despacho:
+                                      </span>
+                                      <div className="space-y-1.5">
+                                        <div className="flex justify-between text-slate-400">
+                                          <span>Subtotal:</span>
+                                          <span className="font-mono">${Number(order.subtotal || 0).toFixed(2)}</span>
+                                        </div>
+                                        {(order.deliveryCost || 0) > 0 && (
+                                          <div className="flex justify-between text-sky-400 font-semibold">
+                                            <span>Costo Envío:</span>
+                                            <span className="font-mono">+${Number(order.deliveryCost).toFixed(2)}</span>
+                                          </div>
+                                        )}
+                                        {(order.discountAmount || 0) > 0 && (
+                                          <div className="flex justify-between text-emerald-400 font-semibold">
+                                            <span>Descuento:</span>
+                                            <span className="font-mono">-${Number(order.discountAmount).toFixed(2)}</span>
+                                          </div>
+                                        )}
+                                        {(order.iva || 0) > 0 && (
+                                          <div className="flex justify-between text-slate-400">
+                                            <span>IVA:</span>
+                                            <span className="font-mono">+${Number(order.iva).toFixed(2)}</span>
+                                          </div>
+                                        )}
+                                        <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-sm font-black text-white">
+                                          <span>TOTAL:</span>
+                                          <span className="font-mono text-emerald-400 text-base">${Number(order.total).toFixed(2)}</span>
+                                        </div>
+                                      </div>
+
+                                      {order.customerAddress && (
+                                        <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-300">
+                                          <span className="text-slate-500 block text-[10px] uppercase font-bold">Dirección:</span>
+                                          <span className="block mt-0.5">{order.customerAddress}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       ));
                     })()}
                   </tbody>
@@ -6573,6 +7077,21 @@ export function AdminDashboard({
                 </div>
               </div>
             </div>
+
+            {/* Modal de Ticket y Checklist de Despacho (Opción 2) */}
+            {ticketModalOrder && (
+              <OrderTicketModal
+                order={ticketModalOrder}
+                restaurant={restaurant}
+                onClose={() => setTicketModalOrder(null)}
+                onStatusChange={async (newStatus: string) => {
+                  await updateOrderStatusAction(ticketModalOrder.id, newStatus);
+                  setTicketModalOrder({ ...ticketModalOrder, status: newStatus as any });
+                  window.location.reload();
+                }}
+                onPrintThermal={() => handlePrintThermalReceipt(ticketModalOrder)}
+              />
+            )}
           </div>
         )}
 
@@ -8085,6 +8604,18 @@ export function AdminDashboard({
           <Soup className="h-5 w-5" />
           <span className="text-[9px] font-bold uppercase tracking-wider">Platos</span>
         </button>
+
+        {/* Inventory Tab */}
+        {bLabels.showInventory && (
+          <button
+            onClick={() => setActiveTab("inventory")}
+            className="flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition duration-200"
+            style={{ color: activeTab === "inventory" ? restaurant.themeColor : "#94a3b8" }}
+          >
+            <Boxes className="h-5 w-5" />
+            <span className="text-[9px] font-bold uppercase tracking-wider">Bodega</span>
+          </button>
+        )}
 
         {/* QR Tab */}
         <button

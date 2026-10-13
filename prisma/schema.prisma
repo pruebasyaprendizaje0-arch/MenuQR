@@ -134,7 +134,10 @@ model Restaurant {
   aiPromptContext   String?    @db.Text
   aiFallbackEnabled Boolean    @default(false)
   testMode          Boolean    @default(true)
-  createdAt      DateTime   @default(now())
+  suppliers         Supplier[]
+  supplyItems       SupplyItem[]
+  purchaseOrders    PurchaseOrder[]
+  createdAt         DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
   @@index([userId])
@@ -169,12 +172,18 @@ model Dish {
   
   // Campos de producto/servicio para comercio
   sku          String?
+  barcode      String?
+  costPrice    Float?     @default(0.0)
   stock        Int?
   minStock     Int?       @default(0)
   trackStock   Boolean    @default(false)
   isService    Boolean    @default(false)
   variants     String?    @db.Text
   isSuggested  Boolean    @default(false)
+  supplierId   String?
+  supplier     Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  recipeItems  DishRecipeItem[]
+  purchaseOrderItems PurchaseOrderItem[]
 
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -183,6 +192,7 @@ model Dish {
   @@index([restaurantId])
   @@index([restaurantId, isAvailable])
   @@index([restaurantId, sku])
+  @@index([restaurantId, supplierId])
   @@index([isSuggested, isAvailable])
 }
 
@@ -573,6 +583,103 @@ model WhatsAppTemplate {
   updatedAt    DateTime   @updatedAt
 
   @@index([restaurantId])
+}
+
+model Supplier {
+  id           String          @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  contactName  String?
+  phone        String?
+  email        String?
+  taxId        String?
+  address      String?
+  notes        String?
+  dishes       Dish[]
+  supplyItems  SupplyItem[]
+  purchaseOrders PurchaseOrder[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([restaurantId])
+}
+
+model SupplyItem {
+  id           String              @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  unit         String              @default("unidad") // kg, g, L, ml, unidad, porcion
+  currentStock Float               @default(0.0)
+  minStock     Float               @default(0.0)
+  costPerUnit  Float               @default(0.0)
+  supplierId   String?
+  supplier     Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  recipeItems  DishRecipeItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([restaurantId])
+  @@index([supplierId])
+}
+
+model DishRecipeItem {
+  id           String      @id @default(uuid())
+  dishId       String
+  dish         Dish        @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  supplyItemId String
+  supplyItem   SupplyItem  @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  quantity     Float       @default(1.0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([dishId])
+  @@index([supplyItemId])
+}
+
+model PurchaseOrder {
+  id           String              @id @default(uuid())
+  orderNumber  Int                 @default(autoincrement())
+  restaurantId String
+  restaurant   Restaurant          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  supplierId   String?
+  supplier     Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  status       String              @default("PENDING") // PENDING, RECEIVED, CANCELLED
+  notes        String?
+  totalCost    Float               @default(0.0)
+  receivedAt   DateTime?
+  items        PurchaseOrderItem[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  @@index([restaurantId])
+  @@index([supplierId])
+}
+
+model PurchaseOrderItem {
+  id              String         @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  itemType        String         @default("DISH") // DISH o SUPPLY
+  dishId          String?
+  dish            Dish?          @relation(fields: [dishId], references: [id], onDelete: SetNull)
+  supplyItemId    String?
+  supplyItem      SupplyItem?    @relation(fields: [supplyItemId], references: [id], onDelete: SetNull)
+  name            String
+  packageType     String         @default("UNIDAD") // UNIDAD, CAJA, PACK, FARDO, BULTO
+  packageQuantity Float          @default(1.0)
+  unitsPerPackage Float          @default(1.0) // Factor de conversión de caja a unidades
+  totalUnits      Float          @default(1.0) // packageQuantity * unitsPerPackage
+  costPerPackage  Float          @default(0.0)
+  costPerUnit     Float          @default(0.0)
+  totalCost       Float          @default(0.0)
+  createdAt       DateTime       @default(now())
+
+  @@index([purchaseOrderId])
+  @@index([dishId])
+  @@index([supplyItemId])
 }
 
 

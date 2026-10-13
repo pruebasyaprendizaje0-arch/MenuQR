@@ -304,85 +304,129 @@ export async function getOrInitWhatsAppSocket(
         if (type !== "notify") return;
 
         for (const msg of messages) {
-          if (!msg.message || msg.key.fromMe) continue;
-          const remoteJid = msg.key.remoteJid;
-          if (!remoteJid || remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast") {
-            continue; // Ignorar grupos y difusiones
-          }
+          try {
+            if (!msg.message || msg.key.fromMe) continue;
+            const remoteJid = msg.key.remoteJid;
+            if (!remoteJid || remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast") {
+              continue; // Ignorar grupos y difusiones
+            }
 
-          const text = (
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            msg.message.imageMessage?.caption ||
-            ""
-          ).trim();
+            const text = extractMessageText(msg);
+            if (!text) continue;
 
-          if (!text) continue;
+            // Consultar datos reales del restaurante en PostgreSQL incluyendo campos de IA
+            const restaurant = await prisma.restaurant.findUnique({
+              where: { id: restaurantId },
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                whatsappBotEnabled: true,
+                schedule: true,
+                localSchedule: true,
+                address: true,
+                city: true,
+                googleBusinessUrl: true,
+                bankName: true,
+                bankAccountType: true,
+                bankAccountNumber: true,
+                bankAccountName: true,
+                bankAccountDocument: true,
+                whatsapp: true,
+                aiProvider: true,
+                aiApiKey: true,
+                aiModel: true,
+                aiPromptContext: true,
+                aiFallbackEnabled: true,
+              },
+            });
 
-          // Consultar datos reales del restaurante en PostgreSQL incluyendo campos de IA
-          const restaurant = await prisma.restaurant.findUnique({
-            where: { id: restaurantId },
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              whatsappBotEnabled: true,
-              schedule: true,
-              localSchedule: true,
-              address: true,
-              city: true,
-              googleBusinessUrl: true,
-              bankName: true,
-              bankAccountType: true,
-              bankAccountNumber: true,
-              bankAccountName: true,
-              bankAccountDocument: true,
-              whatsapp: true,
-              aiProvider: true,
-              aiApiKey: true,
-              aiModel: true,
-              aiPromptContext: true,
-              aiFallbackEnabled: true,
-            },
-          });
+            if (!restaurant || !restaurant.whatsappBotEnabled) continue;
 
-          if (!restaurant || !restaurant.whatsappBotEnabled) continue;
+            console.log(`[WhatsApp Bot] 📩 Mensaje entrante de ${remoteJid} para "${restaurant.name}": "${text}"`);
 
-          // 1. Obtener las plantillas activas del restaurante (o crearlas por defecto)
-          const templates = await getOrSeedRestaurantTemplates(restaurantId);
+            // Registrar mensaje entrante en WhatsAppLog
+            const cleanPhone = remoteJid.split("@")[0].replace(/\D/g, "");
+            const incomingMsgId = msg.key.id || `inc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-          const vars: TemplateVariables = {
-            nombre: restaurant.name,
-            link_menu: `https://menuqr.ubicame.cc/${restaurant.slug}`,
-            horario: restaurant.localSchedule || restaurant.schedule || "Lunes a Domingo de 09:00 a 22:00",
-            direccion: `${restaurant.address || "Local principal"}${restaurant.city ? `, ${restaurant.city}` : ""}`,
-            maps: restaurant.googleBusinessUrl || "Consultar en el local",
-            datos_banco: restaurant.bankName && restaurant.bankAccountNumber
-              ? `• *Banco:* ${restaurant.bankName}\n• *Tipo de Cuenta:* ${restaurant.bankAccountType || "Ahorros"}\n• *Número:* ${restaurant.bankAccountNumber}${restaurant.bankAccountName ? `\n• *Titular:* ${restaurant.bankAccountName}` : ""}${restaurant.bankAccountDocument ? `\n• *C.I. / RUC:* ${restaurant.bankAccountDocument}` : ""}`
-              : "Por favor consulta los datos de cuenta actualizados directamente con nuestro personal en el local.",
-          };
+            await prisma.whatsAppLog.upsert({
+              where: { messageId: incomingMsgId },
+              create: {
+                messageId: incomingMsgId,
+                restaurantId,
+                direction: "INCOMING",
+                fromMe: false,
+                phone: cleanPhone,
+                text,
+              },
+              update: {},
+            }).catch(() => {});
 
-          // 2. Intentar coincidencia con las plantillas configuradas por el restaurante
-          const matched = matchTemplate(text, templates);
-          if (matched) {
-            const reply = renderTemplateContent(matched.content, vars);
-            await sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
-            continue;
-          }
+            // Helper seguro para enviar respuestas con fallback y log en BD
+            const sendBotReply = async (replyText: string) => {
+              try {
+                try {
+                  await sock.sendMessage(remoteJid, { text: replyText }, { quoted: msg });
+                } catch {
+                  await sock.sendMessage(remoteJid, { text: replyText });
+                }
 
-          // 3. Cascada a IA (si el negocio configuró su propia API Key y habilitó IA)
-          const aiResponse = await queryWhatsAppAI(restaurant, text);
-          if (aiResponse) {
-            await sock.sendMessage(remoteJid, { text: aiResponse }, { quoted: msg });
-            continue;
-          }
+                const outMsgId = `out-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+                await prisma.whatsAppLog.create({
+                  data: {
+                    messageId: outMsgId,
+                    restaurantId,
+                    direction: "OUTGOING",
+                    fromMe: true,
+                    phone: cleanPhone,
+                    text: replyText,
+                  },
+                }).catch(() => {});
 
-          // 4. Si no hubo coincidencia y no hay IA disponible, enviar plantilla de Fallback o Bienvenida
-          const fallbackTmpl = templates.find((t) => t.key === "fallback") || templates.find((t) => t.key === "welcome");
-          if (fallbackTmpl) {
-            const reply = renderTemplateContent(fallbackTmpl.content, vars);
-            await sock.sendMessage(remoteJid, { text: reply }, { quoted: msg });
-            continue;
+                console.log(`[WhatsApp Bot] 🚀 Respuesta enviada a ${remoteJid}: "${replyText.substring(0, 45)}..."`);
+              } catch (sendErr) {
+                console.error(`[WhatsApp Bot] ❌ Error enviando mensaje a ${remoteJid}:`, sendErr);
+              }
+            };
+
+            // 1. Obtener las plantillas activas del restaurante (o crearlas por defecto)
+            const templates = await getOrSeedRestaurantTemplates(restaurantId);
+
+            const vars: TemplateVariables = {
+              nombre: restaurant.name,
+              link_menu: `https://menuqr.ubicame.cc/${restaurant.slug}`,
+              horario: restaurant.localSchedule || restaurant.schedule || "Lunes a Domingo de 09:00 a 22:00",
+              direccion: `${restaurant.address || "Local principal"}${restaurant.city ? `, ${restaurant.city}` : ""}`,
+              maps: restaurant.googleBusinessUrl || "Consultar en el local",
+              datos_banco: restaurant.bankName && restaurant.bankAccountNumber
+                ? `• *Banco:* ${restaurant.bankName}\n• *Tipo de Cuenta:* ${restaurant.bankAccountType || "Ahorros"}\n• *Número:* ${restaurant.bankAccountNumber}${restaurant.bankAccountName ? `\n• *Titular:* ${restaurant.bankAccountName}` : ""}${restaurant.bankAccountDocument ? `\n• *C.I. / RUC:* ${restaurant.bankAccountDocument}` : ""}`
+                : "Por favor consulta los datos de cuenta actualizados directamente con nuestro personal en el local.",
+            };
+
+            // 2. Intentar coincidencia con las plantillas configuradas por el restaurante
+            const matched = matchTemplate(text, templates);
+            if (matched) {
+              const reply = renderTemplateContent(matched.content, vars);
+              await sendBotReply(reply);
+              continue;
+            }
+
+            // 3. Cascada a IA (si el negocio configuró su propia API Key y habilitó IA)
+            const aiResponse = await queryWhatsAppAI(restaurant, text);
+            if (aiResponse) {
+              await sendBotReply(aiResponse);
+              continue;
+            }
+
+            // 4. Si no hubo coincidencia y no hay IA disponible, enviar plantilla de Fallback o Bienvenida
+            const fallbackTmpl = templates.find((t) => t.key === "fallback") || templates.find((t) => t.key === "welcome");
+            if (fallbackTmpl) {
+              const reply = renderTemplateContent(fallbackTmpl.content, vars);
+              await sendBotReply(reply);
+              continue;
+            }
+          } catch (itemErr) {
+            console.error(`[WhatsApp Bot] Error procesando mensaje individual:`, itemErr);
           }
         }
       });
@@ -398,8 +442,66 @@ export async function getOrInitWhatsAppSocket(
   return connectPromise;
 }
 
+// Extraer texto desempaquetando mensajes efímeros / temporales / vistas únicas / botones
+export function extractMessageText(msg: proto.IWebMessageInfo): string {
+  const m = msg.message;
+  if (!m) return "";
+
+  const actual: any =
+    m.ephemeralMessage?.message ||
+    m.viewOnceMessage?.message ||
+    m.viewOnceMessageV2?.message ||
+    m.documentWithCaptionMessage?.message ||
+    m;
+
+  return (
+    actual.conversation ||
+    actual.extendedTextMessage?.text ||
+    actual.imageMessage?.caption ||
+    actual.videoMessage?.caption ||
+    actual.buttonsResponseMessage?.selectedButtonId ||
+    actual.templateButtonReplyMessage?.selectedId ||
+    actual.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    ""
+  ).trim();
+}
+
 // ==========================================
-// 5. MÉTODOS DE DESCONEXIÓN Y ENVÍO EXTERNO
+// 5. MÉTODOS DE CONSULTA Y AUTO-RECONEXIÓN
+// ==========================================
+export function isWhatsAppSocketActive(restaurantId: string): boolean {
+  return pool.sockets.has(restaurantId);
+}
+
+export async function initAllConnectedWhatsAppSessions(): Promise<void> {
+  try {
+    const sessions = await prisma.whatsAppSession.findMany({
+      where: {
+        creds: { not: null },
+        restaurant: {
+          whatsappBotEnabled: true,
+        },
+      },
+      select: { restaurantId: true },
+    });
+
+    if (sessions.length > 0) {
+      console.log(`[WhatsApp Auto-Init] Rehidratando ${sessions.length} sesión(es) conectada(s) de Baileys...`);
+      for (const s of sessions) {
+        if (!pool.sockets.has(s.restaurantId)) {
+          getOrInitWhatsAppSocket(s.restaurantId).catch((err) => {
+            console.error(`[WhatsApp Auto-Init] Error conectando socket para ${s.restaurantId}:`, err);
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[WhatsApp Auto-Init] Error rehidratando sesiones:", err);
+  }
+}
+
+// ==========================================
+// 6. MÉTODOS DE DESCONEXIÓN Y ENVÍO EXTERNO
 // ==========================================
 export async function disconnectWhatsApp(restaurantId: string): Promise<void> {
   const sock = pool.sockets.get(restaurantId);

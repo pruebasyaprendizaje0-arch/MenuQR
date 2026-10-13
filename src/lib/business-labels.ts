@@ -22,7 +22,15 @@ export interface ResolvedBusinessLabels {
   showAiSettings: boolean;
   showCrm: boolean;
   showTablesConfig: boolean;
+  showInventory: boolean;
+  inventoryTabTitle: string;
   disabledModules: string[];
+  stockUnitSingular: string;
+  stockUnitPlural: string;
+  stockSectionTitle: string;
+  topItemTitle: string;
+  topChannelTitle: string;
+  isGastro: boolean;
 }
 
 const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
@@ -48,7 +56,15 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showAiSettings: true,
     showCrm: true,
     showTablesConfig: true,
+    showInventory: true,
+    inventoryTabTitle: "Inventario & Insumos",
     disabledModules: [],
+    stockUnitSingular: "porción",
+    stockUnitPlural: "porciones",
+    stockSectionTitle: "Raciones y Disponibilidad del Menú",
+    topItemTitle: "Plato Más Vendido",
+    topChannelTitle: "Mesa que Más Vende",
+    isGastro: true,
   },
   RETAIL: {
     items: "Productos",
@@ -72,7 +88,15 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showAiSettings: true,
     showCrm: true,
     showTablesConfig: false,
+    showInventory: true,
+    inventoryTabTitle: "Bodega & Proveedores",
     disabledModules: ["split-bill"],
+    stockUnitSingular: "unidad",
+    stockUnitPlural: "unidades",
+    stockSectionTitle: "Control de Inventario y Bodega",
+    topItemTitle: "Producto Más Vendido",
+    topChannelTitle: "Canal Principal de Pedidos",
+    isGastro: false,
   },
   SERVICES: {
     items: "Servicios",
@@ -96,7 +120,15 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showAiSettings: true,
     showCrm: true,
     showTablesConfig: false,
+    showInventory: true,
+    inventoryTabTitle: "Insumos & Proveedores",
     disabledModules: ["split-bill"],
+    stockUnitSingular: "cupo",
+    stockUnitPlural: "cupos",
+    stockSectionTitle: "Disponibilidad y Cupos",
+    topItemTitle: "Servicio Más Solicitado",
+    topChannelTitle: "Canal Principal de Solicitudes",
+    isGastro: false,
   },
   GENERAL_CATALOG: {
     items: "Catálogo",
@@ -120,7 +152,15 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showAiSettings: true,
     showCrm: true,
     showTablesConfig: false,
+    showInventory: true,
+    inventoryTabTitle: "Inventario & Compras",
     disabledModules: ["split-bill"],
+    stockUnitSingular: "unidad",
+    stockUnitPlural: "unidades",
+    stockSectionTitle: "Control de Inventario y Disponibilidad",
+    topItemTitle: "Ítem Más Vendido",
+    topChannelTitle: "Canal Principal de Pedidos",
+    isGastro: false,
   },
 };
 
@@ -165,6 +205,14 @@ export function getBusinessLabels(
       showCoupons: !disabledModules.includes("coupons"),
       showAiSettings: !disabledModules.includes("ai-settings"),
       showCrm: !disabledModules.includes("crm"),
+      showInventory: !disabledModules.includes("inventory"),
+      inventoryTabTitle: base.inventoryTabTitle,
+      stockUnitSingular: base.stockUnitSingular,
+      stockUnitPlural: base.stockUnitPlural,
+      stockSectionTitle: base.stockSectionTitle,
+      topItemTitle: base.topItemTitle,
+      topChannelTitle: base.topChannelTitle,
+      isGastro: typeKey === "RESTAURANT",
     };
   } catch {
     return base;

@@ -829,6 +829,9 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   }
 
   const sku = (formData.get("sku") as string)?.trim() || null;
+  const barcode = (formData.get("barcode") as string)?.trim() || null;
+  const costPriceRaw = formData.get("costPrice") as string;
+  const costPrice = costPriceRaw !== null && costPriceRaw !== undefined && costPriceRaw.trim() !== "" ? parseFloat(costPriceRaw) : 0.0;
   const stockRaw = formData.get("stock") as string;
   const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
   const minStockRaw = formData.get("minStock") as string;
@@ -844,6 +847,8 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     name,
     description,
     price,
+    costPrice: isNaN(costPrice as number) ? 0.0 : costPrice,
+    barcode,
     imageUrl: finalImageUrl || null,
     isAvailable: effectiveIsAvailable,
     sku,
@@ -863,19 +868,21 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     });
   } catch (err: any) {
     if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
-      const { minStock: _ms, trackStock: _ts, ...fallbackData } = createData;
+      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, ...fallbackData } = createData;
       createdDish = await prisma.dish.create({
         data: fallbackData,
       });
       try {
         await prisma.$executeRawUnsafe(
-          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2 WHERE "id" = $3`,
+          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2, "costPrice" = $3, "barcode" = $4 WHERE "id" = $5`,
           isNaN(minStock as number) ? 0 : minStock,
           trackStock,
+          isNaN(costPrice as number) ? 0.0 : costPrice,
+          barcode,
           createdDish.id
         );
       } catch (rawErr) {
-        console.warn("Could not execute fallback raw update for minStock/trackStock in createDish:", rawErr);
+        console.warn("Could not execute fallback raw update for minStock/trackStock/costPrice/barcode in createDish:", rawErr);
       }
     } else {
       throw err;
@@ -1039,6 +1046,9 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   }
 
   const sku = (formData.get("sku") as string)?.trim() || null;
+  const barcode = (formData.get("barcode") as string)?.trim() || null;
+  const costPriceRaw = formData.get("costPrice") as string;
+  const costPrice = costPriceRaw !== null && costPriceRaw !== undefined && costPriceRaw.trim() !== "" ? parseFloat(costPriceRaw) : 0.0;
   const stockRaw = formData.get("stock") as string;
   const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
   const minStockRaw = formData.get("minStock") as string;
@@ -1054,6 +1064,8 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     name: string;
     description: string;
     price: number;
+    costPrice?: number | null;
+    barcode?: string | null;
     imageUrl: string | null;
     isAvailable: boolean;
     sku?: string | null;
@@ -1067,6 +1079,8 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     name,
     description,
     price,
+    costPrice: isNaN(costPrice as number) ? 0.0 : costPrice,
+    barcode,
     imageUrl: finalImageUrl || null,
     isAvailable: effectiveIsAvailable,
     sku,
@@ -1099,7 +1113,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     });
   } catch (err: any) {
     if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
-      const { minStock: _ms, trackStock: _ts, ...fallbackData } = updateData;
+      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, ...fallbackData } = updateData;
       updated = await prisma.dish.update({
         where: { id: dishId },
         data: fallbackData,
@@ -1111,13 +1125,15 @@ export async function updateDishAction(dishId: string, formData: FormData) {
       });
       try {
         await prisma.$executeRawUnsafe(
-          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2 WHERE "id" = $3`,
+          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2, "costPrice" = $3, "barcode" = $4 WHERE "id" = $5`,
           isNaN(minStock as number) ? 0 : minStock,
           trackStock,
+          isNaN(costPrice as number) ? 0.0 : costPrice,
+          barcode,
           dishId
         );
       } catch (rawErr) {
-        console.warn("Could not execute fallback raw update for minStock/trackStock in updateDish:", rawErr);
+        console.warn("Could not execute fallback raw update for minStock/trackStock/costPrice/barcode in updateDish:", rawErr);
       }
     } else {
       throw err;
