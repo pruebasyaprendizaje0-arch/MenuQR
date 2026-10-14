@@ -152,6 +152,18 @@ export default async function AdminPage() {
     }
   }
 
+  let rawCategoryAspectRatios: Array<{ id: string; imageAspectRatio: string | null }> = [];
+  try {
+    if (restaurant?.id) {
+      rawCategoryAspectRatios = await prisma.$queryRaw<Array<{ id: string; imageAspectRatio: string | null }>>`
+        SELECT "id", "imageAspectRatio" FROM "Category" WHERE "restaurantId" = ${restaurant.id}
+      `;
+    }
+  } catch (err) {
+    console.error("Error fetching raw category aspect ratios in AdminPage:", err);
+  }
+  const aspectMap = new Map(rawCategoryAspectRatios.map((r) => [r.id, r.imageAspectRatio]));
+
   const serializedRestaurant = {
     ...restaurant,
     logoUrl: restaurant.logoUrl,
@@ -180,6 +192,7 @@ export default async function AdminPage() {
     testMode: Boolean((restaurant as any).testMode ?? false),
     categories: (restaurant.categories || []).map((c: any) => ({
       ...c,
+      imageAspectRatio: aspectMap.get(c.id) || c.imageAspectRatio || "DEFAULT",
       dishes: (c.dishes || []).map((d: any) => ({
         ...d,
         description: d.description || null,

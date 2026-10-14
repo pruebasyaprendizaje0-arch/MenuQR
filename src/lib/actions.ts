@@ -663,14 +663,29 @@ export async function createCategoryAction(restaurantId: string, formData: FormD
 
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
+  const rawAspect = (formData.get("imageAspectRatio") as string) || "DEFAULT";
+  const imageAspectRatio = rawAspect === "1:1" || rawAspect === "9:16" ? rawAspect : "DEFAULT";
 
-  await prisma.category.create({
-    data: {
-      name,
-      order,
-      restaurantId,
-    },
-  });
+  try {
+    await prisma.category.create({
+      data: {
+        name,
+        order,
+        imageAspectRatio,
+        restaurantId,
+      },
+    });
+  } catch (err: any) {
+    if (err?.name === "PrismaClientValidationError" || err?.message?.includes("imageAspectRatio")) {
+      const newId = crypto.randomUUID();
+      await prisma.$executeRaw`
+        INSERT INTO "Category" ("id", "name", "order", "imageAspectRatio", "restaurantId", "createdAt", "updatedAt")
+        VALUES (${newId}, ${name}, ${order}, ${imageAspectRatio}, ${restaurantId}, NOW(), NOW())
+      `;
+    } else {
+      throw err;
+    }
+  }
 
   const restaurant = await prisma.restaurant.findUnique({ where: { id: restaurantId } });
   if (restaurant) revalidatePath(`/${restaurant.slug}`);
@@ -691,17 +706,39 @@ export async function updateCategoryAction(categoryId: string, formData: FormDat
 
   const name = formData.get("name") as string;
   const order = parseInt(formData.get("order") as string || "0", 10);
+  const rawAspect = (formData.get("imageAspectRatio") as string) || "DEFAULT";
+  const imageAspectRatio = rawAspect === "1:1" || rawAspect === "9:16" ? rawAspect : "DEFAULT";
 
-  const updated = await prisma.category.update({
-    where: { id: categoryId },
-    data: {
-      name,
-      order,
-    },
-    include: { restaurant: true },
-  });
+  let updated: any;
+  try {
+    updated = await prisma.category.update({
+      where: { id: categoryId },
+      data: {
+        name,
+        order,
+        imageAspectRatio,
+      },
+      include: { restaurant: true },
+    });
+  } catch (err: any) {
+    if (err?.name === "PrismaClientValidationError" || err?.message?.includes("imageAspectRatio")) {
+      await prisma.$executeRaw`
+        UPDATE "Category"
+        SET "name" = ${name}, "order" = ${order}, "imageAspectRatio" = ${imageAspectRatio}, "updatedAt" = NOW()
+        WHERE "id" = ${categoryId}
+      `;
+      updated = await prisma.category.findUnique({
+        where: { id: categoryId },
+        include: { restaurant: true },
+      });
+    } else {
+      throw err;
+    }
+  }
 
-  revalidatePath(`/${updated.restaurant.slug}`);
+  if (updated?.restaurant?.slug) {
+    revalidatePath(`/${updated.restaurant.slug}`);
+  }
   revalidatePath("/admin");
   return { success: true };
 }

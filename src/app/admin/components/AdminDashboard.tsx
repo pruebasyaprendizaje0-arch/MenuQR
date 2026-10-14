@@ -170,6 +170,7 @@ type Category = {
   id: string;
   name: string;
   order: number;
+  imageAspectRatio?: string | null;
   dishes: Dish[];
 };
 
@@ -934,6 +935,16 @@ export function AdminDashboard({
     initialCustomLabels.disabledModules || (defaultBusinessType !== "RESTAURANT" ? ["split-bill"] : [])
   );
 
+  const [imageAspectRatio, setImageAspectRatio] = useState<"1:1" | "9:16">(
+    initialCustomLabels.imageAspectRatio || "1:1"
+  );
+  const [suggestedAspectRatio, setSuggestedAspectRatio] = useState<"1:1" | "9:16">(
+    initialCustomLabels.suggestedAspectRatio || initialCustomLabels.imageAspectRatio || "1:1"
+  );
+  const [popularAspectRatio, setPopularAspectRatio] = useState<"1:1" | "9:16">(
+    initialCustomLabels.popularAspectRatio || initialCustomLabels.imageAspectRatio || "1:1"
+  );
+
   const catalogTabTitleValue = customCatalogTabChoice === "CUSTOM"
     ? customCatalogTabInput
     : customCatalogTabChoice;
@@ -947,6 +958,9 @@ export function AdminDashboard({
       : catalogTabTitleValue === "Productos"
         ? "Catálogo Digital de Productos"
         : `Catálogo Digital de ${customItemChoice === "CUSTOM" ? customItemsPlural : customItemChoice}`,
+    imageAspectRatio: imageAspectRatio,
+    suggestedAspectRatio: suggestedAspectRatio,
+    popularAspectRatio: popularAspectRatio,
     disabledModules: disabledModules,
     showSplitBill: !disabledModules.includes("split-bill"),
   });
@@ -1799,6 +1813,7 @@ export function AdminDashboard({
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatOrder, setNewCatOrder] = useState("0");
+  const [newCatAspect, setNewCatAspect] = useState<string>("DEFAULT");
 
   // States for Dish Dialogs
   const [editingDish, setEditingDish] = useState<Dish | null>(null);
@@ -3536,6 +3551,148 @@ export function AdminDashboard({
                   )}
                 </div>
 
+                {/* Section: Formato y Proporción de Fotos del Catálogo */}
+                <div className="space-y-3 pt-4 border-t border-slate-850">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Proporción y Formato de Fotos del Catálogo
+                      </label>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Elige cómo se presentarán las imágenes de tus productos en el menú público móvil y web.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2.5 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full">
+                      📸 {imageAspectRatio === "9:16" ? "9:16 Vertical" : "1:1 Estándar"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setImageAspectRatio("1:1")}
+                      className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3.5 cursor-pointer ${
+                        imageAspectRatio === "1:1"
+                          ? "bg-amber-500/15 border-amber-500 text-white shadow-lg shadow-amber-500/10 font-bold"
+                          : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="h-10 w-10 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center shrink-0 text-xl">
+                        ◻️
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs text-white">Estándar / Cuadrado (1:1)</span>
+                          {imageAspectRatio === "1:1" && (
+                            <span className="text-[10px] font-bold text-amber-400">✓ Activo</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-slate-400 font-normal mt-1">
+                          Ideal para platos servidos, pizzas, hamburguesas, cafeterías y gastronomía clásica.
+                        </p>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setImageAspectRatio("9:16")}
+                      className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3.5 cursor-pointer ${
+                        imageAspectRatio === "9:16"
+                          ? "bg-amber-500/15 border-amber-500 text-white shadow-lg shadow-amber-500/10 font-bold"
+                          : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="h-10 w-10 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center shrink-0 text-xl">
+                        📱
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs text-white">Vertical (9:16 - Reels / Botellas)</span>
+                          {imageAspectRatio === "9:16" && (
+                            <span className="text-[10px] font-bold text-amber-400">✓ Activo</span>
+                          )}
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-slate-400 font-normal mt-1">
+                          Ideal para licorerías (botellas altas), moda, perfumes y catálogos tipo Stories sin recortar las fotos.
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Secciones destacadas: Sugerencias y Populares */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-3 border-t border-slate-800/80">
+                    <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                          ⭐ {bLabels.suggestedSectionTitle} ({bLabels.suggestedCardBadge})
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {suggestedAspectRatio === "9:16" ? "9:16 Vertical" : "1:1 Estándar"}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSuggestedAspectRatio("1:1")}
+                          className={`px-3 py-2 rounded-lg text-xs font-bold text-center border transition-all ${
+                            suggestedAspectRatio === "1:1"
+                              ? "bg-amber-500/15 border-amber-500 text-white shadow-sm font-black"
+                              : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          ◻️ 1:1 Estándar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSuggestedAspectRatio("9:16")}
+                          className={`px-3 py-2 rounded-lg text-xs font-bold text-center border transition-all ${
+                            suggestedAspectRatio === "9:16"
+                              ? "bg-amber-500/15 border-amber-500 text-white shadow-sm font-black"
+                              : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          📱 9:16 Vertical
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                          🔥 Los Más Populares
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {popularAspectRatio === "9:16" ? "9:16 Vertical" : "1:1 Estándar"}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPopularAspectRatio("1:1")}
+                          className={`px-3 py-2 rounded-lg text-xs font-bold text-center border transition-all ${
+                            popularAspectRatio === "1:1"
+                              ? "bg-amber-500/15 border-amber-500 text-white shadow-sm font-black"
+                              : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          ◻️ 1:1 Estándar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPopularAspectRatio("9:16")}
+                          className={`px-3 py-2 rounded-lg text-xs font-bold text-center border transition-all ${
+                            popularAspectRatio === "9:16"
+                              ? "bg-amber-500/15 border-amber-500 text-white shadow-sm font-black"
+                              : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          📱 9:16 Vertical
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Section C: Visibilidad de Herramientas del Panel (Sidebar Toggles) */}
                 <div className="space-y-4 pt-4 border-t border-slate-850">
                   <div className="flex items-center justify-between flex-wrap gap-2">
@@ -4673,6 +4830,7 @@ export function AdminDashboard({
                   setEditingCategory(null);
                   setNewCatName("");
                   setNewCatOrder((categoriesList.length + 1).toString());
+                  setNewCatAspect("DEFAULT");
                   setIsCategoryModalOpen(true);
                 }}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 transition-all duration-200"
@@ -4689,6 +4847,7 @@ export function AdminDashboard({
                   <tr>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Nombre</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Orden / Posición</th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Formato Fotos</th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Cantidad Platos</th>
                     <th className="px-6 py-4 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Acciones</th>
                   </tr>
@@ -4696,7 +4855,7 @@ export function AdminDashboard({
                 <tbody className="divide-y divide-slate-800/80">
                   {categoriesList.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-6 py-10 text-center text-sm text-slate-500">
+                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-500">
                         No hay categorías creadas aún.
                       </td>
                     </tr>
@@ -4735,6 +4894,21 @@ export function AdminDashboard({
                             </div>
                           </div>
                         </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                          {cat.imageAspectRatio === "9:16" ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                              📱 9:16 Vertical
+                            </span>
+                          ) : cat.imageAspectRatio === "1:1" ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-sky-500/10 text-sky-300 border border-sky-500/30">
+                              ◻️ 1:1 Estándar
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700/60" title="Hereda el formato configurado a nivel de negocio">
+                              ⚙️ Negocio ({imageAspectRatio === "9:16" ? "9:16" : "1:1"})
+                            </span>
+                          )}
+                        </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400">{(cat.dishes || []).length} platos</td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm space-x-2">
                           <button
@@ -4742,6 +4916,7 @@ export function AdminDashboard({
                               setEditingCategory(cat);
                               setNewCatName(cat.name);
                               setNewCatOrder(cat.order.toString());
+                              setNewCatAspect(cat.imageAspectRatio || "DEFAULT");
                               setIsCategoryModalOpen(true);
                             }}
                             className="inline-flex p-2 text-slate-400 hover:text-white bg-slate-850 hover:bg-slate-800 rounded-lg transition-all"
@@ -4812,7 +4987,7 @@ export function AdminDashboard({
                         onChange={(e) => setNewCatName(e.target.value)}
                         required
                         className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
-                        placeholder="ej: Pizzas, Pastas, Postres"
+                        placeholder="ej: Vinos y Licores, Picadas, Pizzas"
                       />
                     </div>
                     <div>
@@ -4826,6 +5001,69 @@ export function AdminDashboard({
                         className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">
+                        Formato de Fotos de esta Categoría
+                      </label>
+                      <input type="hidden" name="imageAspectRatio" value={newCatAspect} />
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setNewCatAspect("DEFAULT")}
+                          className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                            newCatAspect === "DEFAULT"
+                              ? "bg-amber-500/10 border-amber-500 text-white shadow-md shadow-amber-500/10 ring-1 ring-amber-500/50"
+                              : "bg-slate-950/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between w-full mb-1">
+                            <span className="text-base">⚙️</span>
+                            {newCatAspect === "DEFAULT" && <Check className="h-4 w-4 text-amber-400" />}
+                          </div>
+                          <span className="text-xs font-bold leading-tight">Por Negocio</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">{imageAspectRatio === "9:16" ? "9:16 Vertical" : "1:1 Estándar"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setNewCatAspect("1:1")}
+                          className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                            newCatAspect === "1:1"
+                              ? "bg-sky-500/10 border-sky-500 text-white shadow-md shadow-sky-500/10 ring-1 ring-sky-500/50"
+                              : "bg-slate-950/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between w-full mb-1">
+                            <span className="text-base">◻️</span>
+                            {newCatAspect === "1:1" && <Check className="h-4 w-4 text-sky-400" />}
+                          </div>
+                          <span className="text-xs font-bold leading-tight">1:1 Estándar</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">Cuadrado clásico</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setNewCatAspect("9:16")}
+                          className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                            newCatAspect === "9:16"
+                              ? "bg-purple-500/10 border-purple-500 text-white shadow-md shadow-purple-500/10 ring-1 ring-purple-500/50"
+                              : "bg-slate-950/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between w-full mb-1">
+                            <span className="text-base">📱</span>
+                            {newCatAspect === "9:16" && <Check className="h-4 w-4 text-purple-400" />}
+                          </div>
+                          <span className="text-xs font-bold leading-tight">9:16 Vertical</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">Reels / Botellas</span>
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1.5">
+                        Ideal para negocios con catálogo mixto: licores/vinos en 9:16 alargado, y platos/snacks en 1:1.
+                      </p>
+                    </div>
+
                     <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-800">
                       {editingCategory && (
                         <button
@@ -5211,10 +5449,10 @@ export function AdminDashboard({
                                         ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm shadow-amber-500/15"
                                         : "bg-slate-800/60 text-slate-400 border-slate-700 hover:text-amber-300 hover:border-amber-500/40"
                                     }`}
-                                    title={suggestedDishIds.includes(dish.id) ? "Plato Sugerido / Especial de Hoy (Activo)" : "Marcar como Plato Sugerido"}
+                                    title={suggestedDishIds.includes(dish.id) ? `${bLabels.itemSingle} ${bLabels.isGastro ? "Sugerido / Especial de Hoy" : "Destacado"} (Activo)` : `Marcar como ${bLabels.itemSingle} ${bLabels.isGastro ? "Sugerido" : "Destacado"}`}
                                   >
                                     <Star className={`h-3 w-3 ${suggestedDishIds.includes(dish.id) ? "fill-amber-400 text-amber-400" : ""}`} />
-                                    <span>{suggestedDishIds.includes(dish.id) ? "Sugerido ⭐" : "Hacer Sugerido"}</span>
+                                    <span>{suggestedDishIds.includes(dish.id) ? (bLabels.isGastro ? "Sugerido ⭐" : "Destacado ⭐") : (bLabels.isGastro ? "Hacer Sugerido" : "Hacer Destacado")}</span>
                                   </button>
                                 </div>
 

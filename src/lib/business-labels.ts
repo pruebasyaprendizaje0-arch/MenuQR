@@ -31,6 +31,14 @@ export interface ResolvedBusinessLabels {
   topItemTitle: string;
   topChannelTitle: string;
   isGastro: boolean;
+  imageAspectRatio: "1:1" | "9:16";
+  suggestedAspectRatio: "1:1" | "9:16";
+  popularAspectRatio: "1:1" | "9:16";
+  suggestedSectionTitle: string;
+  suggestedSectionBadge: string;
+  suggestedCardBadge: string;
+  suggestedSectionSubtitle: string;
+  suggestedDefaultDesc: string;
 }
 
 const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
@@ -65,6 +73,14 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Plato Más Vendido",
     topChannelTitle: "Mesa que Más Vende",
     isGastro: true,
+    imageAspectRatio: "1:1",
+    suggestedAspectRatio: "1:1",
+    popularAspectRatio: "1:1",
+    suggestedSectionTitle: "Sugerencias del Chef",
+    suggestedSectionBadge: "⭐ Plato del Día",
+    suggestedCardBadge: "Especial del Día",
+    suggestedSectionSubtitle: "Recomendaciones especiales preparadas para hoy",
+    suggestedDefaultDesc: "Especialidad sugerida por la casa.",
   },
   RETAIL: {
     items: "Productos",
@@ -97,6 +113,14 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Producto Más Vendido",
     topChannelTitle: "Canal Principal de Pedidos",
     isGastro: false,
+    imageAspectRatio: "1:1",
+    suggestedAspectRatio: "1:1",
+    popularAspectRatio: "1:1",
+    suggestedSectionTitle: "Recomendados de la Casa",
+    suggestedSectionBadge: "⭐ Producto Destacado",
+    suggestedCardBadge: "Destacado",
+    suggestedSectionSubtitle: "Nuestra mejor selección y recomendaciones para ti",
+    suggestedDefaultDesc: "Producto seleccionado por la casa.",
   },
   SERVICES: {
     items: "Servicios",
@@ -129,6 +153,14 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Servicio Más Solicitado",
     topChannelTitle: "Canal Principal de Solicitudes",
     isGastro: false,
+    imageAspectRatio: "1:1",
+    suggestedAspectRatio: "1:1",
+    popularAspectRatio: "1:1",
+    suggestedSectionTitle: "Servicios Destacados",
+    suggestedSectionBadge: "⭐ Recomendado",
+    suggestedCardBadge: "Más Solicitado",
+    suggestedSectionSubtitle: "Nuestras opciones y especialidades más solicitadas",
+    suggestedDefaultDesc: "Servicio destacado por la casa.",
   },
   GENERAL_CATALOG: {
     items: "Catálogo",
@@ -161,6 +193,14 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Ítem Más Vendido",
     topChannelTitle: "Canal Principal de Pedidos",
     isGastro: false,
+    imageAspectRatio: "1:1",
+    suggestedAspectRatio: "1:1",
+    popularAspectRatio: "1:1",
+    suggestedSectionTitle: "Selección Especial",
+    suggestedSectionBadge: "⭐ Destacado",
+    suggestedCardBadge: "Selección",
+    suggestedSectionSubtitle: "Artículos seleccionados especialmente para ti",
+    suggestedDefaultDesc: "Ítem destacado del catálogo.",
   },
 };
 
@@ -213,6 +253,14 @@ export function getBusinessLabels(
       topItemTitle: base.topItemTitle,
       topChannelTitle: base.topChannelTitle,
       isGastro: typeKey === "RESTAURANT",
+      imageAspectRatio: custom.imageAspectRatio || base.imageAspectRatio || "1:1",
+      suggestedAspectRatio: custom.suggestedAspectRatio || custom.imageAspectRatio || base.suggestedAspectRatio || "1:1",
+      popularAspectRatio: custom.popularAspectRatio || custom.imageAspectRatio || base.popularAspectRatio || "1:1",
+      suggestedSectionTitle: custom.suggestedSectionTitle || base.suggestedSectionTitle,
+      suggestedSectionBadge: custom.suggestedSectionBadge || base.suggestedSectionBadge,
+      suggestedCardBadge: custom.suggestedCardBadge || base.suggestedCardBadge,
+      suggestedSectionSubtitle: custom.suggestedSectionSubtitle || base.suggestedSectionSubtitle,
+      suggestedDefaultDesc: custom.suggestedDefaultDesc || base.suggestedDefaultDesc,
     };
   } catch {
     return base;

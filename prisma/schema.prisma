@@ -151,14 +151,15 @@ model Restaurant {
 }
 
 model Category {
-  id           String     @id @default(uuid())
-  name         String
-  order        Int        @default(0)
-  restaurantId String
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  dishes       Dish[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id               String     @id @default(uuid())
+  name             String
+  order            Int        @default(0)
+  imageAspectRatio String?    @default("DEFAULT")
+  restaurantId     String
+  restaurant       Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  dishes           Dish[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
   @@index([restaurantId, order])
 }

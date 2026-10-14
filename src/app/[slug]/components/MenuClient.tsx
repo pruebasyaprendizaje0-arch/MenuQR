@@ -40,7 +40,8 @@ import {
   Bell,
   X,
   CreditCard,
-  ShieldCheck
+  ShieldCheck,
+  ShoppingBag
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -64,6 +65,7 @@ type Category = {
   id: string;
   name: string;
   order: number;
+  imageAspectRatio?: string | null;
   dishes: Dish[];
 };
 
@@ -241,6 +243,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     return getBusinessLabels(restaurant.customLabels, restaurant.businessType || "RESTAURANT");
   }, [restaurant.customLabels, restaurant.businessType]);
 
+  const isTableOrderingEnabled = Boolean(
+    bLabels.isGastro && (restaurant as any).enableTableOrdering !== false
+  );
+
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
 
@@ -254,6 +260,30 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const categoryRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   const [selectedTable, setSelectedTable] = useState<string>("");
+  const [suggestedAspect, setSuggestedAspect] = useState<"1:1" | "9:16">(
+    bLabels.suggestedAspectRatio || bLabels.imageAspectRatio || "1:1"
+  );
+  const [popularAspect, setPopularAspect] = useState<"1:1" | "9:16">(
+    bLabels.popularAspectRatio || bLabels.imageAspectRatio || "1:1"
+  );
+
+  const handleSetSuggestedAspect = (aspect: "1:1" | "9:16") => {
+    setSuggestedAspect(aspect);
+    try {
+      localStorage.setItem(`menuqr_suggested_aspect_${restaurant.slug}`, aspect);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSetPopularAspect = (aspect: "1:1" | "9:16") => {
+    setPopularAspect(aspect);
+    try {
+      localStorage.setItem(`menuqr_popular_aspect_${restaurant.slug}`, aspect);
+    } catch {
+      // ignore
+    }
+  };
   const [deliveryAddress, setDeliveryAddress] = useState<string>("");
   const [deliveryReference, setDeliveryReference] = useState<string>("");
   const [customerName, setCustomerName] = useState<string>("");
@@ -490,6 +520,20 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         }
       } catch (e) {
         console.warn("Error leyendo cliente guardado:", e);
+      }
+
+      // Restaurar preferencia comensal de formato de imagen (Sugerencias y Populares)
+      try {
+        const savedSuggested = localStorage.getItem(`menuqr_suggested_aspect_${restaurant.slug}`);
+        if (savedSuggested === "1:1" || savedSuggested === "9:16") {
+          setSuggestedAspect(savedSuggested);
+        }
+        const savedPopular = localStorage.getItem(`menuqr_popular_aspect_${restaurant.slug}`);
+        if (savedPopular === "1:1" || savedPopular === "9:16") {
+          setPopularAspect(savedPopular);
+        }
+      } catch (e) {
+        console.warn("Error leyendo preferencia de formato:", e);
       }
     }
   }, [restaurant.slug]);
@@ -1922,25 +1966,41 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           </div>
         ) : (
           <div className="space-y-10">
-            {/* Table Selector Banner */}
+            {/* Table / Delivery Selector Banner */}
             <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-6 backdrop-blur-md flex items-center justify-between gap-4" style={{ fontFamily: 'var(--font-outfit)' }}>
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center shrink-0" style={{ backgroundColor: `${restaurant.themeColor}15`, color: restaurant.themeColor }}>
-                  <Utensils className="h-5 w-5" />
+                  {isTableOrderingEnabled ? (
+                    selectedTable === "Domicilio" ? (
+                      <Truck className="h-5 w-5" />
+                    ) : selectedTable === "Llevar" ? (
+                      <ShoppingBag className="h-5 w-5" />
+                    ) : (
+                      <Utensils className="h-5 w-5" />
+                    )
+                  ) : (
+                    selectedTable === "Domicilio" ? (
+                      <Truck className="h-5 w-5" />
+                    ) : (
+                      <ShoppingBag className="h-5 w-5" />
+                    )
+                  )}
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Tu Ubicación / Mesa</span>
+                  <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">
+                    {isTableOrderingEnabled ? "Tu Ubicación / Mesa" : "Modalidad de Entrega"}
+                  </span>
                   <p className="text-sm text-slate-200 font-bold mt-0.5">
                     {selectedTable === "Domicilio" 
                       ? "Envío a Domicilio 🛵" 
-                      : selectedTable 
+                      : isTableOrderingEnabled && selectedTable && selectedTable !== "Llevar"
                         ? `Mesa #${selectedTable}` 
-                        : "Para llevar / Llevar a casa"}
+                        : "Para llevar / Retiro en local 🛍️"}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {selectedTable && selectedTable !== "Domicilio" && (
+                {selectedTable && selectedTable !== "Domicilio" && selectedTable !== "Llevar" && isTableOrderingEnabled && (
                   <button
                     onClick={() => setIsSplitModalOpen(true)}
                     className="px-3.5 py-2 rounded-xl text-xs font-black text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition active:scale-95 duration-200 flex items-center gap-1.5"
@@ -1968,31 +2028,63 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
               return (
                 <div id="seccion-sugeridos" className="space-y-4 pt-1" style={{ fontFamily: 'var(--font-outfit)' }}>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2.5">
                       <div className="h-8 w-8 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center shadow-lg shadow-amber-500/10">
                         <Star className="h-4 w-4 fill-amber-400 text-amber-400 animate-pulse" />
                       </div>
                       <div>
                         <h2 className="text-base font-extrabold text-white tracking-wide flex items-center gap-1.5">
-                          <span>Sugerencias del Chef</span>
-                          <span className="text-amber-400 font-bold text-xs bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">⭐ Plato del Día</span>
+                          <span>{bLabels.suggestedSectionTitle}</span>
+                          <span className="text-amber-400 font-bold text-xs bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">{bLabels.suggestedSectionBadge}</span>
                         </h2>
-                        <p className="text-[11px] text-slate-400">Recomendaciones especiales preparadas para hoy</p>
+                        <p className="text-[11px] text-slate-400">{bLabels.suggestedSectionSubtitle}</p>
                       </div>
                     </div>
-                    <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-[0.15em] bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/30">
-                      {suggestedDishes.length} Plato{suggestedDishes.length !== 1 ? "s" : ""}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-amber-400 font-extrabold uppercase tracking-[0.15em] bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/30 hidden sm:inline-block">
+                        {suggestedDishes.length} {suggestedDishes.length === 1 ? bLabels.itemSingle : bLabels.items}
+                      </span>
+                      <div className="flex items-center bg-slate-900/90 rounded-xl p-0.5 border border-amber-500/30 gap-0.5 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => handleSetSuggestedAspect("1:1")}
+                          title="Formato Cuadrado (1:1)"
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                            suggestedAspect === "1:1"
+                              ? "bg-amber-500 text-slate-950 shadow-sm"
+                              : "text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          ◻️ 1:1
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSetSuggestedAspect("9:16")}
+                          title="Formato Vertical (9:16)"
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                            suggestedAspect === "9:16"
+                              ? "bg-amber-500 text-slate-950 shadow-sm"
+                              : "text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          📱 9:16
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-2">
+                  <div className={
+                    suggestedAspect === "9:16"
+                      ? "grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5 sm:gap-4 pb-2"
+                      : "grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-2"
+                  }>
                     {suggestedDishes.map((dish) => (
                       <div 
                         key={dish.id}
-                        className="bg-gradient-to-b from-slate-900/90 to-slate-950/90 border-2 border-amber-500/40 hover:border-amber-400/80 rounded-3xl p-3.5 flex flex-col gap-2.5 relative group overflow-hidden transition-all duration-300 shadow-xl shadow-amber-500/5 hover:shadow-amber-500/15"
+                        className="bg-gradient-to-b from-slate-900/90 to-slate-950/90 border-2 border-amber-500/40 hover:border-amber-400/80 rounded-3xl p-3 sm:p-3.5 flex flex-col gap-2.5 relative group overflow-hidden transition-all duration-300 shadow-xl shadow-amber-500/5 hover:shadow-amber-500/15"
                       >
-                        <div className="h-36 sm:h-40 w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-amber-500/30 relative">
+                        <div className={`${suggestedAspect === "9:16" ? "aspect-[9/16]" : "h-36 sm:h-40"} w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-amber-500/30 relative`}>
                           {dish.imageUrl ? (
                             <img 
                               src={dish.imageUrl} 
@@ -2005,7 +2097,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             </div>
                           )}
                           <div className="absolute top-2 left-2 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-1 backdrop-blur-md shadow-lg">
-                            <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> Especial del Día
+                            <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {bLabels.suggestedCardBadge}
                           </div>
                         </div>
 
@@ -2015,7 +2107,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                               {dish.name}
                             </h3>
                             <p className="text-slate-400 text-[11px] mt-1 line-clamp-2 leading-relaxed">
-                              {dish.description || "Especialidad sugerida por la casa."}
+                              {dish.description || bLabels.suggestedDefaultDesc}
                             </p>
                           </div>
 
@@ -2036,7 +2128,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 active:scale-95 transition-all duration-200"
                               >
                                 <Plus className="h-3.5 w-3.5" />
-                                <span>Pedir</span>
+                                <span>{bLabels.isGastro ? "Pedir" : "Agregar"}</span>
                               </button>
                             ) : (
                               <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2.5 py-1 rounded-full">
@@ -2064,21 +2156,53 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               
               return (
                 <div className="space-y-4" style={{ fontFamily: 'var(--font-outfit)' }}>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <h2 className="text-base font-extrabold text-white tracking-wide flex items-center gap-1.5">
                       <span>Más Populares</span>
                       <span className="text-amber-500 animate-pulse">🔥</span>
                     </h2>
-                    <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.15em]">Los favoritos</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-500 font-extrabold uppercase tracking-[0.15em] hidden sm:inline-block">Los favoritos</span>
+                      <div className="flex items-center bg-slate-900/90 rounded-xl p-0.5 border border-slate-800 gap-0.5 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => handleSetPopularAspect("1:1")}
+                          title="Formato Cuadrado (1:1)"
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                            popularAspect === "1:1"
+                              ? "bg-amber-500 text-slate-950 shadow-sm"
+                              : "text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          ◻️ 1:1
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSetPopularAspect("9:16")}
+                          title="Formato Vertical (9:16)"
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                            popularAspect === "9:16"
+                              ? "bg-amber-500 text-slate-950 shadow-sm"
+                              : "text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          📱 9:16
+                        </button>
+                      </div>
+                    </div>
                   </div>
                   
-                  <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 pb-2">
+                  <div className={
+                    popularAspect === "9:16"
+                      ? "grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3.5 sm:gap-4 pb-2"
+                      : "grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-4 pb-2"
+                  }>
                     {fallbackPopularDishes.map((dish) => (
                       <div 
                         key={dish.id}
                         className="bg-slate-900/40 border border-white/5 rounded-3xl p-3 flex flex-col gap-2 relative group overflow-hidden transition duration-300 hover:border-white/10"
                       >
-                        <div className="h-32 sm:h-36 w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
+                        <div className={`${popularAspect === "9:16" ? "aspect-[9/16]" : "h-32 sm:h-36"} w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative`}>
                           {dish.imageUrl ? (
                             <img 
                               src={dish.imageUrl} 
@@ -2139,6 +2263,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             {/* Categorías y Platos */}
             {restaurant.categories.map((cat) => {
               const isComboCategory = cat.name.toLowerCase().includes("combo");
+              const isCategory916 = (cat.imageAspectRatio && cat.imageAspectRatio !== "DEFAULT")
+                ? cat.imageAspectRatio === "9:16"
+                : bLabels.imageAspectRatio === "9:16";
               
               return (
                 <div 
@@ -2152,7 +2279,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     <span className="text-[10px] text-slate-500 font-normal uppercase tracking-widest">{cat.dishes.length} Opciones</span>
                   </h2>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6">
+                  <div className={
+                    isCategory916
+                      ? "grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5 sm:gap-4.5"
+                      : "grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6"
+                  }>
                     {cat.dishes.map((dish) => {
                       if (isComboCategory) {
                         return (
@@ -2166,7 +2297,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           >
                             <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-bl-full pointer-events-none"></div>
                             
-                            <div className="h-28 w-28 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
+                            <div className={`${isCategory916 ? "h-36 w-24 aspect-[9/16]" : "h-28 w-28"} rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative`}>
                               {dish.imageUrl ? (
                                 <img 
                                   src={dish.imageUrl} 
@@ -2222,6 +2353,85 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         );
                       }
 
+                      {/* 9:16 Vertical Card Mode */}
+                      if (isCategory916) {
+                        return (
+                          <div 
+                            key={dish.id}
+                            className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 hover:border-slate-800 rounded-3xl p-3 flex flex-col justify-between transition-all duration-300 relative group overflow-hidden ${
+                              dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? "" : "opacity-50"
+                            }`}
+                          >
+                            <div className="w-full aspect-[9/16] rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
+                              {dish.imageUrl ? (
+                                <img 
+                                  src={dish.imageUrl} 
+                                  alt={dish.name} 
+                                  loading="lazy"
+                                  decoding="async"
+                                  className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                              ) : (
+                                <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                                  <Utensils className="h-8 w-8" />
+                                </div>
+                              )}
+                              {suggestedDishIds.includes(dish.id) && (
+                                <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-0.5 backdrop-blur-sm shadow-md">
+                                  <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> {bLabels.isGastro ? "Sugerido" : bLabels.suggestedCardBadge}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex-1 flex flex-col justify-between pt-2.5 min-w-0">
+                              <div>
+                                <h3 className="font-extrabold text-white text-xs sm:text-sm group-hover:text-red-400 transition-colors line-clamp-2 leading-snug">
+                                  {dish.name}
+                                </h3>
+                                {dish.description && (
+                                  <ExpandableDescription
+                                    description={dish.description}
+                                    defaultText=""
+                                    className="text-slate-400 text-[10px] mt-1 leading-normal"
+                                    themeColor={restaurant.themeColor}
+                                    threshold={40}
+                                  />
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5">
+                                <div className="flex flex-col">
+                                  <span className="text-xs sm:text-sm font-black text-white" style={{ color: restaurant.themeColor }}>
+                                    ${formatPrice(dish.price)}
+                                  </span>
+                                  {dish.trackStock && (dish.stock ?? 0) <= (dish.minStock ?? 0) && (dish.stock ?? 0) > 0 && (
+                                    <span className="text-[9px] text-amber-400 font-bold flex items-center gap-0.5 animate-pulse">
+                                      🔥 ¡Últimas {dish.stock}!
+                                    </span>
+                                  )}
+                                </div>
+                                <div>
+                                  {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
+                                    <button
+                                      onClick={() => addToCart(dish)}
+                                      className="p-1.5 sm:p-2 rounded-xl text-white shadow-lg transition transform active:scale-90 duration-200"
+                                      style={{ backgroundColor: restaurant.themeColor }}
+                                      title={`Agregar ${dish.name}`}
+                                    >
+                                      <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                    </button>
+                                  ) : (
+                                    <span className="text-[9px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-2 py-0.5 rounded-full">
+                                      Agotado
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      {/* Standard 1:1 Horizontal Row Mode */}
                       return (
                         <div 
                           key={dish.id}
@@ -2245,7 +2455,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             )}
                             {suggestedDishIds.includes(dish.id) && (
                               <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-0.5 backdrop-blur-sm shadow-md">
-                                <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> Sugerido
+                                <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> {bLabels.isGastro ? "Sugerido" : bLabels.suggestedCardBadge}
                               </div>
                             )}
                           </div>
@@ -2671,11 +2881,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               const tablesList = restaurant.tablesConfig 
                 ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)
                 : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-              const isTableSelected = selectedTable !== "" && selectedTable !== "Domicilio";
+              const isTableSelected = isTableOrderingEnabled && selectedTable !== "" && selectedTable !== "Domicilio" && selectedTable !== "Llevar";
 
               const hasPickup = (restaurant as any).enablePickup !== false;
               const hasDelivery = (restaurant as any).enableDelivery !== false && (restaurant as any).deliveryEnabled !== false;
-              const hasTable = (restaurant as any).enableTableOrdering !== false;
+              const hasTable = isTableOrderingEnabled;
 
               const activeModalitiesCount = [hasPickup, hasDelivery, hasTable].filter(Boolean).length;
               const gridColsClass = activeModalitiesCount === 1 
@@ -2691,16 +2901,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     {hasPickup && (
                       <button
                         type="button"
-                        onClick={() => setSelectedTable("")}
+                        onClick={() => setSelectedTable("Llevar")}
                         className={`py-2.5 px-2 rounded-xl text-[11px] font-black border flex flex-col sm:flex-row items-center justify-center gap-1 text-center transition duration-200 ${
-                          selectedTable === ""
+                          selectedTable === "Llevar" || selectedTable === ""
                             ? "text-white border-transparent shadow-lg"
                             : "text-slate-400 bg-slate-950/60 border-slate-800 hover:text-white"
                         }`}
-                        style={{ backgroundColor: selectedTable === "" ? restaurant.themeColor : undefined }}
+                        style={{ backgroundColor: (selectedTable === "Llevar" || selectedTable === "") ? restaurant.themeColor : undefined }}
                       >
                         <span>🛍️</span>
-                        <span className="truncate">Para Llevar</span>
+                        <span className="truncate">{isTableOrderingEnabled ? "Para Llevar" : "Retiro / Llevar"}</span>
                       </button>
                     )}
 
@@ -3109,7 +3319,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
             {/* Invoice Breakdown */}
             {(() => {
-              const isTableOrder = selectedTable !== "" && selectedTable !== "Domicilio";
+              const isTableOrder = isTableOrderingEnabled && selectedTable !== "" && selectedTable !== "Domicilio" && selectedTable !== "Llevar";
               const isDelivery = selectedTable === "Domicilio";
               
               const ivaPercent = restaurant.ivaPercent || 0;
@@ -3218,12 +3428,14 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         </div>
       )}
 
-      {/* Table Selection Modal */}
+      {/* Table / Delivery Selection Modal */}
       {isTableModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in" style={{ fontFamily: 'var(--font-outfit)' }}>
           <div className="bg-slate-900 border border-white/5 rounded-[2rem] p-6 max-w-sm w-full space-y-6 shadow-2xl relative">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-black text-white">Selecciona tu Mesa</h3>
+              <h3 className="text-lg font-black text-white">
+                {isTableOrderingEnabled ? "Selecciona tu Mesa" : "Modalidad de Entrega"}
+              </h3>
               <button 
                 onClick={() => setIsTableModalOpen(false)}
                 className="text-slate-400 hover:text-white transition"
@@ -3232,64 +3444,129 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               </button>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Elige tu número de mesa para llevar tu pedido directamente a tu lugar. Si vas a pedir para llevar, selecciona "Llevar".
+              {isTableOrderingEnabled
+                ? "Elige tu número de mesa para llevar tu pedido directamente a tu lugar. Si vas a pedir para llevar, selecciona \"Llevar\"."
+                : "Elige cómo deseas recibir tu pedido: para retirar en el local o con entrega a domicilio."}
             </p>
             
-            <div className="grid grid-cols-4 gap-2.5 max-h-56 overflow-y-auto pr-1">
-              {(() => {
-                const tablesList = restaurant.tablesConfig 
-                  ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)
-                  : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-                
-                return tablesList.map((num) => (
-                  <button
-                    key={num}
-                    onClick={() => {
-                      setSelectedTable(num);
-                      setIsTableModalOpen(false);
-                    }}
-                    className={`py-3 rounded-xl text-sm font-black border transition duration-200 ${
-                      selectedTable === num 
-                        ? "text-white border-transparent" 
-                        : "text-slate-350 bg-slate-950/60 border-white/5 hover:text-white"
-                    }`}
-                    style={{ backgroundColor: selectedTable === num ? restaurant.themeColor : undefined }}
-                  >
-                    {num}
-                  </button>
-                ));
-              })()}
-              <button
-                onClick={() => {
-                  setSelectedTable("");
-                  setIsTableModalOpen(false);
-                }}
-                className={`col-span-4 py-3 rounded-xl text-xs font-black tracking-wide uppercase border transition duration-200 ${
-                  selectedTable === "" 
-                    ? "text-white border-transparent" 
-                    : "text-slate-400 bg-slate-950/60 border-white/5 hover:text-white"
-                }`}
-                style={{ backgroundColor: selectedTable === "" ? restaurant.themeColor : undefined }}
-              >
-                🛍️ Para Llevar
-              </button>
-              {restaurant.deliveryEnabled && (
+            {isTableOrderingEnabled ? (
+              <div className="grid grid-cols-4 gap-2.5 max-h-56 overflow-y-auto pr-1">
+                {(() => {
+                  const tablesList = restaurant.tablesConfig 
+                    ? restaurant.tablesConfig.split(",").map(t => t.trim()).filter(Boolean)
+                    : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+                  
+                  return tablesList.map((num) => (
+                    <button
+                      key={num}
+                      onClick={() => {
+                        setSelectedTable(num);
+                        setIsTableModalOpen(false);
+                      }}
+                      className={`py-3 rounded-xl text-sm font-black border transition duration-200 ${
+                        selectedTable === num 
+                          ? "text-white border-transparent" 
+                          : "text-slate-350 bg-slate-950/60 border-white/5 hover:text-white"
+                      }`}
+                      style={{ backgroundColor: selectedTable === num ? restaurant.themeColor : undefined }}
+                    >
+                      {num}
+                    </button>
+                  ));
+                })()}
                 <button
                   onClick={() => {
-                    setSelectedTable("Domicilio");
+                    setSelectedTable("Llevar");
                     setIsTableModalOpen(false);
                   }}
                   className={`col-span-4 py-3 rounded-xl text-xs font-black tracking-wide uppercase border transition duration-200 ${
-                    selectedTable === "Domicilio" 
+                    selectedTable === "Llevar" 
                       ? "text-white border-transparent" 
                       : "text-slate-400 bg-slate-950/60 border-white/5 hover:text-white"
                   }`}
-                  style={{ backgroundColor: selectedTable === "Domicilio" ? restaurant.themeColor : undefined }}
+                  style={{ backgroundColor: selectedTable === "Llevar" ? restaurant.themeColor : undefined }}
                 >
-                  🛵 Envío a Domicilio (${restaurant.deliveryCost.toFixed(2)})
+                  🛍️ Para Llevar
                 </button>
-              )}
-            </div>
+                {restaurant.deliveryEnabled && (
+                  <button
+                    onClick={() => {
+                      setSelectedTable("Domicilio");
+                      setIsTableModalOpen(false);
+                    }}
+                    className={`col-span-4 py-3 rounded-xl text-xs font-black tracking-wide uppercase border transition duration-200 ${
+                      selectedTable === "Domicilio" 
+                        ? "text-white border-transparent" 
+                        : "text-slate-400 bg-slate-950/60 border-white/5 hover:text-white"
+                    }`}
+                    style={{ backgroundColor: selectedTable === "Domicilio" ? restaurant.themeColor : undefined }}
+                  >
+                    🛵 Envío a Domicilio{restaurant.deliveryCost > 0 ? ` ($${restaurant.deliveryCost.toFixed(2)})` : ""}
+                  </button>
+                )}
+              </div>
+            ) : (
+              /* Non-restaurant / Products / Catalog: Clear cards for Pickup and Delivery */
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTable("Llevar");
+                    setIsTableModalOpen(false);
+                  }}
+                  className={`w-full p-4 rounded-2xl text-left border transition-all duration-200 flex items-center justify-between group cursor-pointer ${
+                    selectedTable === "Llevar" || selectedTable === ""
+                      ? "text-white border-transparent shadow-lg"
+                      : "text-slate-300 bg-slate-950/60 border-white/10 hover:border-white/20"
+                  }`}
+                  style={{ backgroundColor: (selectedTable === "Llevar" || selectedTable === "") ? restaurant.themeColor : undefined }}
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="h-11 w-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                      <ShoppingBag className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-sm text-white">Retiro en Tienda / Llevar</p>
+                      <p className="text-xs text-white/70">Pasa a recoger tu pedido por el local</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 shrink-0">
+                    Gratis
+                  </span>
+                </button>
+
+                {restaurant.deliveryEnabled !== false && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTable("Domicilio");
+                      setIsTableModalOpen(false);
+                    }}
+                    className={`w-full p-4 rounded-2xl text-left border transition-all duration-200 flex items-center justify-between group cursor-pointer ${
+                      selectedTable === "Domicilio"
+                        ? "text-white border-transparent shadow-lg"
+                        : "text-slate-300 bg-slate-950/60 border-white/10 hover:border-white/20"
+                    }`}
+                    style={{ backgroundColor: selectedTable === "Domicilio" ? restaurant.themeColor : undefined }}
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div className="h-11 w-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                        <Truck className="h-5 w-5 text-white" />
+                      </div>
+                      <div>
+                        <p className="font-extrabold text-sm text-white">Envío a Domicilio</p>
+                        <p className="text-xs text-white/70">Entrega directa en tu dirección</p>
+                      </div>
+                    </div>
+                    {restaurant.deliveryCost > 0 && (
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 shrink-0">
+                        ${restaurant.deliveryCost.toFixed(2)}
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3838,7 +4115,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             <span className="text-[10px] font-extrabold uppercase tracking-wider">Inicio</span>
           </button>
 
-          {/* Menu Tab */}
+          {/* Menu / Catalog Tab */}
           <button
             onClick={() => {
               setCurrentTab("menu");
@@ -3848,18 +4125,52 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             style={{ color: currentTab === "menu" ? restaurant.themeColor : "#94a3b8" }}
           >
             <BookOpen className="h-5 w-5" />
-            <span className="text-[10px] font-extrabold uppercase tracking-wider">Menú</span>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider truncate max-w-[65px]">
+              {bLabels.catalogTabTitle === "Menú Digital" ? "Menú" : bLabels.catalogTabTitle}
+            </span>
           </button>
 
-          {/* Table Selector */}
+          {/* Table / Delivery Selector (Opción 1: Entrega adaptativa) */}
           <button
             onClick={() => setIsTableModalOpen(true)}
             className="flex flex-col items-center gap-1 py-1.5 px-3 rounded-xl transition duration-200 active:scale-95"
-            style={{ color: selectedTable ? "#fbbf24" : "#94a3b8" }}
+            style={{ 
+              color: isTableOrderingEnabled 
+                ? (selectedTable ? "#fbbf24" : "#94a3b8")
+                : (selectedTable === "Domicilio" || selectedTable === "Llevar" ? "#fbbf24" : "#94a3b8")
+            }}
           >
-            <Utensils className="h-5 w-5" />
+            {isTableOrderingEnabled ? (
+              selectedTable === "Domicilio" ? (
+                <Truck className="h-5 w-5" />
+              ) : selectedTable === "Llevar" ? (
+                <ShoppingBag className="h-5 w-5" />
+              ) : (
+                <Utensils className="h-5 w-5" />
+              )
+            ) : (
+              selectedTable === "Domicilio" ? (
+                <Truck className="h-5 w-5" />
+              ) : (
+                <ShoppingBag className="h-5 w-5" />
+              )
+            )}
             <span className="text-[10px] font-extrabold uppercase tracking-wider truncate max-w-[65px]">
-              {selectedTable === "Domicilio" ? "Domicilio" : selectedTable ? `#${selectedTable}` : "Mesa"}
+              {isTableOrderingEnabled ? (
+                selectedTable === "Domicilio" 
+                  ? "Domicilio" 
+                  : selectedTable === "Llevar"
+                    ? "Llevar"
+                    : selectedTable 
+                      ? `#${selectedTable}` 
+                      : "Mesa"
+              ) : (
+                selectedTable === "Domicilio" 
+                  ? "Domicilio" 
+                  : selectedTable === "Llevar"
+                    ? "Llevar"
+                    : "Entrega"
+              )}
             </span>
           </button>
 
@@ -4032,7 +4343,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       )}
 
       {/* Split Bill Modal */}
-      {selectedTable && selectedTable !== "Domicilio" && (
+      {selectedTable && selectedTable !== "Domicilio" && selectedTable !== "Llevar" && isTableOrderingEnabled && (
         <SplitBillModal
           restaurant={restaurant}
           tableName={selectedTable}

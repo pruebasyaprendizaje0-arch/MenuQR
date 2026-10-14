@@ -260,6 +260,18 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
       getSuperAdminSession(),
     ]);
 
+    let rawCategoryAspectRatios: Array<{ id: string; imageAspectRatio: string | null }> = [];
+    try {
+      if (restaurant?.id) {
+        rawCategoryAspectRatios = await prisma.$queryRaw<Array<{ id: string; imageAspectRatio: string | null }>>`
+          SELECT "id", "imageAspectRatio" FROM "Category" WHERE "restaurantId" = ${restaurant.id}
+        `;
+      }
+    } catch (err) {
+      console.error("Error fetching raw category aspect ratios in RestaurantMenuPage:", err);
+    }
+    const aspectMap = new Map(rawCategoryAspectRatios.map((r) => [r.id, r.imageAspectRatio]));
+
     const serializedRestaurant = {
       ...restaurant,
       whatsappNumber: restaurant.whatsapp || "",
@@ -271,6 +283,7 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
       isRuletaActiva: (restaurant as any).ruletaConfig ? Boolean((restaurant as any).ruletaConfig.activa) : true,
       categories: (restaurant.categories || []).map((cat: any) => ({
         ...cat,
+        imageAspectRatio: aspectMap.get(cat.id) || cat.imageAspectRatio || "DEFAULT",
         createdAt: toIso(cat.createdAt),
         updatedAt: toIso(cat.updatedAt),
         dishes: (cat.dishes || []).map((dish: any) => ({

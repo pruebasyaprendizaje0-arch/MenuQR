@@ -1,9 +1,18 @@
 import { PrismaClient } from "@prisma/client";
 
+const PRISMA_SCHEMA_VERSION = "20261014_cat_aspect_ratio";
+
 const globalForPrisma = globalThis as unknown as {
   prismaMain: PrismaClient | undefined;
+  prismaVersion: string | undefined;
   tenantCache: Map<string, PrismaClient> | undefined;
 };
+
+// Invalidate in-memory PrismaClient when schema version advances in development
+if (globalForPrisma.prismaVersion !== PRISMA_SCHEMA_VERSION) {
+  globalForPrisma.prismaMain = undefined;
+  globalForPrisma.prismaVersion = PRISMA_SCHEMA_VERSION;
+}
 
 function getDatabaseUrl(): string {
   const url =
