@@ -31,8 +31,11 @@ import {
   Calendar,
   Sparkles,
   ShoppingBag,
-  RefreshCw
+  RefreshCw,
+  Download,
+  FileSpreadsheet
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { getBusinessLabels, ResolvedBusinessLabels } from "@/lib/business-labels";
 import {
   getInventoryDataAction,
@@ -48,7 +51,10 @@ import {
   createPurchaseOrderAction,
   receivePurchaseOrderAction,
   cancelPurchaseOrderAction,
+  updateDishInventoryAction,
 } from "@/lib/inventory-actions";
+import BatchInventoryModal from "./BatchInventoryModal";
+import QuickEditDishInventoryModal from "./QuickEditDishInventoryModal";
 
 interface InventoryAdminTabProps {
   restaurant: {
@@ -99,6 +105,148 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
   const [wasteItem, setWasteItem] = useState<{ type: "DISH" | "SUPPLY"; item: any } | null>(null);
   const [wasteQty, setWasteQty] = useState(1);
   const [wasteReason, setWasteReason] = useState("Vencido / Caducado");
+
+  // Modales de carga masiva y edición rápida
+  const [isBatchInventoryModalOpen, setIsBatchInventoryModalOpen] = useState(false);
+  const [quickEditDish, setQuickEditDish] = useState<any | null>(null);
+
+  // Exportar todo el documento de inventario a Excel
+  const handleExportInventoryExcel = () => {
+    try {
+      const wb = XLSX.utils.book_new();
+
+      // HOJA 1: Catálogo de Venta / Existencias
+      const dishesRows = dishes.map((d) => {
+        const stock = typeof d.stock === "number" ? d.stock : (d.trackStock ? 0 : "Sin límite");
+        const minStock = typeof d.minStock === "number" ? d.minStock : 0;
+        const cost = typeof d.costPrice === "number" ? d.costPrice : 0;
+        const price = typeof d.price === "number" ? d.price : 0;
+        const profitMarginPct = price > 0 ? Number((((price - cost) / price) * 100).toFixed(1)) : 0;
+        const unitProfit = price > 0 ? Number((price - cost).toFixed(2)) : 0;
+        const totalCostInventory = typeof stock === "number" ? Number((stock * cost).toFixed(2)) : 0;
+        const totalRetailProjected = typeof stock === "number" ? Number((stock * price).toFixed(2)) : 0;
+
+        return {
+          ID: d.id,
+          Categoria: d.category?.name || "General",
+          Nombre: d.name,
+          Codigo_Barras_SKU: d.barcode || d.sku || "",
+          Stock_Actual: stock,
+          Stock_Minimo: minStock,
+          Controla_Stock: d.trackStock ? "SI" : "NO",
+          Costo_Compra: cost,
+          Precio_Venta: price,
+          Margen_Porcentaje: profitMarginPct + "%",
+          Ganancia_Unitaria: unitProfit,
+          Valor_Total_Bodega_Costo: totalCostInventory,
+          Valor_Proyectado_Venta: totalRetailProjected,
+          Proveedor_Habitual: d.supplier?.name || "No asignado",
+          Telefono_Proveedor: d.supplier?.phone || "",
+          Disponible: d.isAvailable ? "SI" : "NO",
+        };
+      });
+
+      const wsDishes = XLSX.utils.json_to_sheet(dishesRows);
+      wsDishes["!cols"] = [
+        { wch: 38 },
+        { wch: 18 },
+        { wch: 32 },
+        { wch: 20 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 24 },
+        { wch: 22 },
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 12 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsDishes, "Catalogo_Venta");
+
+      // HOJA 2: Insumos & Materia Prima
+      const suppliesRows = supplyItems.map((s) => {
+        const stock = Number(s.currentStock) || 0;
+        const cost = Number(s.costPerUnit) || 0;
+        return {
+          ID: s.id,
+          Insumo: s.name,
+          Unidad_Medida: s.unit || "unidad",
+          Stock_Actual: stock,
+          Stock_Minimo: Number(s.minStock) || 0,
+          Costo_Unitario: cost,
+          Valor_Total_Insumo: Number((stock * cost).toFixed(2)),
+          Proveedor_Habitual: s.supplier?.name || "No asignado",
+          Telefono_Proveedor: s.supplier?.phone || "",
+        };
+      });
+      const wsSupplies = XLSX.utils.json_to_sheet(suppliesRows);
+      wsSupplies["!cols"] = [
+        { wch: 38 },
+        { wch: 28 },
+        { wch: 15 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 24 },
+        { wch: 18 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsSupplies, "Insumos_MateriaPrima");
+
+      // HOJA 3: Directorio de Proveedores
+      const suppliersRows = suppliers.map((sup) => ({
+        ID: sup.id,
+        Nombre_Proveedor: sup.name,
+        Contacto: sup.contactName || "",
+        Telefono_WhatsApp: sup.phone || "",
+        Email: sup.email || "",
+        RUC_NIT: sup.taxId || "",
+        Direccion: sup.address || "",
+        Notas: sup.notes || "",
+        Items_Vinculados: sup._count?.dishes || 0,
+      }));
+      const wsSuppliers = XLSX.utils.json_to_sheet(suppliersRows);
+      wsSuppliers["!cols"] = [
+        { wch: 38 },
+        { wch: 26 },
+        { wch: 20 },
+        { wch: 18 },
+        { wch: 24 },
+        { wch: 16 },
+        { wch: 28 },
+        { wch: 30 },
+        { wch: 16 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsSuppliers, "Directorio_Proveedores");
+
+      // HOJA 4: Resumen Financiero
+      const summaryRows = [
+        { Metrica: "Capital Total en Bodega (Costo)", Valor: `$${inventoryMetrics.totalCostValue.toFixed(2)}` },
+        { Metrica: "Valor Proyectado Total de Venta", Valor: `$${inventoryMetrics.totalRetailValue.toFixed(2)}` },
+        { Metrica: "Margen Bruto Promedio Estimado", Valor: `${inventoryMetrics.estimatedMargin}%` },
+        { Metrica: "Ítems con Stock Crítico (Bajo Mínimo)", Valor: inventoryMetrics.lowStockCount },
+        { Metrica: "Ítems Agotados (Quiebre de Stock)", Valor: inventoryMetrics.outOfStockCount },
+        { Metrica: "Total Ítems en Catálogo de Venta", Valor: dishes.length },
+        { Metrica: "Total Insumos / Materias Primas", Valor: supplyItems.length },
+        { Metrica: "Total Proveedores Registrados", Valor: suppliers.length },
+        { Metrica: "Fecha de Generación del Informe", Valor: new Date().toLocaleString() },
+      ];
+      const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+      wsSummary["!cols"] = [{ wch: 42 }, { wch: 25 }];
+      XLSX.utils.book_append_sheet(wb, wsSummary, "Resumen_Financiero");
+
+      const fileDate = new Date().toISOString().split("T")[0];
+      const fileName = `Inventario_MenuQR_${restaurant.slug}_${fileDate}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+    } catch (err: any) {
+      console.error("Error al exportar inventario a Excel:", err);
+      alert("Error al generar el archivo Excel: " + (err.message || "desconocido"));
+    }
+  };
 
   // Carga inicial de datos
   const loadInventory = async (isSilent: boolean = false) => {
@@ -478,16 +626,36 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
           {/* Tabla de Existencias de Productos / Platos de la Carta */}
           <div className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
-            <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
+            <div className="px-5 py-3 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80">
               <div className="flex items-center gap-2">
                 <Package className="h-4 w-4 text-amber-400" />
                 <h3 className="text-sm font-bold text-white">
                   Catálogo de Venta ({filteredDishes.length})
                 </h3>
+                <span className="text-xs text-slate-400 font-mono hidden sm:inline">
+                  · {bLabels.stockUnitPlural} controladas
+                </span>
               </div>
-              <span className="text-xs text-slate-400 font-mono">
-                {bLabels.stockUnitPlural} controladas
-              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleExportInventoryExcel}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 text-xs font-bold transition shadow-sm"
+                  title="Descargar documento completo de inventario en Excel (.xlsx)"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Descargar Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBatchInventoryModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-emerald-600 hover:from-amber-500 hover:to-emerald-500 text-white text-xs font-bold transition shadow-sm"
+                  title="Subir o actualizar existencias, costos y proveedores en lote con Excel"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  <span>Subir en Lotes (.xlsx)</span>
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -555,7 +723,15 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                           </td>
 
                           <td className="px-4 py-3 font-mono text-slate-300">
-                            ${cost.toFixed(2)}
+                            <button
+                              type="button"
+                              onClick={() => setQuickEditDish(dish)}
+                              className="group flex items-center gap-1.5 hover:text-amber-400 transition cursor-pointer text-left font-mono py-1 px-1.5 -ml-1.5 rounded-lg hover:bg-slate-800/60"
+                              title="Clic para editar costo de compra"
+                            >
+                              <span>${cost.toFixed(2)}</span>
+                              <Edit3 className="h-3 w-3 text-slate-600 group-hover:text-amber-400 opacity-60 group-hover:opacity-100 transition" />
+                            </button>
                           </td>
 
                           <td className="px-4 py-3 font-mono font-bold text-white">
@@ -569,26 +745,48 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                                   ? "bg-emerald-500/20 text-emerald-300"
                                   : unitMargin > 20
                                   ? "bg-blue-500/20 text-blue-300"
+                                  : unitMargin < 0
+                                  ? "bg-red-500/20 text-red-300"
                                   : "bg-amber-500/20 text-amber-300"
                               }`}
                             >
-                              +{unitMargin.toFixed(0)}%
+                              {unitMargin >= 0 ? `+${unitMargin.toFixed(0)}%` : `${unitMargin.toFixed(0)}%`}
                             </span>
                           </td>
 
                           <td className="px-4 py-3 text-slate-400">
-                            {dish.supplier?.name ? (
-                              <span className="flex items-center gap-1 font-medium text-slate-300">
-                                <Truck className="h-3 w-3 text-slate-500" />
-                                {dish.supplier.name}
-                              </span>
-                            ) : (
-                              <span className="text-slate-600 italic">No asignado</span>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => setQuickEditDish(dish)}
+                              className="group flex items-center gap-1.5 hover:text-amber-300 transition cursor-pointer text-left py-1 px-1.5 -ml-1.5 rounded-lg hover:bg-slate-800/60"
+                              title="Clic para asignar o cambiar proveedor habitual"
+                            >
+                              {dish.supplier?.name ? (
+                                <span className="flex items-center gap-1 font-medium text-slate-300 group-hover:text-amber-300">
+                                  <Truck className="h-3 w-3 text-amber-500/70" />
+                                  <span>{dish.supplier.name}</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 italic group-hover:text-amber-400 flex items-center gap-1">
+                                  <span>No asignado</span>
+                                  <span className="text-[10px] text-amber-500/80 font-normal underline">(Asignar)</span>
+                                </span>
+                              )}
+                              <Edit3 className="h-3 w-3 text-slate-600 group-hover:text-amber-400 opacity-60 group-hover:opacity-100 transition" />
+                            </button>
                           </td>
 
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setQuickEditDish(dish)}
+                                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 text-amber-400 border border-amber-500/20 hover:border-amber-500/40 text-xs font-bold transition flex items-center gap-1 mr-1 shadow-sm"
+                                title="Editar costo de compra, proveedor habitual y stock"
+                              >
+                                <Edit3 className="h-3 w-3" />
+                                <span>Editar</span>
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleQuickAdjust("DISH", dish.id, -1)}
@@ -1245,6 +1443,41 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
           </div>
         </div>
       )}
+
+      {/* MODAL DE EDICIÓN RÁPIDA DE COSTO & PROVEEDOR */}
+      <QuickEditDishInventoryModal
+        isOpen={Boolean(quickEditDish)}
+        dish={quickEditDish}
+        suppliers={suppliers}
+        onClose={() => setQuickEditDish(null)}
+        onSuccess={(updatedDish) => {
+          setDishes((prev) =>
+            prev.map((d) => (d.id === updatedDish.id ? { ...d, ...updatedDish } : d))
+          );
+          setQuickEditDish(null);
+        }}
+        onOpenNewSupplier={() => {
+          setQuickEditDish(null);
+          setEditingSupplier(null);
+          setIsSupplierModalOpen(true);
+        }}
+        restaurantId={restaurant.id}
+        bLabels={bLabels}
+      />
+
+      {/* MODAL DE CARGA MASIVA DE INVENTARIO EN EXCEL */}
+      <BatchInventoryModal
+        isOpen={isBatchInventoryModalOpen}
+        onClose={() => setIsBatchInventoryModalOpen(false)}
+        onSuccess={() => {
+          loadInventory(true);
+        }}
+        restaurantId={restaurant.id}
+        restaurantSlug={restaurant.slug}
+        existingDishes={dishes}
+        existingSuppliers={suppliers}
+        bLabels={bLabels}
+      />
     </div>
   );
 }

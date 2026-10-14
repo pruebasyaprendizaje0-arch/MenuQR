@@ -159,6 +159,8 @@ type Dish = {
   sku?: string | null;
   barcode?: string | null;
   costPrice?: number | null;
+  supplierId?: string | null;
+  supplier?: { id: string; name: string; phone?: string | null } | null;
   stock?: number | null;
   minStock?: number | null;
   trackStock?: boolean;
@@ -209,7 +211,7 @@ type Restaurant = {
   id: string;
   slug: string;
   name: string;
-  plan?: "FREE" | "PRO";
+  plan?: "FREE" | "PRO" | "ELITE";
   logoUrl: string | null;
   coverUrl: string | null;
   paymentQrUrl: string | null;
@@ -266,6 +268,7 @@ type Restaurant = {
   seoKeywords?: string | null;
   seoImage?: string | null;
   categories: Category[];
+  suppliers?: any[];
   orders: Order[];
   seasonRates?: SeasonRate[];
   coupons?: Coupon[];
@@ -954,7 +957,7 @@ export function AdminDashboard({
   const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [paymentSuccessMsg, setPaymentSuccessMsg] = useState("");
-  const [currentPlan, setCurrentPlan] = useState<"FREE" | "PRO">(restaurant.plan || "FREE");
+  const [currentPlan, setCurrentPlan] = useState<"FREE" | "PRO" | "ELITE">(restaurant.plan || "FREE");
   const [currentTrialEndsAt, setCurrentTrialEndsAt] = useState<Date>(
     restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date()
   );
@@ -981,9 +984,10 @@ export function AdminDashboard({
       method: manualPaymentMethod,
       reference: manualPaymentReference,
       receiptUrl: manualPaymentReceiptUrl,
+      plan: selectedPlanPrice === 20 ? "ELITE" : "PRO",
       notes: selectedPlanPrice === 20 
-        ? "Plan Puesta en Marcha Inmediata ($20.00 USD) - Carga y digitalización asistida" 
-        : "Plan Digital Pro ($15.00 USD) - Autogestión",
+        ? "Plan Elite ($20.00 USD) - Carga de información, mantenimientos mensuales y asesoramiento premium" 
+        : "Plan Pro ($15.00 USD) - Autogestión",
     });
     setIsSubmittingPayment(false);
     if (result.error) {
@@ -1335,6 +1339,7 @@ export function AdminDashboard({
       Precio: number;
       Costo_Compra: number | string;
       Margen_Estimado: number | string;
+      Proveedor_Habitual: string;
       Codigo_Barras_SKU: string;
       Disponible: string;
       Controla_Stock: string;
@@ -1358,6 +1363,7 @@ export function AdminDashboard({
           Precio: itemPrice,
           Costo_Compra: itemCost > 0 ? itemCost : "N/A",
           Margen_Estimado: profitMargin,
+          Proveedor_Habitual: dish.supplier?.name || "No asignado",
           Codigo_Barras_SKU: dish.barcode || dish.sku || "",
           Disponible: dish.isAvailable ? "SI" : "NO",
           Controla_Stock: dish.trackStock ? "SI" : "NO",
@@ -1382,6 +1388,7 @@ export function AdminDashboard({
       { wch: 12 }, // Precio
       { wch: 14 }, // Costo_Compra
       { wch: 16 }, // Margen_Estimado
+      { wch: 24 }, // Proveedor_Habitual
       { wch: 20 }, // Codigo_Barras_SKU
       { wch: 14 }, // Disponible
       { wch: 14 }, // Controla_Stock
@@ -1808,6 +1815,7 @@ export function AdminDashboard({
   const [dishStock, setDishStock] = useState("10");
   const [dishMinStock, setDishMinStock] = useState("3");
   const [dishCostPrice, setDishCostPrice] = useState("0");
+  const [dishSupplierId, setDishSupplierId] = useState("");
   const [dishBarcode, setDishBarcode] = useState("");
   const [dishStockFilter, setDishStockFilter] = useState<"ALL" | "TRACKED" | "LOW_STOCK" | "OUT_OF_STOCK">("ALL");
 
@@ -2285,34 +2293,46 @@ export function AdminDashboard({
           const now = new Date();
           const isExpired = trialEnds < now;
           const daysRemaining = Math.max(0, Math.ceil((trialEnds.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-          const isPro = currentPlan === "PRO";
-          const isProActive = isPro && !isExpired;
+          const isPaidPlan = currentPlan === "PRO" || currentPlan === "ELITE";
+          const isPlanActive = isPaidPlan && !isExpired;
 
           return (
             <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-sm ${
-              isProActive
-                ? "bg-gradient-to-r from-emerald-950/40 to-slate-900 border-emerald-500/30 text-emerald-300"
+              isPlanActive
+                ? currentPlan === "ELITE"
+                  ? "bg-gradient-to-r from-amber-950/40 via-purple-950/30 to-slate-900 border-amber-500/40 text-amber-300"
+                  : "bg-gradient-to-r from-emerald-950/40 to-slate-900 border-emerald-500/30 text-emerald-300"
                 : isExpired 
                   ? "bg-red-500/10 border-red-500/30 text-red-400" 
                   : "bg-amber-500/10 border-amber-500/30 text-amber-400"
             }`}>
               <div className="flex items-center gap-3">
                 <div className={`p-2.5 rounded-xl border ${
-                  isProActive ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" : "bg-amber-500/20 border-amber-500/30 text-amber-400"
+                  isPlanActive 
+                    ? currentPlan === "ELITE"
+                      ? "bg-amber-500/20 border-amber-500/40 text-amber-400"
+                      : "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" 
+                    : "bg-amber-500/20 border-amber-500/30 text-amber-400"
                 }`}>
                   <Crown className="w-5 h-5" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-bold">
-                      {isProActive ? "Plan Premium Activo ($15 USD/mes)" : isExpired ? "Suscripción Vencida" : "Prueba Gratuita (30 Días)"}
+                      {isPlanActive 
+                        ? currentPlan === "ELITE"
+                          ? "⭐ Plan Elite Activo ($20 USD/mes)"
+                          : "Plan Pro Activo ($15 USD/mes)"
+                        : isExpired 
+                        ? "Suscripción Vencida" 
+                        : "Prueba Gratuita (30 Días)"}
                     </span>
                     <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-950/60 border border-current">
-                      {isProActive ? "PRO" : isPro ? "VENCIDO" : `${daysRemaining}d restantes`}
+                      {isPlanActive ? currentPlan : isPaidPlan ? "VENCIDO" : `${daysRemaining}d restantes`}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {isProActive
+                    {isPlanActive
                       ? `Vencimiento: ${trialEnds.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}`
                       : isExpired 
                         ? "Tu prueba ha finalizado. Activa tu plan desde $15 USD/mes para continuar." 
@@ -2328,7 +2348,7 @@ export function AdminDashboard({
                 className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/10 transition-all shrink-0 flex items-center justify-center gap-1.5"
               >
                 <CreditCard className="w-3.5 h-3.5" />
-                {isProActive ? "Renovar ($15/mes)" : "Activar Plan ($15/mes)"}
+                {isPlanActive ? "Renovar Suscripción" : "Activar Plan"}
               </button>
             </div>
           );
@@ -4897,6 +4917,7 @@ export function AdminDashboard({
                     setDishDescription("");
                     setDishPrice("0");
                     setDishCostPrice("0");
+                    setDishSupplierId("");
                     setDishBarcode("");
                     setDishImageUrl("");
                     setDishAvailable(true);
@@ -5206,6 +5227,7 @@ export function AdminDashboard({
                                       setDishDescription(dish.description || "");
                                       setDishPrice(dish.price.toString());
                                       setDishCostPrice(((dish.costPrice as any) ?? 0).toString());
+                                      setDishSupplierId(dish.supplierId || dish.supplier?.id || "");
                                       setDishBarcode(dish.barcode || dish.sku || "");
                                       setDishImageUrl(dish.imageUrl || "");
                                       setDishAvailable(dish.isAvailable);
@@ -5264,6 +5286,7 @@ export function AdminDashboard({
                       formData.append("stock", dishStock);
                       formData.append("minStock", dishMinStock);
                       formData.append("costPrice", dishCostPrice);
+                      formData.append("supplierId", dishSupplierId);
                       formData.append("barcode", dishBarcode);
                       
                       if (editingDish) {
@@ -5365,6 +5388,25 @@ export function AdminDashboard({
                           placeholder="ej: 786123456789 o PROD-001"
                           className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
                         />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Proveedor Habitual <span className="text-[10px] text-slate-500">(opcional)</span>
+                        </label>
+                        <select
+                          name="supplierId"
+                          value={dishSupplierId}
+                          onChange={(e) => setDishSupplierId(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
+                        >
+                          <option value="">-- Sin proveedor habitual --</option>
+                          {((restaurant.suppliers as any[]) || []).map((sup: any) => (
+                            <option key={sup.id} value={sup.id}>
+                              {sup.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
 
                       {parseFloat(dishPrice) > 0 && parseFloat(dishCostPrice) > 0 && (
@@ -8110,9 +8152,19 @@ export function AdminDashboard({
                 <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800/80 space-y-2">
                   <span className="text-xs text-slate-400 font-medium">Estado del Plan</span>
                   <div className="flex items-center gap-2">
-                    <span className={`h-3 w-3 rounded-full ${currentPlan === "PRO" && currentTrialEndsAt > new Date() ? "bg-emerald-500 animate-pulse" : "bg-amber-500"}`} />
+                    <span className={`h-3 w-3 rounded-full ${
+                      (currentPlan === "PRO" || currentPlan === "ELITE") && currentTrialEndsAt > new Date()
+                        ? "bg-emerald-500 animate-pulse"
+                        : "bg-amber-500"
+                    }`} />
                     <span className="font-bold text-white text-base">
-                      {currentPlan === "PRO" && currentTrialEndsAt > new Date() ? "Plan Premium Activo" : currentPlan === "PRO" ? "Suscripción Vencida" : "Prueba Gratuita"}
+                      {currentPlan === "ELITE" && currentTrialEndsAt > new Date()
+                        ? "⭐ Plan Elite Activo ($20 USD/mes)"
+                        : currentPlan === "PRO" && currentTrialEndsAt > new Date()
+                        ? "Plan Pro Activo ($15 USD/mes)"
+                        : currentPlan === "PRO" || currentPlan === "ELITE"
+                        ? "Suscripción Vencida"
+                        : "Prueba Gratuita"}
                     </span>
                   </div>
                 </div>
@@ -8156,7 +8208,7 @@ export function AdminDashboard({
                       </div>
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Gestión de platos, combos e impuestos</span>
+                        <span>Gestión de platos, combos e inventarios</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -8177,16 +8229,16 @@ export function AdminDashboard({
                   </button>
                 </div>
 
-                {/* Plan 2: Plan Puesta en Marcha Inmediata ($20/mes) */}
-                <div className="bg-gradient-to-b from-amber-500/10 to-slate-950 border-2 border-amber-500/50 p-6 rounded-2xl space-y-5 flex flex-col justify-between relative overflow-hidden">
+                {/* Plan 2: Plan Elite ($20/mes) */}
+                <div className="bg-gradient-to-b from-amber-500/10 via-purple-500/5 to-slate-950 border-2 border-amber-500/50 p-6 rounded-2xl space-y-5 flex flex-col justify-between relative overflow-hidden">
                   <div className="space-y-4 relative z-10">
                     <div className="flex justify-between items-start">
                       <div>
-                        <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-wider">
-                          ⭐ Puesta en Marcha
+                        <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-purple-600 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                          ⭐ Plan Elite VIP
                         </span>
                         <h3 className="text-lg font-black text-white mt-1.5 flex items-center gap-1.5">
-                          Puesta en Marcha Inmediata
+                          Plan Elite ($20/mes)
                         </h3>
                       </div>
                       <div className="text-right">
@@ -8195,24 +8247,24 @@ export function AdminDashboard({
                       </div>
                     </div>
                     <p className="text-amber-200/90 text-xs font-medium">
-                      🚀 <strong>Nosotros subimos y cargamos todo tu menú por ti.</strong> Listo en menos de 24 horas.
+                      🚀 <strong>Servicio Llave en Mano:</strong> Nosotros nos encargamos de todo para que tú solo te concentres en atender a tus clientes.
                     </p>
                     <div className="space-y-2 text-xs text-slate-300 pt-2 border-t border-amber-500/20">
                       <div className="flex items-center gap-2 text-amber-100 font-semibold">
                         <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Carga completa de platos, fotos y categorías</span>
+                        <span>Subida completa de información, platos y fotografías por nuestro equipo</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-amber-100 font-semibold">
+                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Mantenimientos mensuales y revisiones recurrentes</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-amber-100 font-semibold">
+                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Asesoramiento premium 1 a 1 en la utilización de la app y ventas</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Optimización visual de fotos y descripciones</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Diseño de códigos QR listos para imprimir</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Asesoría personalizada por WhatsApp</span>
+                        <span>Todo lo incluido en el Plan Pro (WhatsApp, QR, Inventario)</span>
                       </div>
                     </div>
                   </div>
@@ -8222,10 +8274,10 @@ export function AdminDashboard({
                       setSelectedPlanPrice(20);
                       setShowPaymentModal(true);
                     }}
-                    className="w-full py-3 rounded-xl font-extrabold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 transition flex items-center justify-center gap-2 relative z-10"
+                    className="w-full py-3 rounded-xl font-bold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
                   >
                     <CreditCard className="w-4 h-4" />
-                    Pagar Puesta en Marcha ($20/mes)
+                    Pagar Plan Elite ($20/mes)
                   </button>
                 </div>
               </div>
@@ -8268,13 +8320,13 @@ export function AdminDashboard({
                   onClick={() => setSelectedPlanPrice(15)}
                   className={`p-3 rounded-xl border text-left transition ${
                     selectedPlanPrice === 15 
-                      ? "border-amber-400 bg-amber-500/10 text-white" 
+                      ? "border-emerald-400 bg-emerald-500/10 text-white" 
                       : "border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700"
                   }`}
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wider block text-slate-400">Autogestión</span>
                   <span className="font-extrabold text-sm block mt-0.5">Plan Pro</span>
-                  <span className="text-amber-400 font-bold text-xs">$15.00 USD/mes</span>
+                  <span className="text-emerald-400 font-bold text-xs">$15.00 USD/mes</span>
                 </button>
 
                 <button
@@ -8286,10 +8338,33 @@ export function AdminDashboard({
                       : "border-slate-800 bg-slate-950/50 text-slate-400 hover:border-slate-700"
                   }`}
                 >
-                  <span className="text-[10px] font-bold uppercase tracking-wider block text-amber-400">⭐ Con Asistencia</span>
-                  <span className="font-extrabold text-sm block mt-0.5">Puesta en Marcha</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider block text-amber-400">⭐ Gestión & Asesoría</span>
+                  <span className="font-extrabold text-sm block mt-0.5">Plan Elite</span>
                   <span className="text-amber-400 font-bold text-xs">$20.00 USD/mes</span>
                 </button>
+              </div>
+
+              {/* Explicación de la diferencia entre planes */}
+              <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 text-[11px] text-slate-300">
+                {selectedPlanPrice === 20 ? (
+                  <div className="space-y-1">
+                    <p className="font-bold text-amber-300 flex items-center gap-1.5">
+                      ⭐ Plan Elite ($20.00 USD/mes) - Servicio Llave en Mano:
+                    </p>
+                    <p className="text-slate-400">
+                      La empresa MenuQR Pro se encarga de subir toda tu información, platos y fotografías, además de brindarte mantenimientos mensuales recurrentes y asesoramiento premium para optimizar tus ventas con la app.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="font-bold text-emerald-400 flex items-center gap-1.5">
+                      Plan Pro ($15.00 USD/mes) - Autogestionado:
+                    </p>
+                    <p className="text-slate-400">
+                      Tú administras tus platos y fotos con acceso completo al menú interactivo, pedidos por WhatsApp, códigos QR anti-spoofing por mesa, catálogo y control de inventarios.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -8298,7 +8373,7 @@ export function AdminDashboard({
               <div className="flex justify-between items-center text-slate-300">
                 <span>Concepto:</span>
                 <span className="font-bold text-white">
-                  {selectedPlanPrice === 20 ? "Plan Puesta en Marcha Inmediata" : "Plan Digital Pro"}
+                  {selectedPlanPrice === 20 ? "Plan Elite ($20.00 USD/mes)" : "Plan Pro ($15.00 USD/mes)"}
                 </span>
               </div>
               <div className="flex justify-between items-center text-slate-300">

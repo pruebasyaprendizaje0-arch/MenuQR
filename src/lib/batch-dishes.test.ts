@@ -83,6 +83,28 @@ function runTests() {
   assert.strictEqual(fixed, "Tradicionales con azúcar y/o café", "Mojibake should be fixed properly");
   console.log("✅ [PASS] Corrección y recuperación de tildes dañadas por encoding");
 
+  // 5. Test Inventory specific fields (costPrice, supplierName, stock, barcode)
+  const inventoryRow = {
+    "Categoría": "Empanadas",
+    "Nombre del Producto": "Empanada Gigante de Camarón",
+    "Código de Barras / SKU": "EMP-CAM-01",
+    "Stock Actual": "25",
+    "Stock Mínimo": "5",
+    "Costo de Compra": "$ 1,50",
+    "Precio de Venta": "$ 4.50",
+    "Proveedor Habitual": "Mariscos del Pacífico",
+    "Disponible": "SI"
+  };
+  const invExtracted = extractDishRow(inventoryRow);
+  assert.strictEqual(invExtracted.name, "Empanada Gigante de Camarón");
+  assert.strictEqual(invExtracted.price, 4.50, "Selling price must be 4.50");
+  assert.strictEqual(invExtracted.costPrice, 1.50, "Cost price must be 1.50");
+  assert.strictEqual(invExtracted.stock, 25, "Stock must be 25");
+  assert.strictEqual(invExtracted.minStock, 5, "Min stock must be 5");
+  assert.strictEqual(invExtracted.supplierName, "Mariscos del Pacífico");
+  assert.strictEqual(invExtracted.barcode, "EMP-CAM-01");
+  console.log("✅ [PASS] Extracción de Costo de Compra, Proveedor Habitual, Stock y Códigos");
+
   console.log("=================================================");
   console.log("🎉 TODAS LAS PRUEBAS PASARON EXITOSAMENTE (100%)");
   console.log("=================================================");

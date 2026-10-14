@@ -67,9 +67,16 @@ export interface ExtractedDishRow {
   name: string;
   description: string;
   price: number;
+  costPrice?: number;
+  stock?: number | null;
+  minStock?: number;
+  supplierName?: string;
+  barcode?: string;
+  sku?: string;
   isAvailable: boolean;
   imageUrl: string;
   rawPrice?: string;
+  rawCost?: string;
 }
 
 export function extractDishRow(row: Record<string, any>): ExtractedDishRow {
@@ -121,17 +128,49 @@ export function extractDishRow(row: Record<string, any>): ExtractedDishRow {
     ["descrip", "detalle", "ingrediente", "desc"]
   );
 
+  // Costo de compra (primero para no confundir con precio de venta)
+  const rawCost = getVal(
+    [
+      "costocompra", "costodecompra", "costounitario", "preciocosto", "costo", "cost", "costprice",
+      "valorcompra", "preciodecompra"
+    ],
+    ["costocompra", "costodecompra", "costounit", "preciocosto", "costprice", "costo", "cost"]
+  );
+
   const rawPrice = getVal(
     [
-      "precio", "price", "costo", "valor", "preciousd", "preciobs", "precios",
-      "tarifa", "pvp", "preciounitario", "importe", "precioventa"
+      "precioventa", "preciodeventa", "precio", "price", "pvp", "valorventa", "valordeventa",
+      "preciousd", "preciobs", "precios", "tarifa", "preciounitario", "importe", "valor"
     ],
-    ["precio", "price", "costo", "valor", "pvp", "tarifa", "importe"]
+    ["precioventa", "precio", "price", "pvp", "tarifa", "importe", "valor"]
+  );
+
+  const supplierName = getVal(
+    [
+      "proveedorhabitual", "proveedor", "supplier", "distribuidor", "distribuidora",
+      "nombredelproveedor", "proveedorprincipal"
+    ],
+    ["proveedor", "supplier", "distribuid"]
+  );
+
+  const rawStock = getVal(
+    ["stockactual", "stockdisponible", "stock", "existencia", "existencias", "cantidad", "inventario", "unidades"],
+    ["stockactual", "existencia", "stock", "cantidad"]
+  );
+
+  const rawMinStock = getVal(
+    ["stockminimo", "minstock", "minimo", "alertastock", "stockalerta"],
+    ["stockmin", "minstock", "minimo"]
+  );
+
+  const barcode = getVal(
+    ["codigobarrassku", "codigobarras", "codigodebarras", "barcode", "sku", "codigo", "itemcode"],
+    ["codigobarra", "barcode", "sku", "codigo"]
   );
 
   const rawAvailable = getVal(
-    ["disponible", "available", "activo", "estado", "habilitado", "stock"],
-    ["disponib", "activ", "estad", "habilit", "stock"]
+    ["disponible", "available", "activo", "estado", "habilitado"],
+    ["disponib", "activ", "estad", "habilit"]
   ).toUpperCase();
 
   const imageUrl = getVal(
@@ -144,6 +183,14 @@ export function extractDishRow(row: Record<string, any>): ExtractedDishRow {
   );
 
   const parsedPrice = parsePriceValue(rawPrice);
+  const parsedCost = rawCost ? parsePriceValue(rawCost) : 0;
+  const parsedStock = rawStock !== "" && !isNaN(parseInt(rawStock.replace(/[^0-9-]/g, ""), 10))
+    ? parseInt(rawStock.replace(/[^0-9-]/g, ""), 10)
+    : null;
+  const parsedMinStock = rawMinStock !== "" && !isNaN(parseInt(rawMinStock.replace(/[^0-9]/g, ""), 10))
+    ? parseInt(rawMinStock.replace(/[^0-9]/g, ""), 10)
+    : 0;
+
   const isAvailable =
     rawAvailable !== "NO" &&
     rawAvailable !== "FALSE" &&
@@ -156,8 +203,15 @@ export function extractDishRow(row: Record<string, any>): ExtractedDishRow {
     name,
     description,
     price: parsedPrice,
+    costPrice: parsedCost,
+    stock: parsedStock,
+    minStock: parsedMinStock,
+    supplierName: supplierName || undefined,
+    barcode: barcode || undefined,
+    sku: barcode || undefined,
     isAvailable,
     imageUrl: imageUrl || "",
     rawPrice,
+    rawCost,
   };
 }

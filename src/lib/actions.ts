@@ -832,6 +832,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   const barcode = (formData.get("barcode") as string)?.trim() || null;
   const costPriceRaw = formData.get("costPrice") as string;
   const costPrice = costPriceRaw !== null && costPriceRaw !== undefined && costPriceRaw.trim() !== "" ? parseFloat(costPriceRaw) : 0.0;
+  const supplierId = (formData.get("supplierId") as string)?.trim() || null;
   const stockRaw = formData.get("stock") as string;
   const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
   const minStockRaw = formData.get("minStock") as string;
@@ -848,6 +849,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     description,
     price,
     costPrice: isNaN(costPrice as number) ? 0.0 : costPrice,
+    supplierId,
     barcode,
     imageUrl: finalImageUrl || null,
     isAvailable: effectiveIsAvailable,
@@ -868,7 +870,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     });
   } catch (err: any) {
     if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
-      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, ...fallbackData } = createData;
+      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, supplierId: _sup, ...fallbackData } = createData;
       createdDish = await prisma.dish.create({
         data: fallbackData,
       });
@@ -900,9 +902,16 @@ export interface BatchDishInput {
   name: string;
   description?: string;
   price: number;
+  costPrice?: number;
   categoryName: string;
   isAvailable?: boolean;
   imageUrl?: string;
+  supplierId?: string | null;
+  stock?: number | null;
+  minStock?: number;
+  trackStock?: boolean;
+  barcode?: string | null;
+  sku?: string | null;
 }
 
 export async function createBatchDishesAction(restaurantId: string, dishes: BatchDishInput[]) {
@@ -972,11 +981,22 @@ export async function createBatchDishesAction(restaurantId: string, dishes: Batc
       const catId = categoryMap.get(rawCat.toLowerCase()) || existingCategories[0]?.id;
       
       const cleanPrice = parsePriceValue(item.price);
+      const cleanCost = typeof item.costPrice === "number" ? Math.max(0, item.costPrice) : 0;
+      const cleanStock = typeof item.stock === "number" ? Math.max(0, item.stock) : null;
+      const cleanMinStock = typeof item.minStock === "number" ? Math.max(0, item.minStock) : 0;
+      const trackStock = typeof item.trackStock === "boolean" ? item.trackStock : (cleanStock !== null);
       
       return {
         name: item.name.trim(),
         description: item.description?.trim() || null,
         price: cleanPrice,
+        costPrice: cleanCost,
+        supplierId: item.supplierId || null,
+        stock: cleanStock,
+        minStock: cleanMinStock,
+        trackStock,
+        barcode: item.barcode || null,
+        sku: item.sku || null,
         imageUrl: item.imageUrl?.trim() || null,
         isAvailable: item.isAvailable !== false,
         categoryId: catId!,
@@ -1049,6 +1069,8 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   const barcode = (formData.get("barcode") as string)?.trim() || null;
   const costPriceRaw = formData.get("costPrice") as string;
   const costPrice = costPriceRaw !== null && costPriceRaw !== undefined && costPriceRaw.trim() !== "" ? parseFloat(costPriceRaw) : 0.0;
+  const supplierIdRaw = formData.get("supplierId");
+  const supplierId = supplierIdRaw !== null && supplierIdRaw !== undefined ? (supplierIdRaw as string).trim() || null : undefined;
   const stockRaw = formData.get("stock") as string;
   const stock = stockRaw !== null && stockRaw !== undefined && stockRaw.trim() !== "" ? parseInt(stockRaw, 10) : null;
   const minStockRaw = formData.get("minStock") as string;
@@ -1065,6 +1087,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     description: string;
     price: number;
     costPrice?: number | null;
+    supplierId?: string | null;
     barcode?: string | null;
     imageUrl: string | null;
     isAvailable: boolean;
@@ -1091,6 +1114,10 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     variants,
   };
 
+  if (supplierId !== undefined) {
+    updateData.supplierId = supplierId;
+  }
+
   if (categoryId) {
     const category = await prisma.category.findFirst({
       where: { id: categoryId, restaurantId: dish.restaurantId },
@@ -1113,7 +1140,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     });
   } catch (err: any) {
     if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
-      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, ...fallbackData } = updateData;
+      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, supplierId: _sup, ...fallbackData } = updateData;
       updated = await prisma.dish.update({
         where: { id: dishId },
         data: fallbackData,
@@ -1396,7 +1423,7 @@ export async function superAdminCreateRestaurantAction(data: {
   canton: string;
   parroquia: string;
   sector?: string;
-  plan?: "FREE" | "PRO";
+  plan?: "FREE" | "PRO" | "ELITE";
   existingUserId?: string;
 }) {
   try {
@@ -1501,7 +1528,7 @@ export async function superAdminUpdateRestaurantAction(
     description?: string;
     schedule?: string;
     specialty?: string;
-    plan: "FREE" | "PRO";
+    plan: "FREE" | "PRO" | "ELITE";
     bankName?: string;
     bankAccountType?: string;
     bankAccountNumber?: string;
@@ -1594,7 +1621,7 @@ export async function superAdminUpdateRestaurantAction(
       schedule: data.schedule || null,
       specialty: data.specialty || null,
       plan: data.plan,
-      ...(data.plan === "PRO" ? { trialEndsAt: futureTrial } : {}),
+      ...(data.plan === "PRO" || data.plan === "ELITE" ? { trialEndsAt: futureTrial } : {}),
       bankName: data.bankName || null,
       bankAccountType: data.bankAccountType || null,
       bankAccountNumber: data.bankAccountNumber || null,
@@ -1687,7 +1714,7 @@ export async function impersonateUserAction(userId: string, restaurantId?: strin
   redirect("/admin");
 }
 
-export async function changeUserPlanAction(restaurantId: string, plan: "FREE" | "PRO") {
+export async function changeUserPlanAction(restaurantId: string, plan: "FREE" | "PRO" | "ELITE") {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) {
     return { error: "No autorizado. Acción reservada para SuperAdmin." };
@@ -1741,6 +1768,7 @@ export async function createManualSubscriptionPaymentAction(input: {
   reference?: string;
   receiptUrl?: string;
   notes?: string;
+  plan?: "PRO" | "ELITE";
 }) {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) {
@@ -1761,6 +1789,7 @@ export async function createManualSubscriptionPaymentAction(input: {
       reference: input.reference?.trim() || null,
       receiptUrl: input.receiptUrl?.trim() || null,
       notes: input.notes?.trim() || null,
+      plan: input.plan === "ELITE" ? "ELITE" : "PRO",
     },
   });
   revalidatePath("/super-admin");
@@ -1782,11 +1811,12 @@ export async function approveManualSubscriptionPaymentAction(paymentId: string) 
     const baseDate = restaurant.trialEndsAt && restaurant.trialEndsAt > new Date() ? restaurant.trialEndsAt : new Date();
     const expiresAt = new Date(baseDate);
     expiresAt.setDate(expiresAt.getDate() + 30);
+    const targetPlan = payment.plan === "ELITE" ? "ELITE" : "PRO";
     await tx.manualSubscriptionPayment.update({
       where: { id: payment.id },
       data: { status: "APPROVED", approvedBy, approvedAt: new Date(), startsAt: baseDate, expiresAt },
     });
-    await tx.restaurant.update({ where: { id: restaurant.id }, data: { plan: "PRO", trialEndsAt: expiresAt } });
+    await tx.restaurant.update({ where: { id: restaurant.id }, data: { plan: targetPlan, trialEndsAt: expiresAt } });
     return { slug: restaurant.slug, expiresAt };
   });
   revalidatePath("/super-admin");
@@ -2667,16 +2697,23 @@ export async function updateRestaurantLeadStatusAction(
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) return { error: "No autorizado. Acción reservada para SuperAdmin." };
 
-  await prismaTenant.restaurant.update({
-    where: { id: restaurantId },
-    data: {
-      leadStatus,
-      nextFollowUpAt: nextFollowUpAt ? new Date(nextFollowUpAt) : null,
-    },
-  });
+  try {
+    const dataToUpdate: Record<string, any> = { leadStatus };
+    if (nextFollowUpAt !== undefined) {
+      dataToUpdate.nextFollowUpAt = nextFollowUpAt ? new Date(nextFollowUpAt) : null;
+    }
 
-  revalidatePath("/super-admin");
-  return { success: true };
+    await prismaTenant.restaurant.update({
+      where: { id: restaurantId },
+      data: dataToUpdate,
+    });
+
+    revalidatePath("/super-admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error in updateRestaurantLeadStatusAction:", error);
+    return { error: error?.message || "Error al actualizar etapa CRM del negocio." };
+  }
 }
 
 export async function addCrmNoteAction(
@@ -2688,16 +2725,22 @@ export async function addCrmNoteAction(
 
   if (!content.trim()) return { error: "El contenido de la nota no puede estar vacío." };
 
-  await prismaControl.crmNote.create({
-    data: {
-      leadId: target.leadId || null,
-      content: content.trim(),
-      author: "SuperAdmin",
-    },
-  });
+  try {
+    await prismaControl.crmNote.create({
+      data: {
+        restaurantId: target.restaurantId || null,
+        leadId: target.leadId || null,
+        content: content.trim(),
+        author: "SuperAdmin",
+      },
+    });
 
-  revalidatePath("/super-admin");
-  return { success: true };
+    revalidatePath("/super-admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error in addCrmNoteAction:", error);
+    return { error: error?.message || "Error al guardar nota CRM." };
+  }
 }
 
 export async function createProspectLeadAction(data: {
@@ -3576,4 +3619,133 @@ export async function getComprehensiveBusinessBackupAction(
     return { error: error?.message || "Error al obtener los datos de respaldo." };
   }
 }
+
+export async function toggleRestaurantSuspensionAction(
+  restaurantId: string,
+  isSuspended: boolean,
+  reason?: string
+) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  try {
+    const updated = await prismaTenant.restaurant.update({
+      where: { id: restaurantId },
+      data: {
+        isSuspended,
+        suspendedReason: reason || null,
+      },
+    });
+
+    revalidatePath("/super-admin");
+    revalidatePath(`/${updated.slug}`);
+    return { success: true, isSuspended: updated.isSuspended };
+  } catch (error: any) {
+    console.error("Error toggling restaurant suspension:", error);
+    return { error: error?.message || "Error al actualizar estado de suspensión del restaurante." };
+  }
+}
+
+export async function createEliteTaskAction(data: {
+  restaurantId: string;
+  title: string;
+  description?: string;
+  requestType: string;
+  priority: string;
+  dueDate?: string;
+  notes?: string;
+}) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  try {
+    const task = await prismaTenant.eliteTask.create({
+      data: {
+        restaurantId: data.restaurantId,
+        title: data.title,
+        description: data.description || null,
+        requestType: data.requestType || "CARGA_MENU",
+        priority: data.priority || "MEDIA",
+        status: "PENDIENTE",
+        dueDate: data.dueDate ? new Date(data.dueDate) : null,
+        notes: data.notes || null,
+      },
+      include: {
+        restaurant: {
+          select: { id: true, name: true, slug: true, plan: true },
+        },
+      },
+    });
+
+    revalidatePath("/super-admin");
+    return { success: true, task };
+  } catch (error: any) {
+    console.error("Error creating elite task:", error);
+    return { error: error?.message || "Error al crear tarea de soporte Elite." };
+  }
+}
+
+export async function updateEliteTaskStatusAction(
+  taskId: string,
+  status: "PENDIENTE" | "EN_PROCESO" | "COMPLETADO",
+  notes?: string
+) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  try {
+    const isCompleted = status === "COMPLETADO";
+    const updateData: any = {
+      status,
+      completedAt: isCompleted ? new Date() : null,
+    };
+    if (notes !== undefined) {
+      updateData.notes = notes;
+    }
+
+    const task = await prismaTenant.eliteTask.update({
+      where: { id: taskId },
+      data: updateData,
+    });
+
+    if (isCompleted) {
+      await prismaTenant.restaurant.update({
+        where: { id: task.restaurantId },
+        data: { lastMaintenanceAt: new Date() },
+      });
+    }
+
+    revalidatePath("/super-admin");
+    return { success: true, task };
+  } catch (error: any) {
+    console.error("Error updating elite task status:", error);
+    return { error: error?.message || "Error al actualizar estado de la tarea Elite." };
+  }
+}
+
+export async function deleteEliteTaskAction(taskId: string) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  try {
+    await prismaTenant.eliteTask.delete({
+      where: { id: taskId },
+    });
+
+    revalidatePath("/super-admin");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error deleting elite task:", error);
+    return { error: error?.message || "Error al eliminar tarea Elite." };
+  }
+}
+
 

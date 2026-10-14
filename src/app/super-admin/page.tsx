@@ -33,19 +33,27 @@ export default async function SuperAdminPage({
   }
 
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const validTabs = ["directory", "kanban", "prospects", "reminders", "bots", "collections", "elite_ops"];
   const initialTab = (
-    resolvedSearchParams?.tab &&
-    ["directory", "kanban", "prospects", "reminders", "bots"].includes(resolvedSearchParams.tab)
-  ) ? (resolvedSearchParams.tab as "directory" | "kanban" | "prospects" | "reminders" | "bots") : "directory";
+    resolvedSearchParams?.tab && validTabs.includes(resolvedSearchParams.tab)
+  ) ? (resolvedSearchParams.tab as "directory" | "kanban" | "prospects" | "reminders" | "bots" | "collections" | "elite_ops") : "directory";
 
-  // Cargar todos los restaurantes incluyendo conteo de categorías y platos
+  // Cargar todos los restaurantes incluyendo conteo de categorías, platos, fotos y órdenes para Health Score
   let restaurants: any[] = [];
   try {
     restaurants = await prismaTenant.restaurant.findMany({
       orderBy: { createdAt: "desc" },
       include: {
         _count: {
-          select: { categories: true, dishes: true }
+          select: { categories: true, dishes: true, orders: true }
+        },
+        dishes: {
+          select: { id: true, imageUrl: true }
+        },
+        orders: {
+          select: { id: true, total: true, createdAt: true, status: true },
+          take: 5,
+          orderBy: { createdAt: "desc" }
         }
       }
     });
@@ -53,11 +61,26 @@ export default async function SuperAdminPage({
     console.error("Error loading restaurants in SuperAdminPage:", err);
   }
 
+  // Cargar tareas del Plan Elite (VIP Operations Queue)
+  let eliteTasks: any[] = [];
+  try {
+    eliteTasks = await prismaTenant.eliteTask.findMany({
+      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+      include: {
+        restaurant: {
+          select: { id: true, name: true, slug: true, plan: true, whatsapp: true, logoUrl: true }
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Error loading elite tasks in SuperAdminPage:", err);
+  }
+
   let manualPayments: any[] = [];
   try {
     manualPayments = await prismaTenant.manualSubscriptionPayment.findMany({
       orderBy: { createdAt: "desc" },
-      take: 50,
+      take: 100,
       include: { restaurant: { select: { id: true, name: true, slug: true } } },
     });
   } catch (err) {
@@ -114,9 +137,19 @@ export default async function SuperAdminPage({
     totalDishes
   };
 
-  // Serialización para Client Boundary
+  // Serialización para Client Boundary con métricas de salud (Health Score)
   const serializedRestaurants = restaurants.map((r: any) => {
     const owner = userMap.get(r.userId) as any;
+    const totalDishes = r.dishes?.length || r._count?.dishes || 0;
+    const dishesWithPhoto = (r.dishes || []).filter((d: any) => Boolean(d.imageUrl)).length;
+    const photoPercentage = totalDishes > 0 ? Math.round((dishesWithPhoto / totalDishes) * 100) : 0;
+    const totalOrders = r._count?.orders || (r.orders || []).length;
+    const recentOrders = (r.orders || []).filter((o: any) => {
+      const d = new Date(o.createdAt).getTime();
+      return !isNaN(d) && d > (Date.now() - 7 * 86400000);
+    }).length;
+    const lastOrderDate = r.orders?.[0]?.createdAt ? toIso(r.orders[0].createdAt) : null;
+
     return {
       ...r,
       userName: owner?.name || "Usuario",
@@ -126,6 +159,17 @@ export default async function SuperAdminPage({
       qrCobroUrl: r.qrCobroUrl,
       leadStatus: r.leadStatus || "LEAD_NUEVO",
       nextFollowUpAt: r.nextFollowUpAt ? toIso(r.nextFollowUpAt) : null,
+      lastMaintenanceAt: r.lastMaintenanceAt ? toIso(r.lastMaintenanceAt) : null,
+      isSuspended: Boolean(r.isSuspended),
+      suspendedReason: r.suspendedReason || null,
+      health: {
+        totalDishes,
+        dishesWithPhoto,
+        photoPercentage,
+        totalOrders,
+        recentOrders,
+        lastOrderDate,
+      },
       crmNotes: [],
       createdAt: toIso(r.createdAt),
       trialEndsAt: toIso(r.trialEndsAt),
@@ -142,6 +186,14 @@ export default async function SuperAdminPage({
     })),
     createdAt: toIso(l.createdAt),
     updatedAt: toIso(l.updatedAt),
+  }));
+
+  const serializedEliteTasks = eliteTasks.map((task: any) => ({
+    ...task,
+    dueDate: task.dueDate ? toIso(task.dueDate) : null,
+    completedAt: task.completedAt ? toIso(task.completedAt) : null,
+    createdAt: toIso(task.createdAt),
+    updatedAt: toIso(task.updatedAt),
   }));
 
   const serializedManualPayments = manualPayments.map((payment: any) => ({
@@ -201,6 +253,7 @@ export default async function SuperAdminPage({
       subscriptionDeunaPhone={subscriptionDeunaPhone}
       allUsers={allUsers}
       manualPayments={serializedManualPayments}
+      eliteTasks={serializedEliteTasks}
       initialTab={initialTab}
     />
   );

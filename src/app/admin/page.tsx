@@ -43,8 +43,12 @@ export default async function AdminPage() {
             include: {
               dishes: {
                 orderBy: { createdAt: "desc" },
+                include: { supplier: true },
               },
             },
+          },
+          suppliers: {
+            orderBy: { name: "asc" },
           },
           orders: {
             orderBy: { createdAt: "desc" },
@@ -71,8 +75,12 @@ export default async function AdminPage() {
             include: {
               dishes: {
                 orderBy: { createdAt: "desc" },
+                include: { supplier: true },
               },
             },
+          },
+          suppliers: {
+            orderBy: { name: "asc" },
           },
           orders: {
             orderBy: { createdAt: "desc" },

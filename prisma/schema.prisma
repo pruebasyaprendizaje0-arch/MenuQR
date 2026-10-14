@@ -10,6 +10,7 @@ generator client {
 enum Plan {
   FREE
   PRO
+  ELITE
 }
 
 enum BusinessType {
@@ -137,6 +138,10 @@ model Restaurant {
   suppliers         Supplier[]
   supplyItems       SupplyItem[]
   purchaseOrders    PurchaseOrder[]
+  isSuspended       Boolean    @default(false)
+  suspendedReason   String?
+  lastMaintenanceAt DateTime?
+  eliteTasks        EliteTask[]
   createdAt         DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -214,6 +219,7 @@ model ManualSubscriptionPayment {
   reference    String?
   receiptUrl   String?
   status       String   @default("PENDING")
+  plan         Plan     @default(PRO)
   notes        String?
   approvedBy   String?
   approvedAt   DateTime?
@@ -302,6 +308,25 @@ model CrmNote {
 
   @@index([restaurantId])
   @@index([leadId])
+}
+
+model EliteTask {
+  id           String      @id @default(uuid())
+  restaurantId String
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  title        String
+  description  String?     @db.Text
+  requestType  String      @default("CARGA_MENU") // CARGA_MENU, ACTUALIZACION_PRECIOS, CAMBIO_FOTOS, ASESORIA_VENTAS, OTRO
+  priority     String      @default("MEDIA") // ALTA, MEDIA, BAJA
+  status       String      @default("PENDIENTE") // PENDIENTE, EN_PROCESO, COMPLETADO
+  dueDate      DateTime?
+  completedAt  DateTime?
+  notes        String?     @db.Text
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([restaurantId, status])
+  @@index([status, priority])
 }
 
 model SeasonRate {

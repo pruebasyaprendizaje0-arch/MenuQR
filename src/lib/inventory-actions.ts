@@ -38,6 +38,56 @@ export async function getInventoryDataAction(restaurantId: string) {
     const auth = await verifyRestaurantOwnership(restaurantId);
     if (!auth.authorized) return { error: auth.error };
 
+    // Auto-sincronizar proveedores habituales para platos e insumos que hayan sido
+    // comprados u ordenados con un proveedor pero que aún tengan supplierId en null
+    try {
+      const dishesNeedingSupplier = await prisma.dish.findMany({
+        where: { restaurantId, supplierId: null },
+        include: {
+          purchaseOrderItems: {
+            where: { purchaseOrder: { supplierId: { not: null } } },
+            include: { purchaseOrder: { select: { supplierId: true } } },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      for (const d of dishesNeedingSupplier) {
+        const foundSupId = d.purchaseOrderItems[0]?.purchaseOrder?.supplierId;
+        if (foundSupId) {
+          await prisma.dish.update({
+            where: { id: d.id },
+            data: { supplierId: foundSupId },
+          });
+        }
+      }
+
+      const suppliesNeedingSupplier = await prisma.supplyItem.findMany({
+        where: { restaurantId, supplierId: null },
+        include: {
+          purchaseOrderItems: {
+            where: { purchaseOrder: { supplierId: { not: null } } },
+            include: { purchaseOrder: { select: { supplierId: true } } },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      for (const s of suppliesNeedingSupplier) {
+        const foundSupId = s.purchaseOrderItems[0]?.purchaseOrder?.supplierId;
+        if (foundSupId) {
+          await prisma.supplyItem.update({
+            where: { id: s.id },
+            data: { supplierId: foundSupId },
+          });
+        }
+      }
+    } catch (syncErr) {
+      console.warn("Aviso al auto-sincronizar proveedores de órdenes de compra:", syncErr);
+    }
+
     const [suppliers, supplyItems, dishes, purchaseOrders] = await Promise.all([
       prisma.supplier.findMany({
         where: { restaurantId },
@@ -574,6 +624,40 @@ export async function createPurchaseOrderAction(
       },
     });
 
+    // Si la orden de compra tiene proveedor asignado, asociar inmediatamente
+    // como proveedor habitual a los platos e insumos de la orden que no tengan proveedor
+    if (data.supplierId) {
+      try {
+        for (const item of sanitizedItems) {
+          if (item.itemType === "DISH" && item.dishId) {
+            const currentDish = await prisma.dish.findUnique({
+              where: { id: item.dishId },
+              select: { supplierId: true },
+            });
+            if (currentDish && !currentDish.supplierId) {
+              await prisma.dish.update({
+                where: { id: item.dishId },
+                data: { supplierId: data.supplierId },
+              });
+            }
+          } else if (item.itemType === "SUPPLY" && item.supplyItemId) {
+            const currentSupply = await prisma.supplyItem.findUnique({
+              where: { id: item.supplyItemId },
+              select: { supplierId: true },
+            });
+            if (currentSupply && !currentSupply.supplierId) {
+              await prisma.supplyItem.update({
+                where: { id: item.supplyItemId },
+                data: { supplierId: data.supplierId },
+              });
+            }
+          }
+        }
+      } catch (linkErr) {
+        console.warn("Aviso al enlazar proveedor habitual en orden de compra:", linkErr);
+      }
+    }
+
     revalidatePath("/admin");
     return { success: true, purchaseOrder: po };
   } catch (error: any) {
@@ -620,6 +704,7 @@ export async function receivePurchaseOrderAction(
             trackStock: true,
             isAvailable: true,
             ...(updateCosts && item.costPerUnit > 0 ? { costPrice: item.costPerUnit } : {}),
+            ...(po.supplierId ? { supplierId: po.supplierId } : {}),
           },
         });
       } else if (item.itemType === "SUPPLY" && item.supplyItemId) {
@@ -635,6 +720,7 @@ export async function receivePurchaseOrderAction(
           data: {
             currentStock: nextStock,
             ...(updateCosts && item.costPerUnit > 0 ? { costPerUnit: item.costPerUnit } : {}),
+            ...(po.supplierId ? { supplierId: po.supplierId } : {}),
           },
         });
       }
@@ -687,5 +773,273 @@ export async function cancelPurchaseOrderAction(orderId: string) {
   } catch (error: any) {
     console.error("Error in cancelPurchaseOrderAction:", error);
     return { error: error?.message || "Error al cancelar orden." };
+  }
+}
+
+// ==========================================
+// 7. ACTUALIZACIÓN RÁPIDA DE COSTO, PROVEEDOR Y STOCK DE PLATO/PRODUCTO
+// ==========================================
+export async function updateDishInventoryAction(
+  restaurantId: string,
+  dishId: string,
+  data: {
+    costPrice?: number;
+    supplierId?: string | null;
+    price?: number;
+    stock?: number | null;
+    minStock?: number;
+    trackStock?: boolean;
+    barcode?: string | null;
+    sku?: string | null;
+  }
+) {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
+    const dish = await prisma.dish.findFirst({
+      where: { id: dishId, restaurantId },
+    });
+    if (!dish) return { error: "Producto o plato no encontrado." };
+
+    const updatePayload: any = {};
+    if (data.costPrice !== undefined) {
+      updatePayload.costPrice = Math.max(0, Number(data.costPrice) || 0);
+    }
+    if (data.supplierId !== undefined) {
+      updatePayload.supplierId = data.supplierId ? data.supplierId : null;
+    }
+    if (data.price !== undefined && data.price >= 0) {
+      updatePayload.price = Number(data.price);
+    }
+    if (data.stock !== undefined) {
+      updatePayload.stock = data.stock !== null ? Math.max(0, Math.round(Number(data.stock))) : null;
+      if (data.trackStock === undefined && data.stock !== null) {
+        updatePayload.trackStock = true;
+      }
+    }
+    if (data.minStock !== undefined) {
+      updatePayload.minStock = Math.max(0, Math.round(Number(data.minStock)));
+    }
+    if (data.trackStock !== undefined) {
+      updatePayload.trackStock = Boolean(data.trackStock);
+    }
+    if (data.barcode !== undefined) {
+      updatePayload.barcode = data.barcode ? String(data.barcode).trim() : null;
+    }
+    if (data.sku !== undefined) {
+      updatePayload.sku = data.sku ? String(data.sku).trim() : null;
+    }
+
+    const updated = await prisma.dish.update({
+      where: { id: dishId },
+      data: updatePayload,
+      include: {
+        category: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, phone: true } },
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true, dish: updated };
+  } catch (error: any) {
+    console.error("Error in updateDishInventoryAction:", error);
+    return { error: error?.message || "Error al actualizar información de inventario." };
+  }
+}
+
+// ==========================================
+// 8. IMPORTACIÓN Y ACTUALIZACIÓN POR LOTES (UPSERT)
+// ==========================================
+export interface BatchInventoryDishInput {
+  id?: string;
+  name: string;
+  categoryName?: string;
+  costPrice?: number;
+  price?: number;
+  stock?: number | null;
+  minStock?: number;
+  trackStock?: boolean;
+  supplierName?: string | null;
+  supplierId?: string | null;
+  barcode?: string | null;
+  sku?: string | null;
+  description?: string;
+  isAvailable?: boolean;
+}
+
+export async function batchImportOrUpdateInventoryAction(
+  restaurantId: string,
+  items: BatchInventoryDishInput[]
+) {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return { error: "No se proporcionaron datos para importar o actualizar." };
+    }
+
+    // 1. Obtener categorías, proveedores y platos existentes
+    const [existingCategories, existingSuppliers, existingDishes] = await Promise.all([
+      prisma.category.findMany({ where: { restaurantId }, orderBy: { order: "asc" } }),
+      prisma.supplier.findMany({ where: { restaurantId } }),
+      prisma.dish.findMany({ where: { restaurantId } }),
+    ]);
+
+    const categoryMap = new Map<string, string>();
+    existingCategories.forEach((cat) => categoryMap.set(cat.name.trim().toLowerCase(), cat.id));
+
+    const supplierMap = new Map<string, string>();
+    existingSuppliers.forEach((sup) => supplierMap.set(sup.name.trim().toLowerCase(), sup.id));
+
+    const dishById = new Map<string, any>();
+    const dishByCode = new Map<string, any>();
+    const dishByName = new Map<string, any>();
+
+    existingDishes.forEach((d) => {
+      dishById.set(d.id, d);
+      if (d.sku && d.sku.trim()) dishByCode.set(d.sku.trim().toLowerCase(), d);
+      if (d.barcode && d.barcode.trim()) dishByCode.set(d.barcode.trim().toLowerCase(), d);
+      dishByName.set(d.name.trim().toLowerCase(), d);
+    });
+
+    let nextCatOrder = existingCategories.length > 0
+      ? Math.max(...existingCategories.map((c) => c.order)) + 1
+      : 0;
+
+    let updatedCount = 0;
+    let createdCount = 0;
+    let suppliersCreated = 0;
+
+    await prisma.$transaction(async (tx) => {
+      // A. Crear proveedores faltantes si vienen nombrados
+      for (const it of items) {
+        const supName = it.supplierName ? it.supplierName.trim() : "";
+        if (supName && !supplierMap.has(supName.toLowerCase()) && !it.supplierId) {
+          const createdSup = await tx.supplier.create({
+            data: {
+              restaurantId,
+              name: supName,
+              notes: "Registrado automáticamente desde importación Excel de inventario",
+            },
+          });
+          supplierMap.set(supName.toLowerCase(), createdSup.id);
+          suppliersCreated++;
+        }
+      }
+
+      // B. Crear categorías faltantes si vienen nombradas
+      for (const it of items) {
+        const catName = it.categoryName ? it.categoryName.trim() : "General";
+        if (catName && !categoryMap.has(catName.toLowerCase())) {
+          const createdCat = await tx.category.create({
+            data: {
+              restaurantId,
+              name: catName,
+              order: nextCatOrder++,
+            },
+          });
+          categoryMap.set(catName.toLowerCase(), createdCat.id);
+        }
+      }
+
+      // C. Procesar cada ítem: Actualizar si ya existe (upsert), o Crear si es nuevo
+      for (const it of items) {
+        const cleanName = it.name ? it.name.trim() : "";
+        if (!cleanName) continue;
+
+        // Resolver proveedor
+        let resolvedSupplierId: string | null = null;
+        if (it.supplierId) {
+          resolvedSupplierId = it.supplierId;
+        } else if (it.supplierName && supplierMap.has(it.supplierName.trim().toLowerCase())) {
+          resolvedSupplierId = supplierMap.get(it.supplierName.trim().toLowerCase()) || null;
+        }
+
+        // Resolver categoría
+        const catName = it.categoryName ? it.categoryName.trim() : "General";
+        const resolvedCategoryId = categoryMap.get(catName.toLowerCase()) || existingCategories[0]?.id;
+
+        // Buscar coincidencia existente
+        let match = it.id ? dishById.get(it.id) : null;
+        if (!match && it.sku && dishByCode.has(it.sku.trim().toLowerCase())) {
+          match = dishByCode.get(it.sku.trim().toLowerCase());
+        }
+        if (!match && it.barcode && dishByCode.has(it.barcode.trim().toLowerCase())) {
+          match = dishByCode.get(it.barcode.trim().toLowerCase());
+        }
+        if (!match && dishByName.has(cleanName.toLowerCase())) {
+          match = dishByName.get(cleanName.toLowerCase());
+        }
+
+        const cleanCost = typeof it.costPrice === "number" ? Math.max(0, it.costPrice) : undefined;
+        const cleanPrice = typeof it.price === "number" ? Math.max(0, it.price) : undefined;
+        const cleanStock = it.stock !== undefined && it.stock !== null ? Math.max(0, Math.round(Number(it.stock))) : undefined;
+        const cleanMinStock = it.minStock !== undefined ? Math.max(0, Math.round(Number(it.minStock))) : undefined;
+
+        if (match) {
+          // ACTUALIZACIÓN DE PRODUCTO EXISTENTE
+          const updateData: any = {};
+          if (cleanCost !== undefined) updateData.costPrice = cleanCost;
+          if (resolvedSupplierId !== null) updateData.supplierId = resolvedSupplierId;
+          if (cleanPrice !== undefined && cleanPrice >= 0) updateData.price = cleanPrice;
+          if (cleanStock !== undefined) {
+            updateData.stock = cleanStock;
+            updateData.trackStock = true;
+            if (cleanStock > 0 && match.isAvailable === false) {
+              updateData.isAvailable = true;
+            }
+          }
+          if (cleanMinStock !== undefined) updateData.minStock = cleanMinStock;
+          if (it.trackStock !== undefined) updateData.trackStock = it.trackStock;
+          if (it.barcode) updateData.barcode = it.barcode.trim();
+          if (it.sku) updateData.sku = it.sku.trim();
+          if (it.description) updateData.description = it.description.trim();
+          if (it.isAvailable !== undefined) updateData.isAvailable = it.isAvailable;
+
+          await tx.dish.update({
+            where: { id: match.id },
+            data: updateData,
+          });
+          updatedCount++;
+        } else {
+          // CREACIÓN DE NUEVO PRODUCTO
+          if (!resolvedCategoryId) continue;
+          await tx.dish.create({
+            data: {
+              restaurantId,
+              categoryId: resolvedCategoryId,
+              name: cleanName,
+              description: it.description?.trim() || null,
+              price: cleanPrice !== undefined ? cleanPrice : 0,
+              costPrice: cleanCost !== undefined ? cleanCost : 0,
+              supplierId: resolvedSupplierId,
+              stock: cleanStock !== undefined ? cleanStock : 10,
+              minStock: cleanMinStock !== undefined ? cleanMinStock : 2,
+              trackStock: it.trackStock !== undefined ? it.trackStock : true,
+              barcode: it.barcode?.trim() || null,
+              sku: it.sku?.trim() || null,
+              isAvailable: it.isAvailable !== undefined ? it.isAvailable : true,
+            },
+          });
+          createdCount++;
+        }
+      }
+    });
+
+    revalidatePath("/admin");
+    return {
+      success: true,
+      totalProcessed: items.length,
+      updatedCount,
+      createdCount,
+      suppliersCreated,
+    };
+  } catch (error: any) {
+    console.error("Error in batchImportOrUpdateInventoryAction:", error);
+    return { error: error?.message || "Error al procesar la importación en lote." };
   }
 }
