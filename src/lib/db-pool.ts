@@ -99,7 +99,10 @@ export async function ensureDbTables(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_pedido_items_estado ON pedido_items(estado_item);
 
       ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS es_prueba BOOLEAN DEFAULT false;
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS vertical VARCHAR(50) DEFAULT 'menuqr';
+      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
       CREATE INDEX IF NOT EXISTS idx_pedidos_es_prueba ON pedidos(negocio_id, es_prueba);
+      CREATE INDEX IF NOT EXISTS idx_pedidos_vertical ON pedidos(vertical);
     `);
 
     // Sincronizar negocios a partir de la tabla Restaurant de Prisma si existe

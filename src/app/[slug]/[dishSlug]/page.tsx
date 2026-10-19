@@ -3,8 +3,10 @@ import Link from "next/link";
 import { UtensilsCrossed, MapPin, ArrowLeft, MessageSquare, Check, Sparkles, ChevronRight } from "lucide-react";
 import type { Metadata } from "next";
 import { getBaseUrl, normalizeSlug, generateBreadcrumbJsonLd, resolvePublicImageUrl } from "@/lib/seo";
+import { parseDishImages } from "@/lib/dish-images";
 import { notFound } from "next/navigation";
 import { SmartLogo } from "@/components/SmartImage";
+import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
 
 export const dynamic = "force-dynamic";
 
@@ -167,15 +169,45 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
         </nav>
 
         <div className="bg-slate-900/80 border border-slate-800/80 rounded-3xl p-6 md:p-8 space-y-6 shadow-2xl">
-          {dish.imageUrl && (
-            <div className="w-full h-64 md:h-80 rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 relative">
-              <img
-                src={dish.imageUrl}
-                alt={`${dish.name} - ${restaurant.name}`}
-                className="w-full h-full object-cover"
-              />
-            </div>
-          )}
+          {(() => {
+            const dishImages = parseDishImages(dish.imageUrl);
+            if (dishImages.length === 0) return null;
+            return (
+              <div className="space-y-3">
+                <div className="w-full h-64 md:h-80 rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 relative">
+                  <img
+                    src={dishImages[0]}
+                    alt={`${dish.name} - ${restaurant.name}`}
+                    className="w-full h-full object-cover"
+                  />
+                  {dishImages.length > 1 && (
+                    <div className="absolute top-3 right-3 px-2.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur border border-slate-700 text-amber-300 text-xs font-bold shadow-lg">
+                      📷 Galería ({dishImages.length} fotos)
+                    </div>
+                  )}
+                </div>
+
+                {dishImages.length > 1 && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {dishImages.map((imgUrl, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="h-24 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 relative">
+                          <img
+                            src={imgUrl}
+                            alt={`${dish.name} - ángulo ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <p className="text-[10px] text-center text-slate-400 font-medium">
+                          {idx === 0 ? "Frente / Principal" : idx === 1 ? "Espalda / Reverso" : "Detalle"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="space-y-3">
             {dish.category?.name && (
@@ -242,6 +274,14 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
           </Link>
         </div>
       </footer>
+
+      {/* Floating WhatsApp Action Button */}
+      <FloatingWhatsAppButton
+        phone={restaurant.whatsapp}
+        businessName={restaurant.name}
+        customMessage={`¡Hola! Me interesa pedir el plato: ${dish.name} ($${Number(dish.price).toFixed(2)}) en *${restaurant.name}*.`}
+        bottomOffsetClass="bottom-6 right-6 sm:bottom-8 sm:right-8"
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction, validateCouponAction } from "@/lib/actions";
 import { SmartLogo, SmartCover } from "@/components/SmartImage";
 import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
+import { parseDishImages, getPrimaryDishImage } from "@/lib/dish-images";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -48,6 +49,9 @@ import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import RuletaNegocio from "@/components/Ruleta/RuletaNegocio";
 import { getBusinessLabels } from "@/lib/business-labels";
 import { parseTableFromUrl } from "@/lib/table-token";
+import { SmartExitButton } from "@/components/public/SmartExitButton";
+import { GalleryCarousel } from "@/components/public/GalleryCarousel";
+import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
 
 type Dish = {
   id: string;
@@ -130,6 +134,7 @@ type Restaurant = {
     isHoliday: boolean;
     isActive: boolean;
   }[];
+  galleryImages?: string[] | null;
 };
 
 interface CartItem {
@@ -246,6 +251,44 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const isTableOrderingEnabled = Boolean(
     bLabels.isGastro && (restaurant as any).enableTableOrdering !== false
   );
+
+  const galleryImages = useMemo(() => {
+    // 1. Direct array passed from server
+    if (Array.isArray(restaurant.galleryImages)) {
+      const valid = restaurant.galleryImages
+        .filter((u) => typeof u === "string" && u.trim().length > 0)
+        .slice(0, 4);
+      if (valid.length > 0) return valid;
+    }
+
+    // 2. Parse from customLabels
+    let hasExplicitGalleryInCustomLabels = false;
+    if (restaurant.customLabels) {
+      try {
+        const parsed = typeof restaurant.customLabels === "string" ? JSON.parse(restaurant.customLabels) : restaurant.customLabels;
+        if (parsed && typeof parsed === "object" && "galleryImages" in parsed) {
+          hasExplicitGalleryInCustomLabels = true;
+          if (Array.isArray(parsed.galleryImages)) {
+            const valid = parsed.galleryImages
+              .filter((u: any) => typeof u === "string" && u.trim().length > 0)
+              .slice(0, 4);
+            if (valid.length > 0) return valid;
+            return []; // explicitly cleared in admin
+          }
+        }
+      } catch {}
+    }
+
+    if (hasExplicitGalleryInCustomLabels) return [];
+
+    // 3. Fallback default dining & atmosphere photos for restaurants
+    return [
+      "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1000&auto=format&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1000&auto=format&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?w=1000&auto=format&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1544025162-d76694265947?w=1000&auto=format&fit=crop&q=80",
+    ];
+  }, [restaurant.galleryImages, restaurant.customLabels]);
 
   const [currentTab, setCurrentTab] = useState<"profile" | "menu">("menu");
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
@@ -408,7 +451,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const logoClean = restaurant.logoUrl && restaurant.logoUrl.trim() !== "" ? restaurant.logoUrl : null;
   const coverClean = restaurant.coverUrl && restaurant.coverUrl.trim() !== "" ? restaurant.coverUrl : null;
 
-  const coverBg = coverClean || firstDishWithImage?.imageUrl || logoClean;
+  const coverBg = coverClean || getPrimaryDishImage(firstDishWithImage?.imageUrl) || firstDishWithImage?.imageUrl || logoClean;
 
   const handleLogoUpload = async (file: File) => {
     setUploadingLogo(true);
@@ -1229,13 +1272,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           </div>
 
           <div className="flex items-center gap-2">
-            <Link 
-              href="/"
-              className="p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition-all duration-200"
-              title="Volver a MenuQR Pro"
-            >
-              <LogOut className="h-5 w-5" />
-            </Link>
+            <SmartExitButton fallbackUrl="/menuqr" title="Salir / Volver a MenuQR" />
 
             <button 
               onClick={() => setIsCartOpen(true)}
@@ -1576,6 +1613,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   "{restaurant.description}"
                 </p>
               </div>
+            )}
+
+            {/* Galería de Fotos del Restaurante (Salones, Terraza, Barra, Comedor) */}
+            {galleryImages.length > 0 && (
+              <GalleryCarousel
+                images={galleryImages}
+                title="Galería del Restaurante & Salones"
+                badge="🍽️ Espacios & Salón"
+                themeColor={restaurant.themeColor || "#ef4444"}
+              />
             )}
 
             {/* Quick Specs Grid (Especialidad y Horario Desplegable) */}
@@ -2085,17 +2132,41 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         className="bg-gradient-to-b from-slate-900/90 to-slate-950/90 border-2 border-amber-500/40 hover:border-amber-400/80 rounded-3xl p-3 sm:p-3.5 flex flex-col gap-2.5 relative group overflow-hidden transition-all duration-300 shadow-xl shadow-amber-500/5 hover:shadow-amber-500/15"
                       >
                         <div className={`${suggestedAspect === "9:16" ? "aspect-[9/16]" : "h-36 sm:h-40"} w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-amber-500/30 relative`}>
-                          {dish.imageUrl ? (
-                            <img 
-                              src={dish.imageUrl} 
-                              alt={dish.name} 
-                              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-                          ) : (
-                            <div className="h-full w-full flex items-center justify-center bg-slate-900 text-amber-400/60">
-                              <Utensils className="h-10 w-10" />
-                            </div>
-                          )}
+                          {(() => {
+                            const imgs = parseDishImages(dish.imageUrl);
+                            const primary = imgs[0] || null;
+                            const secondary = imgs[1] || null;
+                            if (!primary) {
+                              return (
+                                <div className="h-full w-full flex items-center justify-center bg-slate-900 text-amber-400/60">
+                                  <Utensils className="h-10 w-10" />
+                                </div>
+                              );
+                            }
+                            return (
+                              <>
+                                <img 
+                                  src={primary} 
+                                  alt={dish.name} 
+                                  className={`h-full w-full object-cover transition-opacity duration-300 ${
+                                    secondary ? "group-hover:opacity-0" : "group-hover:scale-105 transition-transform"
+                                  }`}
+                                />
+                                {secondary && (
+                                  <img
+                                    src={secondary}
+                                    alt={`${dish.name} - reverso`}
+                                    className="h-full w-full object-cover absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                  />
+                                )}
+                                {imgs.length > 1 && (
+                                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-950/90 text-amber-300 border border-amber-400/50 flex items-center gap-0.5 backdrop-blur-sm z-10">
+                                    📷 {imgs.length}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                           <div className="absolute top-2 left-2 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-1 backdrop-blur-md shadow-lg">
                             <Star className="h-3 w-3 fill-amber-400 text-amber-400" /> {bLabels.suggestedCardBadge}
                           </div>
@@ -2203,17 +2274,41 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         className="bg-slate-900/40 border border-white/5 rounded-3xl p-3 flex flex-col gap-2 relative group overflow-hidden transition duration-300 hover:border-white/10"
                       >
                         <div className={`${popularAspect === "9:16" ? "aspect-[9/16]" : "h-32 sm:h-36"} w-full rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative`}>
-                          {dish.imageUrl ? (
-                            <img 
-                              src={dish.imageUrl} 
-                              alt={dish.name} 
-                              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-                          ) : (
-                            <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
-                              <Utensils className="h-8 w-8" />
-                            </div>
-                          )}
+                          {(() => {
+                            const imgs = parseDishImages(dish.imageUrl);
+                            const primary = imgs[0] || null;
+                            const secondary = imgs[1] || null;
+                            if (!primary) {
+                              return (
+                                <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                                  <Utensils className="h-8 w-8" />
+                                </div>
+                              );
+                            }
+                            return (
+                              <>
+                                <img 
+                                  src={primary} 
+                                  alt={dish.name} 
+                                  className={`h-full w-full object-cover transition-opacity duration-300 ${
+                                    secondary ? "group-hover:opacity-0" : "group-hover:scale-105 transition-transform"
+                                  }`}
+                                />
+                                {secondary && (
+                                  <img
+                                    src={secondary}
+                                    alt={`${dish.name} - reverso`}
+                                    className="h-full w-full object-cover absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                  />
+                                )}
+                                {imgs.length > 1 && (
+                                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-950/90 text-amber-300 border border-amber-400/50 flex items-center gap-0.5 backdrop-blur-sm z-10">
+                                    📷 {imgs.length}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                           <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-950/80 text-amber-400 border border-amber-500/30 flex items-center gap-0.5 backdrop-blur-sm">
                             <Sparkles className="h-2.5 w-2.5" /> Popular
                           </div>
@@ -2298,17 +2393,41 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             <div className="absolute top-0 right-0 h-16 w-16 bg-gradient-to-bl from-amber-500/10 to-transparent rounded-bl-full pointer-events-none"></div>
                             
                             <div className={`${isCategory916 ? "h-36 w-24 aspect-[9/16]" : "h-28 w-28"} rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative`}>
-                              {dish.imageUrl ? (
-                                <img 
-                                  src={dish.imageUrl} 
-                                  alt={dish.name} 
-                                  className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                />
-                              ) : (
-                                <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
-                                  <Utensils className="h-10 w-10" />
-                                </div>
-                              )}
+                              {(() => {
+                                const imgs = parseDishImages(dish.imageUrl);
+                                const primary = imgs[0] || null;
+                                const secondary = imgs[1] || null;
+                                if (!primary) {
+                                  return (
+                                    <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                                      <Utensils className="h-10 w-10" />
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <>
+                                    <img 
+                                      src={primary} 
+                                      alt={dish.name} 
+                                      className={`h-full w-full object-cover transition-opacity duration-300 ${
+                                        secondary ? "group-hover:opacity-0" : "group-hover:scale-105 transition-transform"
+                                      }`}
+                                    />
+                                    {secondary && (
+                                      <img
+                                        src={secondary}
+                                        alt={`${dish.name} - reverso`}
+                                        className="h-full w-full object-cover absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                      />
+                                    )}
+                                    {imgs.length > 1 && (
+                                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md text-[8px] font-bold bg-slate-950/90 text-amber-300 border border-amber-400/50 flex items-center gap-0.5 backdrop-blur-sm z-10">
+                                        📷 {imgs.length}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                               <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-500 text-slate-950 flex items-center gap-0.5">
                                 ★ Combo Ahorro
                               </div>
@@ -2363,19 +2482,43 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             }`}
                           >
                             <div className="w-full aspect-[9/16] rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
-                              {dish.imageUrl ? (
-                                <img 
-                                  src={dish.imageUrl} 
-                                  alt={dish.name} 
-                                  loading="lazy"
-                                  decoding="async"
-                                  className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                />
-                              ) : (
-                                <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
-                                  <Utensils className="h-8 w-8" />
-                                </div>
-                              )}
+                              {(() => {
+                                const imgs = parseDishImages(dish.imageUrl);
+                                const primary = imgs[0] || null;
+                                const secondary = imgs[1] || null;
+                                if (!primary) {
+                                  return (
+                                    <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                                      <Utensils className="h-8 w-8" />
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <>
+                                    <img 
+                                      src={primary} 
+                                      alt={dish.name} 
+                                      loading="lazy"
+                                      decoding="async"
+                                      className={`h-full w-full object-cover transition-opacity duration-300 ${
+                                        secondary ? "group-hover:opacity-0" : "group-hover:scale-105 transition-transform"
+                                      }`}
+                                    />
+                                    {secondary && (
+                                      <img
+                                        src={secondary}
+                                        alt={`${dish.name} - reverso`}
+                                        className="h-full w-full object-cover absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                      />
+                                    )}
+                                    {imgs.length > 1 && (
+                                      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-950/90 text-amber-300 border border-amber-400/50 flex items-center gap-0.5 backdrop-blur-sm z-10">
+                                        📷 {imgs.length}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                               {suggestedDishIds.includes(dish.id) && (
                                 <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-0.5 backdrop-blur-sm shadow-md">
                                   <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> {bLabels.isGastro ? "Sugerido" : bLabels.suggestedCardBadge}
@@ -2440,19 +2583,43 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           }`}
                         >
                           <div className="h-24 w-24 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
-                            {dish.imageUrl ? (
-                              <img 
-                                src={dish.imageUrl} 
-                                alt={dish.name} 
-                                loading="lazy"
-                                decoding="async"
-                                className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-                              />
-                            ) : (
-                              <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
-                                <Utensils className="h-8 w-8" />
-                              </div>
-                            )}
+                            {(() => {
+                              const imgs = parseDishImages(dish.imageUrl);
+                              const primary = imgs[0] || null;
+                              const secondary = imgs[1] || null;
+                              if (!primary) {
+                                return (
+                                  <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-650">
+                                    <Utensils className="h-8 w-8" />
+                                  </div>
+                                );
+                              }
+                              return (
+                                <>
+                                  <img 
+                                    src={primary} 
+                                    alt={dish.name} 
+                                    loading="lazy"
+                                    decoding="async"
+                                    className={`h-full w-full object-cover transition-opacity duration-300 ${
+                                      secondary ? "group-hover:opacity-0" : "group-hover:scale-105 transition-transform"
+                                    }`}
+                                  />
+                                  {secondary && (
+                                    <img
+                                      src={secondary}
+                                      alt={`${dish.name} - reverso`}
+                                      className="h-full w-full object-cover absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                    />
+                                  )}
+                                  {imgs.length > 1 && (
+                                    <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[8px] font-bold bg-slate-950/90 text-amber-300 border border-amber-400/50 flex items-center gap-0.5 backdrop-blur-sm z-10">
+                                      📷 {imgs.length}
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                             {suggestedDishIds.includes(dish.id) && (
                               <div className="absolute top-1.5 left-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-950/90 text-amber-300 border border-amber-400/60 flex items-center gap-0.5 backdrop-blur-sm shadow-md">
                                 <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> {bLabels.isGastro ? "Sugerido" : bLabels.suggestedCardBadge}
@@ -2666,9 +2833,12 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 cart.map((item) => (
                   <div key={item.dish.id} className="flex gap-4 items-center bg-slate-950/40 border border-slate-850 p-3 rounded-2xl">
                     <div className="h-14 w-14 rounded-xl overflow-hidden bg-slate-950 shrink-0 border border-slate-900">
-                      {item.dish.imageUrl && (
-                        <img src={item.dish.imageUrl} alt={item.dish.name} className="h-full w-full object-cover" />
-                      )}
+                      {(() => {
+                        const cartThumb = getPrimaryDishImage(item.dish.imageUrl) || item.dish.imageUrl;
+                        return cartThumb ? (
+                          <img src={cartThumb} alt={item.dish.name} className="h-full w-full object-cover" />
+                        ) : null;
+                      })()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="font-bold text-white text-sm truncate">{item.dish.name}</h4>
@@ -4196,38 +4366,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       </div>
 
       {/* Floating WhatsApp Action Button */}
-      {(() => {
-        const rawPhone = (restaurant.whatsappNumber || (restaurant as any).whatsapp || "").toString();
-        let formattedPhone = rawPhone.replace(/\D/g, "");
-        if (!formattedPhone) return null;
-
-        if (!formattedPhone.startsWith("593") && formattedPhone.startsWith("0")) {
-          formattedPhone = "593" + formattedPhone.substring(1);
-        } else if (!formattedPhone.startsWith("593") && formattedPhone.length === 9) {
-          formattedPhone = "593" + formattedPhone;
-        } else if (formattedPhone.length === 10 && formattedPhone.startsWith("09")) {
-          formattedPhone = "593" + formattedPhone.substring(1);
-        }
-
-        const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(`¡Hola! Me gustaría información o hacer un pedido en *${restaurant.name}*.`)}`;
-
-        return (
-          <a
-            href={waUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="fixed bottom-20 right-4 sm:bottom-8 sm:right-8 z-40 flex items-center gap-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-[0_10px_30px_rgba(37,211,102,0.5)] hover:shadow-[0_15px_35px_rgba(37,211,102,0.7)] transition-all duration-300 hover:scale-105 active:scale-95 group/wa cursor-pointer"
-            title="Chatear por WhatsApp"
-          >
-            <div className="relative flex items-center justify-center">
-              <MessageSquare className="h-6 w-6 text-white shrink-0 group-hover/wa:rotate-12 transition-transform duration-300" />
-              <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-emerald-200 animate-ping opacity-75"></span>
-              <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-white"></span>
-            </div>
-            <span className="hidden sm:inline text-xs font-black uppercase tracking-wider">WhatsApp</span>
-          </a>
-        );
-      })()}
+      <FloatingWhatsAppButton
+        phone={restaurant.whatsappNumber || (restaurant as any).whatsapp}
+        businessName={restaurant.name}
+        customMessage={`¡Hola! Me gustaría información o hacer un pedido en *${restaurant.name}*.`}
+      />
 
       {/* Order Success & Post-Checkout Ruleta Reward Modal */}
       {isRuletaActiva && orderSuccessInfo && (

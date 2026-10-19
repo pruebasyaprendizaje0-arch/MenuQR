@@ -13,7 +13,10 @@ export interface CustomLabels {
   orderButton?: string; // Ej: "Enviar Pedido por WhatsApp", "Solicitar Cotización"
   catalogTabTitle?: string; // Ej: "Menú Digital", "Productos", "Catálogo de Productos", "Catálogo"
   subTitle?: string;    // Ej: "Menú Digital Auténtico", "Catálogo Digital de Productos"
-  disabledModules?: string[]; // Ej: ["split-bill", "ruleta", "seasons", "coupons", "ai-settings", "crm"]
+  vertical?: string;    // "menuqr" | "catalogo" | "servicios" | "citas" | "reservas"
+  businessSubType?: string; // "RESTAURANT" | "RETAIL" | "SERVICIOS" | "CITAS" | "RESERVAS"
+  enabledModules?: string[]; // Ej: ["tables", "reservas", "citas", "cotizador", "ecommerce"]
+  disabledModules?: string[]; // Ej: ["tables", "split-bill", "ruleta", "seasons", "coupons", "ai-settings", "crm"]
   showSplitBill?: boolean;
   imageAspectRatio?: ImageAspectRatio; // "1:1" (Estándar/Horizontal) o "9:16" (Vertical/Reels/Botellas)
   suggestedAspectRatio?: ImageAspectRatio; // Formato para platos sugeridos / especial del día

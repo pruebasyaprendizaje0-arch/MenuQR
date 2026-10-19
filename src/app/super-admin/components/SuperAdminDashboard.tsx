@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   superAdminLogoutAction, 
   extendTrialAction, 
@@ -25,7 +25,8 @@ import {
   toggleRestaurantSuspensionAction,
   createEliteTaskAction,
   updateEliteTaskStatusAction,
-  deleteEliteTaskAction
+  deleteEliteTaskAction,
+  superAdminToggleRestaurantModuleAction
 } from "@/lib/actions";
 import { SmartLogo } from "@/components/SmartImage";
 import { BotToggleButton } from "@/app/admin/components/BotToggleButton";
@@ -78,9 +79,84 @@ import {
   ArrowUpRight,
   Filter,
   BadgeAlert,
-  HelpCircle
+  HelpCircle,
+  Boxes,
+  Barcode
 } from "lucide-react";
 import { ecuadorData, parishData } from "@/lib/ecuador";
+import { resolveBusinessVertical, BusinessVertical } from "@/lib/business-labels";
+
+export const VERTICAL_TABS: {
+  id: "all" | BusinessVertical;
+  label: string;
+  shortLabel: string;
+  icon: string;
+  color: string;
+  badgeStyle: string;
+  activeTabStyle: string;
+  aliases: string[];
+}[] = [
+  {
+    id: "all",
+    label: "Todos los Negocios",
+    shortLabel: "Todos",
+    icon: "🏢",
+    color: "text-slate-200",
+    badgeStyle: "bg-slate-800 text-slate-300 border-slate-700",
+    activeTabStyle: "bg-gradient-to-r from-red-600 to-amber-600 text-white shadow-lg shadow-red-500/25 border-red-500/50",
+    aliases: [],
+  },
+  {
+    id: "restaurante",
+    label: "Restaurantes & Gastro",
+    shortLabel: "Restaurante",
+    icon: "🍔",
+    color: "text-red-400",
+    badgeStyle: "bg-red-500/10 text-red-400 border-red-500/30",
+    activeTabStyle: "bg-red-600 text-white shadow-lg shadow-red-500/25 border-red-500",
+    aliases: ["restaurante", "gastro", "gastronomia", "gastronomía", "comida", "plato", "menú", "menu", "cafeteria", "cafetería", "bar"],
+  },
+  {
+    id: "retail",
+    label: "Catálogos / Retail / Tiendas",
+    shortLabel: "Retail / Catálogo",
+    icon: "🛍️",
+    color: "text-amber-400",
+    badgeStyle: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    activeTabStyle: "bg-amber-600 text-white shadow-lg shadow-amber-500/25 border-amber-500",
+    aliases: ["retail", "catálogo", "catalogo", "tienda", "licor", "licoreria", "licorería", "ropa", "moda", "producto", "sumeria"],
+  },
+  {
+    id: "servicios",
+    label: "Servicios Técnicos",
+    shortLabel: "Servicios Técnicos",
+    icon: "🔧",
+    color: "text-cyan-400",
+    badgeStyle: "bg-cyan-500/10 text-cyan-400 border-cyan-500/30",
+    activeTabStyle: "bg-cyan-600 text-white shadow-lg shadow-cyan-500/25 border-cyan-500",
+    aliases: ["servicio", "servicios", "tecnico", "técnico", "reparacion", "reparación", "plomer", "electric", "mantenimiento", "taller"],
+  },
+  {
+    id: "citas",
+    label: "Citas, Salud & Belleza",
+    shortLabel: "Citas & Salud",
+    icon: "📅",
+    color: "text-purple-400",
+    badgeStyle: "bg-purple-500/10 text-purple-400 border-purple-500/30",
+    activeTabStyle: "bg-purple-600 text-white shadow-lg shadow-purple-500/25 border-purple-500",
+    aliases: ["cita", "citas", "salud", "clinica", "clínica", "dental", "odont", "odontologia", "barber", "barberia", "barbería", "estetica", "estética", "spa", "doctor"],
+  },
+  {
+    id: "reservas",
+    label: "Hospedaje & Cabañas",
+    shortLabel: "Hospedaje",
+    icon: "🏡",
+    color: "text-emerald-400",
+    badgeStyle: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    activeTabStyle: "bg-emerald-600 text-white shadow-lg shadow-emerald-500/25 border-emerald-500",
+    aliases: ["reserva", "reservas", "hospedaje", "hotel", "hostal", "cabaña", "cabana", "glamping", "lodge", "habitacion", "habitación"],
+  },
+];
 
 type CrmNote = {
   id: string;
@@ -99,6 +175,10 @@ type Restaurant = {
   logoUrl: string | null;
   whatsappNumber: string;
   whatsappBotEnabled?: boolean;
+  businessType?: string | null;
+  customLabels?: any;
+  city?: string | null;
+  province?: string | null;
   locality?: string | null;
   address?: string | null;
   slogan?: string | null;
@@ -276,6 +356,7 @@ export function SuperAdminDashboard({
   });
   const [eliteFilterStatus, setEliteFilterStatus] = useState<"ALL" | "PENDIENTE" | "EN_PROCESO" | "COMPLETADO">("ALL");
   const [collectionsFilter, setCollectionsFilter] = useState<"ALL" | "URGENT" | "UPCOMING" | "OVERDUE" | "SUSPENDED">("ALL");
+  const [selectedVertical, setSelectedVertical] = useState<"all" | BusinessVertical>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [waSupport, setWaSupport] = useState(whatsappSupport);
   const [subscriptionQrUrl, setSubscriptionQrUrl] = useState(subscriptionPaymentQrUrl);
@@ -368,7 +449,8 @@ export function SuperAdminDashboard({
     canton: "",
     parroquia: "",
     sector: "",
-    plan: "FREE" as "FREE" | "PRO" | "ELITE"
+    plan: "FREE" as "FREE" | "PRO" | "ELITE",
+    vertical: "restaurante" as BusinessVertical,
   });
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -387,6 +469,7 @@ export function SuperAdminDashboard({
     schedule: "",
     specialty: "",
     plan: "FREE" as "FREE" | "PRO" | "ELITE",
+    vertical: "restaurante" as BusinessVertical,
     bankName: "",
     bankAccountType: "",
     bankAccountNumber: "",
@@ -402,13 +485,48 @@ export function SuperAdminDashboard({
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
 
-  const filteredRestaurants = restaurantList.filter(
-    (r) =>
-      r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.slug.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (r.userName && r.userName.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Conteos dinámicos en tiempo real por cada categoría / vertical de negocio
+  const verticalCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: restaurantList.length,
+      restaurante: 0,
+      retail: 0,
+      servicios: 0,
+      citas: 0,
+      reservas: 0,
+    };
+    for (const r of restaurantList) {
+      const v = resolveBusinessVertical(r);
+      counts[v] = (counts[v] || 0) + 1;
+    }
+    return counts;
+  }, [restaurantList]);
+
+  const filteredRestaurants = restaurantList.filter((r) => {
+    const vertical = resolveBusinessVertical(r);
+    if (selectedVertical !== "all" && vertical !== selectedVertical) {
+      return false;
+    }
+
+    if (!searchTerm.trim()) return true;
+
+    const term = searchTerm.toLowerCase().trim();
+    const tabConfig = VERTICAL_TABS.find((t) => t.id === vertical);
+    const matchesVerticalAlias = tabConfig?.aliases.some((alias) => alias.includes(term) || term.includes(alias));
+
+    const matchesFields =
+      r.name.toLowerCase().includes(term) ||
+      r.slug.toLowerCase().includes(term) ||
+      r.email.toLowerCase().includes(term) ||
+      (r.userName && r.userName.toLowerCase().includes(term)) ||
+      (r.city && r.city.toLowerCase().includes(term)) ||
+      (r.province && r.province.toLowerCase().includes(term)) ||
+      (r.locality && r.locality.toLowerCase().includes(term)) ||
+      (r.specialty && r.specialty.toLowerCase().includes(term)) ||
+      (r.description && r.description.toLowerCase().includes(term));
+
+    return matchesFields || matchesVerticalAlias;
+  });
 
   const filteredLeads = leads.filter(
     (l) =>
@@ -602,10 +720,71 @@ export function SuperAdminDashboard({
       facebook: res.facebook || "",
       tiktok: res.tiktok || "",
       ubicameUrl: res.ubicameUrl || "https://ubicame.info",
-      reservationUrl: res.reservationUrl || "https://reservaciones.ubicame.cc"
+      reservationUrl: res.reservationUrl || "https://reservaciones.ubicame.cc",
+      vertical: resolveBusinessVertical(res)
     });
     setEditError("");
     setIsEditModalOpen(true);
+  };
+
+  const handleToggleModule = async (
+    restaurantId: string,
+    moduleKey: "inventory" | "caja" | "ruleta",
+    currentActive: boolean
+  ) => {
+    const nextActive = !currentActive;
+
+    // Actualización optimista inmediata en la UI
+    setRestaurantList(prev => prev.map(r => {
+      if (r.id !== restaurantId) return r;
+      let curObj: any = {};
+      if (r.customLabels) {
+        try {
+          curObj = typeof r.customLabels === "string" ? JSON.parse(r.customLabels) : r.customLabels;
+        } catch {
+          curObj = {};
+        }
+      }
+      let curDisabled: string[] = Array.isArray(curObj.disabledModules) ? [...curObj.disabledModules] : [];
+      if (nextActive) {
+        curDisabled = curDisabled.filter(m => m !== moduleKey);
+      } else {
+        if (!curDisabled.includes(moduleKey)) curDisabled.push(moduleKey);
+      }
+      curObj.disabledModules = curDisabled;
+      return {
+        ...r,
+        customLabels: JSON.stringify(curObj),
+      };
+    }));
+
+    const resAction = await superAdminToggleRestaurantModuleAction(restaurantId, moduleKey, nextActive);
+    if (resAction?.error) {
+      alert(resAction.error);
+      // Revertir si hubo error
+      setRestaurantList(prev => prev.map(r => {
+        if (r.id !== restaurantId) return r;
+        let curObj: any = {};
+        if (r.customLabels) {
+          try {
+            curObj = typeof r.customLabels === "string" ? JSON.parse(r.customLabels) : r.customLabels;
+          } catch {
+            curObj = {};
+          }
+        }
+        let curDisabled: string[] = Array.isArray(curObj.disabledModules) ? [...curObj.disabledModules] : [];
+        if (currentActive) {
+          curDisabled = curDisabled.filter(m => m !== moduleKey);
+        } else {
+          if (!curDisabled.includes(moduleKey)) curDisabled.push(moduleKey);
+        }
+        curObj.disabledModules = curDisabled;
+        return {
+          ...r,
+          customLabels: JSON.stringify(curObj),
+        };
+      }));
+    }
   };
 
   const handleReassignSubmit = async (e: React.FormEvent) => {
@@ -652,8 +831,10 @@ export function SuperAdminDashboard({
         canton: "",
         parroquia: "",
         sector: "",
-        plan: "FREE"
+        plan: "FREE",
+        vertical: "restaurante"
       });
+      window.location.reload();
     }
   };
 
@@ -673,6 +854,7 @@ export function SuperAdminDashboard({
       alert("¡Información del negocio guardada con éxito!");
       setIsEditModalOpen(false);
       setEditingRestaurant(null);
+      window.location.reload();
     }
   };
 
@@ -1504,16 +1686,63 @@ export function SuperAdminDashboard({
                 </div>
               </div>
 
+              {/* Pestañas de Segmentos / Categorías con Contadores Dinámicos */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-800">
+                {VERTICAL_TABS.map((tab) => {
+                  const isSelected = selectedVertical === tab.id;
+                  const count = verticalCounts[tab.id] ?? 0;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setSelectedVertical(tab.id)}
+                      className={`group inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all duration-200 border whitespace-nowrap shrink-0 ${
+                        isSelected
+                          ? tab.activeTabStyle
+                          : "bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-white border-slate-800/80 hover:border-slate-700"
+                      }`}
+                    >
+                      <span className="text-sm">{tab.icon}</span>
+                      <span>{tab.label}</span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded-full text-[10px] font-black transition-colors ${
+                          isSelected
+                            ? "bg-white/20 text-white"
+                            : "bg-slate-800 text-slate-400 group-hover:text-slate-300"
+                        }`}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+                {(selectedVertical !== "all" || searchTerm.trim()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedVertical("all");
+                      setSearchTerm("");
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-900/60 hover:bg-slate-850 border border-slate-800 transition shrink-0 ml-auto"
+                    title="Restablecer filtros"
+                  >
+                    <X className="h-3.5 w-3.5 text-slate-400" />
+                    <span>Limpiar filtros</span>
+                  </button>
+                )}
+              </div>
+
               <div className="bg-slate-900/40 border border-slate-800/80 rounded-3xl overflow-hidden shadow-2xl">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-800">
                     <thead className="bg-slate-900/60">
                       <tr>
-                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Restaurante</th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Negocio & Categoría</th>
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Contacto & WhatsApp</th>
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Etapa CRM</th>
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Salud del Menú</th>
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Plan / Licencia</th>
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Herramientas</th>
                         <th className="px-6 py-4 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Seguimiento</th>
                         <th className="px-6 py-4 text-right text-xs font-semibold text-slate-400 uppercase tracking-wider">Acciones & Bitácora</th>
                       </tr>
@@ -1521,8 +1750,32 @@ export function SuperAdminDashboard({
                     <tbody className="divide-y divide-slate-800/80">
                       {filteredRestaurants.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-500">
-                            No se encontraron negocios registrados.
+                          <td colSpan={8} className="px-6 py-12 text-center text-sm text-slate-500">
+                            <div className="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
+                              <Store className="h-8 w-8 text-slate-600" />
+                              <p className="text-slate-300 font-semibold">
+                                {selectedVertical !== "all"
+                                  ? `No hay negocios en la categoría "${VERTICAL_TABS.find(t => t.id === selectedVertical)?.label}"`
+                                  : "No se encontraron negocios registrados."}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {searchTerm.trim()
+                                  ? `Ningún resultado coincide con la búsqueda "${searchTerm}".`
+                                  : "Prueba seleccionando otra categoría o crea un nuevo negocio."}
+                              </p>
+                              {(selectedVertical !== "all" || searchTerm.trim()) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedVertical("all");
+                                    setSearchTerm("");
+                                  }}
+                                  className="mt-2 text-xs text-red-400 hover:text-red-300 underline font-medium"
+                                >
+                                  Ver todos los negocios ({restaurantList.length})
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ) : (
@@ -1531,15 +1784,17 @@ export function SuperAdminDashboard({
                           const isExpired = trialEnds < new Date();
                           const daysRemaining = Math.max(0, Math.ceil((trialEnds.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)));
                           const stageInfo = CRM_STAGES.find(s => s.id === (res.leadStatus || "LEAD_NUEVO")) || CRM_STAGES[0];
+                          const resVertical = resolveBusinessVertical(res);
+                          const tabInfo = VERTICAL_TABS.find((t) => t.id === resVertical) || VERTICAL_TABS[1];
 
                           return (
                             <tr key={res.id} className="hover:bg-slate-900/20 transition-colors">
                               <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-start gap-3">
                                   {res.logoUrl ? (
-                                    <img src={res.logoUrl} alt={res.name} className="h-10 w-10 rounded-xl object-cover border border-slate-800" />
+                                    <img src={res.logoUrl} alt={res.name} className="h-10 w-10 rounded-xl object-cover border border-slate-800 shrink-0 mt-0.5" />
                                   ) : (
-                                    <div className="h-10 w-10 rounded-xl bg-slate-850 flex items-center justify-center font-bold text-white uppercase text-sm">
+                                    <div className="h-10 w-10 rounded-xl bg-slate-850 flex items-center justify-center font-bold text-white uppercase text-sm shrink-0 mt-0.5">
                                       {res.name.charAt(0)}
                                     </div>
                                   )}
@@ -1551,6 +1806,18 @@ export function SuperAdminDashboard({
                                       </a>
                                     </div>
                                     <div className="text-xs text-slate-400">/{res.slug}</div>
+                                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${tabInfo.badgeStyle}`}>
+                                        <span>{tabInfo.icon}</span>
+                                        <span>{tabInfo.shortLabel}</span>
+                                      </span>
+                                      {(res.city || res.locality) && (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 bg-slate-800/80 border border-slate-700/60 max-w-[130px] truncate" title={res.city || res.locality || ""}>
+                                          <MapPin className="h-2.5 w-2.5 text-slate-500 shrink-0" />
+                                          <span className="truncate">{res.city || res.locality}</span>
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </td>
@@ -1692,6 +1959,99 @@ export function SuperAdminDashboard({
                                     )}
                                   </div>
                                 </div>
+                              </td>
+
+                              {/* HERRAMIENTAS ON/OFF (BODEGA, CAJA POS, RULETA) */}
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {(() => {
+                                  let customObj: any = {};
+                                  if (res.customLabels) {
+                                    try {
+                                      customObj = typeof res.customLabels === "string" 
+                                        ? JSON.parse(res.customLabels) 
+                                        : res.customLabels;
+                                    } catch {
+                                      customObj = {};
+                                    }
+                                  }
+                                  const disabledMods: string[] = Array.isArray(customObj.disabledModules) 
+                                    ? customObj.disabledModules 
+                                    : [];
+
+                                  const isInventoryOn = !disabledMods.includes("inventory");
+                                  const isCajaOn = !disabledMods.includes("caja");
+                                  const isRuletaOn = !disabledMods.includes("ruleta");
+
+                                  return (
+                                    <div className="flex flex-col gap-1 min-w-[135px]">
+                                      {/* Bodega & Stock Switch */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleModule(res.id, "inventory", isInventoryOn)}
+                                        className={`inline-flex items-center justify-between gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition shadow-sm cursor-pointer ${
+                                          isInventoryOn
+                                            ? "bg-emerald-950/40 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/50"
+                                            : "bg-slate-900/60 border-slate-800 text-slate-500 hover:text-slate-400 hover:bg-slate-850"
+                                        }`}
+                                        title={isInventoryOn ? "Bodega y Stock ACTIVA (clic para apagar)" : "Bodega y Stock DESACTIVADA (clic para activar)"}
+                                      >
+                                        <span className="flex items-center gap-1.5">
+                                          <Boxes className={`h-3 w-3 ${isInventoryOn ? "text-emerald-400" : "text-slate-500"}`} />
+                                          <span>Bodega</span>
+                                        </span>
+                                        <span className={`text-[8px] font-black uppercase px-1 py-0.2 rounded ${
+                                          isInventoryOn ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-800 text-slate-500"
+                                        }`}>
+                                          {isInventoryOn ? "ON" : "OFF"}
+                                        </span>
+                                      </button>
+
+                                      {/* Caja POS Switch */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleModule(res.id, "caja", isCajaOn)}
+                                        className={`inline-flex items-center justify-between gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition shadow-sm cursor-pointer ${
+                                          isCajaOn
+                                            ? "bg-cyan-950/40 border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/50"
+                                            : "bg-slate-900/60 border-slate-800 text-slate-500 hover:text-slate-400 hover:bg-slate-850"
+                                        }`}
+                                        title={isCajaOn ? "Caja POS Escáner ACTIVA (clic para apagar)" : "Caja POS Escáner DESACTIVADA (clic para activar)"}
+                                      >
+                                        <span className="flex items-center gap-1.5">
+                                          <Barcode className={`h-3 w-3 ${isCajaOn ? "text-cyan-400" : "text-slate-500"}`} />
+                                          <span>Caja POS</span>
+                                        </span>
+                                        <span className={`text-[8px] font-black uppercase px-1 py-0.2 rounded ${
+                                          isCajaOn ? "bg-cyan-500/20 text-cyan-300" : "bg-slate-800 text-slate-500"
+                                        }`}>
+                                          {isCajaOn ? "ON" : "OFF"}
+                                        </span>
+                                      </button>
+
+                                      {/* Ruleta Switch */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleModule(res.id, "ruleta", isRuletaOn)}
+                                        className={`inline-flex items-center justify-between gap-1.5 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition shadow-sm cursor-pointer ${
+                                          isRuletaOn
+                                            ? "bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/50"
+                                            : "bg-slate-900/60 border-slate-800 text-slate-500 hover:text-slate-400 hover:bg-slate-850"
+                                        }`}
+                                        title={isRuletaOn ? "Ruleta de Premios ACTIVA (clic para apagar)" : "Ruleta de Premios DESACTIVADA (clic para activar)"}
+                                      >
+                                        <span className="flex items-center gap-1.5">
+                                          <Sparkles className={`h-3 w-3 ${isRuletaOn ? "text-amber-400" : "text-slate-500"}`} />
+                                          <span>Ruleta</span>
+                                        </span>
+                                        <span className={`text-[8px] font-black uppercase px-1 py-0.2 rounded ${
+                                          isRuletaOn ? "bg-amber-500/20 text-amber-300" : "bg-slate-800 text-slate-500"
+                                        }`}>
+                                          {isRuletaOn ? "ON" : "OFF"}
+                                        </span>
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-xs text-slate-300">
                                 {res.nextFollowUpAt ? (
@@ -3373,6 +3733,57 @@ export function SuperAdminDashboard({
                 </div>
               </div>
 
+              {/* Selector de Categoría / Tipo de Negocio */}
+              <div className="bg-slate-950/70 border border-slate-800 p-4 rounded-2xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                    Categoría y Tipo de Negocio *
+                  </label>
+                  <span className="text-[11px] text-slate-400">
+                    Configura automáticamente la vista móvil, módulos y catálogo
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {VERTICAL_TABS.filter((t) => t.id !== "all").map((v) => {
+                    const isSelected = createData.vertical === v.id;
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setCreateData({ ...createData, vertical: v.id as BusinessVertical })}
+                        className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? "bg-slate-900 border-amber-500 shadow-md ring-1 ring-amber-500/50"
+                            : "bg-slate-950/80 hover:bg-slate-900/60 border-slate-800/90 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        <span className="text-xl p-1.5 rounded-lg bg-slate-900 border border-slate-800 shrink-0">
+                          {v.icon}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className={`text-xs font-bold leading-tight ${isSelected ? "text-white" : "text-slate-300"}`}>
+                            {v.label}
+                          </div>
+                          <div className="text-[10px] text-slate-500 line-clamp-2 mt-0.5 leading-snug">
+                            {v.id === "restaurante" && "Menús QR, comandas de cocina, split-bill y delivery"}
+                            {v.id === "retail" && "Catálogo interactivo, tallas, colores y pedidos WhatsApp"}
+                            {v.id === "servicios" && "Cotizador de reparaciones, repuestos y soporte técnico"}
+                            {v.id === "citas" && "Agendamiento interactivo para clínicas, barberías y spa"}
+                            {v.id === "reservas" && "Catálogo de habitaciones, hospedaje, tarifas y reservas"}
+                          </div>
+                        </div>
+                        {isSelected && (
+                          <div className="w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center shrink-0 mt-0.5">
+                            <Check className="w-2.5 h-2.5 stroke-[3]" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Location Selectors */}
               <div className="border-t border-slate-800 pt-3 mt-3">
                 <span className="block font-semibold text-slate-300 mb-2">Ubicación del Negocio (Ecuador)</span>
@@ -3550,6 +3961,20 @@ export function SuperAdminDashboard({
                       <option value="FREE">FREE (Prueba)</option>
                       <option value="PRO">PRO ($15/mes - Autogestión)</option>
                       <option value="ELITE">⭐ ELITE ($20/mes - Gestión & Asesoría VIP)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 mb-1 font-medium">Categoría / Tipo de Negocio</label>
+                    <select
+                      value={editData.vertical}
+                      onChange={(e) => setEditData({ ...editData, vertical: e.target.value as BusinessVertical })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500 font-medium"
+                    >
+                      {VERTICAL_TABS.filter((t) => t.id !== "all").map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.icon} {v.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>

@@ -120,3 +120,54 @@ export function sanitizeMapEmbedUrl(rawInput?: string | null): string | null {
 
   return `https://maps.google.com/maps?q=${encodeURIComponent(cleaned)}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
 }
+
+/**
+ * Obtiene la URL óptima de iframe para Google Maps a partir de diferentes
+ * fuentes (mapEmbedUrl, googleBusinessUrl, ubicameUrl, address, city, province).
+ */
+export function getMapIframeSrc(
+  mapEmbedUrl?: string | null, 
+  address?: string | null, 
+  ubicameUrl?: string | null,
+  googleBusinessUrl?: string | null,
+  restaurantName?: string | null,
+  city?: string | null,
+  province?: string | null
+): string | null {
+  // 1. Iframe directo o URL embebida explícita
+  const sanitized = sanitizeMapEmbedUrl(mapEmbedUrl);
+  if (sanitized) {
+    return sanitized;
+  }
+
+  // 2. Ficha de Google Business o Google Maps directa
+  if (googleBusinessUrl && (googleBusinessUrl.includes("maps") || googleBusinessUrl.includes("goo.gl"))) {
+    const sanitizedGoogleBusiness = sanitizeMapEmbedUrl(googleBusinessUrl);
+    if (sanitizedGoogleBusiness) {
+      return sanitizedGoogleBusiness;
+    }
+  }
+
+  // 3. Dirección física completa
+  if (address && address.trim() && address.trim().toLowerCase() !== "sector turístico") {
+    const queryParts = [address.trim()];
+    if (city && !address.toLowerCase().includes(city.toLowerCase())) queryParts.push(city);
+    if (province && !address.toLowerCase().includes(province.toLowerCase())) queryParts.push(province);
+    queryParts.push("Ecuador");
+    return `https://maps.google.com/maps?q=${encodeURIComponent(queryParts.join(", "))}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  // 4. Nombre del local + ciudad / provincia / localidad
+  const locationClue = city || province || (address && address.trim());
+  if (restaurantName && locationClue) {
+    const queryParts = [restaurantName, locationClue, "Ecuador"].filter(Boolean);
+    return `https://maps.google.com/maps?q=${encodeURIComponent(queryParts.join(", "))}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  // 5. Fallback con solo la dirección si existe
+  if (address && address.trim()) {
+    return `https://maps.google.com/maps?q=${encodeURIComponent(address.trim() + ", Ecuador")}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  }
+
+  return null;
+}

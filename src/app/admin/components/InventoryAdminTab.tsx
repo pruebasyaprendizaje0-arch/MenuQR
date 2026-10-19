@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
 import {
   Boxes,
   Package,
@@ -492,6 +493,17 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         </div>
       </div>
 
+      {!bLabels.isGastro && (
+        <div className="bg-sky-500/10 border border-sky-500/20 px-4 py-3 rounded-2xl flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-sky-300">
+            <span className="text-base">💡</span>
+            <div>
+              <strong className="text-white">Control de Stock Rápido:</strong> Las existencias de tus productos se actualizan y venden directamente desde la pestaña <strong className="text-sky-200">&quot;Productos & Stock&quot;</strong>. Usa esta sección de Bodega principalmente si deseas llevar registro de compras a proveedores mayoristas, costos y mermas.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================= */}
       {/* TARJETAS DE MÉTRICAS GLOBALES DE INVENTARIO */}
       {/* ========================================================= */}
@@ -637,6 +649,14 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                 </span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                <Link
+                  href="/caja"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition shadow-sm"
+                  title="Abrir Caja POS móvil con escáner de cámara para entradas y ventas"
+                >
+                  <Barcode className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>📱 Abrir Caja POS</span>
+                </Link>
                 <button
                   type="button"
                   onClick={handleExportInventoryExcel}

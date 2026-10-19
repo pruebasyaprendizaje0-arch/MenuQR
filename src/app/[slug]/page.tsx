@@ -8,6 +8,7 @@ import { findRestaurantBySlugOrHistory } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import type { Metadata } from "next";
 import { generateRestaurantJsonLd, getBaseUrl } from "@/lib/seo";
+import { resolveBusinessVertical } from "@/lib/business-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -198,6 +199,18 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
       );
     }
 
+    // Enrutar automáticamente según la vertical del negocio a su experiencia y motor de acción
+    const vertical = resolveBusinessVertical(restaurant);
+    if (vertical === "reservas") {
+      redirect(`/reservas/${slug}`);
+    } else if (vertical === "servicios") {
+      redirect(`/servicios/${slug}`);
+    } else if (vertical === "citas") {
+      redirect(`/citas/${slug}`);
+    } else if (vertical === "retail") {
+      redirect(`/ctalo/${slug}`);
+    }
+
     // Track analytics event asynchronously
     trackAnalyticsEvent("RESTAURANT_VIEW", restaurant.id, { slug, locality: restaurant.locality, city: restaurant.city });
 
@@ -272,8 +285,27 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
     }
     const aspectMap = new Map(rawCategoryAspectRatios.map((r) => [r.id, r.imageAspectRatio]));
 
+    let customMeta: any = {};
+    if (restaurant.customLabels) {
+      try {
+        customMeta = typeof restaurant.customLabels === "string" ? JSON.parse(restaurant.customLabels) : restaurant.customLabels;
+      } catch {}
+    }
+
+    const defaultRestaurantGallery = [
+      "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1000&auto=format&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1000&auto=format&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?w=1000&auto=format&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1544025162-d76694265947?w=1000&auto=format&fit=crop&q=80",
+    ];
+
+    const restaurantGalleryImages = Array.isArray(customMeta.galleryImages) && customMeta.galleryImages.length > 0
+      ? customMeta.galleryImages.filter((u: any) => typeof u === "string" && u.trim().length > 0).slice(0, 4)
+      : ("galleryImages" in customMeta ? [] : defaultRestaurantGallery);
+
     const serializedRestaurant = {
       ...restaurant,
+      galleryImages: restaurantGalleryImages,
       whatsappNumber: restaurant.whatsapp || "",
       paymentQrUrl: restaurant.qrCobroUrl || null,
       trialEndsAt: toIso(restaurant.trialEndsAt),
@@ -313,6 +345,9 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
       </>
     );
   } catch (err: any) {
+    if (err?.digest?.startsWith("NEXT_REDIRECT") || err?.message?.includes("NEXT_REDIRECT")) {
+      throw err;
+    }
     console.error("[MenuPage Error] Fallo critico en Server Component:", err);
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center">

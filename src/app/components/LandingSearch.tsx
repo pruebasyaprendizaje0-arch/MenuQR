@@ -23,6 +23,7 @@ import {
   requestBrowserCoordinates 
 } from "@/lib/geo-utils";
 import { SmartLogo } from "@/components/SmartImage";
+import { getPrimaryDishImage } from "@/lib/dish-images";
 
 type RestaurantListItem = {
   id: string;
@@ -495,7 +496,7 @@ export function LandingSearch({ restaurants }: { restaurants: RestaurantListItem
                 className="bg-slate-900/95 border border-slate-700/80 hover:border-amber-500/60 rounded-2xl p-4 flex gap-4 transition group backdrop-blur-xl shadow-lg"
               >
                 {dish.imageUrl ? (
-                  <img src={dish.imageUrl} alt={dish.name} className="h-16 w-16 rounded-xl object-cover border border-slate-700 shrink-0" />
+                  <img src={getPrimaryDishImage(dish.imageUrl) || dish.imageUrl} alt={dish.name} className="h-16 w-16 rounded-xl object-cover border border-slate-700 shrink-0" />
                 ) : (
                   <div className="h-16 w-16 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 shrink-0">
                     <UtensilsCrossed className="h-6 w-6" />

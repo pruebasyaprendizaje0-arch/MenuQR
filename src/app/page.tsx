@@ -1,15 +1,33 @@
 import Link from "next/link";
-import { UtensilsCrossed, Sparkles, QrCode, MessageSquare, ShieldCheck, ArrowRight, MapPin, HelpCircle, CheckCircle2, Zap, Rocket, Headphones } from "lucide-react";
+import {
+  UtensilsCrossed,
+  Sparkles,
+  QrCode,
+  ShoppingBag,
+  Wrench,
+  Calendar,
+  Hotel,
+  ShieldCheck,
+  ArrowRight,
+  MapPin,
+  HelpCircle,
+  CheckCircle2,
+  Zap,
+  Rocket,
+  Headphones,
+  Globe,
+  Layers,
+  Trees,
+} from "lucide-react";
 import { prismaControl, prismaTenant } from "@/lib/db";
 import { LandingSearch } from "./components/LandingSearch";
-import { ScrollVideoBackground } from "./components/ScrollVideoBackground";
 import { MarketplaceShowcase } from "./components/MarketplaceShowcase";
 import { getMarketplaceDishesAction } from "@/lib/suggested-dishes-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function LandingPage() {
-  // Query all restaurants from the DB to build the public directory safely
+export default async function InstitutionalLandingPage() {
+  // Obtener negocios para el directorio público
   let restaurants: any[] = [];
   try {
     restaurants = await prismaTenant.restaurant.findMany({
@@ -26,17 +44,19 @@ export default async function LandingPage() {
         longitude: true,
         parish: true,
         sector: true,
+        businessType: true,
       },
       orderBy: {
         createdAt: "desc",
       },
+      take: 24,
     });
   } catch (error) {
-    console.error("Error fetching restaurants on root landing page:", error);
+    console.error("Error fetching businesses on root landing page:", error);
     restaurants = [];
   }
 
-  // Query Marketplace suggested dishes & products
+  // Obtener productos destacados del marketplace
   let marketplaceData = { dishes: [] as any[], total: 0, restaurantCount: 0, storeCount: 0 };
   try {
     const mRes = await getMarketplaceDishesAction({
@@ -54,12 +74,18 @@ export default async function LandingPage() {
   let whatsappSupport = "";
   try {
     const whatsappSupportSetting = await prismaControl.systemSetting.findUnique({
-      where: { key: "whatsapp_support" }
+      where: { key: "whatsapp_support" },
     });
-    whatsappSupport = whatsappSupportSetting?.value || process.env.NEXT_PUBLIC_WHATSAPP_SUPPORT || process.env.WHATSAPP_SUPPORT || "593999999999";
-  } catch (error) {
-    console.warn("WARNING: SystemSetting table is missing or not migrated yet.", error);
-    whatsappSupport = process.env.NEXT_PUBLIC_WHATSAPP_SUPPORT || process.env.WHATSAPP_SUPPORT || "593999999999";
+    whatsappSupport =
+      whatsappSupportSetting?.value ||
+      process.env.NEXT_PUBLIC_WHATSAPP_SUPPORT ||
+      process.env.WHATSAPP_SUPPORT ||
+      "593999999999";
+  } catch {
+    whatsappSupport =
+      process.env.NEXT_PUBLIC_WHATSAPP_SUPPORT ||
+      process.env.WHATSAPP_SUPPORT ||
+      "593999999999";
   }
 
   const rawPhone = (whatsappSupport || "593999999999").toString();
@@ -70,508 +96,346 @@ export default async function LandingPage() {
     formattedPhone = "593" + formattedPhone;
   }
 
-  const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent("Hola, quisiera saber más información sobre MenuQR Pro")}`;
-  const waSetupUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent("Hola, me interesa el Plan de Puesta en Marcha Inmediata ($20 USD) para que suban la información de mi restaurante y ponerlo en marcha de inmediato.")}`;
+  const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(
+    "Hola, quisiera saber más sobre la plataforma multi-vertical Ubícame.cc"
+  )}`;
 
   const faqSchema = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    "mainEntity": [
+    mainEntity: [
       {
         "@type": "Question",
-        "name": "¿Cómo crear un menú digital QR gratis para mi restaurante en Ecuador?",
+        "name": "¿Qué es Ubícame.cc y qué verticales incluye?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Puedes registrar tu restaurante en MenuQR Pro en menos de 2 minutos y disfrutar de 30 días de prueba gratuita sin ingresar datos de tarjeta de crédito. Obtendrás un código QR listo para imprimir y colocar en tus mesas."
-        }
+          "text": "Ubícame.cc es la plataforma SaaS multi-tenant todo-en-uno que digitaliza negocios bajo subdominios dinámicos dedicados: MenuQR (Restaurantes y Bares), Catálogo (Tiendas de Ropa, Calzado y Joyería), Servicios (Cotizador técnico express con GPS), Citas (Agenda de turnos online para consultorios y barberías) y Reservas (Motor para cabañas y hostales).",
+        },
       },
       {
         "@type": "Question",
-        "name": "¿Cómo funcionan los pedidos por WhatsApp en MenuQR Pro?",
+        "name": "¿Ubícame cobra comisiones por cada pedido o reserva?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "El cliente escanea el código QR de su mesa, elige los platillos en la carta digital e ingresa sus notas. El pedido se envía formateado con subtotal, impuestos y número de mesa directamente al WhatsApp del restaurante."
-        }
+          "text": "No, todas las verticales de Ubícame operan con 0% de comisiones por venta. El 100% de los ingresos de tus productos, servicios o habitaciones va directamente a tu negocio.",
+        },
       },
       {
         "@type": "Question",
-        "name": "¿Cuánto cuesta MenuQR Pro en Ecuador y qué planes ofrecen?",
+        "name": "¿Cómo funcionan los subdominios dinámicos?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Ofrecemos dos planes claros y accesibles: 1) Plan Digital Pro a $15.00 USD/mes con 30 días de prueba gratis para gestionar tu propio menú. 2) Plan Puesta en Marcha Inmediata a $20.00 USD/mes donde nuestro equipo digitaliza y carga toda la información, platos, fotos y precios de tu restaurante para que comiences a vender en menos de 24 horas."
-        }
+          "text": "Cada vertical cuenta con su propio subdominio especializado (menuqr.ubicame.cc, catalogo.ubicame.cc, servicios.ubicame.cc, citas.ubicame.cc, reservas.ubicame.cc) optimizado en diseño, flujo de compra y SEO para su industria específica.",
+        },
       },
-      {
-        "@type": "Question",
-        "name": "¿MenuQR Pro cobra comisiones por cada pedido realizado?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "No, MenuQR Pro cobra cero comisiones por venta (0%). El 100% del ingreso de tus platillos y bebidas es para tu restaurante."
-        }
-      }
-    ]
+    ],
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
       />
-      <ScrollVideoBackground />
-      {/* Background decoration */}
-      <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-red-600/10 rounded-full blur-[150px] pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-amber-600/10 rounded-full blur-[150px] pointer-events-none"></div>
 
-      {/* Header */}
-      <header className="max-w-6xl w-full mx-auto px-6 py-6 flex items-center justify-between relative z-10 gap-4">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <div className="h-10 w-10 bg-gradient-to-tr from-red-600 to-amber-500 rounded-xl flex items-center justify-center shadow-lg">
-              <UtensilsCrossed className="h-5 w-5 text-white" />
-            </div>
-            <span className="font-extrabold text-white text-lg tracking-tight">
-              MenuQR <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-amber-500">Pro</span>
-            </span>
+      {/* Header Institucional */}
+      <header className="sticky top-0 z-50 backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/80">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <Link href="/" className="flex items-center gap-3 group">
+              <div className="h-11 w-11 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-black text-xl shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
+                <Globe className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <span className="text-xl font-black tracking-tight text-white block">
+                  Ubícame<span className="text-indigo-400">.cc</span>
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block -mt-1">
+                  Ecosistema Multi-Vertical SaaS
+                </span>
+              </div>
+            </Link>
+
+            {/* Selector Rápido de Verticales */}
+            <nav className="hidden lg:inline-flex p-1 bg-slate-900/90 rounded-full border border-slate-800 text-xs font-semibold gap-1">
+              <Link href="/menuqr" className="px-3 py-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                🍔 Restaurantes
+              </Link>
+              <Link href="/ctalo" className="px-3 py-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                🛍️ Catálogo
+              </Link>
+              <Link href="/servicios" className="px-3 py-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                🔧 Servicios
+              </Link>
+              <Link href="/citas" className="px-3 py-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                📅 Citas
+              </Link>
+              <Link href="/reservas" className="px-3 py-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                🏡 Reservas
+              </Link>
+            </nav>
           </div>
 
-          {/* Cross-navigation Context Switcher */}
-          <div className="hidden md:inline-flex p-1 bg-slate-900/90 rounded-full border border-slate-800 text-xs font-semibold gap-1">
-            <Link href="/" className="px-4 py-1.5 rounded-full bg-red-600 text-white font-bold shadow-md shadow-red-600/20">
-              🍔 Para Restaurantes
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-900 transition-all"
+            >
+              Iniciar Sesión
             </Link>
-            <Link href="/catalogos" className="px-4 py-1.5 rounded-full text-slate-400 hover:text-white transition">
-              🛍️ Para Tiendas y Comercios
-            </Link>
-            <Link href="/marketplace" className="px-4 py-1.5 rounded-full text-amber-400 hover:text-amber-300 font-bold transition flex items-center gap-1">
-              ✨ Marketplace
+            <Link
+              href="/registro"
+              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
+            >
+              <span>Registrar Negocio</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Link href="/marketplace" className="text-xs font-bold text-amber-400 hover:underline flex items-center gap-1">
-            ✨ Marketplace
-          </Link>
-          <Link href="/catalogos" className="md:hidden text-xs font-semibold text-slate-300 hover:underline">
-            Comercios
-          </Link>
-          <Link 
-            href="/admin" 
-            className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 border border-slate-800 hover:bg-slate-800 rounded-xl transition"
-          >
-            Iniciar Sesión
-          </Link>
         </div>
       </header>
 
-      {/* Hero section */}
-      <main className="max-w-5xl w-full mx-auto px-6 py-12 md:py-20 flex flex-col items-center text-center relative z-10 space-y-16">
-        
-        {/* Top Hero Text */}
-        <div className="space-y-8 flex flex-col items-center max-w-3xl animate-fade-in">
-          <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-[10px] uppercase tracking-wider font-extrabold text-amber-500">
-            <Sparkles className="h-3 w-3 animate-spin" /> Plataforma SaaS Ultra Moderna
+      {/* Hero Institucional */}
+      <section className="relative pt-16 pb-24 overflow-hidden text-center">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] bg-gradient-to-b from-indigo-500/15 via-purple-500/10 to-transparent rounded-full blur-[140px] pointer-events-none"></div>
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-indigo-950/60 border border-indigo-800/60 text-indigo-300 text-xs font-bold mb-8 shadow-inner animate-pulse">
+            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <span>Arquitectura Multi-Tenant Dinámica • 5 Verticales de Negocio</span>
           </div>
 
-          <div className="space-y-6">
-            <h1 className="text-4xl md:text-6xl font-extrabold text-white leading-tight tracking-tight">
-              Crea tu Menú Digital QR <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-orange-500 to-amber-500">
-                Profesional en Segundos
-              </span>
-            </h1>
-            <p className="text-slate-400 text-sm md:text-base max-w-2xl mx-auto leading-relaxed">
-              Digitaliza tu restaurante, genera códigos QR para tus mesas y recibe pedidos completos directamente en tu WhatsApp de forma automatizada.
-            </p>
-          </div>
+          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black text-white tracking-tight max-w-5xl mx-auto leading-[1.1] mb-6">
+            La Plataforma Todo-en-Uno para{" "}
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400">
+              Vender, Cotizar y Agendar
+            </span>{" "}
+            en Ecuador y Latinoamérica
+          </h1>
 
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center w-full max-w-sm pt-2">
-            <Link 
-              href="/pigro"
-              className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 shadow-xl shadow-red-950/20 transform hover:scale-[1.02] transition-all duration-200"
+          <p className="text-lg sm:text-xl text-slate-400 max-w-3xl mx-auto mb-12 leading-relaxed">
+            Potencia tu negocio con subdominios especializados, pedidos sin comisiones a WhatsApp, control en tiempo real y la mejor experiencia para tus clientes en cada sector.
+          </p>
+
+          {/* Grid de las 5 Verticales de Negocio */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto text-left mb-16">
+            {/* 1. MenuQR */}
+            <Link
+              href="/menuqr"
+              className="p-7 rounded-3xl bg-slate-900/70 border border-slate-800 hover:border-red-500/50 backdrop-blur transition-all group flex flex-col justify-between shadow-xl"
             >
-              Ver Menú de Demo
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-            <Link 
-              href="/registro" 
-              className="w-full sm:w-auto px-8 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider bg-slate-900 border border-slate-800 hover:bg-slate-800 text-white transition-all text-center"
-            >
-              Empezar Gratis
-            </Link>
-          </div>
-        </div>
-
-        {/* Dedicated Spacing Block: Exposes the full-screen background video in the center */}
-        <div className="py-20 md:py-36 w-full pointer-events-none"></div>
-
-        {/* Vitrina de Platos y Productos Sugeridos (Marketplace Showcase) */}
-        {marketplaceData.dishes.length > 0 && (
-          <MarketplaceShowcase
-            initialDishes={marketplaceData.dishes}
-            restaurantCount={marketplaceData.restaurantCount}
-            storeCount={marketplaceData.storeCount}
-          />
-        )}
-
-        {/* Directory Search & Filter Section */}
-        <div className="w-full space-y-6 pt-4">
-          <div className="flex items-center justify-center gap-2 text-amber-400 text-xs font-black uppercase tracking-widest">
-            <Sparkles className="h-4 w-4 text-amber-400" />
-            <span>Directorio de Restaurantes y Menús Digitales</span>
-          </div>
-
-          <LandingSearch restaurants={restaurants} />
-        </div>
-
-        {/* Features grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full text-left pt-12">
-          <div className="bg-slate-900/95 border border-slate-700/80 p-6 rounded-3xl space-y-4 hover:border-red-500/50 shadow-xl backdrop-blur-xl transition duration-300">
-            <div className="h-12 w-12 bg-red-950/70 border border-red-800/60 rounded-2xl flex items-center justify-center text-red-400">
-              <QrCode className="h-6 w-6" />
-            </div>
-            <h3 className="font-extrabold text-white text-lg">Códigos QR Ilimitados</h3>
-            <p className="text-slate-300 text-xs leading-relaxed">
-              Genera e imprime códigos QR para cada mesa o punto de venta. Tus clientes escanean y ven el menú al instante sin descargar apps.
-            </p>
-          </div>
-
-          <div className="bg-slate-900/95 border border-slate-700/80 p-6 rounded-3xl space-y-4 hover:border-amber-500/50 shadow-xl backdrop-blur-xl transition duration-300">
-            <div className="h-12 w-12 bg-amber-950/70 border border-amber-800/60 rounded-2xl flex items-center justify-center text-amber-400">
-              <MessageSquare className="h-6 w-6" />
-            </div>
-            <h3 className="font-extrabold text-white text-lg">Pedidos a tu WhatsApp</h3>
-            <p className="text-slate-300 text-xs leading-relaxed">
-              El cliente arma su carrito de compras y te envía el pedido formateado con detalle, número de mesa, recargos y total directo a tu número.
-            </p>
-          </div>
-
-          <div className="bg-slate-900/95 border border-slate-700/80 p-6 rounded-3xl space-y-4 hover:border-orange-500/50 shadow-xl backdrop-blur-xl transition duration-300">
-            <div className="h-12 w-12 bg-orange-950/70 border border-orange-800/60 rounded-2xl flex items-center justify-center text-orange-400">
-              <ShieldCheck className="h-6 w-6" />
-            </div>
-            <h3 className="font-extrabold text-white text-lg">Panel de Gestión Fácil</h3>
-            <p className="text-slate-300 text-xs leading-relaxed">
-              Administra tus categorías, productos, precios, fotos, horarios y datos bancarios desde un panel intuitivo sin depender de programadores.
-            </p>
-          </div>
-        </div>
-
-        {/* Pricing Section - Planes Claros y Transparentes */}
-        <div className="w-full max-w-5xl space-y-10 my-8">
-          <div className="text-center space-y-3">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mx-auto">
-              <Sparkles className="w-4 h-4 text-amber-400" /> Planes Transparentes Sin Comisiones
-            </div>
-            <h2 className="text-3xl md:text-4xl font-extrabold text-white">Elige el plan ideal para tu restaurante</h2>
-            <p className="text-slate-400 text-xs md:text-sm max-w-xl mx-auto">
-              Comienza hoy mismo sin contratos forzosos, sin comisiones por pedido y con soporte directo en Ecuador.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-            {/* Plan 1: Plan Digital Pro ($15/mes) */}
-            <div className="bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-slate-800 hover:border-slate-700 rounded-[2.5rem] p-8 md:p-10 shadow-2xl relative overflow-hidden flex flex-col justify-between text-left space-y-8 transition-all">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <span className="px-3.5 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-300 text-[11px] font-bold uppercase tracking-wider">
-                    Autogestionable
-                  </span>
-                  <span className="text-xs text-emerald-400 font-semibold">
-                    ✨ 30 Días de Prueba Gratis
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-2xl bg-red-500/15 text-red-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <UtensilsCrossed className="w-6 h-6" />
+                  </div>
+                  <span className="text-[11px] font-bold text-red-400 bg-red-950/60 px-3 py-1 rounded-full border border-red-800/50">
+                    menuqr.ubicame.cc
                   </span>
                 </div>
-
-                <div>
-                  <h3 className="text-2xl font-black text-white">Plan Digital Pro</h3>
-                  <p className="text-slate-400 text-xs mt-1 leading-relaxed">
-                    Ideal para restaurantes que desean gestionar y digitalizar su carta a su propio ritmo.
-                  </p>
-                </div>
-
-                <div className="bg-slate-950/80 p-5 rounded-2xl border border-slate-800/80">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-4xl md:text-5xl font-black text-white">$15</span>
-                    <span className="text-base font-bold text-amber-400">.00 USD</span>
-                    <span className="text-slate-400 text-xs ml-1">/ mes</span>
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Facturación mensual transparente · Cero comisiones
-                  </p>
-                </div>
-
-                <div className="space-y-3 text-xs text-slate-300">
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <span><strong>Menú Digital QR Ilimitado</strong> para mesas, barra y llevar</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <span><strong>Pedidos automáticos a WhatsApp</strong> con subtotales e impuestos</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <span><strong>Panel administrativo fácil</strong> para platos, fotos, categorías y combos</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <span><strong>Configuración fiscal</strong> de IVA (15%), Servicio (10%) y delivery por KM</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <span><strong>0% de comisiones</strong> sobre tus ventas</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <span>Soporte técnico continuo en Ecuador</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 space-y-3">
-                <Link
-                  href="/registro"
-                  className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl font-bold text-xs uppercase tracking-wider text-white bg-slate-900 border border-slate-700 hover:bg-slate-800 hover:border-slate-600 shadow-lg transition-all text-center"
-                >
-                  Comenzar Prueba Gratis de 30 Días
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
-                <p className="text-[11px] text-center text-slate-500">
-                  Sin tarjeta de crédito requerida · Activación en 2 min
+                <h3 className="text-xl font-black text-white mb-2 group-hover:text-red-400 transition-colors">
+                  MenuQR Pro
+                </h3>
+                <p className="text-slate-400 text-xs leading-relaxed mb-4">
+                  Restaurantes, Bares, Cafés y Food Trucks. Pedidos a mesa con códigos QR únicos, comandas KDS a cocina y división de cuenta inteligente.
                 </p>
               </div>
-            </div>
-
-            {/* Plan 2: Plan Puesta en Marcha Inmediata ($20/mes) */}
-            <div className="bg-gradient-to-b from-slate-900/95 via-slate-950 to-slate-950 border-2 border-amber-500/60 rounded-[2.5rem] p-8 md:p-10 shadow-2xl relative overflow-hidden flex flex-col justify-between text-left space-y-8 transform hover:scale-[1.01] transition-all">
-              <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 bg-amber-500/15 rounded-full blur-3xl pointer-events-none"></div>
-
-              <div className="space-y-6 relative z-10">
-                <div className="flex items-center justify-between">
-                  <span className="px-3.5 py-1 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-[11px] font-black uppercase tracking-wider shadow-md shadow-amber-500/20">
-                    ⭐ Más Popular · Puesta en Marcha
-                  </span>
-                  <span className="text-xs text-amber-400 font-bold flex items-center gap-1">
-                    <Rocket className="w-3.5 h-3.5" /> Listo en 24h
-                  </span>
-                </div>
-
-                <div>
-                  <h3 className="text-2xl font-black text-white flex items-center gap-2">
-                    Plan Puesta en Marcha Inmediata
-                  </h3>
-                  <p className="text-amber-200/80 text-xs mt-1 leading-relaxed font-medium">
-                    🚀 <strong>Nosotros llenamos y estructuramos toda la información por ti.</strong> Tú solo envíanos tu carta o fotos.
-                  </p>
-                </div>
-
-                <div className="bg-amber-500/10 p-5 rounded-2xl border border-amber-500/30">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-4xl md:text-5xl font-black text-white">$20</span>
-                    <span className="text-base font-bold text-amber-400">.00 USD</span>
-                    <span className="text-slate-400 text-xs ml-1">/ mes</span>
-                  </div>
-                  <p className="text-[11px] text-amber-300 font-semibold mt-1">
-                    Incluye servicio completo de digitalización y carga inicial asistida
-                  </p>
-                </div>
-
-                <div className="space-y-3 text-xs text-slate-300">
-                  <div className="flex items-start gap-2.5 text-amber-100 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20">
-                    <Rocket className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <span><strong>Carga completa de información:</strong> Subimos todos tus platos, fotos, categorías y precios por ti.</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <span><strong>Todo lo incluido en el Plan Digital Pro</strong> (mesas, QR, pedidos WhatsApp)</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <span><strong>Optimización visual:</strong> Ajuste de imágenes y estructura de menú para maximizar ventas</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <span><strong>Códigos QR listos para imprimir</strong> en alta resolución para tus mesas y barra</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <span><strong>Activación express garantizada</strong> en menos de 24 horas laborables</span>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <Headphones className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <span><strong>Asesoría y acompañamiento VIP</strong> directo por WhatsApp para el lanzamiento</span>
-                  </div>
-                </div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-red-400 group-hover:translate-x-1 transition-transform">
+                <span>Explorar Vertical Restaurantes</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </div>
+            </Link>
 
-              <div className="pt-4 space-y-3 relative z-10">
-                <a
-                  href={waSetupUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full flex items-center justify-center gap-2 px-6 py-4 rounded-2xl font-extrabold text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-xl shadow-amber-500/20 transform hover:scale-[1.02] transition-all text-center"
-                >
-                  <Rocket className="w-4 h-4" />
-                  Quiero Puesta en Marcha Inmediata ($20)
-                </a>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-                  <span>¿Prefieres registrarte primero?</span>
-                  <Link href="/registro" className="text-amber-400 hover:underline font-semibold">
-                    Crear cuenta gratis →
-                  </Link>
+            {/* 2. Catálogo Pro */}
+            <Link
+              href="/ctalo"
+              className="p-7 rounded-3xl bg-slate-900/70 border border-slate-800 hover:border-amber-500/50 backdrop-blur transition-all group flex flex-col justify-between shadow-xl"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <ShoppingBag className="w-6 h-6" />
+                  </div>
+                  <span className="text-[11px] font-bold text-amber-400 bg-amber-950/60 px-3 py-1 rounded-full border border-amber-800/50">
+                    catalogo.ubicame.cc
+                  </span>
                 </div>
+                <h3 className="text-xl font-black text-white mb-2 group-hover:text-amber-400 transition-colors">
+                  Catálogo E-Commerce
+                </h3>
+                <p className="text-slate-400 text-xs leading-relaxed mb-4">
+                  Tiendas de Ropa, Calzado, Joyería y Boutiques. Carrito de compras flotante, selector de tallas y colores, y checkout directo a WhatsApp.
+                </p>
               </div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 group-hover:translate-x-1 transition-transform">
+                <span>Explorar Vertical Catálogo</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+            </Link>
+
+            {/* 3. Servicios Pro */}
+            <Link
+              href="/servicios"
+              className="p-7 rounded-3xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/50 backdrop-blur transition-all group flex flex-col justify-between shadow-xl"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-2xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Wrench className="w-6 h-6" />
+                  </div>
+                  <span className="text-[11px] font-bold text-cyan-400 bg-cyan-950/60 px-3 py-1 rounded-full border border-cyan-800/50">
+                    servicios.ubicame.cc
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-white mb-2 group-hover:text-cyan-400 transition-colors">
+                  Servicios Técnicos
+                </h3>
+                <p className="text-slate-400 text-xs leading-relaxed mb-4">
+                  Técnicos, Plomeros, Electricistas y Cerrajería. Cotizador express en 60 segundos con subida de fotos del desperfecto y geolocalización GPS.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-400 group-hover:translate-x-1 transition-transform">
+                <span>Explorar Cotizador Express</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+            </Link>
+
+            {/* 4. Citas Pro */}
+            <Link
+              href="/citas"
+              className="p-7 rounded-3xl bg-slate-900/70 border border-slate-800 hover:border-purple-500/50 backdrop-blur transition-all group flex flex-col justify-between shadow-xl"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/15 text-purple-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Calendar className="w-6 h-6" />
+                  </div>
+                  <span className="text-[11px] font-bold text-purple-400 bg-purple-950/60 px-3 py-1 rounded-full border border-purple-800/50">
+                    citas.ubicame.cc
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-white mb-2 group-hover:text-purple-400 transition-colors">
+                  Agenda de Citas & Turnos
+                </h3>
+                <p className="text-slate-400 text-xs leading-relaxed mb-4">
+                  Consultorios Médicos, Dentistas, Barberías y Spas. Selector de especialista, catálogo de tratamientos con duración y franjas horarias 24/7.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-purple-400 group-hover:translate-x-1 transition-transform">
+                <span>Explorar Agenda de Citas</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+            </Link>
+
+            {/* 5. Reservas Pro */}
+            <Link
+              href="/reservas"
+              className="p-7 rounded-3xl bg-slate-900/70 border border-slate-800 hover:border-emerald-500/50 backdrop-blur transition-all group flex flex-col justify-between shadow-xl md:col-span-2 lg:col-span-1"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Trees className="w-6 h-6" />
+                  </div>
+                  <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-800/50">
+                    reservas.ubicame.cc
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-white mb-2 group-hover:text-emerald-400 transition-colors">
+                  Hospedaje & Cabañas
+                </h3>
+                <p className="text-slate-400 text-xs leading-relaxed mb-4">
+                  Hostales, Glampings y Casas Vacacionales. Motor de reservas directas con Check-in/Check-out, cálculo de noches y extras sin el 20% de Airbnb.
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 group-hover:translate-x-1 transition-transform">
+                <span>Explorar Motor de Reservas</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </div>
+            </Link>
+
+            {/* Tarjeta de Registro Directo */}
+            <div className="p-7 rounded-3xl bg-gradient-to-br from-indigo-950/70 via-purple-950/70 to-slate-900 border border-indigo-800/50 flex flex-col justify-between shadow-xl">
+              <div>
+                <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 inline-block mb-3">
+                  Puesta en Marcha Inmediata
+                </span>
+                <h3 className="text-xl font-black text-white mb-2">¿Quieres que configuremos tu negocio?</h3>
+                <p className="text-slate-400 text-xs leading-relaxed mb-4">
+                  Envíanos fotos de tus productos, carta o servicios por WhatsApp y nuestro equipo lo digitaliza en menos de 24 horas.
+                </p>
+              </div>
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs text-center shadow-lg transition"
+              >
+                Hablar con un Asesor por WhatsApp
+              </a>
             </div>
           </div>
         </div>
+      </section>
 
-        {/* GEO Coverage Section - Generative & Local Search Optimization */}
-        <div className="w-full max-w-4xl bg-transparent border border-white/10 rounded-[2.5rem] p-8 text-left space-y-6">
-          <div className="flex items-center gap-2 text-amber-500 text-xs font-bold uppercase tracking-wider">
-            <MapPin className="w-4 h-4" /> Cobertura Nacional en Ecuador
-          </div>
-          <h2 className="text-2xl font-extrabold text-white">Presentes en Todas las Provincias y Ciudades de Ecuador</h2>
-          <p className="text-slate-400 text-xs leading-relaxed">
-            MenuQR Pro potencia la transformación digital gastronómica en <strong>Quito, Guayaquil, Cuenca, Ambato, Manta, Loja, Machala, Santo Domingo, Portoviejo, Ibarra, Salinas, Babahoyo, Quevedo, Riobamba y Esmeraldas</strong>. Optimizado para el mercado ecuatoriano con soporte nativo para IVA del 15%, servicio del 10% y transferencias bancarias directas.
-          </p>
-          <div className="flex flex-wrap gap-2 text-[11px] text-slate-400 pt-2">
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Pichincha</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Guayas</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Azuay</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Manabí</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Tungurahua</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Loja</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">El Oro</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Santo Domingo</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Los Ríos</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Chimborazo</span>
-            <span className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">Imbabura</span>
-          </div>
-        </div>
-
-        {/* AEO FAQ Section - Answer Engine Optimization for Search & AI */}
-        <div className="w-full max-w-4xl text-left space-y-8 my-8">
-          <script
-            type="application/ld+json"
-            suppressHydrationWarning
-            dangerouslySetInnerHTML={{
-              __html: JSON.stringify({
-                "@context": "https://schema.org",
-                "@type": "FAQPage",
-                "mainEntity": [
-                  {
-                    "@type": "Question",
-                    "name": "¿Qué es MenuQR Pro y cómo funciona en Ecuador?",
-                    "acceptedAnswer": {
-                      "@type": "Answer",
-                      "text": "MenuQR Pro es una plataforma SaaS en Ecuador que permite a restaurantes, cafeterías y bares crear un menú digital QR interactivo. Los clientes escanean el código QR en la mesa y envían su pedido detallado a través de WhatsApp de forma automatizada.",
-                    },
-                  },
-                  {
-                    "@type": "Question",
-                    "name": "¿Cuánto cuesta MenuQR Pro y qué planes están disponibles?",
-                    "acceptedAnswer": {
-                      "@type": "Answer",
-                      "text": "MenuQR Pro ofrece dos planes: el Plan Digital Pro de $15.00 USD mensuales (con 30 días de prueba gratuita) para autogestión, y el Plan Puesta en Marcha Inmediata de $20.00 USD mensuales donde nuestro equipo carga y digitaliza toda tu carta, fotos y precios en menos de 24 horas.",
-                    },
-                  },
-                  {
-                    "@type": "Question",
-                    "name": "¿En qué consiste el Plan Puesta en Marcha Inmediata de $20 USD?",
-                    "acceptedAnswer": {
-                      "@type": "Answer",
-                      "text": "Con el Plan Puesta en Marcha Inmediata ($20 USD/mes), nuestro equipo se encarga de subir todos los platos, categorías, fotos, precios y datos bancarios de tu negocio, entregándote el menú digital 100% listo y los códigos QR para imprimir en menos de 24 horas.",
-                    },
-                  },
-                  {
-                    "@type": "Question",
-                    "name": "¿MenuQR Pro cobra comisiones sobre las ventas o pedidos?",
-                    "acceptedAnswer": {
-                      "@type": "Answer",
-                      "text": "No. MenuQR Pro no cobra ninguna comisión por venta ni tarifa de intermediación por los pedidos de tu restaurante.",
-                    },
-                  },
-                  {
-                    "@type": "Question",
-                    "name": "¿Cómo reciben los restaurantes los pedidos de sus clientes?",
-                    "acceptedAnswer": {
-                      "@type": "Answer",
-                      "text": "Los clientes seleccionan los platos y mesas desde el menú digital y el pedido estructurado con totales e impuestos se envía instantáneamente al número de WhatsApp del establecimiento.",
-                    },
-                  },
-                ],
-              }),
-            }}
-          />
-
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 text-amber-500 text-xs font-bold uppercase tracking-wider">
-              <HelpCircle className="w-4 h-4" /> Preguntas Frecuentes (AEO)
+      {/* Directorio Público de Negocios Registrados */}
+      {restaurants.length > 0 && (
+        <section className="py-16 bg-slate-900/40 border-t border-slate-800">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="text-center max-w-3xl mx-auto mb-10">
+              <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-300 border border-slate-700">
+                Directorio Unificado Ubícame
+              </span>
+              <h2 className="text-3xl font-extrabold text-white mt-2">
+                Negocios que confían en nuestra plataforma
+              </h2>
             </div>
-            <h2 className="text-3xl font-extrabold text-white">Todo lo que necesitas saber sobre MenuQR Pro</h2>
+
+            <LandingSearch restaurants={restaurants} />
+          </div>
+        </section>
+      )}
+
+      {/* Vitrina de Productos / Platos Sugeridos */}
+      {marketplaceData.dishes && marketplaceData.dishes.length > 0 && (
+        <section className="py-16 border-t border-slate-800 bg-slate-950">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <MarketplaceShowcase
+              initialDishes={marketplaceData.dishes}
+              restaurantCount={marketplaceData.restaurantCount}
+              storeCount={marketplaceData.storeCount}
+            />
+          </div>
+        </section>
+      )}
+
+      {/* Footer Institucional */}
+      <footer className="border-t border-slate-800/80 bg-slate-950 py-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-black text-sm">
+              <Globe className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-extrabold text-white text-base">Ubícame.cc</span>
+              <span className="text-xs text-slate-500 block">Plataforma SaaS Multi-Tenant para Comercio Digital</span>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
-              <h3 className="font-bold text-white text-sm">¿Qué es MenuQR Pro y cómo funciona en Ecuador?</h3>
-              <p className="text-slate-400 text-xs leading-relaxed">
-                Es una solución SaaS pensada para establecimientos gastronómicos en Ecuador. Te brinda un menú QR interactivo con enrutamiento de pedidos automatizado directamente a tu WhatsApp personal o de caja.
-              </p>
-            </div>
-
-            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
-              <h3 className="font-bold text-white text-sm">¿Cuánto cuesta y qué planes ofrecen?</h3>
-              <p className="text-slate-400 text-xs leading-relaxed">
-                Ofrecemos el <strong>Plan Digital Pro ($15.00 USD/mes)</strong> con 30 días de prueba gratis para autogestión, y el <strong>Plan Puesta en Marcha Inmediata ($20.00 USD/mes)</strong> donde nuestro equipo carga toda la información de tu restaurante para que empieces a vender de inmediato.
-              </p>
-            </div>
-
-            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
-              <h3 className="font-bold text-white text-sm">¿En qué consiste el Plan Puesta en Marcha Inmediata ($20)?</h3>
-              <p className="text-slate-400 text-xs leading-relaxed">
-                Tú solo nos envías tu menú físico o fotos de tu carta por WhatsApp. Nuestro equipo sube platos, optimiza fotos, configura categorías, precios e impuestos y te entrega los códigos QR listos en menos de 24 horas.
-              </p>
-            </div>
-
-            <div className="bg-slate-900/60 border border-slate-800/80 p-6 rounded-3xl space-y-3">
-              <h3 className="font-bold text-white text-sm">¿Existen comisiones adicionales por pedido o venta?</h3>
-              <p className="text-slate-400 text-xs leading-relaxed">
-                No. A diferencia de las apps de delivery tradicionales, en MenuQR Pro te quedas con el 100% de tus ventas sin comisiones por pedido.
-              </p>
-            </div>
+          <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400 font-medium">
+            <Link href="/menuqr" className="hover:text-white transition">MenuQR (Restaurantes)</Link>
+            <Link href="/ctalo" className="hover:text-white transition">Catálogo (Tiendas)</Link>
+            <Link href="/servicios" className="hover:text-white transition">Servicios Técnicos</Link>
+            <Link href="/citas" className="hover:text-white transition">Citas & Turnos</Link>
+            <Link href="/reservas" className="hover:text-white transition">Hospedaje & Reservas</Link>
+            <Link href="/privacidad" className="hover:text-white transition">Privacidad</Link>
+            <Link href="/terminos" className="hover:text-white transition">Términos</Link>
           </div>
-        </div>
-      </main>
 
-      {/* Footer */}
-      <footer className="max-w-6xl w-full mx-auto px-6 py-8 flex flex-col md:flex-row items-center justify-between gap-4 relative z-10 text-xs text-slate-500 border-t border-slate-900 mt-8">
-        <p>© 2026 MenuQR Pro Ecuador. Todos los derechos reservados.</p>
-        <div className="flex items-center gap-4">
-          <Link href="/terminos" className="hover:text-slate-300 transition">
-            Términos y Condiciones
-          </Link>
-          <span>•</span>
-          <Link href="/privacidad" className="hover:text-slate-300 transition">
-            Política de Privacidad (LOPDP)
-          </Link>
+          <div className="text-xs text-slate-500 text-center md:text-right">
+            © {new Date().getFullYear()} Ubícame Pro. Todos los derechos reservados.
+          </div>
         </div>
       </footer>
-      {/* Floating WhatsApp Action Button */}
-      <a
-        href={waUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 bg-[#25D366] hover:bg-[#20ba59] text-white p-3.5 sm:px-5 sm:py-3.5 rounded-full shadow-[0_10px_30px_rgba(37,211,102,0.5)] hover:shadow-[0_15px_35px_rgba(37,211,102,0.7)] transition-all duration-300 hover:scale-105 active:scale-95 group/wa cursor-pointer"
-        title="Contactar por WhatsApp"
-      >
-        <div className="relative flex items-center justify-center">
-          <MessageSquare className="h-6 w-6 text-white shrink-0 group-hover/wa:rotate-12 transition-transform duration-300" />
-          <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-emerald-200 animate-ping opacity-75"></span>
-          <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-white"></span>
-        </div>
-        <span className="hidden sm:inline text-xs font-black uppercase tracking-wider">WhatsApp Soporte</span>
-      </a>
     </div>
   );
 }

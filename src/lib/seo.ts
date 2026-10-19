@@ -35,8 +35,18 @@ export function getBaseUrl(): string {
  */
 export function resolvePublicImageUrl(rawUrl?: string | null): string | undefined {
   if (!rawUrl || typeof rawUrl !== "string") return undefined;
-  const trimmed = rawUrl.trim();
+  let trimmed = rawUrl.trim();
   if (!trimmed) return undefined;
+
+  // Support JSON-encoded multi-image galleries (extract primary front image)
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "string") {
+        trimmed = parsed[0].trim();
+      }
+    } catch {}
+  }
 
   // Reject forbidden protocols / prefixes immediately
   const lower = trimmed.toLowerCase();

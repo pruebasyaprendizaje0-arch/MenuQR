@@ -28,6 +28,7 @@ import {
   requestBrowserCoordinates 
 } from "@/lib/geo-utils";
 import type { MarketplaceItem } from "@/lib/suggested-dishes-actions";
+import { getPrimaryDishImage } from "@/lib/dish-images";
 
 export function MarketplaceClient({
   initialDishes,
@@ -695,7 +696,7 @@ export function MarketplaceClient({
                     <div className="relative aspect-[4/3] bg-slate-950 overflow-hidden border-b border-slate-800">
                       {item.imageUrl ? (
                         <img
-                          src={item.imageUrl}
+                          src={getPrimaryDishImage(item.imageUrl) || item.imageUrl}
                           alt={item.name}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           loading="lazy"

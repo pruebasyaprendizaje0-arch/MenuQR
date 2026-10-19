@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, Fragment } from "react";
+import Link from "next/link";
 import { getBusinessLabels } from "@/lib/business-labels";
 import { 
   logoutUserAction, 
@@ -46,8 +47,10 @@ import {
   DEFAULT_WEEKLY_SCHEDULE 
 } from "@/lib/schedule";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
+import { parseDishImages, serializeDishImages, getPrimaryDishImage } from "@/lib/dish-images";
 import { 
   Store, 
+  Barcode,
   Sliders,
   FolderHeart, 
   Soup, 
@@ -111,11 +114,18 @@ import {
   Printer,
   ShieldCheck,
   Boxes,
-  Receipt
+  Receipt,
+  Trees,
+  BedDouble,
+  Wrench,
+  Layers,
+  Image as ImageIcon
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
 import InventoryAdminTab from "./InventoryAdminTab";
+import CitasAdminTab from "./CitasAdminTab";
+import ReservasAdminTab from "./ReservasAdminTab";
 import OrderTicketModal from "./OrderTicketModal";
 import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
 import { AISettingsTab } from "./AISettingsTab";
@@ -164,6 +174,7 @@ type Dish = {
   stock?: number | null;
   minStock?: number | null;
   trackStock?: boolean;
+  variants?: string | null;
 };
 
 type Category = {
@@ -537,7 +548,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "subscription" | "ai-settings">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "citas" | "reservas" | "subscription" | "ai-settings">("metrics");
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
@@ -890,20 +901,6 @@ export function AdminDashboard({
     ? (restaurant as any).businessType
     : (isLikelyStore ? "RETAIL" : "RESTAURANT");
 
-  const [selectedBusinessType, setSelectedBusinessType] = useState<string>(defaultBusinessType);
-  const [selectedCatalogMode, setSelectedCatalogMode] = useState<string>(
-    (restaurant as any).catalogMode || (defaultBusinessType === "RESTAURANT" ? "MENU" : "CATALOG")
-  );
-  const [enableTableOrdering, setEnableTableOrdering] = useState<boolean>(
-    (restaurant as any).enableTableOrdering ?? (defaultBusinessType === "RESTAURANT")
-  );
-  const [enablePickup, setEnablePickup] = useState<boolean>(
-    (restaurant as any).enablePickup ?? true
-  );
-  const [enableDeliveryState, setEnableDeliveryState] = useState<boolean>(
-    (restaurant as any).enableDelivery ?? (restaurant as any).deliveryEnabled ?? true
-  );
-
   const initialCustomLabels: any = (() => {
     try {
       return (restaurant as any).customLabels ? JSON.parse((restaurant as any).customLabels) : {};
@@ -912,27 +909,87 @@ export function AdminDashboard({
     }
   })();
 
-  const defaultItemChoice = initialCustomLabels.items === "Platos" || initialCustomLabels.items === "Productos" || initialCustomLabels.items === "Servicios"
+  const isLodgingInitial = Boolean(
+    initialCustomLabels.vertical === "reservas" ||
+    initialCustomLabels.businessSubType === "RESERVAS" ||
+    /cabaña|hospedaje|glamping|hostal|hotel|lodge/i.test(restaurant.name || "")
+  );
+
+  const isServiciosTecnicosInitial = Boolean(
+    initialCustomLabels.vertical === "servicios" ||
+    initialCustomLabels.businessSubType === "SERVICIOS" ||
+    initialCustomLabels.businessSubType === "TECNICO"
+  );
+
+  const initialPreset: "RESTAURANT" | "RETAIL" | "SERVICIOS" | "CITAS" | "RESERVAS" = (() => {
+    if (isLodgingInitial) return "RESERVAS";
+    if (isServiciosTecnicosInitial) return "SERVICIOS";
+    if (initialCustomLabels.vertical === "citas" || initialCustomLabels.businessSubType === "CITAS") return "CITAS";
+    if (defaultBusinessType === "SERVICES") return "CITAS";
+    if (defaultBusinessType === "RETAIL" || defaultBusinessType === "GENERAL_CATALOG" || isLikelyStore) return "RETAIL";
+    return "RESTAURANT";
+  })();
+
+  const defaultDisabledModules: string[] = (() => {
+    if (initialCustomLabels.disabledModules && Array.isArray(initialCustomLabels.disabledModules)) {
+      return initialCustomLabels.disabledModules;
+    }
+    if (initialPreset === "RESERVAS") return ["tables", "gastro", "split-bill"];
+    if (initialPreset === "SERVICIOS") return ["tables", "gastro", "split-bill", "ruleta"];
+    if (initialPreset === "CITAS") return ["tables", "gastro", "split-bill"];
+    if (initialPreset === "RETAIL") return ["tables", "gastro", "split-bill"];
+    return [];
+  })();
+
+  const [selectedPreset, setSelectedPreset] = useState<"RESTAURANT" | "RETAIL" | "SERVICIOS" | "CITAS" | "RESERVAS">(initialPreset);
+  const [isLodgingState, setIsLodgingState] = useState<boolean>(initialPreset === "RESERVAS");
+  const isLodging = isLodgingState;
+  const isServiciosTecnicos = selectedPreset === "SERVICIOS";
+
+  const [selectedBusinessType, setSelectedBusinessType] = useState<string>(
+    initialPreset === "RESTAURANT" ? "RESTAURANT" : initialPreset === "RETAIL" ? "RETAIL" : "SERVICES"
+  );
+  const [selectedCatalogMode, setSelectedCatalogMode] = useState<string>(
+    (restaurant as any).catalogMode || (initialPreset === "RESTAURANT" ? "MENU" : "CATALOG")
+  );
+  const [enableTableOrdering, setEnableTableOrdering] = useState<boolean>(() => {
+    if (typeof (restaurant as any).enableTableOrdering === "boolean") {
+      if (initialPreset !== "RESTAURANT") {
+        return (restaurant as any).enableTableOrdering && !defaultDisabledModules.includes("tables");
+      }
+      return (restaurant as any).enableTableOrdering;
+    }
+    return initialPreset === "RESTAURANT";
+  });
+  const [enablePickup, setEnablePickup] = useState<boolean>(
+    (restaurant as any).enablePickup ?? true
+  );
+  const [enableDeliveryState, setEnableDeliveryState] = useState<boolean>(
+    (restaurant as any).enableDelivery ?? (restaurant as any).deliveryEnabled ?? true
+  );
+
+  const defaultItemChoice = initialCustomLabels.items === "Platos" || initialCustomLabels.items === "Productos" || initialCustomLabels.items === "Servicios" || initialCustomLabels.items === "Cabañas / Habitaciones"
     ? initialCustomLabels.items
     : initialCustomLabels.items 
       ? "CUSTOM" 
-      : (defaultBusinessType === "RESTAURANT" ? "Platos" : "Productos");
+      : (defaultBusinessType === "RESTAURANT" && initialPreset === "RESTAURANT" ? "Platos" : isLodging ? "Cabañas / Habitaciones" : defaultBusinessType === "SERVICES" ? "Servicios" : "Productos");
 
   const [customItemChoice, setCustomItemChoice] = useState<string>(defaultItemChoice);
-  const [customItemsPlural, setCustomItemsPlural] = useState<string>(initialCustomLabels.items || "");
-  const [customItemSingle, setCustomItemSingle] = useState<string>(initialCustomLabels.itemSingle || "");
+  const [customItemsPlural, setCustomItemsPlural] = useState<string>(initialCustomLabels.items || (isLodging ? "Cabañas / Habitaciones" : ""));
+  const [customItemSingle, setCustomItemSingle] = useState<string>(initialCustomLabels.itemSingle || (isLodging ? "Cabaña" : ""));
 
-  const defaultCatalogTabChoice = initialCustomLabels.catalogTabTitle === "Menú Digital" || initialCustomLabels.catalogTabTitle === "Productos" || initialCustomLabels.catalogTabTitle === "Catálogo de Productos" || initialCustomLabels.catalogTabTitle === "Servicios"
+  const defaultCatalogTabChoice = initialCustomLabels.catalogTabTitle === "Menú Digital" || initialCustomLabels.catalogTabTitle === "Productos" || initialCustomLabels.catalogTabTitle === "Catálogo de Productos" || initialCustomLabels.catalogTabTitle === "Servicios" || initialCustomLabels.catalogTabTitle === "Hospedaje"
     ? initialCustomLabels.catalogTabTitle
     : initialCustomLabels.catalogTabTitle
       ? "CUSTOM"
-      : (defaultBusinessType === "RESTAURANT" ? "Menú Digital" : "Productos");
+      : (defaultBusinessType === "RESTAURANT" && initialPreset === "RESTAURANT" ? "Menú Digital" : isLodging ? "Hospedaje" : defaultBusinessType === "SERVICES" ? "Servicios" : "Productos");
 
   const [customCatalogTabChoice, setCustomCatalogTabChoice] = useState<string>(defaultCatalogTabChoice);
-  const [customCatalogTabInput, setCustomCatalogTabInput] = useState<string>(initialCustomLabels.catalogTabTitle || "");
+  const [customCatalogTabInput, setCustomCatalogTabInput] = useState<string>(initialCustomLabels.catalogTabTitle || (isLodging ? "Hospedaje" : ""));
 
-  const [disabledModules, setDisabledModules] = useState<string[]>(
-    initialCustomLabels.disabledModules || (defaultBusinessType !== "RESTAURANT" ? ["split-bill"] : [])
+  const [disabledModules, setDisabledModules] = useState<string[]>(defaultDisabledModules);
+  const [enabledModules, setEnabledModules] = useState<string[]>(
+    Array.isArray(initialCustomLabels.enabledModules) ? initialCustomLabels.enabledModules : []
   );
 
   const [imageAspectRatio, setImageAspectRatio] = useState<"1:1" | "9:16">(
@@ -945,13 +1002,35 @@ export function AdminDashboard({
     initialCustomLabels.popularAspectRatio || initialCustomLabels.imageAspectRatio || "1:1"
   );
 
+  const [galleryImages, setGalleryImages] = useState<string[]>(() => {
+    if (Array.isArray(initialCustomLabels.galleryImages)) {
+      const loaded = initialCustomLabels.galleryImages
+        .filter((u: any) => typeof u === "string" && u.trim().length > 0)
+        .slice(0, 4);
+      while (loaded.length < 4) loaded.push("");
+      return loaded;
+    }
+    return ["", "", "", ""];
+  });
+
   const catalogTabTitleValue = customCatalogTabChoice === "CUSTOM"
     ? customCatalogTabInput
     : customCatalogTabChoice;
 
   const currentCustomLabelsJSON = JSON.stringify({
+    ...initialCustomLabels,
+    vertical: selectedPreset === "RESERVAS" 
+      ? "reservas" 
+      : selectedPreset === "SERVICIOS" 
+        ? "servicios" 
+        : selectedPreset === "CITAS" 
+          ? "citas" 
+          : selectedPreset === "RETAIL" 
+            ? "ctalo" 
+            : "menuqr",
+    businessSubType: selectedPreset,
     items: customItemChoice === "CUSTOM" ? customItemsPlural : customItemChoice,
-    itemSingle: customItemChoice === "CUSTOM" ? customItemSingle : (customItemChoice === "Productos" ? "Producto" : customItemChoice === "Servicios" ? "Servicio" : "Plato"),
+    itemSingle: customItemChoice === "CUSTOM" ? customItemSingle : (customItemChoice === "Productos" ? "Producto" : customItemChoice === "Servicios" ? "Servicio" : isLodging ? "Cabaña" : "Plato"),
     catalogTabTitle: catalogTabTitleValue,
     subTitle: catalogTabTitleValue === "Menú Digital"
       ? "Menú Digital Auténtico"
@@ -962,7 +1041,9 @@ export function AdminDashboard({
     suggestedAspectRatio: suggestedAspectRatio,
     popularAspectRatio: popularAspectRatio,
     disabledModules: disabledModules,
+    enabledModules: enabledModules,
     showSplitBill: !disabledModules.includes("split-bill"),
+    galleryImages: galleryImages.filter((u) => typeof u === "string" && u.trim().length > 0).slice(0, 4),
   });
 
   const bLabels = getBusinessLabels(currentCustomLabelsJSON, selectedBusinessType);
@@ -1383,7 +1464,7 @@ export function AdminDashboard({
           Controla_Stock: dish.trackStock ? "SI" : "NO",
           Stock_Disponible: dish.trackStock ? (dish.stock ?? 0) : "N/A",
           Stock_Minimo: dish.trackStock ? (dish.minStock ?? 0) : "N/A",
-          URL_Imagen: dish.imageUrl || "",
+          URL_Imagen: getPrimaryDishImage(dish.imageUrl) || dish.imageUrl || "",
         });
       });
     });
@@ -1544,6 +1625,13 @@ export function AdminDashboard({
   const [paymentQrHasError, setPaymentQrHasError] = useState(false);
   const [dishImageHasError, setDishImageHasError] = useState(false);
 
+  const logoFileInputRef = React.useRef<HTMLInputElement>(null);
+  const coverFileInputRef = React.useRef<HTMLInputElement>(null);
+  const paymentQrFileInputRef = React.useRef<HTMLInputElement>(null);
+  const [logoFileName, setLogoFileName] = useState<string | null>(null);
+  const [coverFileName, setCoverFileName] = useState<string | null>(null);
+  const [paymentQrFileName, setPaymentQrFileName] = useState<string | null>(null);
+
   const [logoBase64, setLogoBase64] = useState<string>("");
   const [dishBase64s, setDishBase64s] = useState<string[]>([]);
 
@@ -1585,7 +1673,8 @@ export function AdminDashboard({
 
     items.forEach((item, index) => {
       const img = new Image();
-      const src = item.imageUrl as string;
+      const src = (getPrimaryDishImage(item.imageUrl) || item.imageUrl || "") as string;
+      if (!src) return;
       if (src.startsWith("http")) {
         img.crossOrigin = "anonymous";
       }
@@ -1825,6 +1914,13 @@ export function AdminDashboard({
   const [dishCatId, setDishCatId] = useState("");
   const [dishAvailable, setDishAvailable] = useState(true);
   const [dishImageUrl, setDishImageUrl] = useState("");
+  const [dishImageUrl1, setDishImageUrl1] = useState("");
+  const [dishImageUrl2, setDishImageUrl2] = useState("");
+  const [dishImageUrl3, setDishImageUrl3] = useState("");
+  const [dishImage1Error, setDishImage1Error] = useState(false);
+  const [dishImage2Error, setDishImage2Error] = useState(false);
+  const [dishImage3Error, setDishImage3Error] = useState(false);
+  const [dishImageSlotTab, setDishImageSlotTab] = useState<0 | 1 | 2>(0);
   const [dishSuggested, setDishSuggested] = useState(false);
   const [dishTrackStock, setDishTrackStock] = useState(false);
   const [dishStock, setDishStock] = useState("10");
@@ -1832,6 +1928,13 @@ export function AdminDashboard({
   const [dishCostPrice, setDishCostPrice] = useState("0");
   const [dishSupplierId, setDishSupplierId] = useState("");
   const [dishBarcode, setDishBarcode] = useState("");
+  const [dishBeds, setDishBeds] = useState("");
+  const [dishMaxGuests, setDishMaxGuests] = useState("");
+  const [dishHasVariants, setDishHasVariants] = useState(false);
+  const [dishAttr1Name, setDishAttr1Name] = useState("Presentación");
+  const [dishAttr1Options, setDishAttr1Options] = useState("");
+  const [dishAttr2Name, setDishAttr2Name] = useState("");
+  const [dishAttr2Options, setDishAttr2Options] = useState("");
   const [dishStockFilter, setDishStockFilter] = useState<"ALL" | "TRACKED" | "LOW_STOCK" | "OUT_OF_STOCK">("ALL");
 
   const allDishesList = useMemo(() => categoriesList.flatMap((c) => c.dishes), [categoriesList]);
@@ -2005,6 +2108,22 @@ export function AdminDashboard({
   };
 
 
+  const handleToggleDelivery = (enabled: boolean) => {
+    setEnableDeliveryState(enabled);
+    setDeliveryEnabled(enabled);
+  };
+
+  const handleToggleTableOrdering = (nextState: boolean) => {
+    setEnableTableOrdering(nextState);
+    if (nextState) {
+      setDisabledModules(prev => prev.filter(m => m !== "tables" && m !== "gastro"));
+      setEnabledModules(prev => [...new Set([...prev, "tables"])]);
+    } else {
+      setDisabledModules(prev => [...new Set([...prev, "tables", "gastro"])]);
+      setEnabledModules(prev => prev.filter(m => m !== "tables" && m !== "gastro"));
+    }
+  };
+
   const handleSaveTables = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingTables(true);
@@ -2023,6 +2142,7 @@ export function AdminDashboard({
     e.preventDefault();
     setSavingCharges(true);
     setChargesMessage("");
+    setEnableDeliveryState(deliveryEnabled);
     const res = await updateRestaurantChargesConfigAction(restaurant.id, {
       ivaPercent,
       servicePercent,
@@ -2068,11 +2188,31 @@ export function AdminDashboard({
             {/* Mobile compact header actions */}
             <div className="flex items-center gap-2 md:hidden">
               <a
-                href={`/${restaurant.slug}`}
+                href={
+                  isLodging
+                    ? `/reservas/${restaurant.slug}`
+                    : isServiciosTecnicos
+                    ? `/servicios/${restaurant.slug}`
+                    : (restaurant as any).businessType === "SERVICES"
+                    ? `/citas/${restaurant.slug}`
+                    : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
+                    ? `/ctalo/${restaurant.slug}`
+                    : `/${restaurant.slug}`
+                }
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-white transition-all"
-                title="Ver Menú Público"
+                title={
+                  isLodging
+                    ? "Ver Motor de Reservas"
+                    : isServiciosTecnicos
+                    ? "Ver Cotizador Express"
+                    : (restaurant as any).businessType === "SERVICES"
+                    ? "Ver Agenda Online"
+                    : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
+                    ? "Ver Catálogo Online"
+                    : "Ver Menú Público"
+                }
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
@@ -2132,7 +2272,7 @@ export function AdminDashboard({
               }`}
             >
               <Soup className="h-4 w-4" />
-              {bLabels.items}
+              <span>{bLabels.isGastro ? bLabels.items : `${bLabels.items} & Stock`}</span>
             </button>
             {bLabels.showInventory && (
               <button
@@ -2146,6 +2286,23 @@ export function AdminDashboard({
                 <Boxes className="h-4 w-4 text-amber-400" />
                 <span>{bLabels.inventoryTabTitle}</span>
               </button>
+            )}
+
+            {/* Caja POS Scanner Quick Access */}
+            {bLabels.showCajaPos && (
+              <Link
+                href="/caja"
+                className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 bg-gradient-to-r from-emerald-600/15 to-teal-600/15 text-emerald-400 border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-600/25 shadow-sm"
+                title="Abrir Caja POS móvil para escaneo de código de barras"
+              >
+                <div className="flex items-center gap-3">
+                  <Barcode className="h-4 w-4 text-emerald-400" />
+                  <span>Caja POS (Escanear)</span>
+                </div>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  POS
+                </span>
+              </Link>
             )}
             {bLabels.showSeasons && (
               <button
@@ -2256,6 +2413,46 @@ export function AdminDashboard({
                 )}
               </button>
             )}
+
+            {/* Reservas & Hospedaje CRM (para Cabañas / Glamping / Hoteles) */}
+            {isLodging && (
+              <button
+                onClick={() => setActiveTab("reservas")}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "reservas" 
+                    ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-300 border-l-4 border-emerald-500 shadow-md shadow-emerald-600/10" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Trees className="h-4 w-4 text-emerald-400" />
+                  <span>Reservas & Hospedaje CRM</span>
+                </div>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Check-In
+                </span>
+              </button>
+            )}
+
+            {/* Citas & Turnos CRM (para Citas / Consultorios que NO son Hospedaje ni Servicios Técnicos) */}
+            {!isLodging && !isServiciosTecnicos && (restaurant as any).businessType === "SERVICES" && (
+              <button
+                onClick={() => setActiveTab("citas")}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "citas" 
+                    ? "bg-gradient-to-r from-purple-600/20 to-indigo-500/20 text-purple-300 border-l-4 border-purple-500 shadow-md shadow-purple-600/10" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <CalendarDays className="h-4 w-4 text-purple-400" />
+                  <span>Citas & Agenda CRM</span>
+                </div>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  1-Click WA
+                </span>
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("subscription")}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -2278,12 +2475,40 @@ export function AdminDashboard({
         {/* Footer actions */}
         <div className="hidden md:block p-4 border-t border-slate-800">
           <a
-            href={`/${restaurant.slug}`}
+            href={
+              isLodging
+                ? `/reservas/${restaurant.slug}`
+                : isServiciosTecnicos
+                ? `/servicios/${restaurant.slug}`
+                : (restaurant as any).businessType === "SERVICES"
+                ? `/citas/${restaurant.slug}`
+                : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
+                ? `/ctalo/${restaurant.slug}`
+                : `/${restaurant.slug}`
+            }
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 mb-3 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-white transition-all"
+            className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 mb-3 rounded-xl text-xs font-bold border transition-all shadow-md ${
+              isLodging
+                ? "bg-gradient-to-r from-emerald-600/20 to-teal-600/20 border-emerald-500/30 text-emerald-300 hover:text-white hover:bg-emerald-600/30"
+                : isServiciosTecnicos
+                ? "bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border-cyan-500/30 text-cyan-300 hover:text-white hover:bg-cyan-600/30"
+                : (restaurant as any).businessType === "SERVICES"
+                ? "bg-gradient-to-r from-purple-600/20 to-indigo-600/20 border-purple-500/30 text-purple-300 hover:text-white hover:bg-purple-600/30"
+                : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
+                ? "bg-gradient-to-r from-amber-600/20 to-yellow-600/20 border-amber-500/30 text-amber-300 hover:text-white hover:bg-amber-600/30"
+                : "bg-slate-800/60 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700"
+            }`}
           >
-            Ver Menú Público
+            { isLodging
+              ? "Ver Motor de Reservas"
+              : isServiciosTecnicos
+              ? "Ver Cotizador Express"
+              : (restaurant as any).businessType === "SERVICES"
+              ? "Ver Agenda Online"
+              : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
+              ? "Ver Catálogo Online"
+              : "Ver Menú Público" }
             <ExternalLink className="h-3 w-3" />
           </a>
           <form action={logoutUserAction}>
@@ -2559,7 +2784,9 @@ export function AdminDashboard({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-bold text-white">Dashboard de Métricas</h2>
-                  <p className="text-slate-400 text-sm">Resumen de facturación, visitas al negocio, platos estrella y mesas de mayor consumo.</p>
+                  <p className="text-slate-400 text-sm">
+                    Resumen de facturación, visitas al negocio, {bLabels.items.toLowerCase()} estrella y {bLabels.isGastro ? "mesas de mayor consumo" : "canales principales de solicitud"}.
+                  </p>
                 </div>
 
                 {/* Filter Segmented Control */}
@@ -2823,17 +3050,17 @@ export function AdminDashboard({
               {(() => {
                 const checks = [
                   { label: "Slug amigable configurado", ok: !!restaurant.slug },
-                  { label: "Nombre de restaurante", ok: !!restaurant.name },
+                  { label: `Nombre del ${bLabels.businessTabTitle.toLowerCase() || "negocio"}`, ok: !!restaurant.name },
                   { label: "Descripción / Sobre Nosotros", ok: !!restaurant.description },
                   { label: "Logo del negocio", ok: !!restaurant.logoUrl },
                   { label: "Imagen de portada (Cover)", ok: !!restaurant.coverUrl },
                   { label: "Dirección física exacta", ok: !!restaurant.address },
                   { label: "Ciudad / Cantón / Localidad", ok: !!(restaurant.city || restaurant.locality) },
                   { label: "Provincia registrada", ok: !!restaurant.province },
-                  { label: "Número de WhatsApp para pedidos", ok: !!restaurant.whatsapp },
+                  { label: `Número de WhatsApp para ${bLabels.kitchen.toLowerCase()}`, ok: !!restaurant.whatsapp },
                   { label: "Horario de atención", ok: !!restaurant.schedule },
-                  { label: "Categorías en carta", ok: (restaurant.categories || []).length > 0 },
-                  { label: "Platos agregados al menú", ok: (restaurant.categories || []).some((c: any) => (c.dishes || []).length > 0) },
+                  { label: `${bLabels.categories} registradas`, ok: (restaurant.categories || []).length > 0 },
+                  { label: `${bLabels.items} registrados en el catálogo`, ok: (restaurant.categories || []).some((c: any) => (c.dishes || []).length > 0) },
                 ];
                 const completedCount = checks.filter((c) => c.ok).length;
                 const seoScore = Math.round((completedCount / checks.length) * 100);
@@ -2873,51 +3100,16 @@ export function AdminDashboard({
                   </div>
                 );
               })()}
-
-              {/* Table Management Form */}
-              <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
-                <div>
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Users className="h-5 w-5 text-red-500" />
-                    Configuración de Mesas del Local
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">Define las mesas disponibles de tu local separadas por comas (ej. 1, 2, VIP-1, Terraza-A).</p>
-                </div>
-                <form onSubmit={handleSaveTables} className="flex gap-4 items-end">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={tablesConfig}
-                      onChange={(e) => setTablesConfig(e.target.value)}
-                      required
-                      className="w-full bg-slate-950 border border-slate-850 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white focus:outline-none focus:ring-1 focus:ring-red-500 text-sm"
-                      placeholder="ej. 1, 2, 3, VIP-1, Terraza-A"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={savingTables}
-                    className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 shrink-0 bg-red-600 hover:bg-red-500"
-                  >
-                    {savingTables ? "Guardando..." : "Guardar Mesas"}
-                  </button>
-                </form>
-                {tablesMessage && (
-                  <p className={`text-xs ${tablesMessage.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
-                    {tablesMessage}
-                  </p>
-                )}
-              </div>
             </div>
           );
         })()}
 
-        {/* Restaurante Tab */}
+        {/* Negocio Tab */}
         {activeTab === "restaurant" && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-bold text-white">Configuración del Restaurante</h2>
-              <p className="text-slate-400 text-sm">Edita la información de tu marca, colores del tema, recargos y WhatsApp para pedidos.</p>
+              <h2 className="text-2xl font-bold text-white">Configuración del {bLabels.businessTabTitle}</h2>
+              <p className="text-slate-400 text-sm">Edita la información de tu marca, colores del tema, recargos y WhatsApp para {bLabels.kitchen.toLowerCase()}.</p>
             </div>
 
             {/* Charge Surcharge Configuration Form */}
@@ -2976,7 +3168,7 @@ export function AdminDashboard({
                       <input
                         type="checkbox"
                         checked={deliveryEnabled}
-                        onChange={(e) => setDeliveryEnabled(e.target.checked)}
+                        onChange={(e) => handleToggleDelivery(e.target.checked)}
                         className="h-4.5 w-4.5 rounded border-slate-850 bg-slate-950 text-red-600 focus:ring-red-500 cursor-pointer"
                       />
                       <span className="font-bold text-white">Activar Envío a Domicilio</span>
@@ -3157,13 +3349,18 @@ export function AdminDashboard({
                 </div>
 
                 <div className="flex items-center justify-between pt-2">
-                  <button
-                    type="submit"
-                    disabled={savingCharges}
-                    className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 bg-red-600 hover:bg-red-500"
-                  >
-                    {savingCharges ? "Guardando..." : "Guardar Recargos"}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={savingCharges}
+                      className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 bg-red-600 hover:bg-red-500"
+                    >
+                      {savingCharges ? "Guardando..." : "Guardar Recargos"}
+                    </button>
+                    <span className="text-[11px] text-slate-500 hidden sm:inline">
+                      (También se sincroniza con &quot;Guardar Cambios&quot; al final de la página)
+                    </span>
+                  </div>
                   {chargesMessage && (
                     <p className={`text-xs ${chargesMessage.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
                       {chargesMessage}
@@ -3177,6 +3374,19 @@ export function AdminDashboard({
               action={async (formData) => {
                 const combinedLocality = [province, canton, parroquia, sector].map(s => s.trim()).filter(Boolean).join(" | ");
                 formData.set("locality", combinedLocality);
+                // Sincronización integral de recargos, tarifas y modalidades
+                formData.set("ivaPercent", String(ivaPercent));
+                formData.set("servicePercent", String(servicePercent));
+                formData.set("deliveryCost", String(deliveryCost));
+                formData.set("deliveryEnabled", enableDeliveryState ? "true" : "false");
+                formData.set("enableDelivery", enableDeliveryState ? "true" : "false");
+                formData.set("deliveryRates", JSON.stringify(kmRates));
+                formData.set("ivaOnTable", String(ivaOnTable));
+                formData.set("ivaOnTakeout", String(ivaOnTakeout));
+                formData.set("serviceOnTable", String(serviceOnTable));
+                formData.set("serviceOnTakeout", String(serviceOnTakeout));
+                formData.set("enablePickup", enablePickup ? "true" : "false");
+                formData.set("enableTableOrdering", enableTableOrdering ? "true" : "false");
                 await updateRestaurantAction(restaurant.id, formData);
                 alert("Configuración del negocio actualizada correctamente.");
               }}
@@ -3197,112 +3407,209 @@ export function AdminDashboard({
                   Selecciona el tipo de tu empresa para adaptar automáticamente los nombres de pestañas, botones y funciones tanto en tu panel como en tu catálogo web.
                 </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 pt-2">
                   {/* Option 1: RESTAURANT */}
                   <button
                     type="button"
                     onClick={() => {
+                      setSelectedPreset("RESTAURANT");
+                      setIsLodgingState(false);
                       setSelectedBusinessType("RESTAURANT");
                       setSelectedCatalogMode("MENU");
                       setEnableTableOrdering(true);
+                      setDisabledModules(prev => prev.filter(m => m !== "tables" && m !== "gastro"));
+                      setEnabledModules(prev => [...new Set([...prev, "tables"])]);
+                      setCustomItemChoice("Platos");
+                      setCustomItemsPlural("Platos");
+                      setCustomItemSingle("Plato");
+                      setCustomCatalogTabChoice("Menú Digital");
+                      setCustomCatalogTabInput("Menú Digital");
                     }}
                     className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
-                      selectedBusinessType === "RESTAURANT"
+                      selectedPreset === "RESTAURANT"
                         ? "bg-red-500/15 border-red-500 text-white shadow-lg shadow-red-500/10 font-bold"
                         : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
                     }`}
                   >
                     <div>
-                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
-                        <span>🍔</span> Restaurante / Bar
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 font-black text-sm text-white">
+                          <span>🍔</span> Restaurante / Bar
+                        </div>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-950/80 border border-red-800/50 text-red-400">
+                          menuqr
+                        </span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
-                        Platos, comandas de cocina, mesas y opción para dividir cuenta.
+                        Platos, comandas de cocina KDS, mesas con código QR y opción para dividir cuenta.
                       </p>
                     </div>
                     <div className="mt-3 text-[10px] font-bold uppercase text-red-400">
-                      {selectedBusinessType === "RESTAURANT" ? "✓ Seleccionado" : "Seleccionar"}
+                      {selectedPreset === "RESTAURANT" ? "✓ Seleccionado" : "Seleccionar"}
                     </div>
                   </button>
 
-                  {/* Option 2: RETAIL (Licorería / Tienda) */}
+                  {/* Option 2: RETAIL (Catálogo E-Commerce & Tienda) */}
                   <button
                     type="button"
                     onClick={() => {
+                      setSelectedPreset("RETAIL");
+                      setIsLodgingState(false);
                       setSelectedBusinessType("RETAIL");
                       setSelectedCatalogMode("CATALOG");
                       setEnableTableOrdering(false);
+                      setDisabledModules(prev => [...new Set([...prev, "tables", "gastro", "split-bill"])]);
+                      setEnabledModules(prev => prev.filter(m => m !== "tables" && m !== "gastro"));
+                      setCustomItemChoice("Productos");
+                      setCustomItemsPlural("Productos");
+                      setCustomItemSingle("Producto");
+                      setCustomCatalogTabChoice("Productos");
+                      setCustomCatalogTabInput("Productos");
                     }}
                     className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
-                      selectedBusinessType === "RETAIL"
+                      selectedPreset === "RETAIL"
                         ? "bg-amber-500/15 border-amber-500 text-white shadow-lg shadow-amber-500/10 font-bold"
                         : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
                     }`}
                   >
                     <div>
-                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
-                        <span>🍷</span> Licorería / Tienda
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 font-black text-sm text-white">
+                          <span>🛍️</span> Catálogo E-Commerce
+                        </div>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-950/80 border border-amber-800/50 text-amber-400">
+                          catalogo
+                        </span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
-                        Productos, licores/inventario, despacho a domicilio. Oculta mesas.
+                        Tiendas de ropa, calzado, licores y boutiques. Carrito flotante, tallas/colores y WhatsApp.
                       </p>
                     </div>
                     <div className="mt-3 text-[10px] font-bold uppercase text-amber-400">
-                      {selectedBusinessType === "RETAIL" ? "✓ Seleccionado" : "Seleccionar"}
+                      {selectedPreset === "RETAIL" ? "✓ Seleccionado" : "Seleccionar"}
                     </div>
                   </button>
 
-                  {/* Option 3: SERVICES */}
+                  {/* Option 3: SERVICES (Servicios Técnicos & Cotizador) */}
                   <button
                     type="button"
                     onClick={() => {
+                      setSelectedPreset("SERVICIOS");
+                      setIsLodgingState(false);
                       setSelectedBusinessType("SERVICES");
                       setSelectedCatalogMode("CATALOG");
                       setEnableTableOrdering(false);
+                      setDisabledModules(prev => [...new Set([...prev, "tables", "gastro", "split-bill", "ruleta"])]);
+                      setEnabledModules(prev => prev.filter(m => m !== "tables" && m !== "gastro"));
+                      setCustomItemChoice("CUSTOM");
+                      setCustomItemsPlural("Servicios Técnicos");
+                      setCustomItemSingle("Servicio");
+                      setCustomCatalogTabChoice("CUSTOM");
+                      setCustomCatalogTabInput("Cotizador Express");
                     }}
                     className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
-                      selectedBusinessType === "SERVICES"
+                      selectedPreset === "SERVICIOS"
+                        ? "bg-cyan-500/15 border-cyan-500 text-white shadow-lg shadow-cyan-500/10 font-bold"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 font-black text-sm text-white">
+                          <span>🔧</span> Servicios Técnicos
+                        </div>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-800/50 text-cyan-400">
+                          servicios
+                        </span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
+                        Técnicos, plomeros, electricistas y cerrajería. Cotizador express en 60 segundos con fotos y GPS.
+                      </p>
+                    </div>
+                    <div className="mt-3 text-[10px] font-bold uppercase text-cyan-400">
+                      {selectedPreset === "SERVICIOS" ? "✓ Seleccionado" : "Seleccionar"}
+                    </div>
+                  </button>
+
+                  {/* Option 4: CITAS (Agenda de Citas & Turnos) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPreset("CITAS");
+                      setIsLodgingState(false);
+                      setSelectedBusinessType("SERVICES");
+                      setSelectedCatalogMode("CATALOG");
+                      setEnableTableOrdering(false);
+                      setDisabledModules(prev => [...new Set([...prev, "tables", "gastro", "split-bill"])]);
+                      setEnabledModules(prev => [...new Set([...prev.filter(m => m !== "tables" && m !== "gastro"), "citas"])]);
+                      setCustomItemChoice("Servicios");
+                      setCustomItemsPlural("Servicios");
+                      setCustomItemSingle("Servicio");
+                      setCustomCatalogTabChoice("Servicios");
+                      setCustomCatalogTabInput("Citas & Turnos");
+                    }}
+                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                      selectedPreset === "CITAS"
+                        ? "bg-purple-500/15 border-purple-500 text-white shadow-lg shadow-purple-500/10 font-bold"
+                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 font-black text-sm text-white">
+                          <span>📅</span> Agenda de Citas & Turnos
+                        </div>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-purple-950/80 border border-purple-800/50 text-purple-400">
+                          citas
+                        </span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
+                        Consultorios médicos, dentistas, barberías y spas. Turnos online 24/7 y especialistas.
+                      </p>
+                    </div>
+                    <div className="mt-3 text-[10px] font-bold uppercase text-purple-400">
+                      {selectedPreset === "CITAS" ? "✓ Seleccionado" : "Seleccionar"}
+                    </div>
+                  </button>
+
+                  {/* Option 5: RESERVAS (Hospedaje & Cabañas) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPreset("RESERVAS");
+                      setIsLodgingState(true);
+                      setSelectedBusinessType("SERVICES");
+                      setSelectedCatalogMode("CATALOG");
+                      setEnableTableOrdering(false);
+                      setDisabledModules(prev => [...new Set([...prev, "tables", "gastro", "split-bill"])]);
+                      setEnabledModules(prev => [...new Set([...prev.filter(m => m !== "tables" && m !== "gastro"), "reservas"])]);
+                      setCustomItemChoice("CUSTOM");
+                      setCustomItemsPlural("Cabañas / Habitaciones");
+                      setCustomItemSingle("Cabaña");
+                      setCustomCatalogTabChoice("CUSTOM");
+                      setCustomCatalogTabInput("Hospedaje");
+                    }}
+                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                      selectedPreset === "RESERVAS"
                         ? "bg-emerald-500/15 border-emerald-500 text-white shadow-lg shadow-emerald-500/10 font-bold"
                         : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
                     }`}
                   >
                     <div>
-                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
-                        <span>🛠️</span> Servicios / Citas
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 font-black text-sm text-white">
+                          <span>🏕️</span> Hospedaje & Cabañas
+                        </div>
+                        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800/50 text-emerald-400">
+                          reservas
+                        </span>
                       </div>
                       <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
-                        Servicios, cotización directa por WhatsApp y agenda.
+                        Check-in/out, noches, cabañas, domos, extras y reservas directas sin comisiones.
                       </p>
                     </div>
                     <div className="mt-3 text-[10px] font-bold uppercase text-emerald-400">
-                      {selectedBusinessType === "SERVICES" ? "✓ Seleccionado" : "Seleccionar"}
-                    </div>
-                  </button>
-
-                  {/* Option 4: GENERAL_CATALOG */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedBusinessType("GENERAL_CATALOG");
-                      setSelectedCatalogMode("CATALOG");
-                      setEnableTableOrdering(false);
-                    }}
-                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
-                      selectedBusinessType === "GENERAL_CATALOG"
-                        ? "bg-blue-500/15 border-blue-500 text-white shadow-lg shadow-blue-500/10 font-bold"
-                        : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 font-black text-sm text-white mb-1">
-                        <span>📦</span> Catálogo General
-                      </div>
-                      <p className="text-[11px] leading-relaxed text-slate-400 font-normal">
-                        Exhibición de ítems y consultas de información.
-                      </p>
-                    </div>
-                    <div className="mt-3 text-[10px] font-bold uppercase text-blue-400">
-                      {selectedBusinessType === "GENERAL_CATALOG" ? "✓ Seleccionado" : "Seleccionar"}
+                      {selectedPreset === "RESERVAS" ? "✓ Seleccionado" : "Seleccionar"}
                     </div>
                   </button>
                 </div>
@@ -3387,7 +3694,7 @@ export function AdminDashboard({
                           </span>
                           <button
                             type="button"
-                            onClick={() => setEnableDeliveryState(!enableDeliveryState)}
+                            onClick={() => handleToggleDelivery(!enableDeliveryState)}
                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
                               enableDeliveryState ? "bg-sky-500" : "bg-slate-800"
                             }`}
@@ -3418,7 +3725,7 @@ export function AdminDashboard({
                           </span>
                           <button
                             type="button"
-                            onClick={() => setEnableTableOrdering(!enableTableOrdering)}
+                            onClick={() => handleToggleTableOrdering(!enableTableOrdering)}
                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
                               enableTableOrdering ? "bg-amber-500" : "bg-slate-800"
                             }`}
@@ -3438,118 +3745,134 @@ export function AdminDashboard({
                   </div>
                 </div>
 
-                {/* Section B: Título de la Pestaña en el Catálogo Web */}
-                <div className="space-y-3 pt-4 border-t border-slate-850">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-                    ¿Cómo deseas que aparezca la pestaña de tu catálogo web público?
-                  </label>
-                  <p className="text-xs text-slate-400">
-                    Elige entre mostrar &quot;Menú Digital&quot; (gastronomía), &quot;Productos&quot; (licorería/tienda), &quot;Catálogo de Productos&quot; o un título personalizado.
-                  </p>
+                {/* Personalización de Textos Avanzados (Opcional) */}
+                <details className="group border border-slate-800/80 rounded-2xl bg-slate-900/40 p-4 transition-all">
+                  <summary className="cursor-pointer text-xs font-bold text-slate-300 flex items-center justify-between select-none">
+                    <span className="flex items-center gap-2 flex-wrap">
+                      <span>✏️</span>
+                      <span>Personalizar Títulos y Nombres de Ítems (Opcional)</span>
+                      <span className="text-[10px] font-normal text-slate-400">
+                        · Actual: &quot;{customCatalogTabChoice === 'CUSTOM' ? customCatalogTabInput : customCatalogTabChoice}&quot; / &quot;{customItemChoice === 'CUSTOM' ? customItemsPlural : customItemChoice}&quot;
+                      </span>
+                    </span>
+                    <span className="text-xs text-slate-400 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      { id: "Menú Digital", label: "📖 Menú Digital", desc: "Formato Restaurante / Bar" },
-                      { id: "Productos", label: "📦 Productos", desc: "Formato Licorería / Tienda" },
-                      { id: "Catálogo de Productos", label: "🛍️ Catálogo de Productos", desc: "Formato Catálogo Extenso" },
-                      { id: "CUSTOM", label: "✏️ Personalizado", desc: "Escribe tu propio título" },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          setCustomCatalogTabChoice(opt.id);
-                          if (opt.id !== "CUSTOM") {
-                            setCustomCatalogTabInput(opt.id);
-                          }
-                        }}
-                        className={`p-3 rounded-xl border text-xs font-bold text-left transition-all ${
-                          customCatalogTabChoice === opt.id
-                            ? "bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm"
-                            : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
-                        }`}
-                      >
-                        <div className="font-extrabold">{opt.label}</div>
-                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">{opt.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-
-                  {customCatalogTabChoice === "CUSTOM" && (
-                    <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 mt-3">
-                      <label className="block text-xs font-medium text-slate-400 mb-1">
-                        Título Personalizado para la Pestaña (Ej: Nuestros Licores, Catálogo 2026)
+                  <div className="pt-4 space-y-5 border-t border-slate-850 mt-3">
+                    {/* Sub-Section 1: Título de la Pestaña en el Catálogo Web */}
+                    <div className="space-y-3">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                        ¿Cómo deseas que aparezca la pestaña de tu catálogo web público?
                       </label>
-                      <input
-                        type="text"
-                        value={customCatalogTabInput}
-                        onChange={(e) => setCustomCatalogTabInput(e.target.value)}
-                        placeholder="ej. Nuestros Licores"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
-                      />
-                    </div>
-                  )}
-                </div>
+                      <p className="text-xs text-slate-400">
+                        Elige entre mostrar &quot;Menú Digital&quot; (gastronomía), &quot;Productos&quot; (licorería/tienda), &quot;Catálogo de Productos&quot; o un título personalizado.
+                      </p>
 
-                {/* Section C: Terminología de Ítems */}
-                <div className="space-y-3 pt-4 border-t border-slate-850">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-                    ¿Cómo deseas llamar a los elementos individuales (ítems)?
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
-                      { id: "Platos", label: "🍲 Platos", single: "Plato" },
-                      { id: "Productos", label: "🛍️ Productos", single: "Producto" },
-                      { id: "Servicios", label: "🛠️ Servicios", single: "Servicio" },
-                      { id: "CUSTOM", label: "✏️ Personalizado", single: "Custom" },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          setCustomItemChoice(opt.id);
-                          if (opt.id !== "CUSTOM") {
-                            setCustomItemsPlural(opt.id);
-                            setCustomItemSingle(opt.single);
-                          }
-                        }}
-                        className={`p-3 rounded-xl border text-xs font-bold text-center transition-all ${
-                          customItemChoice === opt.id
-                            ? "bg-sky-500/20 border-sky-500 text-sky-300 shadow-sm"
-                            : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
-                        }`}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {[
+                          { id: "Menú Digital", label: "📖 Menú Digital", desc: "Formato Restaurante / Bar" },
+                          { id: "Productos", label: "📦 Productos", desc: "Formato Licorería / Tienda" },
+                          { id: "Catálogo de Productos", label: "🛍️ Catálogo de Productos", desc: "Formato Catálogo Extenso" },
+                          { id: "CUSTOM", label: "✏️ Personalizado", desc: "Escribe tu propio título" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setCustomCatalogTabChoice(opt.id);
+                              if (opt.id !== "CUSTOM") {
+                                setCustomCatalogTabInput(opt.id);
+                              }
+                            }}
+                            className={`p-3 rounded-xl border text-xs font-bold text-left transition-all ${
+                              customCatalogTabChoice === opt.id
+                                ? "bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm"
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="font-extrabold">{opt.label}</div>
+                            <div className="text-[10px] text-slate-500 font-normal mt-0.5">{opt.desc}</div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {customCatalogTabChoice === "CUSTOM" && (
+                        <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 mt-3">
+                          <label className="block text-xs font-medium text-slate-400 mb-1">
+                            Título Personalizado para la Pestaña (Ej: Nuestros Licores, Catálogo 2026)
+                          </label>
+                          <input
+                            type="text"
+                            value={customCatalogTabInput}
+                            onChange={(e) => setCustomCatalogTabInput(e.target.value)}
+                            placeholder="ej. Nuestros Licores"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Sub-Section 2: Terminología de Ítems */}
+                    <div className="space-y-3 pt-4 border-t border-slate-850">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
+                        ¿Cómo deseas llamar a los elementos individuales (ítems)?
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {[
+                          { id: "Platos", label: "🍲 Platos", single: "Plato" },
+                          { id: "Productos", label: "🛍️ Productos", single: "Producto" },
+                          { id: "Servicios", label: "🛠️ Servicios", single: "Servicio" },
+                          { id: "CUSTOM", label: "✏️ Personalizado", single: "Custom" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setCustomItemChoice(opt.id);
+                              if (opt.id !== "CUSTOM") {
+                                setCustomItemsPlural(opt.id);
+                                setCustomItemSingle(opt.single);
+                              }
+                            }}
+                            className={`p-3 rounded-xl border text-xs font-bold text-center transition-all ${
+                              customItemChoice === opt.id
+                                ? "bg-sky-500/20 border-sky-500 text-sky-300 shadow-sm"
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Custom item inputs */}
+                      {customItemChoice === "CUSTOM" && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800 mt-3">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1">Nombre en Plural (Ej: Licores, Repuestos)</label>
+                            <input
+                              type="text"
+                              value={customItemsPlural}
+                              onChange={(e) => setCustomItemsPlural(e.target.value)}
+                              placeholder="ej. Licores"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-slate-400 mb-1">Nombre en Singular (Ej: Licor, Repuesto)</label>
+                            <input
+                              type="text"
+                              value={customItemSingle}
+                              onChange={(e) => setCustomItemSingle(e.target.value)}
+                              placeholder="ej. Licor"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-
-                  {/* Custom item inputs */}
-                  {customItemChoice === "CUSTOM" && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800 mt-3">
-                      <div>
-                        <label className="block text-xs font-medium text-slate-400 mb-1">Nombre en Plural (Ej: Licores, Repuestos)</label>
-                        <input
-                          type="text"
-                          value={customItemsPlural}
-                          onChange={(e) => setCustomItemsPlural(e.target.value)}
-                          placeholder="ej. Licores"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-400 mb-1">Nombre en Singular (Ej: Licor, Repuesto)</label>
-                        <input
-                          type="text"
-                          value={customItemSingle}
-                          onChange={(e) => setCustomItemSingle(e.target.value)}
-                          placeholder="ej. Licor"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-sky-500 px-3 py-2 rounded-xl text-xs text-white focus:outline-none"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
+                </details>
 
                 {/* Section: Formato y Proporción de Fotos del Catálogo */}
                 <div className="space-y-3 pt-4 border-t border-slate-850">
@@ -3693,122 +4016,368 @@ export function AdminDashboard({
                   </div>
                 </div>
 
-                {/* Section C: Visibilidad de Herramientas del Panel (Sidebar Toggles) */}
-                <div className="space-y-4 pt-4 border-t border-slate-850">
+                {/* Section C: Sistema Modular Híbrido (Capacidades y Módulos Operativos) */}
+                <div className="space-y-6 pt-4 border-t border-slate-850">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-300">
-                        Ocultar / Activar Módulos del Panel Admin
-                      </label>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Usa los interruptores ON / OFF para habilitar u ocultar las funciones secundarias que tu negocio no requiera.
+                      <div className="flex items-center gap-2">
+                        <Boxes className="h-5 w-5 text-amber-400" />
+                        <h4 className="text-sm font-extrabold text-white uppercase tracking-wider">
+                          Módulos y Capacidades del Negocio (Sistema Modular Híbrido)
+                        </h4>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Personaliza y enciende con interruptores ON / OFF las funciones que tu negocio necesita. Si tienes un modelo mixto (por ejemplo, cabañas con restaurante/café, o una clínica que vende productos), puedes activar o silenciar cualquier módulo en tiempo real.
                       </p>
                     </div>
+                    <span className="text-[10px] font-bold px-3 py-1 bg-sky-500/10 border border-sky-500/30 text-sky-300 rounded-full">
+                      ⚡ Módulos ON / OFF
+                    </span>
                   </div>
 
-                  {/* Switch Dividir Cuenta */}
-                  <div className="grid grid-cols-1 gap-4 bg-slate-900/60 p-4 rounded-xl border border-slate-800 my-2">
-                    <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
-                      !disabledModules.includes("split-bill") 
-                        ? "bg-amber-500/10 border-amber-500/40 text-white" 
-                        : "bg-slate-950/60 border-slate-850 text-slate-400"
-                    }`}>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 font-extrabold text-xs text-white">
-                          <Sliders className="h-4 w-4 text-amber-400" />
-                          <span>Módulo Dividir Cuenta en Mesa</span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 leading-snug">
-                          {!disabledModules.includes("split-bill") 
-                            ? "✓ Muestra la herramienta para separar cuenta por comensal." 
-                            : "✕ Oculta por completo la herramienta de dividir cuenta."}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (disabledModules.includes("split-bill")) {
-                            setDisabledModules(prev => prev.filter(m => m !== "split-bill"));
-                          } else {
-                            setDisabledModules(prev => [...prev, "split-bill"]);
-                          }
-                        }}
-                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          !disabledModules.includes("split-bill") ? "bg-amber-500" : "bg-slate-800"
-                        }`}
-                      >
-                        <span
-                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                            !disabledModules.includes("split-bill") ? "translate-x-5" : "translate-x-0"
-                          }`}
-                        />
-                      </button>
-                    </div>
+                  {/* Sub-bloque 1: Canales de Venta Adicionales para Modelos Híbridos */}
+                  <details className="group border border-slate-850 rounded-2xl bg-slate-950/40 p-4 transition-all">
+                    <summary className="cursor-pointer text-xs font-bold text-slate-300 flex items-center justify-between select-none">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        <Boxes className="h-4 w-4 text-sky-400" />
+                        <span>Canales de Venta Adicionales (Modelo Mixto o Híbrido)</span>
+                        <span className="text-[10px] font-normal text-slate-400">
+                          · Giro principal: &quot;{selectedPreset === "RESTAURANT" ? "Restaurante / Bar" : selectedPreset === "RETAIL" ? "Catálogo E-Commerce" : selectedPreset === "SERVICIOS" ? "Servicios Técnicos" : selectedPreset === "CITAS" ? "Agenda de Citas" : "Hospedaje & Cabañas"}&quot;
+                        </span>
+                      </span>
+                      <span className="text-xs text-slate-400 group-open:rotate-180 transition-transform">▼</span>
+                    </summary>
 
-                    {/* Acceso Rápido / Configuración Visibilidad Botón Ruleta */}
-                    <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/40 flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 font-extrabold text-xs text-white">
-                          <Gift className="h-4 w-4 text-rose-400" />
-                          <span>Botón Flotante de Ruleta (¡Gira y Gana!)</span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 leading-snug">
-                          Activa o desactiva la visibilidad del botón flotante en la carta digital y ajusta los premios y probabilidades.
-                        </p>
+                    <div className="pt-4 space-y-3 border-t border-slate-850 mt-3">
+                      <p className="text-[11px] text-slate-400 leading-snug">
+                        💡 Tu modelo principal ya está configurado arriba. Abre y activa estos interruptores únicamente si tienes un negocio combinado (por ejemplo: cabañas u hotel que además tienen restaurante o tienda, o una clínica que vende productos de catálogo).
+                      </p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+                        {/* Modulo 1: Atención en Mesa y KDS */}
+                        {(() => {
+                          const isTablesActive = bLabels.showTablesConfig && enableTableOrdering;
+                          return (
+                            <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                              isTablesActive
+                                ? "bg-amber-500/10 border-amber-500/40 text-white"
+                                : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                            }`}>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                                  <span className="text-base">🍽️</span>
+                                  <span>Atención en Mesa, QR & Pantalla Cocina KDS</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-snug">
+                                  {isTablesActive
+                                    ? "✓ Habilitado: Códigos QR por mesa, comandas a cocina y panel de mesero."
+                                    : "✕ Apagado: Panel limpio sin términos de restaurante ni comandas de cocina."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTableOrdering(!isTablesActive)}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  isTablesActive ? "bg-amber-500" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                    isTablesActive ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Modulo 2: Motor de Reservas y Hospedaje */}
+                        {(() => {
+                          const isReservasActive = !disabledModules.includes("reservas") && (isLodging || enabledModules.includes("reservas") || selectedPreset === "RESERVAS");
+                          return (
+                            <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                              isReservasActive
+                                ? "bg-emerald-500/10 border-emerald-500/40 text-white"
+                                : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                            }`}>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                                  <span className="text-base">🏕️</span>
+                                  <span>Motor de Reservas & Hospedaje CRM</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-snug">
+                                  {isReservasActive
+                                    ? "✓ Habilitado: Reservas por noche, calendario de estadías y check-in/out."
+                                    : "✕ Apagado: Módulo de reservas y hospedaje oculto."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isReservasActive) {
+                                    setDisabledModules(prev => [...new Set([...prev, "reservas"])]);
+                                    setEnabledModules(prev => prev.filter(m => m !== "reservas"));
+                                    setIsLodgingState(false);
+                                  } else {
+                                    setDisabledModules(prev => prev.filter(m => m !== "reservas"));
+                                    setEnabledModules(prev => [...new Set([...prev, "reservas"])]);
+                                    setIsLodgingState(true);
+                                  }
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  isReservasActive ? "bg-emerald-500" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                    isReservasActive ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Modulo 3: Agenda de Citas y Turnos */}
+                        {(() => {
+                          const isCitasActive = !disabledModules.includes("citas") && (selectedPreset === "CITAS" || enabledModules.includes("citas") || (!isLodging && !isServiciosTecnicos && (restaurant as any).businessType === "SERVICES"));
+                          return (
+                            <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                              isCitasActive
+                                ? "bg-purple-500/10 border-purple-500/40 text-white"
+                                : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                            }`}>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                                  <span className="text-base">📅</span>
+                                  <span>Agenda de Citas & Turnos Online</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-snug">
+                                  {isCitasActive
+                                    ? "✓ Habilitado: Agendamiento de turnos 24/7 y confirmación por WhatsApp."
+                                    : "✕ Apagado: Módulo de turnos y agenda online oculto."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isCitasActive) {
+                                    setDisabledModules(prev => [...new Set([...prev, "citas"])]);
+                                    setEnabledModules(prev => prev.filter(m => m !== "citas"));
+                                  } else {
+                                    setDisabledModules(prev => prev.filter(m => m !== "citas"));
+                                    setEnabledModules(prev => [...new Set([...prev, "citas"])]);
+                                  }
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  isCitasActive ? "bg-purple-500" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                    isCitasActive ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Modulo 4: Cotizador Express con Fotos y GPS */}
+                        {(() => {
+                          const isCotizadorActive = !disabledModules.includes("cotizador") && (selectedPreset === "SERVICIOS" || enabledModules.includes("cotizador"));
+                          return (
+                            <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                              isCotizadorActive
+                                ? "bg-cyan-500/10 border-cyan-500/40 text-white"
+                                : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                            }`}>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                                  <span className="text-base">🔧</span>
+                                  <span>Cotizador Express con Fotos & GPS</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-snug">
+                                  {isCotizadorActive
+                                    ? "✓ Habilitado: Solicitudes de presupuesto en 60s con fotos y mapa GPS."
+                                    : "✕ Apagado: Módulo de cotizador express oculto."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isCotizadorActive) {
+                                    setDisabledModules(prev => [...new Set([...prev, "cotizador"])]);
+                                    setEnabledModules(prev => prev.filter(m => m !== "cotizador"));
+                                  } else {
+                                    setDisabledModules(prev => prev.filter(m => m !== "cotizador"));
+                                    setEnabledModules(prev => [...new Set([...prev, "cotizador"])]);
+                                  }
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  isCotizadorActive ? "bg-cyan-500" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                    isCotizadorActive ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Modulo 5: Catálogo E-Commerce & Carrito */}
+                        {(() => {
+                          const isEcommerceActive = !disabledModules.includes("ecommerce") && (selectedPreset === "RETAIL" || enabledModules.includes("ecommerce") || (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG");
+                          return (
+                            <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                              isEcommerceActive
+                                ? "bg-amber-500/10 border-amber-500/40 text-white"
+                                : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                            }`}>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                                  <span className="text-base">🛍️</span>
+                                  <span>Catálogo E-Commerce & Carrito Flotante</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-snug">
+                                  {isEcommerceActive
+                                    ? "✓ Habilitado: Carrito flotante, selector de variantes (tallas, colores) y checkout directo."
+                                    : "✕ Apagado: Modo catálogo simplificado sin carrito flotante."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (isEcommerceActive) {
+                                    setDisabledModules(prev => [...new Set([...prev, "ecommerce"])]);
+                                    setEnabledModules(prev => prev.filter(m => m !== "ecommerce"));
+                                  } else {
+                                    setDisabledModules(prev => prev.filter(m => m !== "ecommerce"));
+                                    setEnabledModules(prev => [...new Set([...prev, "ecommerce"])]);
+                                  }
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  isEcommerceActive ? "bg-amber-500" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                    isEcommerceActive ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Modulo 6: Dividir Cuenta en Mesa */}
+                        {(() => {
+                          const isSplitBillActive = !disabledModules.includes("split-bill") && bLabels.isGastro;
+                          return (
+                            <div className={`p-4 rounded-xl border transition-all flex items-start justify-between gap-3 ${
+                              isSplitBillActive
+                                ? "bg-amber-500/10 border-amber-500/40 text-white"
+                                : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                            }`}>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 font-extrabold text-xs text-white">
+                                  <Sliders className="h-4 w-4 text-amber-400" />
+                                  <span>Módulo Dividir Cuenta por Comensal</span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 leading-snug">
+                                  {isSplitBillActive
+                                    ? "✓ Habilitado: Herramienta interactiva para separar cuenta por comensal."
+                                    : "✕ Apagado: Herramienta de dividir cuenta oculta en mesas."}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (disabledModules.includes("split-bill")) {
+                                    setDisabledModules(prev => prev.filter(m => m !== "split-bill"));
+                                  } else {
+                                    setDisabledModules(prev => [...new Set([...prev, "split-bill"])]);
+                                  }
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  !disabledModules.includes("split-bill") ? "bg-amber-500" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                    !disabledModules.includes("split-bill") ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </div>
+                    </div>
+                  </details>
+
+                  {/* Sub-bloque 2: Módulos de Crecimiento & Gestión */}
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+                        2. Módulos de Crecimiento, Fidelización & Inventario
+                      </span>
                       <button
                         type="button"
                         onClick={() => setActiveTab("ruleta")}
-                        className="px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                        className="px-2.5 py-1 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Gift className="h-3.5 w-3.5" />
-                        <span>Gestionar Ruleta</span>
+                        <Gift className="h-3 w-3" />
+                        <span>Configurar Ruleta</span>
                       </button>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                    {[
-                      { id: "inventory", label: "Inventario & Compras", desc: "Control de stock, insumos, conversión de cajas y proveedores", icon: Boxes },
-                      { id: "ruleta", label: "Ruleta de Premios", desc: "Juego de fidelización y entrega de premios", icon: Gift },
-                      { id: "seasons", label: "Tarifas y Temporadas", desc: "Ajuste de precios por festivos o temporadas altas", icon: CalendarDays },
-                      { id: "coupons", label: "Cupones de Descuento", desc: "Códigos promocionales de descuento para clientes", icon: Tag },
-                      { id: "ai-settings", label: "Asistente IA (BYOK)", desc: "Configuración del bot inteligente de ventas", icon: Bot },
-                      { id: "crm", label: "CRM Clientes", desc: "Base de datos de clientes e historial de consumo", icon: Users },
-                    ].map((mod) => {
-                      const isHidden = disabledModules.includes(mod.id);
-                      const IconComp = mod.icon;
-                      return (
-                        <label
-                          key={mod.id}
-                          className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer select-none transition-all ${
-                            !isHidden
-                              ? "bg-slate-900/90 border-slate-800 text-white"
-                              : "bg-slate-950/40 border-slate-900 opacity-50 text-slate-500"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!isHidden}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setDisabledModules(prev => prev.filter(m => m !== mod.id));
-                              } else {
-                                setDisabledModules(prev => [...prev, mod.id]);
-                              }
-                            }}
-                            className="h-4.5 w-4.5 mt-0.5 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 cursor-pointer shrink-0"
-                          />
-                          <div className="flex-1">
-                            <div className="flex items-center gap-1.5 font-bold text-xs text-white">
-                              <IconComp className="h-3.5 w-3.5 text-slate-400" />
-                              <span>{mod.label}</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      {[
+                        { id: "inventory", label: bLabels.inventoryTabTitle || "Inventario & Compras", desc: "Control de stock, alertas de agotamiento y gestión de compras", icon: Boxes },
+                        { id: "ruleta", label: "Ruleta de Premios (¡Gira y Gana!)", desc: "Botón flotante en el catálogo y premios de fidelización", icon: Gift },
+                        { id: "seasons", label: "Tarifas Dinámicas y Temporadas", desc: "Ajuste de precios para feriados, fines de semana o temporada alta", icon: CalendarDays },
+                        { id: "coupons", label: "Cupones de Descuento", desc: "Códigos promocionales de descuento para tus clientes", icon: Tag },
+                        { id: "ai-settings", label: "Asistente IA de Ventas (BYOK)", desc: "Bot inteligente para recomendación y atención 24/7", icon: Bot },
+                        { id: "crm", label: "CRM & Historial de Clientes", desc: "Base de datos de compradores, preferencias y hábitos", icon: Users },
+                      ].map((mod) => {
+                        const isHidden = disabledModules.includes(mod.id);
+                        const IconComp = mod.icon;
+                        return (
+                          <label
+                            key={mod.id}
+                            className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer select-none transition-all ${
+                              !isHidden
+                                ? "bg-slate-900/90 border-slate-800 text-white"
+                                : "bg-slate-950/40 border-slate-900 opacity-50 text-slate-500"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!isHidden}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setDisabledModules(prev => prev.filter(m => m !== mod.id));
+                                } else {
+                                  setDisabledModules(prev => [...new Set([...prev, mod.id])]);
+                                }
+                              }}
+                              className="h-4.5 w-4.5 mt-0.5 rounded border-slate-800 bg-slate-950 text-sky-500 focus:ring-sky-500 cursor-pointer shrink-0"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                                <IconComp className="h-3.5 w-3.5 text-slate-400" />
+                                <span>{mod.label}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{mod.desc}</p>
                             </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{mod.desc}</p>
-                          </div>
-                        </label>
-                      );
-                    })}
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
@@ -4166,41 +4735,77 @@ export function AdminDashboard({
               <div className="border-t border-slate-800/80 pt-6 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span>🖼️ URL del Logo</span>
+                    <span>🖼️ Logo de tu Negocio</span>
                   </h4>
                   <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-full">
-                    ✨ Recomendado: WebP, 500–800 px de ancho.
+                    ✨ Recomendado: WebP o PNG, 500–800 px.
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="block text-xs font-semibold text-slate-300">URL Directa del Logo (HTTPS)</label>
+                  <div className="md:col-span-2 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => logoFileInputRef.current?.click()}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-900 border border-slate-700 hover:border-amber-400 hover:bg-slate-800 text-white transition-all active:scale-95 cursor-pointer shadow-md"
+                      >
+                        📁 Subir archivo desde tu dispositivo
+                      </button>
+                      {logoFileName && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 truncate max-w-[220px]">
+                          ✓ {logoFileName}
+                        </span>
+                      )}
+                      {(logoUrlInput || logoFileName) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLogoUrlInput("");
+                            setLogoFileName(null);
+                            setLogoHasError(false);
+                            if (logoFileInputRef.current) logoFileInputRef.current.value = "";
+                          }}
+                          className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded transition-colors cursor-pointer"
+                        >
+                          ✕ Quitar
+                        </button>
+                      )}
+                    </div>
+
                     <input
-                      type="text"
-                      name="logoUrl"
-                      value={logoUrlInput}
-                      onChange={(e) => {
-                        setLogoUrlInput(e.target.value);
-                        setLogoHasError(false);
-                      }}
-                      placeholder="https://i.postimg.cc/xxxxx/logo.webp"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-3 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                    <p className="text-[11px] text-slate-400">
-                      Pega la URL pública HTTPS de tu logo optimizado (ej. Postimages, Cloudinary, S3).
-                    </p>
-                    <input
+                      ref={logoFileInputRef}
                       type="file"
                       name="logoFile"
                       accept="image/*"
                       className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setLogoFileName(file.name);
+                          const previewUrl = URL.createObjectURL(file);
+                          setLogoUrlInput(previewUrl);
+                          setLogoHasError(false);
+                        }
+                      }}
                     />
-                    <input
-                      type="file"
-                      name="logoFileCamera"
-                      accept="image/*"
-                      className="hidden"
-                    />
+
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold text-slate-400">O pega una URL Directa (HTTPS o /uploads/...)</label>
+                      <input
+                        type="text"
+                        name="logoUrl"
+                        value={logoUrlInput}
+                        onChange={(e) => {
+                          setLogoUrlInput(e.target.value);
+                          setLogoHasError(false);
+                        }}
+                        placeholder="https://i.postimg.cc/xxxxx/logo.webp o /uploads/..."
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      El logo oficial aparecerá en la cabecera, ficha comercial y buscador.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-slate-300">Vista Previa</label>
@@ -4215,12 +4820,12 @@ export function AdminDashboard({
                           />
                         ) : (
                           <div className="text-center p-2">
-                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar la imagen.</p>
-                            <p className="text-[10px] text-slate-400">Verifica que la URL sea directa y pública.</p>
+                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar.</p>
+                            <p className="text-[10px] text-slate-400">Verifica la URL o sube un archivo.</p>
                           </div>
                         )
                       ) : (
-                        <span className="text-xs text-slate-500 italic">Sin URL de logo</span>
+                        <span className="text-xs text-slate-500 italic">Sin logo</span>
                       )}
                     </div>
                   </div>
@@ -4231,41 +4836,77 @@ export function AdminDashboard({
               <div className="border-t border-slate-800/80 pt-6 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span>🌄 URL de Portada (Banner)</span>
+                    <span>🌄 Portada / Banner Comercial</span>
                   </h4>
                   <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-full">
-                    ✨ Recomendado: WebP, 1600–2000 px de ancho.
+                    ✨ Recomendado: WebP o JPG, 1600–2000 px de ancho.
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="block text-xs font-semibold text-slate-300">URL Directa de Portada (HTTPS)</label>
+                  <div className="md:col-span-2 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => coverFileInputRef.current?.click()}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-900 border border-slate-700 hover:border-amber-400 hover:bg-slate-800 text-white transition-all active:scale-95 cursor-pointer shadow-md"
+                      >
+                        📁 Subir archivo desde tu dispositivo
+                      </button>
+                      {coverFileName && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 truncate max-w-[220px]">
+                          ✓ {coverFileName}
+                        </span>
+                      )}
+                      {(coverUrlInput || coverFileName) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCoverUrlInput("");
+                            setCoverFileName(null);
+                            setCoverHasError(false);
+                            if (coverFileInputRef.current) coverFileInputRef.current.value = "";
+                          }}
+                          className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded transition-colors cursor-pointer"
+                        >
+                          ✕ Quitar
+                        </button>
+                      )}
+                    </div>
+
                     <input
-                      type="text"
-                      name="coverUrl"
-                      value={coverUrlInput}
-                      onChange={(e) => {
-                        setCoverUrlInput(e.target.value);
-                        setCoverHasError(false);
-                      }}
-                      placeholder="https://i.postimg.cc/xxxxx/portada.webp"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-3 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                    <p className="text-[11px] text-slate-400">
-                      Pega la URL pública HTTPS del banner de tu restaurante.
-                    </p>
-                    <input
+                      ref={coverFileInputRef}
                       type="file"
                       name="coverFile"
                       accept="image/*"
                       className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setCoverFileName(file.name);
+                          const previewUrl = URL.createObjectURL(file);
+                          setCoverUrlInput(previewUrl);
+                          setCoverHasError(false);
+                        }
+                      }}
                     />
-                    <input
-                      type="file"
-                      name="coverFileCamera"
-                      accept="image/*"
-                      className="hidden"
-                    />
+
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold text-slate-400">O pega una URL Directa (HTTPS o /uploads/...)</label>
+                      <input
+                        type="text"
+                        name="coverUrl"
+                        value={coverUrlInput}
+                        onChange={(e) => {
+                          setCoverUrlInput(e.target.value);
+                          setCoverHasError(false);
+                        }}
+                        placeholder="https://i.postimg.cc/xxxxx/portada.webp o /uploads/..."
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      El banner se mostrará como fondo de cabecera y en la presentación destacada del perfil comercial.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-slate-300">Vista Previa</label>
@@ -4280,15 +4921,150 @@ export function AdminDashboard({
                           />
                         ) : (
                           <div className="text-center p-2">
-                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar la portada.</p>
-                            <p className="text-[10px] text-slate-400">Verifica que la URL sea directa y pública.</p>
+                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar.</p>
+                            <p className="text-[10px] text-slate-400">Verifica la URL o sube un archivo.</p>
                           </div>
                         )
                       ) : (
-                        <span className="text-xs text-slate-500 italic">Sin URL de portada</span>
+                        <span className="text-xs text-slate-500 italic">Sin portada</span>
                       )}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Establishment Gallery Section (Max 4 Photos for Business Profile) */}
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Camera className="w-4 h-4 text-amber-400" />
+                      <span>📸 Galería del Establecimiento / Local (Máx. 4 Fotos)</span>
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                      Se mostrarán en el carrusel táctil interactivo en la pestaña <strong>Perfil Comercial</strong> de tu página pública (ideal para comedores, salones, vitrinas, góndolas, talleres u oficinas).
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-full">
+                    ✨ Carrusel Táctil & Lightbox
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                  {[
+                    {
+                      slot: 0,
+                      label: selectedBusinessType === "RESTAURANT" 
+                        ? "Foto 1 (Comedor Principal o Salón)" 
+                        : selectedBusinessType === "RETAIL" 
+                          ? "Foto 1 (Vitrinas o Fachada)" 
+                          : selectedBusinessType === "SERVICES" 
+                            ? "Foto 1 (Taller, Oficina o Recepción)" 
+                            : "Foto 1 (Principal del Local)",
+                      placeholder: "https://... o /uploads/...",
+                    },
+                    {
+                      slot: 1,
+                      label: selectedBusinessType === "RESTAURANT" 
+                        ? "Foto 2 (Terraza, Barra o Fachada)" 
+                        : selectedBusinessType === "RETAIL" 
+                          ? "Foto 2 (Góndolas o Pasillos)" 
+                          : selectedBusinessType === "SERVICES" 
+                            ? "Foto 2 (Herramientas o Equipos)" 
+                            : "Foto 2 (Área de Atención)",
+                      placeholder: "https://... o /uploads/...",
+                    },
+                    {
+                      slot: 2,
+                      label: selectedBusinessType === "RESTAURANT" 
+                        ? "Foto 3 (Ambiente, Cocina o Eventos)" 
+                        : selectedBusinessType === "RETAIL" 
+                          ? "Foto 3 (Sección Destacada o Novedades)" 
+                          : selectedBusinessType === "SERVICES" 
+                            ? "Foto 3 (Trabajo Realizado)" 
+                            : "Foto 3 (Instalaciones)",
+                      placeholder: "https://... o /uploads/...",
+                    },
+                    {
+                      slot: 3,
+                      label: selectedBusinessType === "RESTAURANT" 
+                        ? "Foto 4 (Plato Estrella o Rincón Especial)" 
+                        : selectedBusinessType === "RETAIL" 
+                          ? "Foto 4 (Caja o Exhibidor)" 
+                          : selectedBusinessType === "SERVICES" 
+                            ? "Foto 4 (Área de Operaciones)" 
+                            : "Foto 4 (Destacado del Negocio)",
+                      placeholder: "https://... o /uploads/...",
+                    },
+                  ].map(({ slot, label, placeholder }) => {
+                    const url = galleryImages[slot] || "";
+                    return (
+                      <div
+                        key={slot}
+                        className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-4 space-y-3 flex flex-col justify-between"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 text-[10px] font-black flex items-center justify-center border border-amber-500/30">
+                                {slot + 1}
+                              </span>
+                              {label}
+                            </span>
+                            {url && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = [...galleryImages];
+                                  updated[slot] = "";
+                                  setGalleryImages(updated);
+                                }}
+                                className="text-[11px] text-red-400 hover:text-red-300 font-bold transition cursor-pointer"
+                              >
+                                ✕ Limpiar
+                              </button>
+                            )}
+                          </div>
+                          <input
+                            type="url"
+                            value={url}
+                            onChange={(e) => {
+                              const updated = [...galleryImages];
+                              updated[slot] = e.target.value;
+                              setGalleryImages(updated);
+                            }}
+                            placeholder={placeholder}
+                            className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-amber-500 font-mono"
+                          />
+                        </div>
+
+                        {/* Vista Previa */}
+                        <div className="relative w-full aspect-[16/9] rounded-xl overflow-hidden bg-slate-900 border border-slate-800 flex items-center justify-center group">
+                          {url.trim() ? (
+                            <>
+                              <img
+                                src={url.trim()}
+                                alt={`Vista previa slot ${slot + 1}`}
+                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = "none";
+                                }}
+                              />
+                              <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/75 text-emerald-400 text-[9px] font-black uppercase tracking-wider border border-emerald-500/30">
+                                ✓ Enlace Activo
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center text-slate-600 gap-1 p-3 text-center">
+                              <ImageIcon className="w-6 h-6 opacity-40 text-slate-500" />
+                              <span className="text-[10px] font-bold text-slate-500">Sin foto configurada</span>
+                              <span className="text-[9px] text-slate-600">Pega un enlace web HTTPS o /uploads/...</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -4296,35 +5072,77 @@ export function AdminDashboard({
               <div className="border-t border-slate-800/80 pt-6 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span>📱 URL de QR de Cobro (Deuna / Transferencia)</span>
+                    <span>📱 QR de Cobro Directo (Deuna / Transferencia)</span>
                   </h4>
                   <span className="text-[11px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2.5 py-1 rounded-full">
-                    ✨ Recomendado: WebP, formato cuadrado.
+                    ✨ Recomendado: WebP o PNG cuadrado.
                   </span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="block text-xs font-semibold text-slate-300">URL Directa del Código QR (HTTPS)</label>
+                  <div className="md:col-span-2 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => paymentQrFileInputRef.current?.click()}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-900 border border-slate-700 hover:border-amber-400 hover:bg-slate-800 text-white transition-all active:scale-95 cursor-pointer shadow-md"
+                      >
+                        📁 Subir archivo desde tu dispositivo
+                      </button>
+                      {paymentQrFileName && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 truncate max-w-[220px]">
+                          ✓ {paymentQrFileName}
+                        </span>
+                      )}
+                      {(paymentQrUrlInput || paymentQrFileName) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPaymentQrUrlInput("");
+                            setPaymentQrFileName(null);
+                            setPaymentQrHasError(false);
+                            if (paymentQrFileInputRef.current) paymentQrFileInputRef.current.value = "";
+                          }}
+                          className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded transition-colors cursor-pointer"
+                        >
+                          ✕ Quitar
+                        </button>
+                      )}
+                    </div>
+
                     <input
-                      type="text"
-                      name="paymentQrUrl"
-                      value={paymentQrUrlInput}
-                      onChange={(e) => {
-                        setPaymentQrUrlInput(e.target.value);
-                        setPaymentQrHasError(false);
-                      }}
-                      placeholder="https://i.postimg.cc/xxxxx/qr.webp"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-3 rounded-xl text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-                    <p className="text-[11px] text-slate-400">
-                      Pega la URL de tu código QR de cobranza digital o cuenta de transferencias.
-                    </p>
-                    <input
+                      ref={paymentQrFileInputRef}
                       type="file"
                       name="paymentQrFile"
                       accept="image/*"
                       className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setPaymentQrFileName(file.name);
+                          const previewUrl = URL.createObjectURL(file);
+                          setPaymentQrUrlInput(previewUrl);
+                          setPaymentQrHasError(false);
+                        }
+                      }}
                     />
+
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold text-slate-400">O pega una URL Directa (HTTPS o /uploads/...)</label>
+                      <input
+                        type="text"
+                        name="paymentQrUrl"
+                        value={paymentQrUrlInput}
+                        onChange={(e) => {
+                          setPaymentQrUrlInput(e.target.value);
+                          setPaymentQrHasError(false);
+                        }}
+                        placeholder="https://i.postimg.cc/xxxxx/qr.webp o /uploads/..."
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      El código QR se mostrará en el perfil comercial para que tus clientes puedan escanearlo y transferirte directamente.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold text-slate-300">Vista Previa</label>
@@ -4339,12 +5157,12 @@ export function AdminDashboard({
                           />
                         ) : (
                           <div className="text-center p-2">
-                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar el QR.</p>
-                            <p className="text-[10px] text-slate-400">Verifica que la URL sea directa y pública.</p>
+                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar.</p>
+                            <p className="text-[10px] text-slate-400">Verifica la URL o sube un archivo.</p>
                           </div>
                         )
                       ) : (
-                        <span className="text-xs text-slate-500 italic">Sin URL de QR</span>
+                        <span className="text-xs text-slate-500 italic">Sin QR</span>
                       )}
                     </div>
                   </div>
@@ -5158,6 +5976,20 @@ export function AdminDashboard({
                     setDishSupplierId("");
                     setDishBarcode("");
                     setDishImageUrl("");
+                    setDishImageUrl1("");
+                    setDishImageUrl2("");
+                    setDishImageUrl3("");
+                    setDishImage1Error(false);
+                    setDishImage2Error(false);
+                    setDishImage3Error(false);
+                    setDishImageSlotTab(0);
+                    setDishBeds("");
+                    setDishMaxGuests("");
+                    setDishHasVariants(false);
+                    setDishAttr1Name("Presentación");
+                    setDishAttr1Options("");
+                    setDishAttr2Name("");
+                    setDishAttr2Options("");
                     setDishAvailable(true);
                     setDishSuggested(false);
                     setDishTrackStock(!bLabels.isGastro);
@@ -5354,11 +6186,22 @@ export function AdminDashboard({
                           >
                             {/* Image */}
                             <div className="h-20 w-20 rounded-xl bg-slate-950 overflow-hidden shrink-0 border border-slate-800 relative">
-                              {dish.imageUrl ? (
-                                <img src={dish.imageUrl} alt={dish.name} className="h-full w-full object-cover" />
-                              ) : (
-                                <div className="h-full w-full flex items-center justify-center text-xs text-slate-600">Sin foto</div>
-                              )}
+                              {(() => {
+                                const images = parseDishImages(dish.imageUrl);
+                                const primary = images[0] || null;
+                                return primary ? (
+                                  <>
+                                    <img src={primary} alt={dish.name} className="h-full w-full object-cover" />
+                                    {images.length > 1 && (
+                                      <span className="absolute bottom-1 right-1 bg-black/80 backdrop-blur text-[9px] font-bold text-amber-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                        📷 {images.length}
+                                      </span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div className="h-full w-full flex items-center justify-center text-xs text-slate-600">Sin foto</div>
+                                );
+                              })()}
                             </div>
 
                             {/* Info */}
@@ -5468,6 +6311,52 @@ export function AdminDashboard({
                                       setDishSupplierId(dish.supplierId || dish.supplier?.id || "");
                                       setDishBarcode(dish.barcode || dish.sku || "");
                                       setDishImageUrl(dish.imageUrl || "");
+                                      const parsedImgs = parseDishImages(dish.imageUrl);
+                                      setDishImageUrl1(parsedImgs[0] || "");
+                                      setDishImageUrl2(parsedImgs[1] || "");
+                                      setDishImageUrl3(parsedImgs[2] || "");
+                                      setDishImage1Error(false);
+                                      setDishImage2Error(false);
+                                      setDishImage3Error(false);
+                                      setDishImageSlotTab(0);
+                                      let initialBeds = "";
+                                      let initialGuests = "";
+                                      let initialHasVariants = false;
+                                      let initialAttr1Name = "Presentación";
+                                      let initialAttr1Options = "";
+                                      let initialAttr2Name = "";
+                                      let initialAttr2Options = "";
+                                      if (dish.variants) {
+                                        try {
+                                          const parsed = typeof dish.variants === "string" ? JSON.parse(dish.variants) : dish.variants;
+                                          if (parsed && typeof parsed === "object") {
+                                            if (parsed.beds) initialBeds = String(parsed.beds);
+                                            if (parsed.maxGuests) initialGuests = String(parsed.maxGuests);
+                                            if (parsed.hasVariants || (Array.isArray(parsed.attribute1Options) && parsed.attribute1Options.length > 0)) {
+                                              initialHasVariants = Boolean(parsed.hasVariants ?? true);
+                                              initialAttr1Name = parsed.attribute1Name || "Presentación";
+                                              initialAttr1Options = Array.isArray(parsed.attribute1Options) ? parsed.attribute1Options.join(", ") : "";
+                                              initialAttr2Name = parsed.attribute2Name || "";
+                                              initialAttr2Options = Array.isArray(parsed.attribute2Options) ? parsed.attribute2Options.join(", ") : "";
+                                            } else if (Array.isArray(parsed.tallas) && parsed.tallas.length > 0) {
+                                              initialHasVariants = true;
+                                              initialAttr1Name = "Talla";
+                                              initialAttr1Options = parsed.tallas.join(", ");
+                                              if (Array.isArray(parsed.colores) && parsed.colores.length > 0) {
+                                                initialAttr2Name = "Color";
+                                                initialAttr2Options = parsed.colores.join(", ");
+                                              }
+                                            }
+                                          }
+                                        } catch {}
+                                      }
+                                      setDishBeds(initialBeds);
+                                      setDishMaxGuests(initialGuests);
+                                      setDishHasVariants(initialHasVariants);
+                                      setDishAttr1Name(initialAttr1Name);
+                                      setDishAttr1Options(initialAttr1Options);
+                                      setDishAttr2Name(initialAttr2Name);
+                                      setDishAttr2Options(initialAttr2Options);
                                       setDishAvailable(dish.isAvailable);
                                       setDishSuggested(suggestedDishIds.includes(dish.id));
                                       setDishTrackStock(Boolean(dish.trackStock));
@@ -5526,6 +6415,58 @@ export function AdminDashboard({
                       formData.append("costPrice", dishCostPrice);
                       formData.append("supplierId", dishSupplierId);
                       formData.append("barcode", dishBarcode);
+                      const serializedImages = serializeDishImages([dishImageUrl1, dishImageUrl2, dishImageUrl3]);
+                      formData.set("imageUrl", serializedImages || "");
+                      
+                      // Variantes y metadatos de hospedaje (camas y huéspedes)
+                      const variantsObj: any = {};
+                      if (editingDish?.variants) {
+                        try {
+                          const parsed = typeof editingDish.variants === "string" ? JSON.parse(editingDish.variants) : editingDish.variants;
+                          if (parsed && typeof parsed === "object") Object.assign(variantsObj, parsed);
+                        } catch {}
+                      }
+                      if (dishBeds.trim()) {
+                        variantsObj.beds = dishBeds.trim();
+                      } else {
+                        delete variantsObj.beds;
+                      }
+                      if (dishMaxGuests.trim() && parseInt(dishMaxGuests, 10) > 0) {
+                        variantsObj.maxGuests = parseInt(dishMaxGuests, 10);
+                      } else {
+                        delete variantsObj.maxGuests;
+                      }
+
+                      // Guardar variantes semánticas (Alternativa 1 y 2)
+                      if (dishHasVariants && dishAttr1Name.trim() && dishAttr1Options.trim()) {
+                        variantsObj.hasVariants = true;
+                        variantsObj.attribute1Name = dishAttr1Name.trim();
+                        variantsObj.attribute1Options = dishAttr1Options.split(",").map(s => s.trim()).filter(Boolean);
+                        if (dishAttr2Name.trim() && dishAttr2Options.trim()) {
+                          variantsObj.attribute2Name = dishAttr2Name.trim();
+                          variantsObj.attribute2Options = dishAttr2Options.split(",").map(s => s.trim()).filter(Boolean);
+                        } else {
+                          delete variantsObj.attribute2Name;
+                          delete variantsObj.attribute2Options;
+                        }
+                        if (dishAttr1Name.trim().toLowerCase() === "talla") {
+                          variantsObj.tallas = variantsObj.attribute1Options;
+                        }
+                        if (dishAttr2Name.trim().toLowerCase() === "color") {
+                          variantsObj.colores = variantsObj.attribute2Options;
+                        }
+                      } else {
+                        variantsObj.hasVariants = false;
+                        delete variantsObj.attribute1Name;
+                        delete variantsObj.attribute1Options;
+                        delete variantsObj.attribute2Name;
+                        delete variantsObj.attribute2Options;
+                        delete variantsObj.tallas;
+                        delete variantsObj.colores;
+                      }
+
+                      const finalVariants = Object.keys(variantsObj).length > 0 ? JSON.stringify(variantsObj) : "";
+                      formData.append("variants", finalVariants);
                       
                       if (editingDish) {
                         const res = await updateDishAction(editingDish.id, formData);
@@ -5675,60 +6616,435 @@ export function AdminDashboard({
                       />
                     </div>
 
+                    {/* Campos de Hospedaje: Distribución de camas y Capacidad de huéspedes */}
+                    {(isLodging || dishBeds || dishMaxGuests) && (
+                      <div className="p-3.5 bg-emerald-950/25 border border-emerald-500/30 rounded-xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <BedDouble className="h-4 w-4 text-emerald-400" />
+                            <span className="text-xs font-bold text-white">Detalles de Alojamiento (Insignias de Tarjeta)</span>
+                          </div>
+                          {(dishBeds || dishMaxGuests) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDishBeds("");
+                                setDishMaxGuests("");
+                              }}
+                              className="text-[10px] text-red-400 hover:text-red-300 transition underline cursor-pointer"
+                            >
+                              ✕ Quitar ambas insignias
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                              🛏️ Distribución de Camas / Baño
+                            </label>
+                            <input
+                              type="text"
+                              value={dishBeds}
+                              onChange={(e) => setDishBeds(e.target.value)}
+                              placeholder="ej: Camas equipadas y baño privado"
+                              className="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-emerald-500 focus:outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              💡 Déjalo vacío si no deseas mostrar camas en la tarjeta.
+                            </p>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                              👥 Capacidad Máxima (Huéspedes)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={dishMaxGuests}
+                              onChange={(e) => setDishMaxGuests(e.target.value)}
+                              placeholder="ej: 4"
+                              className="w-full bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-emerald-500 focus:outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              💡 Déjalo vacío o en 0 para no mostrar capacidad.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Variantes y Presentaciones del Producto (Alternativa 1 y 2) */}
+                    <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl space-y-3.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="dishHasVariants" className="flex items-center gap-2 text-xs font-bold text-white cursor-pointer">
+                          <Layers className="h-4 w-4 text-amber-400" />
+                          <span>Habilitar Variantes / Presentaciones</span>
+                        </label>
+                        <input
+                          type="checkbox"
+                          id="dishHasVariants"
+                          checked={dishHasVariants}
+                          onChange={(e) => setDishHasVariants(e.target.checked)}
+                          className="h-4 w-4 text-amber-500 focus:ring-amber-400 border-slate-800 rounded bg-slate-900 cursor-pointer"
+                        />
+                      </div>
+                      
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        {dishHasVariants
+                          ? "Define las opciones disponibles (ej: Six-Pack, Unidad, Litro, Temperatura). El cliente elegirá antes de añadir."
+                          : "⚡ Modo Compra Directa: Desactivado. El cliente agregará este producto al carrito con 1 solo clic sin preguntas ni ventanas innecesarias."}
+                      </p>
+
+                      {dishHasVariants && (
+                        <div className="pt-3 border-t border-slate-850 space-y-3.5">
+                          {/* Botones de configuración rápida / presets */}
+                          <div>
+                            <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                              ⚡ Plantillas Rápidas (1 Clic)
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDishAttr1Name("Presentación");
+                                  setDishAttr1Options("Unidad, Six-Pack, Pack x12, Caja");
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-750 text-[11px] font-medium text-amber-300 transition cursor-pointer"
+                              >
+                                🍾 Presentación (Cervezas / Licores)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDishAttr1Name("Volumen");
+                                  setDishAttr1Options("375 ml, 750 ml, 1 Litro, 1.75 L");
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-750 text-[11px] font-medium text-amber-300 transition cursor-pointer"
+                              >
+                                📏 Volumen (Botellas)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDishAttr2Name("Temperatura");
+                                  setDishAttr2Options("Bien Helada ❄️, Al Clima");
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-750 text-[11px] font-medium text-sky-300 transition cursor-pointer"
+                              >
+                                ❄️ + Temperatura
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDishAttr1Name("Talla");
+                                  setDishAttr1Options("S, M, L, XL");
+                                  setDishAttr2Name("Color");
+                                  setDishAttr2Options("Negro, Blanco, Azul");
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-750 text-[11px] font-medium text-slate-300 transition cursor-pointer"
+                              >
+                                👕 Ropa (Talla & Color)
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Atributo 1 */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                Nombre Atributo 1 *
+                              </label>
+                              <input
+                                type="text"
+                                value={dishAttr1Name}
+                                onChange={(e) => setDishAttr1Name(e.target.value)}
+                                placeholder="ej: Presentación o Volumen"
+                                className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                Opciones (separadas por coma) *
+                              </label>
+                              <input
+                                type="text"
+                                value={dishAttr1Options}
+                                onChange={(e) => setDishAttr1Options(e.target.value)}
+                                placeholder="ej: Unidad, Six-Pack, Pack x12, Caja"
+                                className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Atributo 2 (Opcional) */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                Atributo 2 <span className="text-[10px] text-slate-500">(opcional)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={dishAttr2Name}
+                                onChange={(e) => setDishAttr2Name(e.target.value)}
+                                placeholder="ej: Temperatura o Color"
+                                className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                Opciones Atributo 2 (separadas por coma)
+                              </label>
+                              <input
+                                type="text"
+                                value={dishAttr2Options}
+                                onChange={(e) => setDishAttr2Options(e.target.value)}
+                                placeholder="ej: Bien Helada ❄️, Al Clima"
+                                className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="border-t border-slate-800 pt-4 space-y-3">
                       <div className="flex items-center justify-between flex-wrap gap-2">
-                        <label className="block text-xs font-semibold text-slate-300">
-                          URL DE IMAGEN DEL {bLabels.itemSingle.toUpperCase()} (HTTPS)
-                        </label>
+                        <div>
+                          <label className="block text-xs font-bold text-white tracking-wide">
+                            GALERÍA DE FOTOS DEL {bLabels.itemSingle.toUpperCase()} (HASTA 3 ÁNGULOS)
+                          </label>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Sube hasta 3 fotos (ej: Frente, Espalda / Dorso y Detalle para ropa o productos).
+                          </p>
+                        </div>
                         <span className="text-[10px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-full">
                           ✨ WebP · máx 1200 px · 100–300 KB
                         </span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
-                        <div className="sm:col-span-2 space-y-1.5">
-                          <input
-                            type="text"
-                            name="imageUrl"
-                            value={dishImageUrl}
-                            onChange={(e) => {
-                              setDishImageUrl(e.target.value);
-                              setDishImageHasError(false);
-                            }}
-                            placeholder="https://i.postimg.cc/xxxxx/imagen.webp"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none"
-                          />
-                          <p className="text-[10px] text-slate-400">
-                            Pega la URL pública de la imagen del {bLabels.itemSingle.toLowerCase()}.
-                          </p>
-                          <input
-                            type="file"
-                            name="dishFile"
-                            accept="image/*"
-                            className="hidden"
-                          />
+
+                      {/* Selector de pestañas para las 3 fotos */}
+                      <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setDishImageSlotTab(0)}
+                          className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            dishImageSlotTab === 0
+                              ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20"
+                              : "text-slate-400 hover:text-white hover:bg-slate-900"
+                          }`}
+                        >
+                          <span>📸 Foto 1: Frente</span>
+                          {dishImageUrl1.trim() && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDishImageSlotTab(1)}
+                          className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            dishImageSlotTab === 1
+                              ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20"
+                              : "text-slate-400 hover:text-white hover:bg-slate-900"
+                          }`}
+                        >
+                          <span>🔄 Foto 2: Espalda</span>
+                          {dishImageUrl2.trim() && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDishImageSlotTab(2)}
+                          className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            dishImageSlotTab === 2
+                              ? "bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20"
+                              : "text-slate-400 hover:text-white hover:bg-slate-900"
+                          }`}
+                        >
+                          <span>🔍 Foto 3: Detalle</span>
+                          {dishImageUrl3.trim() && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Formulario y vista previa de la pestaña activa */}
+                      <div className="p-3.5 bg-slate-950/70 rounded-2xl border border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-200">
+                            {dishImageSlotTab === 0 && "📸 Foto 1: Frente / Portada (Principal en listados)"}
+                            {dishImageSlotTab === 1 && "🔄 Foto 2: Dorso / Espalda (Hover en catálogo web)"}
+                            {dishImageSlotTab === 2 && "🔍 Foto 3: Ángulo extra o detalle (Textura / Empaque)"}
+                          </span>
+                          {((dishImageSlotTab === 0 && dishImageUrl1) ||
+                            (dishImageSlotTab === 1 && dishImageUrl2) ||
+                            (dishImageSlotTab === 2 && dishImageUrl3)) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (dishImageSlotTab === 0) {
+                                  setDishImageUrl1("");
+                                  setDishImage1Error(false);
+                                } else if (dishImageSlotTab === 1) {
+                                  setDishImageUrl2("");
+                                  setDishImage2Error(false);
+                                } else {
+                                  setDishImageUrl3("");
+                                  setDishImage3Error(false);
+                                }
+                              }}
+                              className="text-red-400 hover:text-red-300 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                            >
+                              ✕ Quitar foto
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <div className="h-20 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-1.5 overflow-hidden">
-                            {dishImageUrl && dishImageUrl.trim() !== "" ? (
-                              !dishImageHasError ? (
-                                <img
-                                  src={dishImageUrl.trim()}
-                                  alt={`Vista previa ${bLabels.itemSingle.toLowerCase()}`}
-                                  onError={() => setDishImageHasError(true)}
-                                  className="w-full h-full object-cover rounded-lg shadow"
-                                />
-                              ) : (
-                                <div className="text-center p-1">
-                                  <p className="text-[10px] text-red-400 font-semibold">⚠️ No se pudo cargar</p>
-                                  <p className="text-[9px] text-slate-400">Verifica la URL</p>
-                                </div>
-                              )
-                            ) : (
-                              <span className="text-[11px] text-slate-500 italic">Sin imagen</span>
-                            )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+                          <div className="sm:col-span-2 space-y-2">
+                            <input
+                              type="text"
+                              value={
+                                dishImageSlotTab === 0
+                                  ? dishImageUrl1
+                                  : dishImageSlotTab === 1
+                                  ? dishImageUrl2
+                                  : dishImageUrl3
+                              }
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (dishImageSlotTab === 0) {
+                                  setDishImageUrl1(val);
+                                  setDishImage1Error(false);
+                                } else if (dishImageSlotTab === 1) {
+                                  setDishImageUrl2(val);
+                                  setDishImage2Error(false);
+                                } else {
+                                  setDishImageUrl3(val);
+                                  setDishImage3Error(false);
+                                }
+                              }}
+                              placeholder={
+                                dishImageSlotTab === 0
+                                  ? "https://i.postimg.cc/xxxxx/frente.webp"
+                                  : dishImageSlotTab === 1
+                                  ? "https://i.postimg.cc/xxxxx/espalda.webp"
+                                  : "https://i.postimg.cc/xxxxx/detalle.webp"
+                              }
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none"
+                            />
+                            <p className="text-[10px] text-slate-400">
+                              {dishImageSlotTab === 0 && "Esta foto se mostrará como imagen principal en el menú y catálogo digital."}
+                              {dishImageSlotTab === 1 && "En tiendas y ropa, se mostrará al colocar el cursor sobre el producto o en la galería."}
+                              {dishImageSlotTab === 2 && "Foto complementaria para mostrar costuras, etiquetas, empaque o detalle."}
+                            </p>
+                          </div>
+
+                          <div>
+                            <div className="h-24 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-1.5 overflow-hidden relative">
+                              {(() => {
+                                const currentUrl =
+                                  dishImageSlotTab === 0
+                                    ? dishImageUrl1
+                                    : dishImageSlotTab === 1
+                                    ? dishImageUrl2
+                                    : dishImageUrl3;
+                                const currentError =
+                                  dishImageSlotTab === 0
+                                    ? dishImage1Error
+                                    : dishImageSlotTab === 1
+                                    ? dishImage2Error
+                                    : dishImage3Error;
+                                const setError =
+                                  dishImageSlotTab === 0
+                                    ? setDishImage1Error
+                                    : dishImageSlotTab === 1
+                                    ? setDishImage2Error
+                                    : setDishImage3Error;
+
+                                if (currentUrl && currentUrl.trim() !== "") {
+                                  if (!currentError) {
+                                    return (
+                                      <img
+                                        src={currentUrl.trim()}
+                                        alt={`Vista previa ranura ${dishImageSlotTab + 1}`}
+                                        onError={() => setError(true)}
+                                        className="w-full h-full object-cover rounded-lg shadow"
+                                      />
+                                    );
+                                  }
+                                  return (
+                                    <div className="text-center p-1">
+                                      <p className="text-[10px] text-red-400 font-semibold">⚠️ No cargó</p>
+                                      <p className="text-[9px] text-slate-400">Verifica la URL</p>
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <span className="text-[11px] text-slate-500 italic">
+                                    Ranura {dishImageSlotTab + 1} vacía
+                                  </span>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </div>
                       </div>
+
+                      {/* Tira de miniaturas de las 3 ranuras simultáneas */}
+                      <div className="flex items-center gap-3 pt-1">
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                          Ranuras:
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {[
+                            { idx: 0, url: dishImageUrl1, label: "Frente" },
+                            { idx: 1, url: dishImageUrl2, label: "Espalda" },
+                            { idx: 2, url: dishImageUrl3, label: "Detalle" },
+                          ].map((slot) => (
+                            <button
+                              key={slot.idx}
+                              type="button"
+                              onClick={() => setDishImageSlotTab(slot.idx as 0 | 1 | 2)}
+                              className={`relative w-12 h-12 rounded-lg border overflow-hidden transition cursor-pointer ${
+                                dishImageSlotTab === slot.idx
+                                  ? "border-amber-400 ring-2 ring-amber-400/30"
+                                  : "border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-100"
+                              }`}
+                            >
+                              {slot.url && slot.url.trim() ? (
+                                <img
+                                  src={slot.url.trim()}
+                                  alt={slot.label}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-600 text-[9px]">
+                                  <span>{slot.idx + 1}</span>
+                                </div>
+                              )}
+                              <span className="absolute bottom-0 inset-x-0 bg-slate-950/85 text-[8px] text-center text-slate-300 font-medium py-0.2">
+                                {slot.label}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Inputs ocultos para persistencia del formulario */}
+                      <input
+                        type="hidden"
+                        name="imageUrl"
+                        value={serializeDishImages([dishImageUrl1, dishImageUrl2, dishImageUrl3]) || ""}
+                      />
+                      <input
+                        type="file"
+                        name="dishFile"
+                        accept="image/*"
+                        className="hidden"
+                      />
                     </div>
 
                     <div className="space-y-3 pt-2">
@@ -6468,23 +7784,25 @@ export function AdminDashboard({
                   }`}
                 >
                   <QrCode className="h-4 w-4 text-emerald-400" />
-                  <span>QR General del Menú</span>
+                  <span>{bLabels.isGastro ? "QR General del Menú" : `QR General del ${bLabels.businessTabTitle}`}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setQrSubTab("tables")}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
-                    qrSubTab === "tables"
-                      ? "bg-emerald-600 text-white shadow-sm"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  <Utensils className="h-4 w-4" />
-                  <span>QRs por Mesa</span>
-                  <span className="text-[10px] bg-black/30 text-white px-2 py-0.5 rounded-full font-black">
-                    {tablesList.length}
-                  </span>
-                </button>
+                {bLabels.showTablesConfig && enableTableOrdering && (
+                  <button
+                    type="button"
+                    onClick={() => setQrSubTab("tables")}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+                      qrSubTab === "tables"
+                        ? "bg-emerald-600 text-white shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <Utensils className="h-4 w-4" />
+                    <span>QRs por Mesa</span>
+                    <span className="text-[10px] bg-black/30 text-white px-2 py-0.5 rounded-full font-black">
+                      {tablesList.length}
+                    </span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -6591,6 +7909,43 @@ export function AdminDashboard({
             {/* SUB-PESTAÑA 2: QRS INDIVIDUALES POR MESA CON TOKEN CRIPTOGRÁFICO Y BATCH PRINT */}
             {qrSubTab === "tables" && (
               <div className="space-y-6 animate-fade-in">
+                {/* Configuración rápida de Mesas del Local */}
+                <div className="bg-slate-900/60 border border-slate-800/80 p-5 rounded-3xl backdrop-blur-md space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
+                        <Users className="h-4 w-4 text-emerald-400" />
+                        Configuración de Mesas del Local
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Define las mesas o áreas de tu local separadas por comas (ej. 1, 2, 3, VIP-1, Terraza-A).
+                      </p>
+                    </div>
+                  </div>
+                  <form onSubmit={handleSaveTables} className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                    <input
+                      type="text"
+                      value={tablesConfig}
+                      onChange={(e) => setTablesConfig(e.target.value)}
+                      required
+                      className="flex-1 bg-slate-950 border border-slate-800 focus:border-emerald-500 px-4 py-2.5 rounded-xl text-white focus:outline-none text-xs font-mono font-bold"
+                      placeholder="ej. 1, 2, 3, VIP-1, Terraza-A"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingTables}
+                      className="px-5 py-2.5 rounded-xl text-xs font-black uppercase text-white shadow-lg bg-emerald-600 hover:bg-emerald-500 transition active:scale-95 shrink-0"
+                    >
+                      {savingTables ? "Guardando..." : "Guardar Mesas"}
+                    </button>
+                  </form>
+                  {tablesMessage && (
+                    <p className={`text-xs ${tablesMessage.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>
+                      {tablesMessage}
+                    </p>
+                  )}
+                </div>
+
                 {/* Table selector & Batch Print Toolbar */}
                 <div className="bg-slate-900/60 border border-slate-800/80 p-4 sm:p-5 rounded-3xl backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="space-y-1">
@@ -8360,6 +9715,23 @@ export function AdminDashboard({
           </div>
         )}
 
+        {/* Citas & Agenda CRM Tab */}
+        {activeTab === "citas" && (
+          <div className="space-y-6 animate-fade-in">
+            <CitasAdminTab restaurant={restaurant} />
+          </div>
+        )}
+
+        {/* Reservas & Hospedaje CRM Tab */}
+        {activeTab === "reservas" && (
+          <div className="space-y-6 animate-fade-in">
+            <ReservasAdminTab 
+              restaurant={restaurant} 
+              onNavigateToDishes={() => setActiveTab("dishes")}
+            />
+          </div>
+        )}
+
         {/* Plan & Suscripción Tab */}
         {activeTab === "subscription" && (
           <div className="space-y-6 animate-fade-in">
@@ -8895,7 +10267,7 @@ export function AdminDashboard({
           style={{ color: activeTab === "restaurant" ? restaurant.themeColor : "#94a3b8" }}
         >
           <Store className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">Negocio</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.businessTabTitle}</span>
         </button>
 
         {/* Categories Tab */}
@@ -8905,7 +10277,7 @@ export function AdminDashboard({
           style={{ color: activeTab === "categories" ? restaurant.themeColor : "#94a3b8" }}
         >
           <FolderHeart className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">Categorías</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.categories}</span>
         </button>
 
         {/* Dishes Tab */}
@@ -8915,7 +10287,7 @@ export function AdminDashboard({
           style={{ color: activeTab === "dishes" ? restaurant.themeColor : "#94a3b8" }}
         >
           <Soup className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">Platos</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.items}</span>
         </button>
 
         {/* Inventory Tab */}
@@ -8926,8 +10298,20 @@ export function AdminDashboard({
             style={{ color: activeTab === "inventory" ? restaurant.themeColor : "#94a3b8" }}
           >
             <Boxes className="h-5 w-5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">Bodega</span>
+            <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.inventoryTabTitle.split(" ")[0]}</span>
           </button>
+        )}
+
+        {/* Caja POS Mobile Quick Link */}
+        {bLabels.showCajaPos && (
+          <Link
+            href="/caja"
+            className="flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition duration-200 text-emerald-400 hover:text-emerald-300"
+            title="Caja POS móvil"
+          >
+            <Barcode className="h-5 w-5 text-emerald-400" />
+            <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400">Caja</span>
+          </Link>
         )}
 
         {/* QR Tab */}
@@ -8961,6 +10345,30 @@ export function AdminDashboard({
           <ShoppingBag className="h-5 w-5" />
           <span className="text-[9px] font-bold uppercase tracking-wider">Historial</span>
         </button>
+
+        {/* Reservas Tab */}
+        {isLodging && !disabledModules.includes("reservas") && (
+          <button
+            onClick={() => setActiveTab("reservas")}
+            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+            style={{ color: activeTab === "reservas" ? "#34d399" : "#94a3b8" }}
+          >
+            <Trees className="h-5 w-5" />
+            <span className="text-[9px] font-bold uppercase tracking-wider">Reservas</span>
+          </button>
+        )}
+
+        {/* Citas Tab */}
+        {!isLodging && (selectedPreset === "CITAS" || enabledModules.includes("citas") || (!isServiciosTecnicos && (restaurant as any).businessType === "SERVICES")) && !disabledModules.includes("citas") && (
+          <button
+            onClick={() => setActiveTab("citas")}
+            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+            style={{ color: activeTab === "citas" ? "#c084fc" : "#94a3b8" }}
+          >
+            <CalendarDays className="h-5 w-5" />
+            <span className="text-[9px] font-bold uppercase tracking-wider">Citas</span>
+          </button>
+        )}
       </div>
     </div>
   </div>

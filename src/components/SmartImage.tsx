@@ -67,6 +67,7 @@ interface SmartCoverProps {
   name: string;
   className?: string;
   themeColor?: string | null;
+  icon?: React.ReactNode;
 }
 
 export function SmartCover({
@@ -75,6 +76,7 @@ export function SmartCover({
   name,
   className = "w-full h-full object-cover",
   themeColor,
+  icon,
 }: SmartCoverProps) {
   const [hasError, setHasError] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -86,7 +88,9 @@ export function SmartCover({
         <>
           {!isLoaded && (
             <div className="absolute inset-0 bg-slate-900/90 animate-pulse flex items-center justify-center">
-              <Utensils className="h-10 w-10 text-slate-700 animate-bounce" />
+              <div className="h-10 w-10 text-amber-400 animate-bounce flex items-center justify-center font-black">
+                {getInitials(name)}
+              </div>
             </div>
           )}
           <img
@@ -103,11 +107,17 @@ export function SmartCover({
         </>
       ) : (
         <div
-          className="w-full h-full flex flex-col items-center justify-center gap-2 p-6 text-center text-white bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950"
+          className="w-full h-full flex flex-col items-center justify-center gap-3 p-6 text-center text-white bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950"
           style={{ backgroundColor: themeColor ? `${themeColor}cc` : undefined }}
         >
-          <Utensils className="h-16 w-16 opacity-80 text-amber-400 animate-pulse" />
-          <span className="font-extrabold text-xl tracking-tight">{name}</span>
+          {icon ? (
+            <div className="text-amber-400">{icon}</div>
+          ) : (
+            <div className="h-16 w-16 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-2xl font-black text-amber-400 shadow-xl">
+              {getInitials(name)}
+            </div>
+          )}
+          <span className="font-extrabold text-xl tracking-tight max-w-[85%] truncate">{name}</span>
         </div>
       )}
     </div>

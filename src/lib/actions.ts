@@ -13,6 +13,7 @@ import { trackAnalyticsEvent } from "@/lib/analytics";
 import { saveUploadedFile } from "@/lib/storage";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { pool } from "@/lib/db-pool";
+import { parseDishImages, serializeDishImages } from "@/lib/dish-images";
 
 
 /**
@@ -31,16 +32,9 @@ export async function validateExternalImageUrl(
     return { isValid: true, cleanUrl: null };
   }
 
-  if (options?.allowLegacyUploads && (cleanUrl.startsWith("/uploads/") || cleanUrl.startsWith("uploads/"))) {
-    return { isValid: true, cleanUrl };
-  }
-
   if (cleanUrl.startsWith("/uploads/") || cleanUrl.startsWith("uploads/")) {
-    return {
-      isValid: false,
-      cleanUrl: null,
-      error: "Por favor ingresa una URL externa válida (ej. https://.../imagen.webp). No se permiten rutas locales /uploads/ para nuevas imágenes.",
-    };
+    const formatted = cleanUrl.startsWith("/") ? cleanUrl : `/${cleanUrl}`;
+    return { isValid: true, cleanUrl: formatted };
   }
 
   if (!/^https?:\/\//i.test(cleanUrl)) {
@@ -250,13 +244,71 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
     const localityParts = [province, canton, parroquia, sector].filter(Boolean);
     const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
 
-    const businessTypeInput = (formData.get("businessType") as string) || "RESTAURANT";
-    const validBusinessTypes = ["RESTAURANT", "RETAIL", "SERVICES", "GENERAL_CATALOG"];
-    const businessType = validBusinessTypes.includes(businessTypeInput.toUpperCase())
-      ? (businessTypeInput.toUpperCase() as any)
-      : "RESTAURANT";
+    const businessTypeInput = ((formData.get("businessType") as string) || "RESTAURANT").toUpperCase();
+    let businessType: "RESTAURANT" | "RETAIL" | "SERVICES" | "GENERAL_CATALOG" = "RESTAURANT";
+    if (businessTypeInput === "RETAIL" || businessTypeInput === "GENERAL_CATALOG" || businessTypeInput === "CATALOG") {
+      businessType = "RETAIL";
+    } else if (["SERVICES", "CITAS", "RESERVAS"].includes(businessTypeInput)) {
+      businessType = "SERVICES";
+    }
     const catalogMode = businessType === "RESTAURANT" ? "MENU" : "CATALOG";
     const enableTableOrdering = businessType === "RESTAURANT";
+    let customLabelsInitial: string | null = null;
+    if (businessTypeInput === "RESERVAS") {
+      customLabelsInitial = JSON.stringify({
+        vertical: "reservas",
+        businessSubType: "RESERVAS",
+        items: "Cabañas / Habitaciones",
+        itemSingle: "Cabaña",
+        categories: "Tipos de Alojamiento",
+        amenities: [
+          "📶 WiFi de Alta Velocidad",
+          "🔥 Chimenea / Fogata a Leña",
+          "🛁 Jacuzzi Privado",
+          "🚗 Parqueadero Gratuito",
+          "🐾 Pet Friendly",
+          "☕ Desayuno Artesanal",
+        ],
+        availableExtras: [
+          { id: "ext-1", name: "Desayuno Campestre Tradicional", price: 6.5, perPerson: true },
+          { id: "ext-2", name: "Cesta de Leña Seca para Fogata", price: 5.0, perPerson: false },
+          { id: "ext-3", name: "Sesión Privada de Jacuzzi con Sales", price: 20.0, perPerson: false },
+          { id: "ext-4", name: "Paseo a Caballo Guiado (1 hora)", price: 15.0, perPerson: true },
+        ],
+      });
+    } else if (businessTypeInput === "CITAS") {
+      customLabelsInitial = JSON.stringify({
+        vertical: "citas",
+        businessSubType: "CITAS",
+        items: "Servicios",
+        itemSingle: "Servicio",
+        categories: "Especialidades",
+      });
+    } else if (businessTypeInput === "SERVICES") {
+      customLabelsInitial = JSON.stringify({
+        vertical: "servicios",
+        businessSubType: "SERVICIOS",
+        items: "Servicios Técnicos",
+        itemSingle: "Servicio",
+        categories: "Especialidades Técnicas",
+      });
+    } else if (businessTypeInput === "RETAIL" || businessTypeInput === "GENERAL_CATALOG" || businessTypeInput === "CATALOG") {
+      customLabelsInitial = JSON.stringify({
+        vertical: "ctalo",
+        businessSubType: "RETAIL",
+        items: "Productos",
+        itemSingle: "Producto",
+        categories: "Categorías",
+      });
+    } else {
+      customLabelsInitial = JSON.stringify({
+        vertical: "menuqr",
+        businessSubType: "RESTAURANT",
+        items: "Platos",
+        itemSingle: "Plato",
+        categories: "Categorías",
+      });
+    }
 
     await prismaTenant.restaurant.create({
       data: {
@@ -269,6 +321,7 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
         businessType,
         catalogMode,
         enableTableOrdering,
+        customLabels: customLabelsInitial,
       },
     });
 
@@ -548,6 +601,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
 
   revalidatePath("/admin");
   revalidatePath(`/${slug}`);
+  revalidatePath(`/ctalo/${slug}`);
   return { success: true };
 }
 
@@ -858,11 +912,20 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   if (uploadedImage) {
     finalImageUrl = uploadedImage;
   } else if (imageUrlInput && imageUrlInput.trim() !== "") {
-    const val = await validateExternalImageUrl(imageUrlInput);
-    if (!val.isValid) {
-      return { error: val.error || "URL de imagen inválida." };
+    const rawList = parseDishImages(imageUrlInput);
+    if (rawList.length > 0) {
+      const validatedList: string[] = [];
+      for (const item of rawList) {
+        const val = await validateExternalImageUrl(item);
+        if (!val.isValid) {
+          return { error: val.error || `URL de imagen inválida: ${item}` };
+        }
+        if (val.cleanUrl) {
+          validatedList.push(val.cleanUrl);
+        }
+      }
+      finalImageUrl = serializeDishImages(validatedList);
     }
-    finalImageUrl = val.cleanUrl;
   }
 
   const sku = (formData.get("sku") as string)?.trim() || null;
@@ -1094,12 +1157,22 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   if (uploadedImage) {
     finalImageUrl = uploadedImage;
   } else if (imageUrlInput && imageUrlInput.trim() !== "") {
-    const isSameAsExisting = imageUrlInput.trim() === dish.imageUrl;
-    const val = await validateExternalImageUrl(imageUrlInput, { allowLegacyUploads: isSameAsExisting });
-    if (!val.isValid) {
-      return { error: val.error || "URL de imagen inválida." };
+    const rawList = parseDishImages(imageUrlInput);
+    const existingList = parseDishImages(dish.imageUrl);
+    if (rawList.length > 0) {
+      const validatedList: string[] = [];
+      for (const item of rawList) {
+        const isSameAsExisting = existingList.includes(item.trim()) || item.trim() === dish.imageUrl;
+        const val = await validateExternalImageUrl(item, { allowLegacyUploads: isSameAsExisting });
+        if (!val.isValid) {
+          return { error: val.error || `URL de imagen inválida: ${item}` };
+        }
+        if (val.cleanUrl) {
+          validatedList.push(val.cleanUrl);
+        }
+      }
+      finalImageUrl = serializeDishImages(validatedList);
     }
-    finalImageUrl = val.cleanUrl;
   }
 
   const sku = (formData.get("sku") as string)?.trim() || null;
@@ -1462,6 +1535,7 @@ export async function superAdminCreateRestaurantAction(data: {
   sector?: string;
   plan?: "FREE" | "PRO" | "ELITE";
   existingUserId?: string;
+  vertical?: "restaurante" | "retail" | "servicios" | "citas" | "reservas";
 }) {
   try {
     const isSuperAdmin = await getSuperAdminSession();
@@ -1532,6 +1606,28 @@ export async function superAdminCreateRestaurantAction(data: {
     const localityParts = [data.province, data.canton, data.parroquia, data.sector].filter(Boolean);
     const locality = localityParts.length > 0 ? localityParts.join(", ") : null;
 
+    const vertical = data.vertical || "restaurante";
+    let businessType: "RESTAURANT" | "RETAIL" | "SERVICES" | "GENERAL_CATALOG" = "RESTAURANT";
+    let catalogMode: "MENU" | "CATALOG" = "MENU";
+    if (vertical === "retail") {
+      businessType = "RETAIL";
+      catalogMode = "CATALOG";
+    } else if (vertical === "servicios") {
+      businessType = "SERVICES";
+      catalogMode = "CATALOG";
+    } else if (vertical === "reservas") {
+      businessType = "SERVICES";
+      catalogMode = "CATALOG";
+    } else if (vertical === "citas") {
+      businessType = "SERVICES";
+      catalogMode = "MENU";
+    }
+
+    const customLabels = JSON.stringify({
+      vertical,
+      businessSubType: vertical.toUpperCase(),
+    });
+
     await prismaTenant.restaurant.create({
       data: {
         userId: assignedUserId,
@@ -1539,7 +1635,14 @@ export async function superAdminCreateRestaurantAction(data: {
         slug: cleanSlug,
         whatsapp: data.whatsapp || "",
         locality,
+        province: data.province || null,
+        city: data.canton || null,
+        parish: data.parroquia || null,
+        sector: data.sector || null,
         plan: data.plan || "FREE",
+        businessType,
+        catalogMode,
+        customLabels,
       }
     });
 
@@ -1577,6 +1680,7 @@ export async function superAdminUpdateRestaurantAction(
     tiktok?: string;
     ubicameUrl?: string;
     reservationUrl?: string;
+    vertical?: "restaurante" | "retail" | "servicios" | "citas" | "reservas";
   }
 ) {
   const isSuperAdmin = await getSuperAdminSession();
@@ -1644,6 +1748,39 @@ export async function superAdminUpdateRestaurantAction(
   const futureTrial = new Date();
   futureTrial.setFullYear(futureTrial.getFullYear() + 1);
 
+  let businessTypeUpdate: any = undefined;
+  let catalogModeUpdate: any = undefined;
+  let customLabelsUpdate: any = undefined;
+
+  if (data.vertical) {
+    if (data.vertical === "retail") {
+      businessTypeUpdate = "RETAIL";
+      catalogModeUpdate = "CATALOG";
+    } else if (data.vertical === "servicios") {
+      businessTypeUpdate = "SERVICES";
+      catalogModeUpdate = "CATALOG";
+    } else if (data.vertical === "reservas") {
+      businessTypeUpdate = "SERVICES";
+      catalogModeUpdate = "CATALOG";
+    } else if (data.vertical === "citas") {
+      businessTypeUpdate = "SERVICES";
+      catalogModeUpdate = "MENU";
+    } else {
+      businessTypeUpdate = "RESTAURANT";
+      catalogModeUpdate = "MENU";
+    }
+
+    let existingCustom: any = {};
+    if (restaurant.customLabels) {
+      try {
+        existingCustom = typeof restaurant.customLabels === "string" ? JSON.parse(restaurant.customLabels) : restaurant.customLabels;
+      } catch {}
+    }
+    existingCustom.vertical = data.vertical;
+    existingCustom.businessSubType = data.vertical.toUpperCase();
+    customLabelsUpdate = JSON.stringify(existingCustom);
+  }
+
   const updatedRestaurant = await prismaTenant.restaurant.update({
     where: { id: restaurantId },
     data: {
@@ -1659,6 +1796,9 @@ export async function superAdminUpdateRestaurantAction(
       specialty: data.specialty || null,
       plan: data.plan,
       ...(data.plan === "PRO" || data.plan === "ELITE" ? { trialEndsAt: futureTrial } : {}),
+      ...(businessTypeUpdate ? { businessType: businessTypeUpdate } : {}),
+      ...(catalogModeUpdate ? { catalogMode: catalogModeUpdate } : {}),
+      ...(customLabelsUpdate ? { customLabels: customLabelsUpdate } : {}),
       bankName: data.bankName || null,
       bankAccountType: data.bankAccountType || null,
       bankAccountNumber: data.bankAccountNumber || null,
@@ -2624,6 +2764,7 @@ export async function updateRestaurantChargesConfigAction(
 
     revalidatePath(`/admin`);
     revalidatePath(`/${restaurant.slug}`);
+    revalidatePath(`/ctalo/${restaurant.slug}`);
     return { success: true };
   } catch (error) {
     console.error("Error updating charges config:", error);
@@ -3782,6 +3923,82 @@ export async function deleteEliteTaskAction(taskId: string) {
   } catch (error: any) {
     console.error("Error deleting elite task:", error);
     return { error: error?.message || "Error al eliminar tarea Elite." };
+  }
+}
+
+export async function superAdminToggleRestaurantModuleAction(
+  restaurantId: string,
+  moduleKey: "inventory" | "caja" | "ruleta",
+  enable: boolean
+) {
+  const isSuperAdmin = await getSuperAdminSession();
+  if (!isSuperAdmin) {
+    return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  if (!restaurantId || !moduleKey) {
+    return { error: "Parámetros incompletos para actualizar módulo." };
+  }
+
+  try {
+    const restaurant = await prismaTenant.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true, slug: true, customLabels: true }
+    });
+
+    if (!restaurant) {
+      return { error: "Negocio no encontrado." };
+    }
+
+    let customObj: any = {};
+    if (restaurant.customLabels) {
+      try {
+        customObj = typeof restaurant.customLabels === "string" 
+          ? JSON.parse(restaurant.customLabels) 
+          : restaurant.customLabels;
+      } catch (e) {
+        customObj = {};
+      }
+    }
+
+    let disabledModules: string[] = Array.isArray(customObj.disabledModules) 
+      ? [...customObj.disabledModules] 
+      : [];
+
+    if (enable) {
+      // Remove from disabledModules to activate
+      disabledModules = disabledModules.filter((m) => m !== moduleKey);
+    } else {
+      // Add to disabledModules to deactivate
+      if (!disabledModules.includes(moduleKey)) {
+        disabledModules.push(moduleKey);
+      }
+    }
+
+    customObj.disabledModules = disabledModules;
+
+    await prismaTenant.restaurant.update({
+      where: { id: restaurantId },
+      data: {
+        customLabels: JSON.stringify(customObj)
+      }
+    });
+
+    revalidatePath("/super-admin");
+    revalidatePath("/admin");
+    revalidatePath("/caja");
+    revalidatePath(`/${restaurant.slug}`);
+
+    return { 
+      success: true, 
+      restaurantId, 
+      moduleKey, 
+      enabled: enable,
+      disabledModules 
+    };
+  } catch (error: any) {
+    console.error("Error in superAdminToggleRestaurantModuleAction:", error);
+    return { error: error?.message || "Error al actualizar módulo en el negocio." };
   }
 }
 

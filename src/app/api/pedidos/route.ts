@@ -4,17 +4,42 @@ import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado } from "@/li
 
 export const dynamic = "force-dynamic";
 
-// GET /api/pedidos?negocio_id=...&activos=true
+// Helper para limpiar teléfono de WhatsApp (Ecuador o internacional)
+function formatWhatsAppNumber(phone: string): string {
+  if (!phone) return "";
+  let cleaned = phone.replace(/\D/g, "");
+  // Si empieza con 09 (móvil común de Ecuador), reemplazar por 5939
+  if (cleaned.startsWith("09") && cleaned.length === 10) {
+    cleaned = "593" + cleaned.slice(1);
+  }
+  return cleaned;
+}
+
+// GET /api/pedidos?negocio_id=...&activos=true&vertical=...
 export async function GET(req: NextRequest) {
   try {
     await ensureDbTables();
 
     const { searchParams } = new URL(req.url);
     const negocioId = searchParams.get("negocio_id");
+    const slug = searchParams.get("slug");
     const soloActivos = searchParams.get("activos") !== "false";
     const mesa = searchParams.get("mesa");
+    const vertical = searchParams.get("vertical");
 
-    if (!negocioId) {
+    let targetNegocioId = negocioId;
+
+    if (!targetNegocioId && slug) {
+      const { rows: negRows } = await pool.query(
+        "SELECT id FROM negocios WHERE slug = $1 LIMIT 1",
+        [slug.toLowerCase().trim()]
+      );
+      if (negRows[0]) {
+        targetNegocioId = negRows[0].id;
+      }
+    }
+
+    if (!targetNegocioId) {
       // Tomar el primer negocio disponible si no se envía negocio_id
       const { rows: firstNegocio } = await pool.query("SELECT id FROM negocios LIMIT 1");
       if (firstNegocio.length === 0) {
@@ -39,6 +64,8 @@ export async function GET(req: NextRequest) {
         p.cliente_nombre,
         p.cliente_telefono,
         p.solicita_mesero,
+        p.vertical,
+        p.metadata,
         c.nombre as camarero_nombre,
         COALESCE(
           json_agg(
@@ -60,7 +87,7 @@ export async function GET(req: NextRequest) {
       WHERE p.negocio_id = $1
     `;
 
-    const params: any[] = [negocioId];
+    const params: any[] = [targetNegocioId];
 
     if (soloActivos) {
       params.push("pagado");
@@ -73,8 +100,13 @@ export async function GET(req: NextRequest) {
       query += ` AND p.mesa = $${params.length}`;
     }
 
+    if (vertical) {
+      params.push(vertical);
+      query += ` AND p.vertical = $${params.length}`;
+    }
+
     query += `
-      GROUP BY p.id, c.nombre, p.cliente_nombre, p.cliente_telefono, p.solicita_mesero
+      GROUP BY p.id, c.nombre, p.cliente_nombre, p.cliente_telefono, p.solicita_mesero, p.vertical, p.metadata
       ORDER BY p.created_at ASC
     `;
 
@@ -90,208 +122,630 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/pedidos - Lógica de MESA ABIERTA
+// POST /api/pedidos - Endpoint unificado para procesar pedidos/solicitudes de todas las verticales
 export async function POST(req: NextRequest) {
   try {
     await ensureDbTables();
 
     const body = await req.json();
-    const { negocio_id, mesa, camarero_id, items, cliente_nombre, cliente_telefono } = body;
+    const {
+      vertical = "menuqr", // "menuqr" | "catalogo" | "servicios" | "citas" | "reservas"
+      negocio_id,
+      slug,
+      cliente_nombre,
+      cliente_telefono,
+      cliente_direccion,
+      // Vertical menuqr
+      mesa,
+      camarero_id,
+      items = [],
+      // Vertical catalogo
+      metodo_entrega = "domicilio",
+      costo_envio = 0,
+      notas_entrega,
+      // Vertical servicios (cotizador express)
+      servicio_solicitado,
+      descripcion_problema,
+      fotos_urls = [],
+      urgencia = "normal",
+      latitud,
+      longitud,
+      direccion_referencia,
+      fecha_preferida,
+      // Vertical citas (agenda de turnos)
+      especialista_id,
+      especialista_nombre,
+      servicio_nombre,
+      fecha_cita,
+      hora_cita,
+      duracion_min,
+      notas_cita,
+      precio_estimado = 0,
+      // Vertical reservas (hospedaje)
+      check_in,
+      check_out,
+      noches = 1,
+      huespedes_adultos = 1,
+      huespedes_ninos = 0,
+      tipo_habitacion,
+      extras = [],
+      total_reserva,
+      hora_llegada_estimada,
+    } = body;
 
-    if (!negocio_id || !mesa) {
-      return NextResponse.json(
-        { ok: false, error: "negocio_id y mesa son obligatorios" },
-        { status: 400 }
+    // 1. Resolver ID del negocio y obtener datos de contacto para WhatsApp
+    let resolvedNegocioId = negocio_id;
+    let businessName = "Comercio";
+    let businessPhone = "";
+
+    // Buscar negocio por slug si no se proveyó ID
+    if (!resolvedNegocioId && slug) {
+      const { rows: negSlugRows } = await pool.query(
+        "SELECT id, nombre, slug FROM negocios WHERE slug = $1 LIMIT 1",
+        [String(slug).toLowerCase().trim()]
       );
+      if (negSlugRows[0]) {
+        resolvedNegocioId = negSlugRows[0].id;
+        businessName = negSlugRows[0].nombre;
+      }
     }
 
-    if (!Array.isArray(items) || items.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "El pedido debe contener al menos un item" },
-        { status: 400 }
-      );
+    // Si aún no hay negocio, intentar buscar el primer negocio o crear uno demo
+    if (!resolvedNegocioId) {
+      const { rows: fallbackNeg } = await pool.query("SELECT id, nombre FROM negocios LIMIT 1");
+      if (fallbackNeg[0]) {
+        resolvedNegocioId = fallbackNeg[0].id;
+        businessName = fallbackNeg[0].nombre;
+      }
     }
 
-    // 1. Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
-    const { rows: existingOrders } = await pool.query(
-      `SELECT * FROM pedidos 
-       WHERE negocio_id = $1 AND mesa = $2 AND estado NOT IN ('pagado', 'cancelado')
-       ORDER BY created_at DESC LIMIT 1`,
-      [negocio_id, String(mesa)]
-    );
+    // Buscar teléfono de WhatsApp configurado en Restaurant
+    try {
+      const { rows: restRows } = await pool.query(
+        `SELECT id, name, slug, whatsapp FROM "Restaurant" WHERE id::text = $1 OR slug = $2 LIMIT 1`,
+        [resolvedNegocioId || "", slug || ""]
+      );
+      if (restRows[0]) {
+        if (restRows[0].name) businessName = restRows[0].name;
+        if (restRows[0].whatsapp) businessPhone = restRows[0].whatsapp;
+        if (!resolvedNegocioId) resolvedNegocioId = restRows[0].id;
+      }
+    } catch {}
 
     const client = await pool.connect();
+
     try {
       await client.query("BEGIN");
 
-      let orderId: string;
-      let isExisting = false;
-      let currentOrder: any = null;
+      let createdOrderId: string;
+      let responseOrder: any = null;
+      let whatsappMessageText = "";
+      let orderTotal = 0;
+      let insertedItems: any[] = [];
 
-      if (existingOrders.length > 0) {
-        // --- CASO MESA ABIERTA: Ya existe pedido activo ---
-        isExisting = true;
-        currentOrder = existingOrders[0];
-        orderId = currentOrder.id;
+      // =========================================================================
+      // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
+      // =========================================================================
+      if (vertical === "menuqr") {
+        const mesaStr = mesa ? String(mesa).trim() : "Delivery";
 
-        // Calcular incremento de total
-        let itemsAddTotal = 0;
-        const insertedItems: any[] = [];
-
-        for (const item of items) {
-          const cantidad = parseInt(item.cantidad) || 1;
-          const precio = parseFloat(item.precio) || 0;
-          itemsAddTotal += cantidad * precio;
-
-          const { rows: itemRows } = await client.query(
-            `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-             VALUES ($1, $2, $3, $4, $5, true, 'nuevo')
-             RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-            [orderId, item.nombre, cantidad, precio, item.notas || null]
+        if (!Array.isArray(items) || items.length === 0) {
+          await client.query("ROLLBACK");
+          return NextResponse.json(
+            { ok: false, error: "El pedido de restaurante debe contener al menos un item" },
+            { status: 400 }
           );
-          insertedItems.push(itemRows[0]);
         }
 
-        // Actualizar total del pedido y vincular nombre si aplica
-        const { rows: updatedOrderRows } = await client.query(
-          `UPDATE pedidos 
-           SET total = total + $1,
-               cliente_nombre = COALESCE($2, cliente_nombre),
-               cliente_telefono = COALESCE($3, cliente_telefono)
-           WHERE id = $4 
-           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero`,
-          [
-            itemsAddTotal,
-            cliente_nombre ? String(cliente_nombre).trim() : null,
-            cliente_telefono ? String(cliente_telefono).trim() : null,
-            orderId,
-          ]
+        // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
+        const { rows: existingOrders } = await pool.query(
+          `SELECT * FROM pedidos 
+           WHERE negocio_id = $1 AND mesa = $2 AND estado NOT IN ('pagado', 'cancelado')
+           ORDER BY created_at DESC LIMIT 1`,
+          [resolvedNegocioId, mesaStr]
         );
 
-        await client.query("COMMIT");
+        if (existingOrders.length > 0 && mesaStr !== "Delivery") {
+          // --- MESA ABIERTA: Añadir items al pedido existente ---
+          const currentOrder = existingOrders[0];
+          createdOrderId = currentOrder.id;
 
-        // Obtener nombre del camarero
-        let camareroNombre = "Sin camarero";
-        if (currentOrder.camarero_id) {
-          const { rows: camRows } = await pool.query(
-            "SELECT nombre FROM camareros WHERE id = $1",
-            [currentOrder.camarero_id]
+          let itemsAddTotal = 0;
+          for (const item of items) {
+            const cantidad = parseInt(item.cantidad) || 1;
+            const precio = parseFloat(item.precio) || 0;
+            itemsAddTotal += cantidad * precio;
+
+            const { rows: itemRows } = await client.query(
+              `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+               VALUES ($1, $2, $3, $4, $5, true, 'nuevo')
+               RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
+              [createdOrderId, item.nombre, cantidad, precio, item.notas || null]
+            );
+            insertedItems.push(itemRows[0]);
+          }
+
+          const { rows: updatedOrderRows } = await client.query(
+            `UPDATE pedidos 
+             SET total = total + $1,
+                 cliente_nombre = COALESCE($2, cliente_nombre),
+                 cliente_telefono = COALESCE($3, cliente_telefono)
+             WHERE id = $4 
+             RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
+            [
+              itemsAddTotal,
+              cliente_nombre ? String(cliente_nombre).trim() : null,
+              cliente_telefono ? String(cliente_telefono).trim() : null,
+              createdOrderId,
+            ]
           );
-          if (camRows[0]) camareroNombre = camRows[0].nombre;
+
+          await client.query("COMMIT");
+
+          // Obtener nombre del camarero
+          let camareroNombre = "Sin camarero";
+          if (currentOrder.camarero_id) {
+            const { rows: camRows } = await pool.query(
+              "SELECT nombre FROM camareros WHERE id = $1",
+              [currentOrder.camarero_id]
+            );
+            if (camRows[0]) camareroNombre = camRows[0].nombre;
+          }
+
+          const { rows: allItems } = await pool.query(
+            `SELECT id, nombre, cantidad, precio::float, notas, es_añadido, estado_item 
+             FROM pedido_items WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado') ORDER BY es_añadido ASC, nombre ASC`,
+            [createdOrderId]
+          );
+
+          responseOrder = {
+            ...updatedOrderRows[0],
+            camarero_nombre: camareroNombre,
+            items: allItems,
+          };
+
+          // Notificar vía Socket.IO en tiempo real a cocina/camareros
+          emitItemsAñadidos(resolvedNegocioId, mesaStr, insertedItems);
+          emitPedidoActualizado(resolvedNegocioId, responseOrder);
+
+          // Generar mensaje WhatsApp para comensal
+          whatsappMessageText = `*🍽️ Platos adicionales en Mesa ${mesaStr}*\n` +
+            `*Local:* ${businessName}\n` +
+            `*Comensal:* ${cliente_nombre || "Cliente"}\n\n` +
+            `*Platos añadidos:*\n` +
+            insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(it.precio * it.cantidad).toFixed(2)})`).join("\n") +
+            `\n\n*Total acumulado de la mesa:* $${responseOrder.total.toFixed(2)}`;
+
+          const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
+          const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+          return NextResponse.json({
+            ok: true,
+            tipo: "items_añadidos",
+            pedido: responseOrder,
+            nuevos_items: insertedItems,
+            whatsapp_url: waUrl,
+            vertical: "menuqr",
+          });
+        } else {
+          // --- NUEVO PEDIDO RESTAURANTE ---
+          for (const item of items) {
+            const cantidad = parseInt(item.cantidad) || 1;
+            const precio = parseFloat(item.precio) || 0;
+            orderTotal += cantidad * precio;
+          }
+
+          let finalCamareroId = camarero_id || null;
+          if (!finalCamareroId) {
+            const { rows: defaultCam } = await client.query(
+              "SELECT id FROM camareros WHERE negocio_id = $1 AND activo = true LIMIT 1",
+              [resolvedNegocioId]
+            );
+            if (defaultCam[0]) finalCamareroId = defaultCam[0].id;
+          }
+
+          const metaObj = {
+            tipo_pedido: mesaStr === "Delivery" ? "delivery" : "mesa",
+            cliente_direccion: cliente_direccion || null,
+          };
+
+          const { rows: newOrderRows } = await client.query(
+            `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+             VALUES ($1, $2, $3, 'nuevo', $4, $5, $6, 'menuqr', $7)
+             RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
+            [
+              resolvedNegocioId,
+              mesaStr,
+              finalCamareroId,
+              orderTotal,
+              cliente_nombre ? String(cliente_nombre).trim() : null,
+              cliente_telefono ? String(cliente_telefono).trim() : null,
+              JSON.stringify(metaObj),
+            ]
+          );
+
+          createdOrderId = newOrderRows[0].id;
+
+          for (const item of items) {
+            const cantidad = parseInt(item.cantidad) || 1;
+            const precio = parseFloat(item.precio) || 0;
+
+            const { rows: itemRows } = await client.query(
+              `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+               VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
+               RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
+              [createdOrderId, item.nombre, cantidad, precio, item.notas || null]
+            );
+            insertedItems.push(itemRows[0]);
+          }
+
+          await client.query("COMMIT");
+
+          let camareroNombre = "Sin camarero";
+          if (finalCamareroId) {
+            const { rows: camRows } = await pool.query(
+              "SELECT nombre FROM camareros WHERE id = $1",
+              [finalCamareroId]
+            );
+            if (camRows[0]) camareroNombre = camRows[0].nombre;
+          }
+
+          responseOrder = {
+            ...newOrderRows[0],
+            camarero_nombre: camareroNombre,
+            items: insertedItems,
+          };
+
+          // Notificar vía Socket.IO en tiempo real
+          emitNuevoPedido(resolvedNegocioId, responseOrder);
+
+          whatsappMessageText = `*🍽️ Nuevo Pedido - MenuQR Pro*\n` +
+            `*Restaurante:* ${businessName}\n` +
+            `*Lugar:* ${mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr}\n` +
+            `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
+            (cliente_telefono ? `*Teléfono:* ${cliente_telefono}\n` : "") +
+            `\n*Detalle del pedido:*\n` +
+            insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(it.precio * it.cantidad).toFixed(2)})`).join("\n") +
+            `\n\n*Total a pagar:* $${orderTotal.toFixed(2)}`;
+
+          const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
+          const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+          return NextResponse.json({
+            ok: true,
+            tipo: "nuevo_pedido",
+            pedido: responseOrder,
+            items: insertedItems,
+            whatsapp_url: waUrl,
+            vertical: "menuqr",
+          });
+        }
+      }
+
+      // =========================================================================
+      // CASO B: VERTICAL CTALO (Tiendas de Ropa, Calzado, Joyería, Retail)
+      // =========================================================================
+      else if (vertical === "catalogo" || vertical === "ctalo") {
+        if (!Array.isArray(items) || items.length === 0) {
+          await client.query("ROLLBACK");
+          return NextResponse.json(
+            { ok: false, error: "El pedido de catálogo debe incluir al menos un producto" },
+            { status: 400 }
+          );
         }
 
-        // Obtener todos los items actualizados del pedido
-        const { rows: allItems } = await pool.query(
-          `SELECT id, nombre, cantidad, precio::float, notas, es_añadido, estado_item 
-           FROM pedido_items WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado') ORDER BY es_añadido ASC, nombre ASC`,
-          [orderId]
-        );
+        let subtotal = 0;
+        for (const it of items) {
+          const qty = parseInt(it.cantidad) || 1;
+          const pr = parseFloat(it.precio) || 0;
+          subtotal += qty * pr;
+        }
 
-        const fullUpdatedOrder = {
-          ...updatedOrderRows[0],
-          camarero_nombre: camareroNombre,
-          items: allItems,
+        const envio = parseFloat(costo_envio) || 0;
+        const descuento = parseFloat(body.descuento) || 0;
+        const propina = parseFloat(body.propina) || 0;
+        const zonaEnvio = body.zona_envio || null;
+        const metodoPago = body.metodo_pago || "Efectivo / Local";
+        const codigoCupon = body.codigo_cupon || null;
+
+        orderTotal = Math.max(0, subtotal - descuento) + envio + propina;
+
+        const metadataCatalogo = {
+          metodo_entrega,
+          cliente_direccion: cliente_direccion || "",
+          costo_envio: envio,
+          subtotal,
+          zona_envio: zonaEnvio,
+          metodo_pago: metodoPago,
+          codigo_cupon: codigoCupon,
+          descuento,
+          propina,
+          notas_entrega: notas_entrega || "",
         };
 
-        // Notificar en tiempo real por Socket.IO
-        emitItemsAñadidos(negocio_id, String(mesa), insertedItems);
-        emitPedidoActualizado(negocio_id, fullUpdatedOrder);
-
-        return NextResponse.json({
-          ok: true,
-          tipo: "items_añadidos",
-          pedido: fullUpdatedOrder,
-          nuevos_items: insertedItems,
-        });
-      } else {
-        // --- CASO NUEVO PEDIDO: Crear pedido y asociar items ---
-        let initialTotal = 0;
-        for (const item of items) {
-          const cantidad = parseInt(item.cantidad) || 1;
-          const precio = parseFloat(item.precio) || 0;
-          initialTotal += cantidad * precio;
-        }
-
-        // Obtener camarero predeterminado si no se envió
-        let finalCamareroId = camarero_id || null;
-        if (!finalCamareroId) {
-          const { rows: defaultCam } = await client.query(
-            "SELECT id FROM camareros WHERE negocio_id = $1 AND activo = true LIMIT 1",
-            [negocio_id]
-          );
-          if (defaultCam[0]) finalCamareroId = defaultCam[0].id;
-        }
-
-        // Verificar si el negocio está en modo pruebas
-        let esPrueba = false;
-        try {
-          const { rows: restTest } = await client.query(
-            `SELECT "testMode" FROM "Restaurant" WHERE id = $1 LIMIT 1`,
-            [negocio_id]
-          );
-          if (restTest[0] && restTest[0].testMode === true) {
-            esPrueba = true;
-          }
-        } catch {}
-
-        const { rows: newOrderRows } = await client.query(
-          `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, es_prueba)
-           VALUES ($1, $2, $3, 'nuevo', $4, $5, $6, $7)
-           RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, es_prueba`,
+        const { rows: orderRows } = await client.query(
+          `INSERT INTO pedidos (negocio_id, mesa, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+           VALUES ($1, 'CATALOGO', 'nuevo', $2, $3, $4, 'ctalo', $5)
+           RETURNING id, negocio_id, mesa, estado, total::float, created_at, cliente_nombre, cliente_telefono, vertical, metadata`,
           [
-            negocio_id,
-            String(mesa),
-            finalCamareroId,
-            initialTotal,
-            cliente_nombre ? String(cliente_nombre).trim() : null,
+            resolvedNegocioId,
+            orderTotal,
+            cliente_nombre ? String(cliente_nombre).trim() : "Cliente Tienda",
             cliente_telefono ? String(cliente_telefono).trim() : null,
-            esPrueba,
+            JSON.stringify(metadataCatalogo),
           ]
         );
 
-        orderId = newOrderRows[0].id;
-        const insertedItems: any[] = [];
+        createdOrderId = orderRows[0].id;
 
         for (const item of items) {
-          const cantidad = parseInt(item.cantidad) || 1;
-          const precio = parseFloat(item.precio) || 0;
+          const qty = parseInt(item.cantidad) || 1;
+          const pr = parseFloat(item.precio) || 0;
+          const variantDesc = [
+            item.talla ? `Talla: ${item.talla}` : null,
+            item.color ? `Color: ${item.color}` : null,
+            item.notas ? item.notas : null,
+          ].filter(Boolean).join(" | ");
 
           const { rows: itemRows } = await client.query(
             `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
              VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
-             RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-            [orderId, item.nombre, cantidad, precio, item.notas || null]
+             RETURNING id, pedido_id, nombre, cantidad, precio::float, notas`,
+            [createdOrderId, item.nombre, qty, pr, variantDesc || null]
           );
           insertedItems.push(itemRows[0]);
         }
 
         await client.query("COMMIT");
 
-        let camareroNombre = "Sin camarero";
-        if (finalCamareroId) {
-          const { rows: camRows } = await pool.query(
-            "SELECT nombre FROM camareros WHERE id = $1",
-            [finalCamareroId]
-          );
-          if (camRows[0]) camareroNombre = camRows[0].nombre;
-        }
+        whatsappMessageText = `*🛍️ Nuevo Pedido de Tienda / Catálogo*\n` +
+          `*Tienda:* ${businessName}\n` +
+          `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
+          `*Teléfono:* ${cliente_telefono || "No especificado"}\n` +
+          `*Modalidad:* ${metodo_entrega === "domicilio" ? `Envío a Domicilio 🛵 ${zonaEnvio ? `(${zonaEnvio})` : ""}` : "Retiro en Tienda 🏬"}\n` +
+          (cliente_direccion ? `*Dirección:* ${cliente_direccion}\n` : "") +
+          `*Método de Pago:* ${metodoPago}\n` +
+          (notas_entrega ? `*Notas:* ${notas_entrega}\n` : "") +
+          `\n*Artículos seleccionados:*\n` +
+          insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ${it.notas ? `(${it.notas})` : ""} - $${(it.precio * it.cantidad).toFixed(2)}`).join("\n") +
+          `\n\n*Subtotal Base:* $${subtotal.toFixed(2)}\n` +
+          (descuento > 0 ? `*Descuento (${codigoCupon || "Cupón"}):* -$${descuento.toFixed(2)}\n` : "") +
+          (envio > 0 ? `*Envío ${zonaEnvio ? `(${zonaEnvio})` : ""}:* $${envio.toFixed(2)}\n` : "") +
+          (propina > 0 ? `*Propina:* $${propina.toFixed(2)}\n` : "") +
+          `*TOTAL A PAGAR: $${orderTotal.toFixed(2)}*` +
+          (metodoPago.toLowerCase().includes("transferencia") || metodoPago.toLowerCase().includes("qr") ? `\n\n📸 *Adjunto comprobante de pago/transferencia.*` : "");
 
-        const fullNewOrder = {
-          ...newOrderRows[0],
-          camarero_nombre: camareroNombre,
-          items: insertedItems,
-        };
-
-        // Notificar en tiempo real por Socket.IO
-        emitNuevoPedido(negocio_id, fullNewOrder);
+        const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
+        const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
 
         return NextResponse.json({
           ok: true,
-          tipo: "nuevo_pedido",
-          pedido: fullNewOrder,
-          items: insertedItems,
+          id: createdOrderId,
+          pedido: { ...orderRows[0], items: insertedItems },
+          whatsapp_url: waUrl,
+          vertical: "ctalo",
         });
       }
+
+      // =========================================================================
+      // CASO C: VERTICAL SERVICIOS (Técnicos, Plomeros, Electricistas - Cotizador Express)
+      // =========================================================================
+      else if (vertical === "servicios") {
+        const metadataServicios = {
+          servicio_solicitado: servicio_solicitado || "Cotización Técnica",
+          descripcion_problema: descripcion_problema || "",
+          urgencia: urgencia || "normal",
+          latitud: latitud || null,
+          longitud: longitud || null,
+          direccion_referencia: direccion_referencia || cliente_direccion || "",
+          fecha_preferida: fecha_preferida || "Lo antes posible",
+          fotos_urls: Array.isArray(fotos_urls) ? fotos_urls : [],
+        };
+
+        const { rows: orderRows } = await client.query(
+          `INSERT INTO pedidos (negocio_id, mesa, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+           VALUES ($1, 'COTIZACION', 'nuevo', 0, $2, $3, 'servicios', $4)
+           RETURNING id, negocio_id, mesa, estado, total::float, created_at, cliente_nombre, cliente_telefono, vertical, metadata`,
+          [
+            resolvedNegocioId,
+            cliente_nombre ? String(cliente_nombre).trim() : "Cliente Solicitante",
+            cliente_telefono ? String(cliente_telefono).trim() : null,
+            JSON.stringify(metadataServicios),
+          ]
+        );
+
+        createdOrderId = orderRows[0].id;
+
+        // Insertar item de solicitud
+        const { rows: itemRows } = await client.query(
+          `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas)
+           VALUES ($1, $2, 1, 0, $3)
+           RETURNING id, nombre, cantidad, precio::float, notas`,
+          [createdOrderId, servicio_solicitado || "Servicio Técnico Solicitado", descripcion_problema || null]
+        );
+        insertedItems.push(itemRows[0]);
+
+        await client.query("COMMIT");
+
+        // Construir enlace de Google Maps si se envió lat/lng
+        let mapsLink = "";
+        if (latitud && longitud) {
+          mapsLink = `https://www.google.com/maps/search/?api=1&query=${latitud},${longitud}`;
+        }
+
+        whatsappMessageText = `*🔧 Nueva Solicitud de Cotización Express*\n` +
+          `*Profesional / Empresa:* ${businessName}\n` +
+          `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
+          `*Teléfono:* ${cliente_telefono || "No indicado"}\n` +
+          `*Servicio Requerido:* ${servicio_solicitado || "Asistencia Técnica"}\n` +
+          `*Nivel de Urgencia:* ${urgencia === "urgente_24_7" ? "🚨 Urgencia Inmediata (24/7)" : "Estándar / Programada"}\n` +
+          `*Fecha Preferida:* ${fecha_preferida || "A convenir"}\n` +
+          (direccion_referencia ? `*Dirección / Referencia:* ${direccion_referencia}\n` : "") +
+          (mapsLink ? `*📍 Ubicación GPS:* ${mapsLink}\n` : "") +
+          (descripcion_problema ? `\n*Descripción del trabajo/avería:*\n"${descripcion_problema}"\n` : "") +
+          (fotos_urls.length > 0 ? `\n*Fotos adjuntas (${fotos_urls.length}):*\n` + fotos_urls.slice(0, 3).map((f: string, i: number) => `• Foto ${i + 1}: ${f}`).join("\n") + "\n" : "") +
+          `\n_Por favor envía el presupuesto preliminar y disponibilidad._`;
+
+        const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
+        const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+        return NextResponse.json({
+          ok: true,
+          id: createdOrderId,
+          pedido: { ...orderRows[0], items: insertedItems },
+          whatsapp_url: waUrl,
+          vertical: "servicios",
+        });
+      }
+
+      // =========================================================================
+      // CASO D: VERTICAL CITAS (Consultorios, Barberías, Dentistas, Spas)
+      // =========================================================================
+      else if (vertical === "citas") {
+        const metadataCitas = {
+          servicio_nombre: servicio_nombre || "Cita General",
+          especialista_id: especialista_id || null,
+          especialista_nombre: especialista_nombre || "Profesional de Turno",
+          fecha_cita: fecha_cita || new Date().toISOString().split("T")[0],
+          hora_cita: hora_cita || "Por confirmar",
+          duracion_min: duracion_min || 30,
+          notas_cita: notas_cita || "",
+        };
+
+        orderTotal = parseFloat(precio_estimado) || 0;
+
+        const { rows: orderRows } = await client.query(
+          `INSERT INTO pedidos (negocio_id, mesa, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+           VALUES ($1, 'CITA', 'nuevo', $2, $3, $4, 'citas', $5)
+           RETURNING id, negocio_id, mesa, estado, total::float, created_at, cliente_nombre, cliente_telefono, vertical, metadata`,
+          [
+            resolvedNegocioId,
+            orderTotal,
+            cliente_nombre ? String(cliente_nombre).trim() : "Paciente / Cliente",
+            cliente_telefono ? String(cliente_telefono).trim() : null,
+            JSON.stringify(metadataCitas),
+          ]
+        );
+
+        createdOrderId = orderRows[0].id;
+
+        const itemDesc = `Cita: ${servicio_nombre || "Servicio"} (${duracion_min || 30} min) con ${especialista_nombre || "Especialista"}`;
+        const { rows: itemRows } = await client.query(
+          `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas)
+           VALUES ($1, $2, 1, $3, $4)
+           RETURNING id, nombre, cantidad, precio::float, notas`,
+          [createdOrderId, itemDesc, orderTotal, `Fecha: ${fecha_cita} Hora: ${hora_cita}`]
+        );
+        insertedItems.push(itemRows[0]);
+
+        await client.query("COMMIT");
+
+        whatsappMessageText = `*📅 Solicitud de Cita / Turno*\n` +
+          `*Establecimiento:* ${businessName}\n` +
+          `*Paciente / Cliente:* ${cliente_nombre || "Cliente"}\n` +
+          `*Teléfono:* ${cliente_telefono || "No indicado"}\n` +
+          `*Tratamiento / Servicio:* ${servicio_nombre || "Consulta"}\n` +
+          `*Especialista:* ${especialista_nombre || "Cualquier profesional disponible"}\n` +
+          `*Fecha solicitada:* ${fecha_cita}\n` +
+          `*Hora solicitada:* ${hora_cita}\n` +
+          (duracion_min ? `*Duración estimada:* ${duracion_min} minutos\n` : "") +
+          (orderTotal > 0 ? `*Valor referencial:* $${orderTotal.toFixed(2)}\n` : "") +
+          (notas_cita ? `*Notas adicionales:* ${notas_cita}\n` : "") +
+          `\n_Por favor confirma la reserva de este turno._`;
+
+        const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
+        const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+        return NextResponse.json({
+          ok: true,
+          id: createdOrderId,
+          pedido: { ...orderRows[0], items: insertedItems },
+          whatsapp_url: waUrl,
+          vertical: "citas",
+        });
+      }
+
+      // =========================================================================
+      // CASO E: VERTICAL RESERVAS (Hostales, Cabañas, Hospedaje, Glamping)
+      // =========================================================================
+      else if (vertical === "reservas") {
+        const metadataReservas = {
+          check_in: check_in || new Date().toISOString().split("T")[0],
+          check_out: check_out || "",
+          noches: parseInt(noches) || 1,
+          huespedes_adultos: parseInt(huespedes_adultos) || 1,
+          huespedes_ninos: parseInt(huespedes_ninos) || 0,
+          tipo_habitacion: tipo_habitacion || "Hospedaje Estándar",
+          hora_llegada_estimada: hora_llegada_estimada || "14:00",
+          extras: Array.isArray(extras) ? extras : [],
+        };
+
+        orderTotal = parseFloat(total_reserva) || 0;
+
+        const { rows: orderRows } = await client.query(
+          `INSERT INTO pedidos (negocio_id, mesa, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+           VALUES ($1, 'RESERVA', 'nuevo', $2, $3, $4, 'reservas', $5)
+           RETURNING id, negocio_id, mesa, estado, total::float, created_at, cliente_nombre, cliente_telefono, vertical, metadata`,
+          [
+            resolvedNegocioId,
+            orderTotal,
+            cliente_nombre ? String(cliente_nombre).trim() : "Huésped Titular",
+            cliente_telefono ? String(cliente_telefono).trim() : null,
+            JSON.stringify(metadataReservas),
+          ]
+        );
+
+        createdOrderId = orderRows[0].id;
+
+        // Registrar item principal de la habitación
+        const { rows: itemRows } = await client.query(
+          `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id, nombre, cantidad, precio::float, notas`,
+          [
+            createdOrderId,
+            `Estadía: ${tipo_habitacion || "Cabaña/Habitación"}`,
+            parseInt(noches) || 1,
+            orderTotal,
+            `Check-in: ${check_in} | Check-out: ${check_out} | Huéspedes: ${huespedes_adultos} adultos, ${huespedes_ninos} niños`,
+          ]
+        );
+        insertedItems.push(itemRows[0]);
+
+        await client.query("COMMIT");
+
+        whatsappMessageText = `*🏡 Nueva Solicitud de Reserva de Hospedaje*\n` +
+          `*Lugar:* ${businessName}\n` +
+          `*Titular de la reserva:* ${cliente_nombre || "Huésped"}\n` +
+          `*Teléfono:* ${cliente_telefono || "No indicado"}\n` +
+          `*Alojamiento:* ${tipo_habitacion || "Habitación Seleccionada"}\n` +
+          `*Check-in:* ${check_in}\n` +
+          `*Check-out:* ${check_out}\n` +
+          `*Noches:* ${noches}\n` +
+          `*Huéspedes:* ${huespedes_adultos} Adulto(s)` + (huespedes_ninos > 0 ? `, ${huespedes_ninos} Niño(s)` : "") + `\n` +
+          (hora_llegada_estimada ? `*Hora estimada de llegada:* ${hora_llegada_estimada}\n` : "") +
+          (extras.length > 0 ? `*Servicios adicionales:* ${extras.map((e: any) => e.nombre || e).join(", ")}\n` : "") +
+          `\n*VALOR TOTAL ESTIMADO:* $${orderTotal.toFixed(2)}\n\n` +
+          `_Por favor confirmar disponibilidad y detalles para el abono o garantía de reserva._`;
+
+        const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
+        const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+        return NextResponse.json({
+          ok: true,
+          id: createdOrderId,
+          pedido: { ...orderRows[0], items: insertedItems },
+          whatsapp_url: waUrl,
+          vertical: "reservas",
+        });
+      }
+
+      // Si se envía una vertical no reconocida
+      await client.query("ROLLBACK");
+      return NextResponse.json(
+        { ok: false, error: `Vertical '${vertical}' no reconocida` },
+        { status: 400 }
+      );
     } catch (txErr) {
       await client.query("ROLLBACK");
       throw txErr;
