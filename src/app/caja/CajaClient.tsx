@@ -174,61 +174,115 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
     } catch {}
   };
 
-  // Start Camera Scanner
-  useEffect(() => {
-    let isMounted = true;
-    const scannerId = "caja-lector";
+  const handleBarcodeScannedRef = useRef<(code: string) => void>(() => {});
 
-    async function initScanner() {
+  // Function to initialize or restart camera scanner
+  const startCamera = async () => {
+    setScannerError(null);
+    try {
+      if (
+        typeof window !== "undefined" &&
+        !window.isSecureContext &&
+        location.protocol !== "https:" &&
+        location.hostname !== "localhost"
+      ) {
+        setScannerError(
+          "La cámara requiere conexión HTTPS segura (https://...) para operar en dispositivos móviles."
+        );
+        setIsScanning(false);
+        return;
+      }
+
+      const scannerId = "caja-lector";
+      const container = document.getElementById(scannerId);
+      if (!container) {
+        console.warn("Contenedor #caja-lector no encontrado en el DOM");
+        return;
+      }
+
+      // Stop existing instance if running
+      if (scannerRef.current) {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop().catch(() => {});
+        }
+        try {
+          scannerRef.current.clear();
+        } catch {}
+      }
+
+      const qr = new Html5Qrcode(scannerId);
+      scannerRef.current = qr;
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+        ],
+      };
+
       try {
-        const qr = new Html5Qrcode(scannerId);
-        scannerRef.current = qr;
-
-        const config = {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.UPC_E,
-          ],
-        };
-
         await qr.start(
           { facingMode: "environment" },
           config,
-          (decodedText) => {
-            if (isMounted) handleBarcodeScanned(decodedText);
-          },
-          () => {
-            // standard frame scan, no error to show
-          }
+          (decodedText) => handleBarcodeScannedRef.current(decodedText),
+          () => {}
         );
-
-        if (isMounted) {
-          setIsScanning(true);
-          setScannerError(null);
-        }
-      } catch (err: any) {
-        console.warn("Error starting html5-qrcode camera:", err);
-        if (isMounted) {
-          setIsScanning(false);
-          setScannerError(
-            "Cámara no disponible o permiso denegado. Puedes escribir los códigos manualmente con el botón ⌨️."
+      } catch (camErr) {
+        console.warn("Intento con facingMode environment falló, buscando cámaras disponibles:", camErr);
+        const cameras = await Html5Qrcode.getCameras().catch(() => []);
+        if (cameras && cameras.length > 0) {
+          const selectedCam =
+            cameras.find((c) => /back|rear|trasera|environment/i.test(c.label)) ||
+            cameras[cameras.length - 1];
+          await qr.start(
+            selectedCam.id,
+            config,
+            (decodedText) => handleBarcodeScannedRef.current(decodedText),
+            () => {}
           );
+        } else {
+          throw camErr;
         }
       }
-    }
 
-    // Small delay to ensure DOM container is rendered
+      setIsScanning(true);
+      setScannerError(null);
+    } catch (err: any) {
+      console.warn("Error starting html5-qrcode camera:", err);
+      setIsScanning(false);
+      const msg = err?.message || String(err);
+      if (
+        msg.includes("Permissions policy") ||
+        msg.includes("Permission denied") ||
+        msg.includes("NotAllowedError")
+      ) {
+        setScannerError(
+          "Permiso de cámara bloqueado en el navegador móvil. Revisa los permisos de tu navegador o usa el botón ⌨️."
+        );
+      } else {
+        setScannerError(
+          "Cámara no disponible o permiso denegado. Puedes escribir los códigos manualmente con el botón ⌨️."
+        );
+      }
+    }
+  };
+
+  // Start Camera Scanner on mount
+  useEffect(() => {
+    let isMounted = true;
     const timer = setTimeout(() => {
-      initScanner();
-    }, 300);
+      if (isMounted) {
+        startCamera();
+      }
+    }, 350);
 
     return () => {
       isMounted = false;
@@ -291,6 +345,7 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
       }
     });
   };
+  handleBarcodeScannedRef.current = handleBarcodeScanned;
 
   // Add or increment item in cart
   const addOrIncrementDish = (dish: DishItem, qtyToAdd: number, isBox = false) => {
@@ -535,14 +590,24 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
             <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-6 text-center z-10 space-y-3">
               <Camera className="w-10 h-10 text-amber-400" />
               <p className="text-xs text-slate-300 leading-relaxed">{scannerError}</p>
-              <button
-                type="button"
-                onClick={() => setIsManualModalOpen(true)}
-                className="px-4 py-2.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs flex items-center gap-2"
-              >
-                <Keyboard className="w-4 h-4" />
-                <span>Ingresar código manual</span>
-              </button>
+              <div className="flex flex-col sm:flex-row gap-2 w-full max-w-xs pt-1">
+                <button
+                  type="button"
+                  onClick={() => startCamera()}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 transition-all active:scale-95"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Reintentar cámara</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsManualModalOpen(true)}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all active:scale-95"
+                >
+                  <Keyboard className="w-4 h-4" />
+                  <span>Código manual</span>
+                </button>
+              </div>
             </div>
           )}
         </div>
