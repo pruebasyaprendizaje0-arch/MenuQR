@@ -2823,7 +2823,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             </div>
 
             {/* Cart Items List */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6 pb-28 sm:pb-8 space-y-4">
               {cart.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500">
                   <Utensils className="h-10 w-10 text-slate-700 mb-2" />
@@ -4270,7 +4270,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       )}
 
       {/* Floating Bottom Navigation Bar for Mobile */}
-      <div className="fixed bottom-0 left-0 right-0 z-[100] md:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pointer-events-none">
+      <div className={`fixed bottom-0 left-0 right-0 z-[100] md:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pointer-events-none transition-all duration-300 ${isCartOpen ? "opacity-0 translate-y-full pointer-events-none" : "opacity-100"}`}>
         <div className="max-w-md mx-auto bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center justify-around shadow-[0_10px_30px_rgba(0,0,0,0.8)] pointer-events-auto">
           {/* Profile Tab */}
           <button
@@ -4370,6 +4370,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         phone={restaurant.whatsappNumber || (restaurant as any).whatsapp}
         businessName={restaurant.name}
         customMessage={`¡Hola! Me gustaría información o hacer un pedido en *${restaurant.name}*.`}
+        className={isCartOpen ? "hidden" : ""}
       />
 
       {/* Order Success & Post-Checkout Ruleta Reward Modal */}
