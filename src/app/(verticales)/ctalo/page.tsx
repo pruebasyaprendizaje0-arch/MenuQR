@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { getVerticalMarketplaceData } from "@/lib/marketplace";
 import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMarketplaceSection";
+import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 
 export const metadata: Metadata = {
   title: "Catálogo Pro | E-Commerce con Variantes de Talla y Color para WhatsApp",
@@ -217,6 +218,9 @@ export default async function CtaloLandingPage() {
           </Link>
         </div>
       </section>
+
+      {/* Footer de Ecosistema Ubícame */}
+      <EcosystemFooter currentVertical="ctalo" />
     </div>
   );
 }

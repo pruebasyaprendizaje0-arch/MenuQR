@@ -22,6 +22,7 @@ import {
   BedDouble,
 } from "lucide-react";
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
+import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 import { SmartLogo } from "@/components/SmartImage";
 import { SmartExitButton } from "@/components/public/SmartExitButton";
 import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
@@ -706,6 +707,15 @@ export function ReservasClient({ property }: { property: PropertyData }) {
             </div>
           </form>
         )}
+
+        {/* Pie de Página Comercial Ecosistema Ubícame & Ubícame.info */}
+        <BusinessCompactFooter
+          businessName={property.name}
+          slug={property.slug}
+          ubicameUrl={property.ubicameUrl}
+          vertical="reservas"
+          showAffiliateCta={true}
+        />
       </div>
     )}
       </div>

@@ -20,6 +20,7 @@ import {
   Store,
 } from "lucide-react";
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
+import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 import { SmartExitButton } from "@/components/public/SmartExitButton";
 import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
 
@@ -682,6 +683,15 @@ export function CitasClient({ business }: { business: BusinessData }) {
             </div>
           </form>
         )}
+
+            {/* Pie de Página Comercial Ecosistema Ubícame & Ubícame.info */}
+            <BusinessCompactFooter
+              businessName={business.name}
+              slug={business.slug}
+              ubicameUrl={business.ubicameUrl}
+              vertical="citas"
+              showAffiliateCta={true}
+            />
           </div>
         )}
       </div>

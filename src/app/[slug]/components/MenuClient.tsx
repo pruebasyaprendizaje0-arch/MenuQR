@@ -6,6 +6,7 @@ import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction, val
 import { SmartLogo, SmartCover } from "@/components/SmartImage";
 import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
 import { parseDishImages, getPrimaryDishImage } from "@/lib/dish-images";
+import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -2760,16 +2761,15 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 </Link>
               </div>
 
-              {/* Micro Powered By */}
-              <div className="pt-3 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Plataforma activa para bares, cafeterías y restaurantes</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-slate-400">
-                  <span>Powered by</span>
-                  <strong className="text-white font-black tracking-wide">MenuQR Pro</strong>
-                </div>
+              {/* Insignia Ubícame.info, 5 Apps y Red Ubícame */}
+              <div className="pt-4 border-t border-white/5">
+                <BusinessCompactFooter
+                  businessName={restaurant.name}
+                  slug={restaurant.slug}
+                  ubicameUrl={restaurant.ubicameUrl}
+                  vertical="menuqr"
+                  showAffiliateCta={false}
+                />
               </div>
             </div>
           </div>

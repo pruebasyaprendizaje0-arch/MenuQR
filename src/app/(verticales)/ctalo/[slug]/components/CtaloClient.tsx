@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 import {
   ShoppingBag,
   Search,
@@ -1738,6 +1739,15 @@ export function CtaloClient({ store }: { store: StoreData }) {
           </button>
         </div>
       </div>
+
+      {/* Pie de Página Comercial Ecosistema Ubícame & Ubícame.info */}
+      <BusinessCompactFooter
+        businessName={store.name}
+        slug={store.slug}
+        ubicameUrl={store.ubicameUrl}
+        vertical="ctalo"
+        showAffiliateCta={true}
+      />
 
       {/* Floating Cart Button for Desktop (on Mobile, the Bottom Bar has it integrated) */}
       {cart.length > 0 && !isCartOpen && (

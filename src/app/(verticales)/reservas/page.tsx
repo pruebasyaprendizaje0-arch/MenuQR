@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { getVerticalMarketplaceData } from "@/lib/marketplace";
 import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMarketplaceSection";
+import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 
 export const metadata: Metadata = {
   title: "Reservas Pro | Motor de Reservas de Hospedaje sin Comisiones",
@@ -217,6 +218,9 @@ export default async function ReservasLandingPage() {
           </Link>
         </div>
       </section>
+
+      {/* Footer de Ecosistema Ubícame */}
+      <EcosystemFooter currentVertical="reservas" />
     </div>
   );
 }

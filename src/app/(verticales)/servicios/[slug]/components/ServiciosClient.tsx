@@ -21,6 +21,7 @@ import {
   Store,
 } from "lucide-react";
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
+import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 import { SmartExitButton } from "@/components/public/SmartExitButton";
 import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
 
@@ -577,6 +578,15 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
           </div>
         </div>
       </div>
+
+      {/* Pie de Página Comercial Ecosistema Ubícame & Ubícame.info */}
+      <BusinessCompactFooter
+        businessName={technician.name}
+        slug={technician.slug}
+        ubicameUrl={technician.ubicameUrl}
+        vertical="servicios"
+        showAffiliateCta={true}
+      />
     </div>
   )}
       </div>

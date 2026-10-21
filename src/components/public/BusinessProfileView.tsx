@@ -22,6 +22,7 @@ import { SmartLogo, SmartCover } from "@/components/SmartImage";
 import { getMapIframeSrc } from "@/lib/map-utils";
 import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
 import { GalleryCarousel } from "@/components/public/GalleryCarousel";
+import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 
 export interface BusinessProfileProps {
   id: string;
@@ -983,6 +984,15 @@ export function BusinessProfileView({
           )}
         </div>
       )}
+
+      {/* Pie de Página Comercial Ecosistema Ubícame & Ubícame.info */}
+      <BusinessCompactFooter
+        businessName={name}
+        slug={slug}
+        ubicameUrl={ubicameUrl}
+        vertical="menuqr"
+        showAffiliateCta={true}
+      />
     </div>
   );
 }

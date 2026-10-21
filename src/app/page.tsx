@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import {
   UtensilsCrossed,
   Sparkles,
@@ -23,8 +24,25 @@ import { prismaControl, prismaTenant } from "@/lib/db";
 import { LandingSearch } from "./components/LandingSearch";
 import { MarketplaceShowcase } from "./components/MarketplaceShowcase";
 import { getMarketplaceDishesAction } from "@/lib/suggested-dishes-actions";
+import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Ubícame.cc | Plataforma Todo-en-Uno para Vender, Cotizar y Agendar",
+  description:
+    "Ecosistema SaaS multi-vertical con subdominios especializados en Ecuador y Latinoamérica: MenuQR (Restaurantes), Catálogo (Moda y Joyería), Servicios (Técnicos), Citas (Turnos) y Reservas (Hospedaje).",
+  keywords: [
+    "Ubícame.cc",
+    "SaaS Ecuador",
+    "MenuQR Pro",
+    "Catálogo WhatsApp",
+    "Agenda de turnos online",
+    "Cotizador de servicios técnicos",
+    "Motor de reservas cabañas",
+    "Plataforma multi-vertical",
+  ],
+};
 
 export default async function InstitutionalLandingPage() {
   // Obtener negocios para el directorio público
@@ -408,34 +426,8 @@ export default async function InstitutionalLandingPage() {
         </section>
       )}
 
-      {/* Footer Institucional */}
-      <footer className="border-t border-slate-800/80 bg-slate-950 py-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-black text-sm">
-              <Globe className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="font-extrabold text-white text-base">Ubícame.cc</span>
-              <span className="text-xs text-slate-500 block">Plataforma SaaS Multi-Tenant para Comercio Digital</span>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-slate-400 font-medium">
-            <Link href="/menuqr" className="hover:text-white transition">MenuQR (Restaurantes)</Link>
-            <Link href="/ctalo" className="hover:text-white transition">Catálogo (Tiendas)</Link>
-            <Link href="/servicios" className="hover:text-white transition">Servicios Técnicos</Link>
-            <Link href="/citas" className="hover:text-white transition">Citas & Turnos</Link>
-            <Link href="/reservas" className="hover:text-white transition">Hospedaje & Reservas</Link>
-            <Link href="/privacidad" className="hover:text-white transition">Privacidad</Link>
-            <Link href="/terminos" className="hover:text-white transition">Términos</Link>
-          </div>
-
-          <div className="text-xs text-slate-500 text-center md:text-right">
-            © {new Date().getFullYear()} Ubícame Pro. Todos los derechos reservados.
-          </div>
-        </div>
-      </footer>
+      {/* Footer de Ecosistema Ubícame */}
+      <EcosystemFooter currentVertical="hub" whatsappSupport={whatsappSupport} />
     </div>
   );
 }

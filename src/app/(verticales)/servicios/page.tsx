@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { getVerticalMarketplaceData } from "@/lib/marketplace";
 import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMarketplaceSection";
+import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 
 export const metadata: Metadata = {
   title: "Servicios Pro | Cotizador Express con Fotos y GPS para Técnicos",
@@ -216,6 +217,9 @@ export default async function ServiciosLandingPage() {
           </Link>
         </div>
       </section>
+
+      {/* Footer de Ecosistema Ubícame */}
+      <EcosystemFooter currentVertical="servicios" />
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { getVerticalMarketplaceData } from "@/lib/marketplace";
 import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMarketplaceSection";
+import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 
 export const metadata: Metadata = {
   title: "Citas Pro | Agenda de Turnos y Especialistas para WhatsApp",
@@ -217,6 +218,9 @@ export default async function CitasLandingPage() {
           </Link>
         </div>
       </section>
+
+      {/* Footer de Ecosistema Ubícame */}
+      <EcosystemFooter currentVertical="citas" />
     </div>
   );
 }

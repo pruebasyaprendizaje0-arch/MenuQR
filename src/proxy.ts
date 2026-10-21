@@ -33,6 +33,11 @@ const SYSTEM_PREFIXES = [
   "/marketplace",
   "/catalogos",
   "/restaurantes",
+  "/menuqr",
+  "/ctalo",
+  "/servicios",
+  "/citas",
+  "/reservas",
 ];
 
 // Extensiones de archivos estáticos que se ignoran
