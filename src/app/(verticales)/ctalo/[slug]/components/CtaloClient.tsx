@@ -916,6 +916,15 @@ export function CtaloClient({ store }: { store: StoreData }) {
           </div>
         )}
       </main>
+
+      {/* Pie de Página Comercial Ecosistema Ubícame & Ubícame.info (Exclusivo pestaña Catálogo, ya que Perfil Comercial incluye el suyo dentro de BusinessProfileView) */}
+      <BusinessCompactFooter
+        businessName={store.name}
+        slug={store.slug}
+        ubicameUrl={store.ubicameUrl}
+        vertical="ctalo"
+        showAffiliateCta={true}
+      />
     </>
   )}
 
@@ -1740,15 +1749,6 @@ export function CtaloClient({ store }: { store: StoreData }) {
           </button>
         </div>
       </div>
-
-      {/* Pie de Página Comercial Ecosistema Ubícame & Ubícame.info */}
-      <BusinessCompactFooter
-        businessName={store.name}
-        slug={store.slug}
-        ubicameUrl={store.ubicameUrl}
-        vertical="ctalo"
-        showAffiliateCta={true}
-      />
 
       {/* Floating Cart Button for Desktop (on Mobile, the Bottom Bar has it integrated) */}
       {cart.length > 0 && !isCartOpen && (
