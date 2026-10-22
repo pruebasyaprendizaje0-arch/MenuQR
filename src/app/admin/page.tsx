@@ -230,6 +230,13 @@ export default async function AdminPage() {
     document: "",
     deunaPhone: "",
   };
+  let globalAnnouncement: {
+    text: string;
+    type: "info" | "success" | "warning" | "promo";
+    link?: string;
+    active: boolean;
+  } | null = null;
+
   try {
     const settings = await prisma.systemSetting.findMany({
       where: { key: { in: [
@@ -240,6 +247,11 @@ export default async function AdminPage() {
         "subscription_bank_account_name",
         "subscription_bank_account_document",
         "subscription_deuna_phone",
+        "global_announcement_text",
+        "global_announcement_type",
+        "global_announcement_link",
+        "global_announcement_active",
+        "global_announcement_updated_at",
       ] } },
     });
     const value = (key: string) => settings.find((setting) => setting.key === key)?.value || "";
@@ -252,8 +264,17 @@ export default async function AdminPage() {
       document: value("subscription_bank_account_document"),
       deunaPhone: value("subscription_deuna_phone"),
     };
+
+    if (value("global_announcement_active") === "true" && value("global_announcement_text")) {
+      globalAnnouncement = {
+        text: value("global_announcement_text"),
+        type: (value("global_announcement_type") || "info") as any,
+        link: value("global_announcement_link") || undefined,
+        active: true,
+      };
+    }
   } catch (error) {
-    console.warn("No se pudo cargar la configuración de pago de suscripciones.", error);
+    console.warn("No se pudo cargar la configuración de pago de suscripciones o anuncio global.", error);
   }
 
   let visitStatsReal = { total: 0, today: 0, week: 0, month: 0 };
@@ -358,6 +379,7 @@ export default async function AdminPage() {
       visitStats={defaultVisitStats}
       visitStatsReal={visitStatsReal}
       visitStatsTest={visitStatsTest}
+      globalAnnouncement={globalAnnouncement}
     />
   );
 }

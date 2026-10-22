@@ -81,8 +81,14 @@ import {
   BadgeAlert,
   HelpCircle,
   Boxes,
-  Barcode
+  Barcode,
+  BarChart3,
+  Megaphone,
+  Server
 } from "lucide-react";
+import { SuperAdminAnalyticsTab } from "./SuperAdminAnalyticsTab";
+import { SuperAdminAnnouncementsTab } from "./SuperAdminAnnouncementsTab";
+import { SuperAdminOpsTab } from "./SuperAdminOpsTab";
 import { ecuadorData, parishData } from "@/lib/ecuador";
 import { resolveBusinessVertical, BusinessVertical } from "@/lib/business-labels";
 
@@ -315,6 +321,8 @@ export function SuperAdminDashboard({
   manualPayments = [],
   eliteTasks = [],
   initialTab = "directory",
+  analyticsData,
+  globalAnnouncement,
 }: { 
   restaurants: Restaurant[]; 
   leads?: ProspectLead[];
@@ -330,10 +338,12 @@ export function SuperAdminDashboard({
   allUsers?: UserOption[];
   manualPayments?: ManualPayment[];
   eliteTasks?: EliteTask[];
-  initialTab?: "directory" | "kanban" | "prospects" | "reminders" | "bots" | "collections" | "elite_ops";
+  initialTab?: "directory" | "analytics" | "announcements" | "collections" | "elite_ops" | "kanban" | "prospects" | "reminders" | "bots" | "ops";
+  analyticsData?: any;
+  globalAnnouncement?: any;
 }) {
-  const validTabs = ["directory", "kanban", "prospects", "reminders", "bots", "collections", "elite_ops"];
-  const [activeTab, setActiveTab] = useState<"directory" | "kanban" | "prospects" | "reminders" | "bots" | "collections" | "elite_ops">(
+  const validTabs = ["directory", "analytics", "announcements", "collections", "elite_ops", "kanban", "prospects", "reminders", "bots", "ops"];
+  const [activeTab, setActiveTab] = useState<"directory" | "analytics" | "announcements" | "collections" | "elite_ops" | "kanban" | "prospects" | "reminders" | "bots" | "ops">(
     initialTab && validTabs.includes(initialTab)
       ? (initialTab as any)
       : "directory"
@@ -949,6 +959,38 @@ export function SuperAdminDashboard({
           </button>
 
           <button
+            onClick={() => setActiveTab("analytics")}
+            className={`flex items-center gap-2 py-3 px-5 text-xs font-bold border-b-2 transition whitespace-nowrap ${
+              activeTab === "analytics" 
+                ? "border-teal-500 text-teal-400 bg-teal-500/5" 
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <BarChart3 className="h-4 w-4 text-teal-400" />
+            Analítica & GMV
+            {analyticsData?.gmvTotal > 0 && (
+              <span className="bg-teal-500/20 text-teal-300 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                ${Math.round(analyticsData.gmvTotal).toLocaleString()}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab("announcements")}
+            className={`flex items-center gap-2 py-3 px-5 text-xs font-bold border-b-2 transition whitespace-nowrap relative ${
+              activeTab === "announcements" 
+                ? "border-purple-500 text-purple-400 bg-purple-500/5" 
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Megaphone className="h-4 w-4 text-purple-400" />
+            Anuncios & Difusión
+            {globalAnnouncement?.active && (
+              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab("collections")}
             className={`flex items-center gap-2 py-3 px-5 text-xs font-bold border-b-2 transition whitespace-nowrap relative ${
               activeTab === "collections" 
@@ -1036,6 +1078,18 @@ export function SuperAdminDashboard({
             <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
               {botsActivosCount} ON
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("ops")}
+            className={`flex items-center gap-2 py-3 px-5 text-xs font-bold border-b-2 transition whitespace-nowrap ${
+              activeTab === "ops" 
+                ? "border-blue-500 text-blue-400 bg-blue-500/5" 
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Server className="h-4 w-4 text-blue-400" />
+            Salud & Reportes
           </button>
         </div>
       </header>
@@ -3213,6 +3267,35 @@ export function SuperAdminDashboard({
               </div>
             </div>
           </div>
+        )}
+
+        {/* TAB 8: ANALÍTICA & GMV */}
+        {activeTab === "analytics" && (
+          <SuperAdminAnalyticsTab
+            gmvTotal={analyticsData?.gmvTotal || 0}
+            totalOrdersCount={analyticsData?.totalOrdersCount || 0}
+            ordersLast30DaysGmv={analyticsData?.ordersLast30DaysGmv || 0}
+            ordersLast30DaysCount={analyticsData?.ordersLast30DaysCount || 0}
+            analyticsEventStats={analyticsData?.analyticsEventStats || { qrScans: 0, menuViews: 0, whatsappClicks: 0, dishViews: 0, totalEvents: 0 }}
+            restaurants={restaurantList}
+          />
+        )}
+
+        {/* TAB 9: ANUNCIOS & DIFUSIÓN */}
+        {activeTab === "announcements" && (
+          <SuperAdminAnnouncementsTab
+            initialAnnouncement={globalAnnouncement || { text: "", type: "info", link: "", active: false }}
+            restaurants={restaurantList}
+          />
+        )}
+
+        {/* TAB 10: SALUD INFRAESTRUCTURA & REPORTES */}
+        {activeTab === "ops" && (
+          <SuperAdminOpsTab
+            restaurants={restaurantList}
+            manualPayments={paymentList}
+            leads={leads}
+          />
         )}
 
       </main>

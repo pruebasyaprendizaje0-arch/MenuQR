@@ -33,10 +33,10 @@ export default async function SuperAdminPage({
   }
 
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const validTabs = ["directory", "kanban", "prospects", "reminders", "bots", "collections", "elite_ops"];
+  const validTabs = ["directory", "analytics", "announcements", "collections", "elite_ops", "kanban", "prospects", "reminders", "bots", "ops"];
   const initialTab = (
     resolvedSearchParams?.tab && validTabs.includes(resolvedSearchParams.tab)
-  ) ? (resolvedSearchParams.tab as "directory" | "kanban" | "prospects" | "reminders" | "bots" | "collections" | "elite_ops") : "directory";
+  ) ? (resolvedSearchParams.tab as "directory" | "analytics" | "announcements" | "collections" | "elite_ops" | "kanban" | "prospects" | "reminders" | "bots" | "ops") : "directory";
 
   // Cargar todos los restaurantes incluyendo conteo de categorías, platos, fotos y órdenes para Health Score
   let restaurants: any[] = [];
@@ -129,12 +129,64 @@ export default async function SuperAdminPage({
     console.error("Error counting categories/dishes:", err);
   }
 
+  let gmvTotal = 0;
+  let totalOrdersCount = 0;
+  let ordersLast30DaysGmv = 0;
+  let ordersLast30DaysCount = 0;
+  const analyticsEventStats = {
+    qrScans: 0,
+    menuViews: 0,
+    whatsappClicks: 0,
+    dishViews: 0,
+    totalEvents: 0,
+  };
+
+  try {
+    const orderAgg = await prismaTenant.order.aggregate({
+      where: { status: { not: "CANCELLED" } },
+      _sum: { total: true },
+      _count: { id: true },
+    });
+    gmvTotal = orderAgg._sum.total || 0;
+    totalOrdersCount = orderAgg._count.id || 0;
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const orderAgg30 = await prismaTenant.order.aggregate({
+      where: {
+        status: { not: "CANCELLED" },
+        createdAt: { gte: thirtyDaysAgo },
+      },
+      _sum: { total: true },
+      _count: { id: true },
+    });
+    ordersLast30DaysGmv = orderAgg30._sum.total || 0;
+    ordersLast30DaysCount = orderAgg30._count.id || 0;
+
+    const eventCounts = await prismaTenant.analyticsEvent.groupBy({
+      by: ["eventType"],
+      _count: { id: true },
+    });
+    eventCounts.forEach((item) => {
+      analyticsEventStats.totalEvents += item._count.id;
+      if (item.eventType === "QR_SCAN") analyticsEventStats.qrScans = item._count.id;
+      if (item.eventType === "MENU_VIEW" || item.eventType === "RESTAURANT_VIEW") analyticsEventStats.menuViews += item._count.id;
+      if (item.eventType === "WHATSAPP_CLICK") analyticsEventStats.whatsappClicks += item._count.id;
+      if (item.eventType === "DISH_VIEW") analyticsEventStats.dishViews += item._count.id;
+    });
+  } catch (err) {
+    console.warn("Analytics / Order aggregation fallback:", err);
+  }
+
   const metrics = {
     totalRestaurants,
     activeTrials,
     expiredTrials,
     totalCategories,
-    totalDishes
+    totalDishes,
+    gmvTotal,
+    totalOrdersCount,
   };
 
   // Serialización para Client Boundary con métricas de salud (Health Score)
@@ -212,6 +264,14 @@ export default async function SuperAdminPage({
   let subscriptionBankAccountName = "";
   let subscriptionBankAccountDocument = "";
   let subscriptionDeunaPhone = "";
+  let globalAnnouncement = {
+    text: "",
+    type: "info" as "info" | "success" | "warning" | "promo",
+    link: "",
+    active: false,
+    updatedAt: "",
+  };
+
   try {
     const settings = await prismaControl.systemSetting.findMany({
       where: { key: { in: [
@@ -223,6 +283,11 @@ export default async function SuperAdminPage({
         "subscription_bank_account_name",
         "subscription_bank_account_document",
         "subscription_deuna_phone",
+        "global_announcement_text",
+        "global_announcement_type",
+        "global_announcement_link",
+        "global_announcement_active",
+        "global_announcement_updated_at",
       ] } },
     });
     const settingValue = (key: string) => settings.find((setting) => setting.key === key)?.value || "";
@@ -234,6 +299,15 @@ export default async function SuperAdminPage({
     subscriptionBankAccountName = settingValue("subscription_bank_account_name");
     subscriptionBankAccountDocument = settingValue("subscription_bank_account_document");
     subscriptionDeunaPhone = settingValue("subscription_deuna_phone");
+
+    const rawActive = settingValue("global_announcement_active");
+    globalAnnouncement = {
+      text: settingValue("global_announcement_text"),
+      type: (settingValue("global_announcement_type") || "info") as any,
+      link: settingValue("global_announcement_link"),
+      active: rawActive === "true",
+      updatedAt: settingValue("global_announcement_updated_at"),
+    };
   } catch (error) {
     console.warn("WARNING: SystemSetting table is missing or not migrated yet.", error);
   }
@@ -255,6 +329,14 @@ export default async function SuperAdminPage({
       manualPayments={serializedManualPayments}
       eliteTasks={serializedEliteTasks}
       initialTab={initialTab}
+      analyticsData={{
+        gmvTotal,
+        totalOrdersCount,
+        ordersLast30DaysGmv,
+        ordersLast30DaysCount,
+        analyticsEventStats,
+      }}
+      globalAnnouncement={globalAnnouncement}
     />
   );
 }
