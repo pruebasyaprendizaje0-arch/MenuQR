@@ -136,7 +136,11 @@ function toIso(val: any): string {
 export default async function RestaurantMenuPage({ params: paramsPromise }: PageProps) {
   const params = await paramsPromise;
   const pageStartTime = performance.now();
-  const slug = params.slug.toLowerCase().trim();
+  let decodedSlug = params.slug;
+  try {
+    decodedSlug = decodeURIComponent(params.slug);
+  } catch {}
+  const slug = decodedSlug.toLowerCase().trim();
 
   if (IGNORED_STATIC_SLUGS.includes(slug)) {
     return null;
@@ -148,9 +152,15 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
     if (slugCheck.isRedirect && slugCheck.targetSlug) {
       redirect(`/${slugCheck.targetSlug}`, RedirectType.replace);
     }
+    const realSlug = slugCheck.restaurant?.slug || slug;
 
-    const restaurant = await prisma.restaurant.findUnique({
-      where: { slug },
+    const restaurant = await prisma.restaurant.findFirst({
+      where: {
+        OR: [
+          { slug: realSlug },
+          { slug },
+        ],
+      },
       include: {
         categories: {
           orderBy: { order: "asc" },

@@ -3,10 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 function getBaseUrl(req: NextRequest) {
-  if (process.env.APP_URL && !process.env.APP_URL.includes("localhost")) {
+  if (process.env.APP_URL && !process.env.APP_URL.includes("localhost") && !process.env.APP_URL.includes("0.0.0.0")) {
     return process.env.APP_URL.replace(/\/$/, "");
   }
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "localhost:3000";
+  let host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  if (!host || host.includes("0.0.0.0")) {
+    host = "localhost:3000";
+  }
   const proto = req.headers.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
   return `${proto}://${host}`;
 }
@@ -17,14 +20,13 @@ export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const businessType = searchParams.get("type") || "RESTAURANT";
   const mode = searchParams.get("mode") || "login";
+  const baseUrl = getBaseUrl(req);
 
   if (!clientId) {
-    const errorUrl = new URL(mode === "register" ? "/registro" : "/login", req.url);
+    const errorUrl = new URL(mode === "register" ? "/registro" : "/login", baseUrl);
     errorUrl.searchParams.set("error", "google_config_missing");
     return NextResponse.redirect(errorUrl);
   }
-
-  const baseUrl = getBaseUrl(req);
   const redirectUri = `${baseUrl}/api/auth/google/callback`;
 
   // Empaquetar estado para persistir intención (vertical / modo)

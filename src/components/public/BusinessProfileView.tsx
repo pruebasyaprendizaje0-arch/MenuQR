@@ -73,6 +73,7 @@ export interface BusinessProfileProps {
   galleryImages?: string[] | null;
   galleryTitle?: string;
   galleryBadge?: string;
+  vertical?: "menuqr" | "ctalo" | "servicios" | "citas" | "reservas";
 }
 
 export function BusinessProfileView({
@@ -118,6 +119,7 @@ export function BusinessProfileView({
   bankAccountDocument,
   bankAccountEmail,
   galleryImages,
+  vertical = "menuqr",
   galleryTitle,
   galleryBadge,
 }: BusinessProfileProps) {
@@ -990,7 +992,7 @@ export function BusinessProfileView({
         businessName={name}
         slug={slug}
         ubicameUrl={ubicameUrl}
-        vertical="menuqr"
+        vertical={vertical}
         showAffiliateCta={true}
       />
     </div>

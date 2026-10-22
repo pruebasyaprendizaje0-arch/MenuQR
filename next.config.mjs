@@ -14,6 +14,10 @@ const nextConfig = {
         source: "/uploads/:path*",
         destination: "/api/uploads/:path*",
       },
+      {
+        source: "/catalogo/:path*",
+        destination: "/ctalo/:path*",
+      },
     ];
   },
   async headers() {

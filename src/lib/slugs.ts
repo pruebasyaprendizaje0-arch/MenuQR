@@ -1,13 +1,29 @@
 import { prismaTenant } from "@/lib/db";
 
+export function sanitizeSlug(input: string): string {
+  if (!input || typeof input !== "string") return "";
+  return input
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export async function findRestaurantBySlugOrHistory(slug: string) {
   if (!slug || typeof slug !== "string") {
     return { restaurant: null, isRedirect: false, targetSlug: null };
   }
-  const cleanSlug = slug.toLowerCase().trim();
+  let decodedSlug = slug;
+  try {
+    decodedSlug = decodeURIComponent(slug);
+  } catch {}
 
-  // 1. Try finding by current active slug
-  const restaurant = await prismaTenant.restaurant.findUnique({
+  const cleanSlug = decodedSlug.toLowerCase().trim();
+  const sanitizedSlug = sanitizeSlug(decodedSlug);
+
+  // 1. Try finding by current active slug (exact match)
+  let restaurant = await prismaTenant.restaurant.findUnique({
     where: { slug: cleanSlug },
   });
 
@@ -15,9 +31,24 @@ export async function findRestaurantBySlugOrHistory(slug: string) {
     return { restaurant, isRedirect: false, targetSlug: cleanSlug };
   }
 
+  // 1.b If slug had spaces or special chars, check sanitized slug
+  if (sanitizedSlug && sanitizedSlug !== cleanSlug) {
+    restaurant = await prismaTenant.restaurant.findUnique({
+      where: { slug: sanitizedSlug },
+    });
+    if (restaurant) {
+      return { restaurant, isRedirect: true, targetSlug: sanitizedSlug };
+    }
+  }
+
   // 2. Try finding in SlugHistory
-  const history = await prismaTenant.slugHistory.findUnique({
-    where: { oldSlug: cleanSlug },
+  const history = await prismaTenant.slugHistory.findFirst({
+    where: {
+      OR: [
+        { oldSlug: cleanSlug },
+        ...(sanitizedSlug && sanitizedSlug !== cleanSlug ? [{ oldSlug: sanitizedSlug }] : []),
+      ],
+    },
     include: {
       restaurant: true,
     },

@@ -7,10 +7,13 @@ import crypto from "crypto";
 export const dynamic = "force-dynamic";
 
 function getBaseUrl(req: NextRequest) {
-  if (process.env.APP_URL && !process.env.APP_URL.includes("localhost")) {
+  if (process.env.APP_URL && !process.env.APP_URL.includes("localhost") && !process.env.APP_URL.includes("0.0.0.0")) {
     return process.env.APP_URL.replace(/\/$/, "");
   }
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "localhost:3000";
+  let host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  if (!host || host.includes("0.0.0.0")) {
+    host = "localhost:3000";
+  }
   const proto = req.headers.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
   return `${proto}://${host}`;
 }
@@ -23,7 +26,7 @@ export async function GET(req: NextRequest) {
   const errorParam = searchParams.get("error");
 
   if (errorParam || !code) {
-    const errorUrl = new URL("/login", req.url);
+    const errorUrl = new URL("/login", baseUrl);
     errorUrl.searchParams.set("error", errorParam || "google_auth_failed");
     return NextResponse.redirect(errorUrl);
   }
@@ -32,7 +35,7 @@ export async function GET(req: NextRequest) {
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 
   if (!clientId || !clientSecret) {
-    const errorUrl = new URL("/login", req.url);
+    const errorUrl = new URL("/login", baseUrl);
     errorUrl.searchParams.set("error", "google_config_missing");
     return NextResponse.redirect(errorUrl);
   }

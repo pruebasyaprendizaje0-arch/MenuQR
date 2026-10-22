@@ -1,10 +1,12 @@
 import React from "react";
 import { prisma } from "@/lib/db";
-import { findRestaurantBySlugOrHistory } from "@/lib/slugs";
+import { findRestaurantBySlugOrHistory, sanitizeSlug } from "@/lib/slugs";
 import type { Metadata } from "next";
 import { CtaloClient } from "./components/CtaloClient";
 import { redirect } from "next/navigation";
 import { getBusinessLabels } from "@/lib/business-labels";
+import Link from "next/link";
+import { ShoppingBag, ArrowLeft, Store } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +18,14 @@ interface PageProps {
 
 export async function generateMetadata({ params: paramsPromise }: PageProps): Promise<Metadata> {
   const params = await paramsPromise;
-  const slug = params.slug.toLowerCase().trim();
+  let decodedSlug = params.slug;
+  try {
+    decodedSlug = decodeURIComponent(params.slug);
+  } catch {}
+  const rawSlug = decodedSlug.toLowerCase().trim();
+  const cleanSlug = sanitizeSlug(decodedSlug);
 
-  if (slug === "demo") {
+  if (rawSlug === "demo" || cleanSlug === "demo") {
     return {
       title: "Catálogo Demo | Boutique & Calzado Pro",
       description: "Catálogo interactivo con variantes de tallas, colores y carrito de compras para WhatsApp.",
@@ -26,8 +33,13 @@ export async function generateMetadata({ params: paramsPromise }: PageProps): Pr
   }
 
   try {
-    const store = await prisma.restaurant.findUnique({
-      where: { slug },
+    const store = await prisma.restaurant.findFirst({
+      where: {
+        OR: [
+          { slug: cleanSlug },
+          { slug: rawSlug },
+        ],
+      },
       select: {
         name: true,
         description: true,
@@ -50,7 +62,7 @@ export async function generateMetadata({ params: paramsPromise }: PageProps): Pr
   };
 }
 
-// Datos demo si el comercio no existe o si se solicita /ctalo/demo
+// Datos demo EXCLUSIVOS si se solicita /ctalo/demo de forma explícita
 function getMockDemoStore() {
   return {
     id: "demo-boutique-id",
@@ -151,22 +163,34 @@ function getMockDemoStore() {
 
 export default async function CtaloSlugPage({ params: paramsPromise }: PageProps) {
   const params = await paramsPromise;
-  const slug = params.slug.toLowerCase().trim();
+  let decodedSlug = params.slug;
+  try {
+    decodedSlug = decodeURIComponent(params.slug);
+  } catch {}
+  const rawSlug = decodedSlug.toLowerCase().trim();
+  const cleanSlug = sanitizeSlug(decodedSlug);
 
-  if (slug === "demo") {
+  // Modo demo oficial
+  if (rawSlug === "demo" || cleanSlug === "demo") {
     const demoStore = getMockDemoStore();
     return <CtaloClient store={demoStore} />;
   }
 
   try {
-    const slugCheck = await findRestaurantBySlugOrHistory(slug);
+    const slugCheck = await findRestaurantBySlugOrHistory(decodedSlug);
     if (slugCheck.isRedirect && slugCheck.targetSlug) {
       redirect(`/ctalo/${slugCheck.targetSlug}`);
     }
-    const realSlug = slugCheck.restaurant?.slug || slug;
+    const realSlug = slugCheck.restaurant?.slug || cleanSlug;
 
-    let store = await prisma.restaurant.findUnique({
-      where: { slug: realSlug },
+    let store = await prisma.restaurant.findFirst({
+      where: {
+        OR: [
+          { slug: realSlug },
+          { slug: cleanSlug },
+          { slug: rawSlug },
+        ],
+      },
       include: {
         categories: {
           orderBy: { order: "asc" },
@@ -180,12 +204,12 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
       },
     });
 
-    if (!store && slug) {
+    if (!store && decodedSlug) {
       store = await prisma.restaurant.findFirst({
         where: {
           OR: [
-            { slug: { contains: slug } },
-            { name: { contains: slug, mode: "insensitive" } },
+            { slug: { contains: cleanSlug } },
+            { name: { contains: decodedSlug, mode: "insensitive" } },
           ],
         },
         include: {
@@ -203,10 +227,30 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
     }
 
     if (!store) {
-      const demoStore = getMockDemoStore();
-      demoStore.name = `Tienda (${slug})`;
-      demoStore.slug = slug;
-      return <CtaloClient store={demoStore} />;
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center relative overflow-hidden">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[340px] h-[340px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+          <div className="relative z-10 max-w-md space-y-6">
+            <div className="h-16 w-16 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center mx-auto text-amber-400 shadow-xl">
+              <ShoppingBag className="h-8 w-8" />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-extrabold tracking-tight text-white">Catálogo no encontrado</h1>
+              <p className="text-slate-400 text-sm">
+                El catálogo comercial <code className="text-amber-300 bg-slate-900 px-1.5 py-0.5 rounded font-mono">/{decodedSlug}</code> no existe o su enlace fue actualizado.
+              </p>
+            </div>
+            <div className="pt-4 flex flex-col gap-2.5">
+              <Link href="/catalogos" className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-sm shadow-lg transition-all">
+                Explorar Catálogos y Tiendas
+              </Link>
+              <Link href="/admin" className="px-6 py-3 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-850 text-slate-300 font-semibold text-sm transition-all">
+                Ingresar al Panel Administrativo
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
     }
 
     let rawCategoryAspectRatios: Array<{ id: string; imageAspectRatio: string | null }> = [];
@@ -340,7 +384,23 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
     return <CtaloClient store={formattedStore} />;
   } catch (error) {
     console.error("[CtaloSlugPage Error]:", error);
-    const demoStore = getMockDemoStore();
-    return <CtaloClient store={demoStore} />;
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center relative overflow-hidden">
+        <div className="relative z-10 max-w-md space-y-4">
+          <div className="h-14 w-14 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center mx-auto text-amber-400 shadow-xl">
+            <ShoppingBag className="h-7 w-7" />
+          </div>
+          <h1 className="text-2xl font-bold text-white">Error al cargar el catálogo</h1>
+          <p className="text-slate-400 text-xs">
+            Ocurrió un problema momentáneo al cargar los productos de esta tienda. Por favor intenta recargar.
+          </p>
+          <div className="pt-2">
+            <Link href="/catalogos" className="inline-block px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg transition-all">
+              Volver al Directorio de Catálogos
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 }

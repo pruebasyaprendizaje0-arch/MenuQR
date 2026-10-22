@@ -1,8 +1,10 @@
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { Sparkles, ArrowLeft, ChefHat, Users, LayoutDashboard, Trees, Calendar, Wrench, ShoppingBag, ExternalLink } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { RestaurantSwitcher } from "./components/RestaurantSwitcher";
 
 export const dynamic = "force-dynamic";
 
@@ -18,21 +20,55 @@ export default async function AdminLayout({
   }
 
   const isSuperAdmin = await getSuperAdminSession();
+  const cookieStore = await cookies();
+  const sessionUserId = (session as any).userId || (session as any).id || "";
+  const activeRestaurantId = (session as any).restaurantId || cookieStore.get("active_restaurant_id")?.value;
 
-  const userRestaurant = await prisma.restaurant.findFirst({
-    where: {
-      OR: [
-        { id: (session as any).restaurantId || "" },
-        { userId: (session as any).userId || (session as any).id || "" },
-      ],
-    },
+  // Lista de todos los negocios del usuario para el selector multi-empresa
+  const userRestaurants = await prisma.restaurant.findMany({
+    where: isSuperAdmin && !sessionUserId ? {} : { userId: sessionUserId },
     select: {
+      id: true,
+      name: true,
       slug: true,
       businessType: true,
-      enableTableOrdering: true,
-      customLabels: true,
+      logoUrl: true,
     },
+    orderBy: { createdAt: "asc" },
   });
+
+  // Resolución estricta del negocio activo: prioriza el ID de sesión/cookie sobre el primer registro del usuario
+  let userRestaurant = null;
+  if (activeRestaurantId) {
+    userRestaurant = await prisma.restaurant.findFirst({
+      where: isSuperAdmin
+        ? { id: activeRestaurantId }
+        : { id: activeRestaurantId, userId: sessionUserId },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        businessType: true,
+        enableTableOrdering: true,
+        customLabels: true,
+      },
+    });
+  }
+
+  if (!userRestaurant) {
+    userRestaurant = await prisma.restaurant.findFirst({
+      where: { userId: sessionUserId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        businessType: true,
+        enableTableOrdering: true,
+        customLabels: true,
+      },
+    });
+  }
 
   const parsedLabels = (() => {
     try {
@@ -67,7 +103,7 @@ export default async function AdminLayout({
               <Sparkles className="h-3.5 w-3.5 text-amber-200" />
             </div>
             <span>
-              Modo Puesta en Marcha / Asistencia Super Admin — Estás configurando el perfil y menú digital de: <strong>{session.email}</strong>
+              Modo Puesta en Marcha / Asistencia Super Admin — Estás configurando el perfil y menú digital de: <strong>{session.email}</strong> {userRestaurant ? `(${userRestaurant.name})` : ""}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -84,7 +120,7 @@ export default async function AdminLayout({
 
       {/* Barra de Accesos Rápidos Operativos Adaptativa */}
       <div className="bg-slate-900 border-b border-slate-800 text-xs py-2 px-4 flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
           <Link
             href="/admin"
             className="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition font-medium"
@@ -163,8 +199,17 @@ export default async function AdminLayout({
           )}
         </div>
 
-        <div className="text-[11px] text-slate-400 hidden sm:block">
-          Sincronización en tiempo real vía Socket.IO y Postgres
+        <div className="flex items-center gap-3">
+          {userRestaurant && userRestaurants.length > 1 && (
+            <RestaurantSwitcher
+              currentRestaurantId={userRestaurant.id}
+              restaurants={userRestaurants}
+            />
+          )}
+
+          <div className="text-[11px] text-slate-400 hidden md:block">
+            Sincronización en tiempo real vía Socket.IO y Postgres
+          </div>
         </div>
       </div>
 

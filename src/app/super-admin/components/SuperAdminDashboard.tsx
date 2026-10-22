@@ -1801,9 +1801,23 @@ export function SuperAdminDashboard({
                                   <div>
                                     <div className="text-sm font-semibold text-white flex items-center gap-1">
                                       {res.name}
-                                      <a href={`/${res.slug}`} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition">
-                                        <ExternalLink className="h-3 w-3" />
-                                      </a>
+                                      {(() => {
+                                        const cleanSlug = encodeURIComponent((res.slug || "").trim());
+                                        const targetHref = resVertical === "retail" 
+                                          ? `/ctalo/${cleanSlug}` 
+                                          : resVertical === "reservas"
+                                          ? `/reservas/${cleanSlug}`
+                                          : resVertical === "servicios"
+                                          ? `/servicios/${cleanSlug}`
+                                          : resVertical === "citas"
+                                          ? `/citas/${cleanSlug}`
+                                          : `/${cleanSlug}`;
+                                        return (
+                                          <a href={targetHref} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-white transition" title={`Abrir ${tabInfo.label}`}>
+                                            <ExternalLink className="h-3 w-3" />
+                                          </a>
+                                        );
+                                      })()}
                                     </div>
                                     <div className="text-xs text-slate-400">/{res.slug}</div>
                                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -3937,9 +3951,18 @@ export function SuperAdminDashboard({
                       type="text"
                       required
                       value={editData.slug}
-                      onChange={(e) => setEditData({ ...editData, slug: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                      onChange={(e) => {
+                        const clean = e.target.value
+                          .toLowerCase()
+                          .normalize("NFD")
+                          .replace(/[\u0300-\u036f]/g, "")
+                          .replace(/[^a-z0-9-]+/g, "-");
+                        setEditData({ ...editData, slug: clean });
+                      }}
+                      placeholder="ej: mi-negocio-online"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500 font-mono text-xs"
                     />
+                    <p className="text-[10px] text-slate-500 mt-1">Solo minúsculas, números y guiones. Sin espacios ni tildes.</p>
                   </div>
                   <div>
                     <label className="block text-slate-300 mb-1 font-medium">Teléfono WhatsApp</label>

@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "npx prisma db push && node .next/standalone/server.js",
     "lint": "eslint .",
-    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/split-bill.test.ts && npx tsx src/lib/batch-dishes.test.ts && npx tsx src/lib/impersonation.test.ts && npx tsx src/lib/ruleta-flow.test.ts && npx tsx src/lib/suggested-dishes.test.ts && npx tsx src/lib/stock-control.test.ts && npx tsx src/lib/table-token.test.ts && npx tsx src/lib/whatsapp-templates.test.ts && npx tsx src/lib/marketplace.test.ts && npx tsx src/lib/caja-pos.test.ts && npx tsx src/lib/gallery-profiles.test.ts && npx tsx src/lib/floating-whatsapp.test.ts"
+    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/split-bill.test.ts && npx tsx src/lib/batch-dishes.test.ts && npx tsx src/lib/impersonation.test.ts && npx tsx src/lib/ruleta-flow.test.ts && npx tsx src/lib/suggested-dishes.test.ts && npx tsx src/lib/stock-control.test.ts && npx tsx src/lib/table-token.test.ts && npx tsx src/lib/whatsapp-templates.test.ts && npx tsx src/lib/marketplace.test.ts && npx tsx src/lib/caja-pos.test.ts && npx tsx src/lib/gallery-profiles.test.ts && npx tsx src/lib/floating-whatsapp.test.ts && npx tsx src/lib/catalog-multistore.test.ts"
   },
   "engines": {
     "node": ">=20.9.0",

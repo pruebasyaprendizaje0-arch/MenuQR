@@ -628,6 +628,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
             actionTabIcon={<ShoppingBag className="h-4.5 w-4.5 shrink-0" />}
             onSelectActionTab={() => setCurrentTab("catalogo")}
             verticalBadge="Tienda Oficial & E-Commerce"
+            vertical="ctalo"
           />
         </div>
       ) : (
