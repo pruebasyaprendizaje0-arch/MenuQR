@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     const tokenData = await tokenRes.json();
     if (!tokenRes.ok || !tokenData.access_token) {
       console.error("Error al obtener tokens de Google:", tokenData);
-      const errorUrl = new URL("/login", req.url);
+      const errorUrl = new URL("/login", baseUrl);
       errorUrl.searchParams.set("error", "google_token_error");
       return NextResponse.redirect(errorUrl);
     }
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
     const profile = await userRes.json();
     if (!userRes.ok || !profile.email) {
       console.error("Error al obtener perfil de Google:", profile);
-      const errorUrl = new URL("/login", req.url);
+      const errorUrl = new URL("/login", baseUrl);
       errorUrl.searchParams.set("error", "google_profile_error");
       return NextResponse.redirect(errorUrl);
     }
