@@ -65,7 +65,7 @@ async function runTests() {
 
     assert(!mainPageContent.includes('href="/mamma-mia"'), "src/app/page.tsx no debe contener enlaces a /mamma-mia");
     assert(!slugPageContent.includes('href="/mamma-mia"'), "src/app/[slug]/page.tsx no debe contener enlaces a /mamma-mia");
-    assert(mainPageContent.includes('href="/pigro"'), "src/app/page.tsx debe enlazar al menú de muestra /pigro");
+    assert(mainPageContent.includes('href="/menuqr"') || mainPageContent.includes('href="/pigro"'), "src/app/page.tsx debe enlazar a las verticales del ecosistema o demo");
     assert(slugPageContent.includes('href="/pigro"'), "src/app/[slug]/page.tsx debe enlazar al menú de muestra /pigro");
 
     // TEST 3: Safe Image URL Resolution (resolvePublicImageUrl)

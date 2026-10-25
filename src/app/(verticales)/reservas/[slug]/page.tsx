@@ -150,6 +150,23 @@ export default async function ReservasSlugPage({ params: paramsPromise }: PagePr
             dishes: true,
           },
         },
+        campaigns: {
+          where: {
+            isActive: true,
+            OR: [
+              { endDate: null },
+              { endDate: { gte: new Date() } },
+            ],
+          },
+          include: {
+            dishes: {
+              include: {
+                dish: true,
+              },
+            },
+          },
+          orderBy: [{ order: "asc" }, { createdAt: "desc" }],
+        },
       },
     });
 
@@ -258,6 +275,19 @@ export default async function ReservasSlugPage({ params: paramsPromise }: PagePr
       structuredSchedule: property.structuredSchedule,
       blockedDates: property.blockedDates,
       mapEmbedUrl: property.mapEmbedUrl,
+      campaigns: ((property as any).campaigns || []).map((camp: any) => ({
+        ...camp,
+        startDate: camp.startDate ? camp.startDate.toISOString() : null,
+        endDate: camp.endDate ? camp.endDate.toISOString() : null,
+        eventDate: camp.eventDate ? camp.eventDate.toISOString() : null,
+        createdAt: camp.createdAt.toISOString(),
+        updatedAt: camp.updatedAt.toISOString(),
+        dishes: (camp.dishes || []).map((cd: any) => ({
+          ...cd,
+          createdAt: cd.createdAt.toISOString(),
+          dish: cd.dish,
+        })),
+      })),
     };
 
     return <ReservasClient property={formattedProperty} />;

@@ -201,6 +201,31 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
             },
           },
         },
+        campaigns: {
+          where: {
+            isActive: true,
+            OR: [
+              { endDate: null },
+              { endDate: { gte: new Date() } },
+            ],
+          },
+          include: {
+            dishes: {
+              include: {
+                dish: {
+                  select: {
+                    id: true,
+                    name: true,
+                    price: true,
+                    imageUrl: true,
+                    isAvailable: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: [{ order: "asc" }, { createdAt: "desc" }],
+        },
       },
     });
 
@@ -221,6 +246,31 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
                 orderBy: { createdAt: "desc" },
               },
             },
+          },
+          campaigns: {
+            where: {
+              isActive: true,
+              OR: [
+                { endDate: null },
+                { endDate: { gte: new Date() } },
+              ],
+            },
+            include: {
+              dishes: {
+                include: {
+                  dish: {
+                    select: {
+                      id: true,
+                      name: true,
+                      price: true,
+                      imageUrl: true,
+                      isAvailable: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: [{ order: "asc" }, { createdAt: "desc" }],
           },
         },
       });
@@ -381,6 +431,19 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
       structuredSchedule: store.structuredSchedule,
       blockedDates: store.blockedDates,
       mapEmbedUrl: store.mapEmbedUrl,
+      campaigns: ((store as any).campaigns || []).map((camp: any) => ({
+        ...camp,
+        startDate: camp.startDate ? camp.startDate.toISOString() : null,
+        endDate: camp.endDate ? camp.endDate.toISOString() : null,
+        eventDate: camp.eventDate ? camp.eventDate.toISOString() : null,
+        createdAt: camp.createdAt.toISOString(),
+        updatedAt: camp.updatedAt.toISOString(),
+        dishes: (camp.dishes || []).map((cd: any) => ({
+          ...cd,
+          createdAt: cd.createdAt.toISOString(),
+          dish: cd.dish,
+        })),
+      })),
     };
 
     return <CtaloClient store={formattedStore} />;

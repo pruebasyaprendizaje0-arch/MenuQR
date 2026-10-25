@@ -177,6 +177,34 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
         ruletaConfig: {
           select: { activa: true },
         },
+        campaigns: {
+          where: {
+            isActive: true,
+            OR: [
+              { endDate: null },
+              { endDate: { gte: new Date() } },
+            ],
+          },
+          include: {
+            dishes: {
+              include: {
+                dish: {
+                  select: {
+                    id: true,
+                    name: true,
+                    price: true,
+                    imageUrl: true,
+                    isAvailable: true,
+                    category: {
+                      select: { name: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          orderBy: [{ order: "asc" }, { createdAt: "desc" }],
+        },
       },
     });
 
@@ -340,6 +368,19 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
         endDate: toIso(rate.endDate),
         createdAt: toIso(rate.createdAt),
         updatedAt: toIso(rate.updatedAt),
+      })),
+      campaigns: ((restaurant as any).campaigns || []).map((camp: any) => ({
+        ...camp,
+        startDate: toIso(camp.startDate),
+        endDate: toIso(camp.endDate),
+        eventDate: toIso(camp.eventDate),
+        createdAt: toIso(camp.createdAt),
+        updatedAt: toIso(camp.updatedAt),
+        dishes: (camp.dishes || []).map((cd: any) => ({
+          ...cd,
+          createdAt: toIso(cd.createdAt),
+          dish: cd.dish,
+        })),
       })),
     };
 

@@ -470,6 +470,29 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
 
   graphList.push(generateBreadcrumbJsonLd(breadcrumbItems));
 
+  const activeEvents = ((restaurant as any).campaigns || [])
+    .filter((c: any) => c.isActive && c.type === "EVENT")
+    .map((c: any) => ({
+      "@type": "Event",
+      "@id": `${siteUrl}#event-${c.id}`,
+      name: c.title,
+      description: c.description || c.title,
+      startDate: c.startDate || c.eventDate || new Date().toISOString(),
+      endDate: c.endDate,
+      eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+      eventStatus: "https://schema.org/EventScheduled",
+      location: {
+        "@type": "Place",
+        name: restaurant.name,
+        address: postalAddress,
+      },
+      image: resolvePublicImageUrl(c.imageUrl),
+    }));
+
+  if (activeEvents.length > 0) {
+    graphList.push(...activeEvents);
+  }
+
   return {
     "@context": "https://schema.org",
     "@graph": graphList,

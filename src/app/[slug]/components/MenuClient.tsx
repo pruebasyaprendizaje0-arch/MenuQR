@@ -43,7 +43,8 @@ import {
   X,
   CreditCard,
   ShieldCheck,
-  ShoppingBag
+  ShoppingBag,
+  Flame,
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -53,6 +54,9 @@ import { parseTableFromUrl } from "@/lib/table-token";
 import { SmartExitButton } from "@/components/public/SmartExitButton";
 import { GalleryCarousel } from "@/components/public/GalleryCarousel";
 import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
+import { BusinessCampaignSection } from "@/components/public/BusinessCampaignSection";
+import { BusinessCampaignData } from "@/lib/campaign-types";
+import { calculateItemPromoPrice } from "@/lib/campaign-utils";
 
 type Dish = {
   id: string;
@@ -136,6 +140,7 @@ type Restaurant = {
     isActive: boolean;
   }[];
   galleryImages?: string[] | null;
+  campaigns?: BusinessCampaignData[] | null;
 };
 
 interface CartItem {
@@ -663,6 +668,29 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     }
   };
 
+  const dishPromoMap = useMemo(() => {
+    const map = new Map<string, { promoPrice: number; promoLabel: string; campaignTitle: string }>();
+    (restaurant.campaigns || []).forEach((c) => {
+      if (!c.isActive) return;
+      if (c.endDate && new Date(c.endDate) < new Date()) return;
+      (c.dishes || []).forEach((cd) => {
+        const promoPrice = calculateItemPromoPrice(
+          cd.dish?.price ?? 0,
+          c.discountType,
+          c.discountValue || 0,
+          cd.promoPrice
+        );
+        const label = cd.promoLabel || c.badgeText || (c.discountType === "DEAL_2X1" ? "2x1" : "PROMO");
+        map.set(cd.dishId, {
+          promoPrice,
+          promoLabel: label,
+          campaignTitle: c.title,
+        });
+      });
+    });
+    return map;
+  }, [restaurant.campaigns]);
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -861,6 +889,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     }
 
     let reachedStockLimit = false;
+    const promo = dishPromoMap.get(dish.id);
+    const effectivePrice = promo ? promo.promoPrice : dish.price;
 
     setCart((prevCart) => {
       const existing = prevCart.find((item) => item.dish.id === dish.id);
@@ -874,7 +904,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             ? {
                 ...item,
                 quantity: item.quantity + 1,
-                dish: { ...item.dish, stock: curStock, isAvailable, trackStock: isTracked },
+                dish: { ...item.dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: isTracked },
               }
             : item
         );
@@ -882,7 +912,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return [
         ...prevCart,
         {
-          dish: { ...dish, stock: curStock, isAvailable, trackStock: isTracked },
+          dish: { ...dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: isTracked },
           quantity: 1,
         },
       ];
@@ -1811,6 +1841,23 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               </div>
             </div>
 
+            {/* Campañas, Eventos & Promociones Semanales */}
+            {restaurant.campaigns && restaurant.campaigns.length > 0 && (
+              <BusinessCampaignSection
+                campaigns={restaurant.campaigns}
+                themeColor={restaurant.themeColor}
+                businessName={restaurant.name}
+                businessWhatsapp={restaurant.whatsappNumber}
+                onSelectDish={(dishId) => {
+                  setCurrentTab("menu");
+                  const cat = categories.find((c) => c.dishes.some((d) => d.id === dishId));
+                  if (cat) {
+                    setTimeout(() => scrollToCategory(cat.id), 150);
+                  }
+                }}
+              />
+            )}
+
             {/* Description & Story Section */}
             {restaurant.description && (
               <div className="bg-slate-900/50 border border-white/10 rounded-[2.5rem] p-8 backdrop-blur-xl space-y-4 relative overflow-hidden">
@@ -2223,6 +2270,31 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           </div>
         ) : (
           <div className="space-y-10">
+            {/* Ribbon Promocional en Menú Digital */}
+            {restaurant.campaigns && restaurant.campaigns.some((c) => c.isActive) && (
+              <div 
+                onClick={() => setCurrentTab("profile")}
+                className="cursor-pointer rounded-2xl bg-gradient-to-r from-rose-500/20 via-amber-500/15 to-rose-500/20 border border-rose-500/30 p-3.5 flex items-center justify-between gap-3 backdrop-blur-md shadow-lg shadow-rose-500/10 hover:border-rose-400 transition group"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="p-1.5 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 shrink-0">
+                    <Flame className="w-4 h-4 animate-pulse" />
+                  </span>
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-rose-300 block">
+                      Promociones y Eventos de la Semana
+                    </span>
+                    <p className="text-xs font-bold text-white truncate">
+                      {restaurant.campaigns.find((c) => c.isActive)?.title}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-xs font-extrabold text-amber-300 shrink-0 flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                  Ver detalles →
+                </span>
+              </div>
+            )}
+
             {/* Table / Delivery Selector Banner */}
             <div className="bg-slate-900/40 border border-white/5 rounded-[2rem] p-6 backdrop-blur-md flex items-center justify-between gap-4" style={{ fontFamily: 'var(--font-outfit)' }}>
               <div className="flex items-center gap-3">
@@ -2394,9 +2466,25 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                           <div className="flex items-center justify-between pt-2.5 border-t border-white/5 mt-1">
                             <div className="flex flex-col">
-                              <span className="text-base font-black text-amber-400">
-                                ${formatPrice(dish.price)}
-                              </span>
+                              {dishPromoMap.get(dish.id) ? (
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-base font-black text-emerald-400">
+                                      ${formatPrice(dishPromoMap.get(dish.id)!.promoPrice)}
+                                    </span>
+                                    <span className="text-[11px] text-slate-500 line-through">
+                                      ${formatPrice(dish.price)}
+                                    </span>
+                                  </div>
+                                  <span className="text-[9px] font-black uppercase text-rose-400 block">
+                                    🔥 {dishPromoMap.get(dish.id)!.promoLabel}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-base font-black text-amber-400">
+                                  ${formatPrice(dish.price)}
+                                </span>
+                              )}
                               {dish.trackStock && (dish.stock ?? 0) <= (dish.minStock ?? 0) && (dish.stock ?? 0) > 0 && (
                                 <span className="text-[10px] text-amber-400 font-bold flex items-center gap-0.5 animate-pulse">
                                   🔥 ¡Últimas {dish.stock}!

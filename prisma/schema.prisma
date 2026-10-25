@@ -25,6 +25,19 @@ enum CatalogMode {
   CATALOG
 }
 
+enum CampaignType {
+  PROMO
+  EVENT
+  ACTIVITY
+}
+
+enum CampaignDiscountType {
+  PERCENTAGE
+  FIXED_PRICE
+  DEAL_2X1
+  CUSTOM
+}
+
 model User {
   id               String       @id @default(uuid())
   email            String       @unique
@@ -142,6 +155,7 @@ model Restaurant {
   suspendedReason   String?
   lastMaintenanceAt DateTime?
   eliteTasks        EliteTask[]
+  campaigns         BusinessCampaign[]
   createdAt         DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -190,6 +204,7 @@ model Dish {
   supplier     Supplier?  @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   recipeItems  DishRecipeItem[]
   purchaseOrderItems PurchaseOrderItem[]
+  campaignDishes CampaignDish[]
 
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -706,6 +721,57 @@ model PurchaseOrderItem {
   @@index([purchaseOrderId])
   @@index([dishId])
   @@index([supplyItemId])
+}
+
+model BusinessCampaign {
+  id              String               @id @default(uuid())
+  restaurantId    String
+  restaurant      Restaurant           @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  title           String
+  type            CampaignType         @default(PROMO)
+  badgeText       String?              @default("Promo Semanal")
+  description     String?              @db.Text
+  imageUrl        String?
+  startDate       DateTime?
+  endDate         DateTime?
+  eventDate       DateTime?
+  startTime       String?
+  endTime         String?
+  daysOfWeek      String?
+  discountType    CampaignDiscountType @default(PERCENTAGE)
+  discountValue   Float?               @default(0.0)
+  ctaType         String               @default("WHATSAPP")
+  ctaText         String?              @default("Aprovechar por WhatsApp")
+  whatsappMessage String?              @db.Text
+  externalUrl     String?
+  isActive        Boolean              @default(true)
+  showInProfile   Boolean              @default(true)
+  showInCatalog   Boolean              @default(true)
+  order           Int                  @default(0)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  dishes          CampaignDish[]
+
+  @@index([restaurantId, isActive])
+  @@index([restaurantId, type])
+  @@index([endDate])
+}
+
+model CampaignDish {
+  id          String           @id @default(uuid())
+  campaignId  String
+  campaign    BusinessCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  dishId      String
+  dish        Dish             @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  promoPrice  Float?
+  promoLabel  String?
+
+  createdAt   DateTime         @default(now())
+
+  @@unique([campaignId, dishId])
+  @@index([campaignId])
+  @@index([dishId])
 }
 
 

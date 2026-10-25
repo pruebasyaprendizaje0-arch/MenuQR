@@ -124,6 +124,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
+import CampaignsAdminTab from "./CampaignsAdminTab";
 import InventoryAdminTab from "./InventoryAdminTab";
 import CitasAdminTab from "./CitasAdminTab";
 import ReservasAdminTab from "./ReservasAdminTab";
@@ -614,7 +615,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "citas" | "reservas" | "subscription" | "ai-settings">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "citas" | "reservas" | "subscription" | "ai-settings">("metrics");
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
@@ -2500,6 +2501,17 @@ export function AdminDashboard({
                 <span>🎡 Ruleta de Premios</span>
               </button>
             )}
+            <button
+              onClick={() => setActiveTab("campaigns")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "campaigns" 
+                  ? "bg-gradient-to-r from-rose-600/20 to-amber-500/20 text-rose-400 border-l-4 border-rose-500" 
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <Flame className="h-4 w-4 text-rose-400" />
+              <span>Promos & Eventos</span>
+            </button>
             <button
               onClick={() => setActiveTab("qr")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -7974,6 +7986,11 @@ export function AdminDashboard({
         {/* Ruleta de Premios Tab */}
         {activeTab === "ruleta" && (
           <RuletaAdminTab restaurant={restaurant} />
+        )}
+
+        {/* Campañas, Eventos & Promociones Tab */}
+        {activeTab === "campaigns" && (
+          <CampaignsAdminTab restaurant={restaurant} />
         )}
 
         {/* Inventario & Compras Tab */}

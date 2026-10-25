@@ -23,6 +23,8 @@ import { getMapIframeSrc } from "@/lib/map-utils";
 import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
 import { GalleryCarousel } from "@/components/public/GalleryCarousel";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
+import { BusinessCampaignSection } from "@/components/public/BusinessCampaignSection";
+import { BusinessCampaignData } from "@/lib/campaign-types";
 
 export interface BusinessProfileProps {
   id: string;
@@ -74,6 +76,9 @@ export interface BusinessProfileProps {
   galleryTitle?: string;
   galleryBadge?: string;
   vertical?: "menuqr" | "ctalo" | "servicios" | "citas" | "reservas";
+  // Campañas, Eventos & Promociones Semanales
+  campaigns?: BusinessCampaignData[] | null;
+  onSelectDish?: (dishId: string) => void;
 }
 
 export function BusinessProfileView({
@@ -122,6 +127,8 @@ export function BusinessProfileView({
   vertical = "menuqr",
   galleryTitle,
   galleryBadge,
+  campaigns,
+  onSelectDish,
 }: BusinessProfileProps) {
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
@@ -479,6 +486,19 @@ export function BusinessProfileView({
           </div>
         </div>
       </div>
+
+      {/* ============================================================ */}
+      {/* 1.5 CAMPAÑAS, EVENTOS & PROMOCIONES SEMANALES               */}
+      {/* ============================================================ */}
+      {campaigns && campaigns.length > 0 && (
+        <BusinessCampaignSection
+          campaigns={campaigns}
+          themeColor={effectiveThemeColor}
+          businessName={name}
+          businessWhatsapp={whatsappNumber || whatsapp}
+          onSelectDish={onSelectDish}
+        />
+      )}
 
       {/* ============================================================ */}
       {/* 2. SOBRE NOSOTROS & HISTORIA                                 */}
