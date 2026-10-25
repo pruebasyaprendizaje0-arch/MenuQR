@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
@@ -51,6 +51,8 @@ interface Product {
   tallas?: string[];
   colores?: string[];
   stock: number;
+  isAvailable?: boolean;
+  trackStock?: boolean;
   isNew?: boolean;
   categoryId?: string;
   categoryName?: string;
@@ -288,6 +290,126 @@ export function CtaloClient({ store }: { store: StoreData }) {
     );
   }, [store]);
 
+  // Mapa de inventario sincronizado en vivo
+  const [liveStockMap, setLiveStockMap] = useState<
+    Record<
+      string,
+      {
+        stock: number | null;
+        isAvailable: boolean;
+        trackStock: boolean;
+      }
+    >
+  >({});
+
+  // Función para obtener stock efectivo de un producto
+  const getProductStock = useCallback(
+    (productId: string): number => {
+      if (liveStockMap[productId]?.stock !== undefined && liveStockMap[productId]?.stock !== null) {
+        return liveStockMap[productId].stock as number;
+      }
+      const prod = allProducts.find((p) => p.id === productId);
+      return typeof prod?.stock === "number" ? prod.stock : 0;
+    },
+    [liveStockMap, allProducts]
+  );
+
+  const isProductAvailable = useCallback(
+    (productId: string): boolean => {
+      if (liveStockMap[productId]) {
+        return liveStockMap[productId].isAvailable;
+      }
+      const prod = allProducts.find((p) => p.id === productId);
+      return prod?.isAvailable !== false && (typeof prod?.stock !== "number" || prod.stock > 0);
+    },
+    [liveStockMap, allProducts]
+  );
+
+  // Sincronizar existencias en vivo y auto-ajustar carrito automáticamente
+  const refreshLiveStock = useCallback(
+    async (showAlerts = false) => {
+      try {
+        const res = await fetch(`/api/stock-check?restaurantId=${store.id}`, {
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.dishes) {
+            setLiveStockMap(data.dishes);
+
+            setCart((prev) => {
+              let hasAdjustments = false;
+              const messages: string[] = [];
+
+              const adjusted = prev
+                .map((it) => {
+                  const fresh = data.dishes[it.productId];
+                  if (fresh) {
+                    const curStock = typeof fresh.stock === "number" ? fresh.stock : 999999;
+                    if (fresh.isAvailable === false || curStock <= 0) {
+                      hasAdjustments = true;
+                      messages.push(`"${it.name}" se encuentra agotado y fue removido de tu orden.`);
+                      return null;
+                    }
+                    if (it.cantidad > curStock) {
+                      hasAdjustments = true;
+                      messages.push(
+                        `Solo disponemos de ${curStock} unidad(es) de "${it.name}". Ajustamos tu carrito a ${curStock} automáticamente.`
+                      );
+                      return { ...it, cantidad: curStock };
+                    }
+                  }
+                  return it;
+                })
+                .filter(Boolean) as CartItem[];
+
+              if (showAlerts && hasAdjustments && messages.length > 0) {
+                alert("Aviso de disponibilidad de inventario:\n\n" + messages.join("\n"));
+              }
+              return adjusted;
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Error consultando stock en vivo:", err);
+      }
+    },
+    [store.id]
+  );
+
+  // Polling cada 25s o al volver a enfocar la ventana
+  useEffect(() => {
+    refreshLiveStock(false);
+
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        refreshLiveStock(false);
+      }
+    }, 25000);
+
+    const handleFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        refreshLiveStock(false);
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [refreshLiveStock]);
+
+  // Al abrir el carrito, validar existencias frescas inmediatamente
+  useEffect(() => {
+    if (isCartOpen) {
+      refreshLiveStock(true);
+    }
+  }, [isCartOpen, refreshLiveStock]);
+
   // Determina el formato de imagen (1:1 o 9:16) según la categoría o el negocio
   const getProductAspect = (product: Product): "1:1" | "9:16" => {
     const catAspect = product.categoryAspect;
@@ -344,6 +466,14 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
   // Añadir directamente con 1 clic (para productos sin variantes - Alternativa 1)
   const handleDirectAddToCart = (product: Product, delta: number = 1) => {
+    const isAvail = isProductAvailable(product.id);
+    const curStock = getProductStock(product.id);
+
+    if (delta > 0 && (!isAvail || curStock <= 0)) {
+      alert(`¡Producto Agotado! "${product.name}" no tiene existencias disponibles en bodega.`);
+      return;
+    }
+
     const cartId = `${product.id}-direct`;
     setCart((prev) => {
       const existing = prev.find((it) => it.cartId === cartId);
@@ -352,11 +482,19 @@ export function CtaloClient({ store }: { store: StoreData }) {
         if (newQty <= 0) {
           return prev.filter((it) => it.cartId !== cartId);
         }
+        if (delta > 0 && newQty > curStock) {
+          alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${product.name}".`);
+          return prev;
+        }
         return prev.map((it) =>
           it.cartId === cartId ? { ...it, cantidad: newQty } : it
         );
       }
       if (delta <= 0) return prev;
+      if (delta > curStock) {
+        alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${product.name}".`);
+        return prev;
+      }
       return [
         ...prev,
         {
@@ -366,7 +504,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
           price: product.price,
           imageUrl: product.imageUrl,
           variantLabel: null,
-          cantidad: delta,
+          cantidad: Math.min(delta, curStock),
         },
       ];
     });
@@ -384,9 +522,30 @@ export function CtaloClient({ store }: { store: StoreData }) {
     setQuantity(1);
   };
 
-  // Añadir al carrito con variantes seleccionadas
+  // Añadir al carrito con variantes seleccionadas y tope infranqueable
   const handleAddToCart = () => {
     if (!activeProduct) return;
+
+    const isAvail = isProductAvailable(activeProduct.id);
+    const curStock = getProductStock(activeProduct.id);
+
+    if (!isAvail || curStock <= 0) {
+      alert(`¡Producto Agotado! "${activeProduct.name}" no tiene existencias disponibles.`);
+      return;
+    }
+
+    const currentInCart = cart
+      .filter((it) => it.productId === activeProduct.id)
+      .reduce((sum, it) => sum + it.cantidad, 0);
+
+    const maxCanAdd = Math.max(0, curStock - currentInCart);
+
+    if (quantity > maxCanAdd) {
+      alert(
+        `¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${activeProduct.name}"${currentInCart > 0 ? ` (ya tienes ${currentInCart} en tu carrito)` : ""}.`
+      );
+      return;
+    }
 
     let variantLabel: string | null = null;
     if (activeProduct.hasVariants) {
@@ -426,22 +585,38 @@ export function CtaloClient({ store }: { store: StoreData }) {
     setIsCartOpen(true);
   };
 
-  // Actualizar cantidad en carrito
+  // Actualizar cantidad en carrito con tope estricto de bodega
   const updateCartQty = (cartId: string, delta: number) => {
-    setCart((prev) =>
-      prev
-        .map((it) => {
-          if (it.cartId === cartId) {
-            const newQty = it.cantidad + delta;
-            return newQty > 0 ? { ...it, cantidad: newQty } : null;
+    setCart((prev) => {
+      const it = prev.find((item) => item.cartId === cartId);
+      if (!it) return prev;
+
+      if (delta > 0) {
+        const curStock = getProductStock(it.productId);
+        const otherInCart = prev
+          .filter((item) => item.productId === it.productId && item.cartId !== cartId)
+          .reduce((sum, item) => sum + item.cantidad, 0);
+
+        const maxAllowed = curStock - otherInCart;
+        if (it.cantidad >= maxAllowed) {
+          alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${it.name}".`);
+          return prev;
+        }
+      }
+
+      return prev
+        .map((item) => {
+          if (item.cartId === cartId) {
+            const newQty = item.cantidad + delta;
+            return newQty > 0 ? { ...item, cantidad: newQty } : null;
           }
-          return it;
+          return item;
         })
-        .filter(Boolean) as CartItem[]
-    );
+        .filter(Boolean) as CartItem[];
+    });
   };
 
-  // Procesar pedido a la API unificada y WhatsApp
+  // Procesar pedido a la API unificada y WhatsApp con tope estricto y sin desvío ante rechazo
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cart.length === 0) return;
@@ -482,6 +657,8 @@ export function CtaloClient({ store }: { store: StoreData }) {
         total: grandTotal,
         notas_entrega: customerNotes,
         items: cart.map((it) => ({
+          dishId: it.productId,
+          productId: it.productId,
           nombre: it.name,
           cantidad: it.cantidad,
           precio: it.price,
@@ -499,59 +676,42 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
       const data = await res.json();
 
-      if (data.ok && data.whatsapp_url) {
+      if (res.ok && data.ok && data.whatsapp_url) {
         setOrderSuccess(true);
         setCart([]);
         window.open(data.whatsapp_url, "_blank");
       } else {
-        // Fallback WhatsApp message generator
-        const phone = store.whatsappNumber || store.whatsapp;
-        let cleanPhone = (phone || "").replace(/\D/g, "");
-        if (cleanPhone.startsWith("09")) cleanPhone = "593" + cleanPhone.substring(1);
-        else if (cleanPhone.startsWith("0")) cleanPhone = "593" + cleanPhone.substring(1);
-        else if (!cleanPhone.startsWith("593") && cleanPhone.length === 9) cleanPhone = "593" + cleanPhone;
+        // El servidor rechazó el pedido (por ejemplo, existencias insuficientes)
+        const errMsg = data?.error || "No se pudo procesar el pedido.";
 
-        let msg = `🛍️ *NUEVO PEDIDO - ${store.name.toUpperCase()}*\n`;
-        msg += `--------------------------------------\n`;
-        msg += `👤 *Cliente:* ${customerName}\n`;
-        msg += `📱 *WhatsApp:* ${customerPhone}\n`;
-        msg += `📦 *Modalidad:* ${deliveryMethod === "domicilio" ? `Envío a Domicilio (${selectedKmRate?.label || "Zona"})` : "Retiro en Tienda"}\n`;
-        if (deliveryMethod === "domicilio") {
-          msg += `📍 *Dirección:* ${fullAddress}\n`;
-        }
-        msg += `💳 *Método de Pago:* ${paymentMethod === "transferencia" ? "QR Deuna / Transferencia Bancaria" : "Efectivo / Local"}\n\n`;
+        // Forzar actualización inmediata del stock en vivo desde la base de datos
+        await refreshLiveStock(false);
 
-        msg += `🛒 *DETALLE DEL PEDIDO:*\n`;
-        cart.forEach((it) => {
-          msg += `• ${it.cantidad}x ${it.name} ${it.variantLabel ? `(${it.variantLabel})` : ""} - $${(it.price * it.cantidad).toFixed(2)}\n`;
-        });
-        msg += `\n`;
-        msg += `• *Subtotal:* $${subtotal.toFixed(2)}\n`;
-        if (discountAmount > 0) {
-          msg += `• *Cupón (${appliedCoupon?.code}):* -$${discountAmount.toFixed(2)}\n`;
-        }
-        if (deliveryMethod === "domicilio" && effectiveDeliveryCost > 0) {
-          msg += `• *Envío (${selectedKmRate?.label || "Zona"}):* $${effectiveDeliveryCost.toFixed(2)}\n`;
-        }
-        if (tipAmount > 0) {
-          msg += `• *Propina (${tipPercentage}%):* $${tipAmount.toFixed(2)}\n`;
-        }
-        msg += `💰 *TOTAL A PAGAR: $${grandTotal.toFixed(2)}*\n`;
-        if (customerNotes.trim()) {
-          msg += `\n📝 *Notas:* ${customerNotes.trim()}\n`;
-        }
-        if (paymentMethod === "transferencia") {
-          msg += `\n📸 *Adjunto comprobante de pago/transferencia a este chat.*`;
-        }
+        // Auto-ajustar carrito al máximo disponible para cada ítem (Opción 1)
+        setCart((prev) =>
+          prev
+            .map((it) => {
+              const freshStock = getProductStock(it.productId);
+              if (freshStock <= 0) return null;
+              if (it.cantidad > freshStock) {
+                return { ...it, cantidad: freshStock };
+              }
+              return it;
+            })
+            .filter(Boolean) as CartItem[]
+        );
 
-        const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
-        setOrderSuccess(true);
-        setCart([]);
-        window.open(waUrl, "_blank");
+        alert(
+          `⚠️ Aviso de Inventario:\n\n${errMsg}\n\nHemos ajustado tu carrito automáticamente al máximo disponible en bodega para que puedas continuar con tu compra.`
+        );
+
+        // NUNCA abrir WhatsApp con cantidades rechazadas
+        setIsSubmitting(false);
+        return;
       }
     } catch (err) {
       console.error("Error submitting catalog order:", err);
-      alert("Error al conectar con el servidor.");
+      alert("Error al conectar con el servidor. Por favor verifica tu conexión e inténtalo nuevamente.");
     } finally {
       setIsSubmitting(false);
     }
@@ -813,6 +973,9 @@ export function CtaloClient({ store }: { store: StoreData }) {
                           Destacado
                         </span>
                       )}
+                      <span className="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur border border-slate-700/80 text-slate-300 text-[10px] font-bold">
+                        Bodega: {getProductStock(product.id)}
+                      </span>
                       <span className="absolute bottom-2.5 right-2.5 px-2.5 py-1 rounded-xl bg-slate-950/80 backdrop-blur border border-slate-700 text-amber-400 font-black text-xs sm:text-sm">
                         ${product.price.toFixed(2)}
                       </span>
@@ -862,21 +1025,42 @@ export function CtaloClient({ store }: { store: StoreData }) {
                   </div>
 
                   <div className="p-3.5 sm:p-5 pt-0">
-                    {product.hasVariants ? (
-                      <button
-                        onClick={() => handleOpenProduct(product)}
-                        className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-2 group-hover:shadow-md cursor-pointer"
-                      >
-                        <span>Elegir {product.attribute1Name || "Opción"}</span>
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    ) : (
+                    {(() => {
+                      const curStock = getProductStock(product.id);
+                      const isAvail = isProductAvailable(product.id);
+                      const isSoldOut = !isAvail || curStock <= 0;
+                      if (isSoldOut) {
+                        return (
+                          <div className="w-full py-2.5 rounded-xl bg-slate-900/90 border border-red-500/30 text-red-400 font-bold text-xs flex items-center justify-center gap-2 cursor-not-allowed select-none opacity-80 shadow-inner">
+                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                            <span>AGOTADO</span>
+                          </div>
+                        );
+                      }
+
+                      if (product.hasVariants) {
+                        return (
+                          <button
+                            onClick={() => handleOpenProduct(product)}
+                            className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-2 group-hover:shadow-md cursor-pointer"
+                          >
+                            <span>Elegir {product.attribute1Name || "Opción"}</span>
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        );
+                      }
+                      return null;
+                    })() || (
                       (() => {
                         const currentQty = getProductCartQty(product.id);
+                        const curStock = getProductStock(product.id);
+                        const isAtMax = currentQty >= curStock;
+
                         return currentQty > 0 ? (
                           <div className="flex items-center justify-between bg-slate-950 border border-amber-500/50 rounded-xl p-1 px-2 shadow-inner">
                             <span className="text-[11px] font-bold text-amber-400 pl-1">
                               En carrito: <strong>{currentQty}</strong>
+                              <span className="text-[9.5px] text-slate-400 font-normal ml-1">/ {curStock}</span>
                             </span>
                             <div className="flex items-center gap-1.5">
                               <button
@@ -890,9 +1074,20 @@ export function CtaloClient({ store }: { store: StoreData }) {
                               <span className="w-5 text-center text-xs font-black text-white">{currentQty}</span>
                               <button
                                 type="button"
-                                onClick={() => handleDirectAddToCart(product, 1)}
-                                className="p-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 transition active:scale-90 font-bold"
-                                title="Sumar 1"
+                                disabled={isAtMax}
+                                onClick={() => {
+                                  if (isAtMax) {
+                                    alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${product.name}".`);
+                                    return;
+                                  }
+                                  handleDirectAddToCart(product, 1);
+                                }}
+                                className={`p-1 rounded-lg transition active:scale-90 font-bold ${
+                                  isAtMax
+                                    ? "bg-slate-800 text-slate-600 opacity-40 cursor-not-allowed"
+                                    : "bg-amber-500 hover:bg-amber-400 text-slate-950"
+                                }`}
+                                title={isAtMax ? `Stock máximo alcanzado (${curStock})` : "Sumar 1"}
                               >
                                 <Plus className="w-3.5 h-3.5" />
                               </button>
@@ -1094,31 +1289,71 @@ export function CtaloClient({ store }: { store: StoreData }) {
               </div>
             )}
 
-            {/* Selector de Cantidad */}
-            <div className="flex items-center justify-between border-t border-slate-800 pt-5 mb-6">
-              <span className="text-xs font-bold text-slate-400">Cantidad:</span>
-              <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                  className="p-1 rounded text-slate-400 hover:text-white"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <span className="text-sm font-bold text-white w-6 text-center">{quantity}</span>
-                <button
-                  type="button"
-                  onClick={() => setQuantity((q) => q + 1)}
-                  className="p-1 rounded text-slate-400 hover:text-white"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+            {/* Selector de Cantidad con Tope Estricto de Bodega */}
+            {(() => {
+              const curStock = getProductStock(activeProduct.id);
+              const inCart = cart
+                .filter((it) => it.productId === activeProduct.id)
+                .reduce((sum, it) => sum + it.cantidad, 0);
+              const maxCanAdd = Math.max(0, curStock - inCart);
+              const isAtMax = quantity >= maxCanAdd;
+
+              return (
+                <div className="border-t border-slate-800 pt-5 mb-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-300 block">Cantidad:</span>
+                      <span className="text-[11px] text-amber-400 font-medium">
+                        Bodega: {curStock} unids {inCart > 0 ? `(${inCart} en carrito)` : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        disabled={quantity <= 1}
+                        onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                        className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Restar"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-sm font-bold text-white w-6 text-center">{quantity}</span>
+                      <button
+                        type="button"
+                        disabled={isAtMax}
+                        onClick={() => {
+                          if (isAtMax) {
+                            alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega.`);
+                            return;
+                          }
+                          setQuantity((q) => q + 1);
+                        }}
+                        className={`p-1 rounded transition ${isAtMax ? "text-slate-600 opacity-40 cursor-not-allowed" : "text-slate-400 hover:text-white"}`}
+                        title={isAtMax ? `Stock máximo alcanzado (${maxCanAdd})` : "Aumentar"}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {maxCanAdd <= 0 && (
+                    <div className="mt-3 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>Ya tienes en tu carrito el stock máximo disponible ({curStock} unids).</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <button
               onClick={handleAddToCart}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              disabled={(() => {
+                const curStock = getProductStock(activeProduct.id);
+                const inCart = cart.filter((it) => it.productId === activeProduct.id).reduce((sum, it) => sum + it.cantidad, 0);
+                return curStock - inCart <= 0;
+              })()}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <ShoppingBag className="w-4 h-4 text-slate-950" />
               <span>Añadir al Carrito (${(activeProduct.price * quantity).toFixed(2)})</span>
@@ -1194,23 +1429,52 @@ export function CtaloClient({ store }: { store: StoreData }) {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
-                          <button
-                            onClick={() => updateCartQty(item.cartId, -1)}
-                            className="p-0.5 text-slate-400 hover:text-white"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="text-xs font-bold text-white w-4 text-center">
-                            {item.cantidad}
-                          </span>
-                          <button
-                            onClick={() => updateCartQty(item.cartId, 1)}
-                            className="p-0.5 text-slate-400 hover:text-white"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                        </div>
+                        {(() => {
+                          const curStock = getProductStock(item.productId);
+                          const otherInCart = cart
+                            .filter((i) => i.productId === item.productId && i.cartId !== item.cartId)
+                            .reduce((sum, i) => sum + i.cantidad, 0);
+                          const maxAllowed = curStock - otherInCart;
+                          const isAtMax = item.cantidad >= maxAllowed;
+
+                          return (
+                            <div className="flex flex-col items-end gap-1">
+                              <div className="flex items-center gap-1.5 bg-slate-900 px-2 py-1 rounded-lg border border-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => updateCartQty(item.cartId, -1)}
+                                  className="p-0.5 text-slate-400 hover:text-white"
+                                  title="Restar 1"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <span className="text-xs font-bold text-white w-4 text-center">
+                                  {item.cantidad}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={isAtMax}
+                                  onClick={() => {
+                                    if (isAtMax) {
+                                      alert(
+                                        `¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${item.name}".`
+                                      );
+                                      return;
+                                    }
+                                    updateCartQty(item.cartId, 1);
+                                  }}
+                                  className={`p-0.5 transition ${isAtMax ? "text-slate-600 opacity-40 cursor-not-allowed" : "text-slate-400 hover:text-white"}`}
+                                  title={isAtMax ? `Stock máximo alcanzado (${curStock} en bodega)` : "Sumar 1"}
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <span className="text-[10px] text-amber-400/90 font-medium">
+                                Bodega: {curStock}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     ))}
                   </div>

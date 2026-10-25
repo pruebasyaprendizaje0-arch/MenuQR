@@ -15,6 +15,7 @@ import { saveUploadedFile } from "@/lib/storage";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { pool } from "@/lib/db-pool";
 import { parseDishImages, serializeDishImages } from "@/lib/dish-images";
+import { emitStockActualizado, emitProductoActualizado } from "@/lib/socket-server";
 
 
 /**
@@ -2251,11 +2252,11 @@ export async function createOrderAction(data: {
         return { error: `El producto "${dbDish.name}" no está disponible actualmente.` };
       }
 
-      // Stock check para platos con control de inventario activo
-      const shouldTrackStock = Boolean(dbDish.trackStock);
+      // Stock check estricto para platos
+      const shouldTrackStock = Boolean(dbDish.trackStock || typeof dbDish.stock === "number");
       if (shouldTrackStock) {
         const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
-        if (availableStock <= 0) {
+        if (availableStock <= 0 || !dbDish.isAvailable) {
           return { error: `El producto "${dbDish.name}" se encuentra agotado.` };
         }
         if (item.quantity > availableStock) {
@@ -2445,6 +2446,7 @@ export async function createOrderAction(data: {
     );
 
     // Save order within transaction (PASO 23)
+    const updatedDishesForSocket: any[] = [];
     const order = await prisma.$transaction(async (tx) => {
       const rest = await tx.restaurant.findUnique({
         where: { id: data.restaurantId },
@@ -2514,7 +2516,7 @@ export async function createOrderAction(data: {
       // Descontar inventario de forma atómica con verificación en caliente para evitar sobreventa
       for (const item of data.items) {
         const dbDish = dishMap.get(item.dishId);
-        const shouldTrackStock = Boolean(dbDish?.trackStock);
+        const shouldTrackStock = Boolean(dbDish?.trackStock || typeof dbDish?.stock === "number");
         if (dbDish && shouldTrackStock) {
           const freshDish = await tx.dish.findUnique({
             where: { id: dbDish.id },
@@ -2523,9 +2525,9 @@ export async function createOrderAction(data: {
 
           if (freshDish) {
             const currentStock = freshDish.stock ?? 0;
-            if (currentStock < item.quantity) {
+            if (currentStock < item.quantity || !freshDish.isAvailable) {
               throw new Error(
-                currentStock <= 0
+                currentStock <= 0 || !freshDish.isAvailable
                   ? `El producto "${freshDish.name}" se acaba de agotar.`
                   : `Solo quedan ${currentStock} unidad(es) disponibles de "${freshDish.name}". Por favor ajusta tu pedido.`
               );
@@ -2540,6 +2542,14 @@ export async function createOrderAction(data: {
                 trackStock: true,
                 isAvailable: isStillAvailable,
               },
+            });
+
+            updatedDishesForSocket.push({
+              id: freshDish.id,
+              name: freshDish.name,
+              stock: updatedStock,
+              isAvailable: isStillAvailable,
+              trackStock: true,
             });
           }
         }
@@ -2626,10 +2636,19 @@ export async function createOrderAction(data: {
 
     try {
       revalidatePath(`/admin`);
+      revalidatePath(`/caja`);
       revalidatePath(`/${restaurant.slug}`);
+      revalidatePath(`/ctalo/${restaurant.slug}`);
       revalidatePath(`/${restaurant.slug}/rastreo`);
       revalidatePath(`/${restaurant.slug}/repartidor`);
       revalidatePath(`/cocina`);
+
+      if (updatedDishesForSocket.length > 0) {
+        emitStockActualizado(data.restaurantId, updatedDishesForSocket);
+        for (const ud of updatedDishesForSocket) {
+          emitProductoActualizado(data.restaurantId, ud);
+        }
+      }
     } catch {
       // Safe fallback when executed outside Next request context
     }

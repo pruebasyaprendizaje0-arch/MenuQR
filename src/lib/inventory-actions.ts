@@ -1090,3 +1090,55 @@ export async function batchImportOrUpdateInventoryAction(
     return { error: error?.message || "Error al procesar la importación en lote." };
   }
 }
+
+/**
+ * Activa el control estricto de stock en TODO el catálogo del negocio (Opción 1).
+ * Convierte todos los productos "Sin límite" a productos controlados con unidades activas,
+ * garantizando que ningún ítem quede exento de descuento o bloqueo al agotarse.
+ */
+export async function enableUniversalStockAction(restaurantId: string) {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
+    const dishes = await prisma.dish.findMany({
+      where: { restaurantId },
+      select: { id: true, stock: true, trackStock: true, isAvailable: true, name: true },
+    });
+
+    let updatedCount = 0;
+    await prisma.$transaction(async (tx) => {
+      for (const d of dishes) {
+        const curStock = typeof d.stock === "number" ? d.stock : 0;
+        const isStillAvail = curStock > 0;
+        await tx.dish.update({
+          where: { id: d.id },
+          data: {
+            trackStock: true,
+            stock: curStock,
+            isAvailable: isStillAvail,
+          },
+        });
+        updatedCount++;
+      }
+    });
+
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { slug: true },
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/caja");
+    if (restaurant?.slug) {
+      revalidatePath(`/${restaurant.slug}`);
+      revalidatePath(`/ctalo/${restaurant.slug}`);
+    }
+
+    return { success: true, updatedCount };
+  } catch (error: any) {
+    console.error("Error in enableUniversalStockAction:", error);
+    return { error: error?.message || "Error al activar el control de stock universal." };
+  }
+}

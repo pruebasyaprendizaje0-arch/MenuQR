@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/db";
 import { getUserSession, getSuperAdminSession, refreshUserSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { emitStockActualizado, emitProductoActualizado } from "@/lib/socket-server";
 
 async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; error?: string }> {
   const isSuperAdmin = await getSuperAdminSession();
@@ -37,6 +38,7 @@ export type ScannedDishResult = {
     price: number;
     stock: number | null;
     trackStock: boolean;
+    isAvailable?: boolean;
     barcode: string | null;
     imageUrl: string | null;
   };
@@ -69,6 +71,7 @@ export async function searchDishByBarcodeAction(
         price: true,
         stock: true,
         trackStock: true,
+        isAvailable: true,
         barcode: true,
         sku: true,
         imageUrl: true,
@@ -89,6 +92,7 @@ export async function searchDishByBarcodeAction(
             price: d.price,
             stock: d.stock,
             trackStock: d.trackStock,
+            isAvailable: d.isAvailable,
             barcode: d.barcode,
             imageUrl: d.imageUrl,
           },
@@ -117,6 +121,7 @@ export async function searchDishByBarcodeAction(
                   price: d.price,
                   stock: d.stock,
                   trackStock: d.trackStock,
+                  isAvailable: d.isAvailable,
                   barcode: d.barcode,
                   imageUrl: d.imageUrl,
                 },
@@ -316,7 +321,7 @@ export async function processCajaSaleAction(
     );
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Validar existencias de stock
+      // 1. Validar existencias de stock estricto
       for (const it of data.items) {
         const dish = await tx.dish.findUnique({
           where: { id: it.dishId },
@@ -327,14 +332,15 @@ export async function processCajaSaleAction(
           throw new Error(`El producto "${it.name}" no fue encontrado en este negocio.`);
         }
 
-        const shouldTrack = Boolean(dish.trackStock || typeof dish.stock === "number");
-        if (shouldTrack) {
-          const currentStock = typeof dish.stock === "number" ? dish.stock : 0;
-          if (currentStock < it.quantity) {
-            throw new Error(
-              `Stock insuficiente para "${dish.name}". Disponible: ${currentStock}, solicitado: ${it.quantity}.`
-            );
-          }
+        const currentStock = typeof dish.stock === "number" ? dish.stock : 0;
+        if (!dish.isAvailable || currentStock <= 0) {
+          throw new Error(`El producto "${dish.name}" se encuentra agotado en bodega.`);
+        }
+
+        if (currentStock < it.quantity) {
+          throw new Error(
+            `Stock insuficiente para "${dish.name}". Disponible en bodega: ${currentStock}, solicitado: ${it.quantity}.`
+          );
         }
       }
 
@@ -362,10 +368,11 @@ export async function processCajaSaleAction(
       });
 
       // 3. Descontar Stock y marcar agotado si llega a 0
+      const updatedDishes: any[] = [];
       for (const it of data.items) {
         const dish = await tx.dish.findUnique({
           where: { id: it.dishId },
-          select: { id: true, stock: true, trackStock: true, isAvailable: true },
+          select: { id: true, name: true, stock: true, trackStock: true, isAvailable: true },
         });
 
         if (dish) {
@@ -381,10 +388,18 @@ export async function processCajaSaleAction(
               isAvailable: stillAvailable,
             },
           });
+
+          updatedDishes.push({
+            id: dish.id,
+            name: dish.name,
+            stock: newStock,
+            isAvailable: stillAvailable,
+            trackStock: true,
+          });
         }
       }
 
-      return { orderNumber: order.orderNumber, total: subtotal };
+      return { orderNumber: order.orderNumber, total: subtotal, updatedDishes };
     });
 
     const restaurant = await prisma.restaurant.findUnique({
@@ -394,7 +409,18 @@ export async function processCajaSaleAction(
 
     revalidatePath("/admin");
     revalidatePath("/caja");
-    if (restaurant?.slug) revalidatePath(`/${restaurant.slug}`);
+    if (restaurant?.slug) {
+      revalidatePath(`/${restaurant.slug}`);
+      revalidatePath(`/ctalo/${restaurant.slug}`);
+    }
+
+    // Notificar por Socket.IO en tiempo real
+    try {
+      emitStockActualizado(restaurantId, result.updatedDishes);
+      for (const ud of result.updatedDishes) {
+        emitProductoActualizado(restaurantId, ud);
+      }
+    } catch {}
 
     return {
       success: true,

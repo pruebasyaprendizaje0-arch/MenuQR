@@ -40,6 +40,7 @@ interface DishItem {
   price: number;
   stock: number | null;
   trackStock: boolean;
+  isAvailable?: boolean;
   barcode: string | null;
   imageUrl: string | null;
 }
@@ -56,6 +57,7 @@ interface CartSessionItem {
   quantity: number;
   stock: number | null;
   trackStock: boolean;
+  isAvailable?: boolean;
   barcode?: string | null;
   isBox?: boolean;
 }
@@ -351,17 +353,27 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
   const addOrIncrementDish = (dish: DishItem, qtyToAdd: number, isBox = false) => {
     setSessionItems((prev) => {
       const idx = prev.findIndex((item) => item.dishId === dish.id);
+      const curStock = typeof dish.stock === "number" ? dish.stock : 0;
+      const isAvailable = dish.isAvailable !== false;
+
+      // In VENTA mode: Enforce strict stock check (bloqueo al agotarse)
+      if (mode === "VENTA") {
+        if (!isAvailable || curStock <= 0) {
+          playErrorSound();
+          alert(`¡PRODUCTO AGOTADO! "${dish.name}" no cuenta con existencias en bodega.`);
+          return prev;
+        }
+      }
+
       if (idx !== -1) {
         const updated = [...prev];
         const newQty = updated[idx].quantity + qtyToAdd;
 
         // In VENTA mode, check if stock would be exceeded
-        if (mode === "VENTA" && dish.trackStock && typeof dish.stock === "number") {
-          if (newQty > dish.stock) {
-            playErrorSound();
-            alert(`Stock insuficiente para "${dish.name}". Disponible: ${dish.stock}`);
-            return prev;
-          }
+        if (mode === "VENTA" && newQty > curStock) {
+          playErrorSound();
+          alert(`Stock insuficiente para "${dish.name}". Disponible en bodega: ${curStock}, solicitados: ${newQty}.`);
+          return prev;
         }
 
         updated[idx] = {
@@ -372,12 +384,10 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
       }
 
       // In VENTA mode, check initial quantity
-      if (mode === "VENTA" && dish.trackStock && typeof dish.stock === "number") {
-        if (qtyToAdd > dish.stock) {
-          playErrorSound();
-          alert(`Stock insuficiente para "${dish.name}". Disponible: ${dish.stock}`);
-          return prev;
-        }
+      if (mode === "VENTA" && qtyToAdd > curStock) {
+        playErrorSound();
+        alert(`Stock insuficiente para "${dish.name}". Disponible en bodega: ${curStock}, solicitados: ${qtyToAdd}.`);
+        return prev;
       }
 
       return [
@@ -388,6 +398,7 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
           quantity: qtyToAdd,
           stock: dish.stock,
           trackStock: dish.trackStock,
+          isAvailable: dish.isAvailable,
           barcode: dish.barcode,
           isBox,
         },
@@ -404,10 +415,11 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
           if (item.dishId !== dishId) return item;
           const nextQty = item.quantity + delta;
 
-          if (delta > 0 && mode === "VENTA" && item.trackStock && typeof item.stock === "number") {
-            if (nextQty > item.stock) {
+          if (delta > 0 && mode === "VENTA") {
+            const curStock = typeof item.stock === "number" ? item.stock : 0;
+            if (nextQty > curStock) {
               playErrorSound();
-              alert(`Stock insuficiente para "${item.name}". Disponible: ${item.stock}`);
+              alert(`Stock insuficiente para "${item.name}". Solo quedan ${curStock} unidades en bodega.`);
               return item;
             }
           }

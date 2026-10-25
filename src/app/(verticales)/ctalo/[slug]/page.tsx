@@ -353,7 +353,9 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
             attribute2Options,
             tallas: attribute1Name === "Talla" ? attribute1Options : [],
             colores: attribute2Name === "Color" ? attribute2Options : [],
-            stock: dish.stock !== null ? dish.stock : 10,
+            stock: typeof dish.stock === "number" ? dish.stock : 0,
+            isAvailable: dish.isAvailable && (typeof dish.stock !== "number" || dish.stock > 0),
+            trackStock: dish.trackStock,
             isNew: dish.isSuggested || false,
           };
         }),

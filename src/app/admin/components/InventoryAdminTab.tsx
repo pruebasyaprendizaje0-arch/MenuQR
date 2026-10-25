@@ -53,6 +53,7 @@ import {
   receivePurchaseOrderAction,
   cancelPurchaseOrderAction,
   updateDishInventoryAction,
+  enableUniversalStockAction,
 } from "@/lib/inventory-actions";
 import BatchInventoryModal from "./BatchInventoryModal";
 import QuickEditDishInventoryModal from "./QuickEditDishInventoryModal";
@@ -272,8 +273,51 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
     }
   };
 
+  const [isEnablingUniversalStock, setIsEnablingUniversalStock] = useState(false);
+
+  const handleEnableUniversalStock = async () => {
+    const confirmed = window.confirm(
+      "¿Deseas activar el control de stock universal en todo tu catálogo?\n\n" +
+      "• Todos los productos 'Sin límite' pasarán a estar estrictamente controlados.\n" +
+      "• Cuando cualquier producto llegue a 0 unidades, se bloqueará su venta automáticamente en la web y en Caja POS.\n" +
+      "• Podrás ajustar las unidades iniciales con los botones + / - o editando cada ítem."
+    );
+    if (!confirmed) return;
+
+    setIsEnablingUniversalStock(true);
+    try {
+      const res = await enableUniversalStockAction(restaurant.id);
+      if (res?.success) {
+        alert(`¡Listo! Se activó el control de stock universal en ${res.updatedCount} productos.`);
+        loadInventory();
+      } else {
+        alert(res?.error || "Error al activar el control de stock.");
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setIsEnablingUniversalStock(false);
+    }
+  };
+
   useEffect(() => {
     loadInventory();
+
+    // Auto-actualización periódica en segundo plano cada 15 segundos
+    const interval = setInterval(() => {
+      loadInventory(true);
+    }, 15000);
+
+    // Actualización inmediata al volver a enfocar la pestaña del navegador
+    const handleFocus = () => {
+      loadInventory(true);
+    };
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, [restaurant.id]);
 
   // Métricas financieras calculadas
@@ -649,6 +693,26 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                 </span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => loadInventory(true)}
+                  disabled={refreshing}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition shadow-sm"
+                  title="Refrescar existencias en tiempo real"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-amber-400" : ""}`} />
+                  <span className="hidden sm:inline">Refrescar</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEnableUniversalStock}
+                  disabled={isEnablingUniversalStock}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition shadow-sm active:scale-95"
+                  title="Activar control de stock estricto a todos los productos 'Sin límite'"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  <span>{isEnablingUniversalStock ? "Activando..." : "⚡ Activar Stock a Todo"}</span>
+                </button>
                 <Link
                   href="/caja"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition shadow-sm"

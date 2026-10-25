@@ -55,6 +55,20 @@ export function emitProductoActualizado(negocio_id: string, producto: any): void
 }
 
 /**
+ * Emite evento 'stock_actualizado' a la sala del negocio
+ */
+export function emitStockActualizado(negocio_id: string, updatedDishes: any[]): void {
+  const io = getIO();
+  if (io) {
+    const room = `negocio_${negocio_id}`;
+    io.to(room).emit("stock_actualizado", { updatedDishes, timestamp: new Date().toISOString() });
+    console.log(`[Socket.IO] 'stock_actualizado' emitido a la sala ${room}:`, updatedDishes?.length, "productos");
+  } else {
+    console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'stock_actualizado'`);
+  }
+}
+
+/**
  * Emite evento 'pedido_actualizado' a la sala del negocio (cambios de estado: en_cocina, listo, por_pagar, pagado)
  */
 export function emitPedidoActualizado(negocio_id: string, pedido: any): void {

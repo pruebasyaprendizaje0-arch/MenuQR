@@ -3,6 +3,7 @@ import { pool, ensureDbTables } from "@/lib/db-pool";
 import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado } from "@/lib/socket-server";
 import { prisma } from "@/lib/db";
 import { revalidatePath } from "next/cache";
+import { deductStockUniversal } from "@/lib/stock-service";
 
 export const dynamic = "force-dynamic";
 
@@ -244,6 +245,25 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        // Deducción y validación atómica universal de stock en Prisma
+        if (resolvedNegocioId) {
+          const deductRes = await deductStockUniversal(
+            resolvedNegocioId,
+            items.map((it: any) => ({
+              dishId: it.dishId || it.productId || it.id,
+              name: it.nombre,
+              quantity: parseInt(it.cantidad) || 1,
+            }))
+          );
+          if (!deductRes.success) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              { ok: false, error: deductRes.error || "Existencias insuficientes en bodega." },
+              { status: 400 }
+            );
+          }
+        }
+
         // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
         const { rows: existingOrders } = await pool.query(
           `SELECT * FROM pedidos 
@@ -439,6 +459,25 @@ export async function POST(req: NextRequest) {
             { ok: false, error: "El pedido de catálogo debe incluir al menos un producto" },
             { status: 400 }
           );
+        }
+
+        // Deducción y validación atómica universal de stock en Prisma
+        if (resolvedNegocioId) {
+          const deductRes = await deductStockUniversal(
+            resolvedNegocioId,
+            items.map((it: any) => ({
+              dishId: it.dishId || it.productId || it.id,
+              name: it.nombre,
+              quantity: parseInt(it.cantidad) || 1,
+            }))
+          );
+          if (!deductRes.success) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              { ok: false, error: deductRes.error || "Existencias insuficientes en bodega." },
+              { status: 400 }
+            );
+          }
         }
 
         let subtotal = 0;
