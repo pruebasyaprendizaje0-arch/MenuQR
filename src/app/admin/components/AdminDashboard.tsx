@@ -321,6 +321,12 @@ export type CustomerMetadata = {
   points?: number;
   favoriteDish?: string;
   customNotes?: string;
+  lastService?: string;
+  equipmentBrand?: string;
+  equipmentTech?: string;
+  symptoms?: string[];
+  preferredTimeSlot?: string;
+  lastQuoteAt?: string;
 };
 
 export const DIETARY_PREFERENCES_LIST = [
@@ -330,6 +336,45 @@ export const DIETARY_PREFERENCES_LIST = [
   { id: "LACTOSE_FREE", label: "Sin Lactosa", emoji: "🥛", color: "bg-blue-500/20 text-blue-300 border-blue-500/40" },
   { id: "KETO", label: "Keto / Low Carb", emoji: "🥑", color: "bg-purple-500/20 text-purple-300 border-purple-500/40" },
   { id: "HALAL", label: "Halal", emoji: "🍖", color: "bg-teal-500/20 text-teal-300 border-teal-500/40" },
+];
+
+export const SERVICIOS_MARCAS_COMUNES = [
+  "Samsung",
+  "LG",
+  "Mabe",
+  "Whirlpool",
+  "Electrolux",
+  "Haceb",
+  "Indurama",
+  "Bosch",
+  "TCL",
+  "General Electric",
+  "Otra",
+];
+
+export const SERVICIOS_TECNOLOGIAS = [
+  { id: "Inverter ⚡", label: "Inverter ⚡", desc: "Ahorro / Digital" },
+  { id: "Convencional", label: "Convencional", desc: "Estándar / Análogo" },
+  { id: "Smart / WiFi", label: "Smart / WiFi", desc: "Control inteligente" },
+  { id: "Industrial", label: "Industrial", desc: "Comercial / Trifásico" },
+];
+
+export const SERVICIOS_SINTOMAS_HABITUALES = [
+  "❄️ No enfría / congela",
+  "🔊 Ruido extraño / vibra",
+  "💧 Fuga de agua / goteo",
+  "⚡ Salta breaker / no prende",
+  "🔥 No calienta / sin chispa",
+  "⚠️ Código de error",
+  "🧼 No centrifuga / desagua",
+  "⚙️ Mantenimiento preventivo",
+];
+
+export const SERVICIOS_FRANJAS_HORARIAS = [
+  { id: "☀️ Mañana (08:00 - 12:00)", label: "☀️ Mañana (08:00 - 12:00)" },
+  { id: "🌤️ Tarde (13:00 - 17:00)", label: "🌤️ Tarde (13:00 - 17:00)" },
+  { id: "🌙 Fin de Jornada (17:00 - 19:30)", label: "🌙 Fin de Jornada (17:00 - 19:30)" },
+  { id: "🚨 Urgencia Inmediata", label: "🚨 Urgencia Inmediata" },
 ];
 
 export function parseCustomerMetadata(notesString?: string | null): CustomerMetadata {
@@ -347,6 +392,12 @@ export function parseCustomerMetadata(notesString?: string | null): CustomerMeta
         points: typeof parsed.points === "number" ? parsed.points : 0,
         favoriteDish: typeof parsed.favoriteDish === "string" ? parsed.favoriteDish : "",
         customNotes: typeof parsed.customNotes === "string" ? parsed.customNotes : "",
+        lastService: typeof parsed.lastService === "string" ? parsed.lastService : "",
+        equipmentBrand: typeof parsed.equipmentBrand === "string" ? parsed.equipmentBrand : "",
+        equipmentTech: typeof parsed.equipmentTech === "string" ? parsed.equipmentTech : "",
+        symptoms: Array.isArray(parsed.sintomas_detectados) ? parsed.sintomas_detectados : (Array.isArray(parsed.symptoms) ? parsed.symptoms : []),
+        preferredTimeSlot: typeof parsed.preferredTimeSlot === "string" ? parsed.preferredTimeSlot : "",
+        lastQuoteAt: typeof parsed.lastQuoteAt === "string" ? parsed.lastQuoteAt : "",
       };
     }
   } catch (e) {
@@ -363,6 +414,12 @@ export function formatCustomerMetadata(meta: CustomerMetadata): string {
     points: meta.points || 0,
     favoriteDish: meta.favoriteDish || "",
     customNotes: meta.customNotes || "",
+    lastService: meta.lastService || "",
+    equipmentBrand: meta.equipmentBrand || "",
+    equipmentTech: meta.equipmentTech || "",
+    symptoms: meta.symptoms || [],
+    preferredTimeSlot: meta.preferredTimeSlot || "",
+    lastQuoteAt: meta.lastQuoteAt || "",
   });
 }
 
@@ -1296,6 +1353,54 @@ export function AdminDashboard({
   const [custCustomNotes, setCustCustomNotes] = useState("");
   const [savingCustomer, setSavingCustomer] = useState(false);
 
+  // Technical Services Customer Modal Fields (Opción 2: Ficha Técnica Modular)
+  const [custModalTab, setCustModalTab] = useState<"contacto" | "tecnico" | "visitas">("contacto");
+  const [custEquipmentBrand, setCustEquipmentBrand] = useState("Samsung");
+  const [custCustomBrand, setCustCustomBrand] = useState("");
+  const [custEquipmentTech, setCustEquipmentTech] = useState("Inverter ⚡");
+  const [custSymptoms, setCustSymptoms] = useState<string[]>([]);
+  const [custCustomSymptom, setCustCustomSymptom] = useState("");
+  const [custPreferredTimeSlot, setCustPreferredTimeSlot] = useState("☀️ Mañana (08:00 - 12:00)");
+  const [custLastService, setCustLastService] = useState("");
+  const [custLastQuoteAt, setCustLastQuoteAt] = useState("");
+  const [custGpsLoading, setCustGpsLoading] = useState(false);
+
+  const handleDetectCustomerGps = () => {
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      alert("La geolocalización no está soportada en este navegador.");
+      return;
+    }
+    setCustGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = parseFloat(pos.coords.latitude.toFixed(6));
+        const lng = parseFloat(pos.coords.longitude.toFixed(6));
+        const cleanAddr = custAddress.replace(/\s*\[GPS:.*?\]/g, "").trim();
+        setCustAddress(cleanAddr ? `${cleanAddr} [GPS: ${lat},${lng}]` : `[GPS: ${lat},${lng}]`);
+        setCustGpsLoading(false);
+      },
+      () => {
+        alert("No se pudo obtener la ubicación GPS.");
+        setCustGpsLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleToggleCustomerSymptom = (sym: string) => {
+    setCustSymptoms((prev) =>
+      prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym]
+    );
+  };
+
+  const handleAddCustomSymptom = () => {
+    const trimmed = custCustomSymptom.trim();
+    if (trimmed && !custSymptoms.includes(trimmed)) {
+      setCustSymptoms((prev) => [...prev, trimmed]);
+      setCustCustomSymptom("");
+    }
+  };
+
   // Quick Points Adjustment in 360 modal
   const [adjustPointsDelta, setAdjustPointsDelta] = useState<number>(10);
   const [adjustPointsReason, setAdjustPointsReason] = useState("");
@@ -1317,6 +1422,24 @@ export function AdminDashboard({
       setCustPoints(meta.points || 0);
       setCustFavoriteDish(meta.favoriteDish || "");
       setCustCustomNotes(meta.customNotes || "");
+
+      // Technical metadata
+      const rawBrand = meta.equipmentBrand || "";
+      const isPredefined = SERVICIOS_MARCAS_COMUNES.filter((b) => b !== "Otra").includes(rawBrand);
+      if (isPredefined || !rawBrand) {
+        setCustEquipmentBrand(rawBrand || "Samsung");
+        setCustCustomBrand("");
+      } else {
+        setCustEquipmentBrand("Otra");
+        setCustCustomBrand(rawBrand);
+      }
+      setCustEquipmentTech(meta.equipmentTech || "Inverter ⚡");
+      setCustSymptoms(Array.isArray(meta.symptoms) ? meta.symptoms : []);
+      setCustCustomSymptom("");
+      setCustPreferredTimeSlot(meta.preferredTimeSlot || "☀️ Mañana (08:00 - 12:00)");
+      setCustLastService(meta.lastService || meta.favoriteDish || "");
+      setCustLastQuoteAt(meta.lastQuoteAt || "");
+      setCustModalTab("contacto");
     } else {
       setEditingCustomer(null);
       setCustName("");
@@ -1331,6 +1454,17 @@ export function AdminDashboard({
       setCustPoints(0);
       setCustFavoriteDish("");
       setCustCustomNotes("");
+
+      // Technical metadata reset
+      setCustEquipmentBrand("Samsung");
+      setCustCustomBrand("");
+      setCustEquipmentTech("Inverter ⚡");
+      setCustSymptoms([]);
+      setCustCustomSymptom("");
+      setCustPreferredTimeSlot("☀️ Mañana (08:00 - 12:00)");
+      setCustLastService("");
+      setCustLastQuoteAt("");
+      setCustModalTab("contacto");
     }
     setIsCustomerModalOpen(true);
   };
@@ -1343,13 +1477,27 @@ export function AdminDashboard({
     }
     setSavingCustomer(true);
 
+    const resolvedBrand = isServiciosTecnicos
+      ? (custEquipmentBrand === "Otra" ? (custCustomBrand.trim() || "Otra Marca") : custEquipmentBrand)
+      : (custEquipmentBrand || "");
+
+    const effectiveService = isServiciosTecnicos
+      ? (custLastService.trim() || custFavoriteDish.trim() || "Servicio Técnico")
+      : custFavoriteDish.trim();
+
     const serializedNotes = formatCustomerMetadata({
       dietary: custDietary,
       allergies: custAllergies.trim(),
       birthDate: custBirthDate,
       points: Number(custPoints) || 0,
-      favoriteDish: custFavoriteDish.trim(),
+      favoriteDish: effectiveService,
       customNotes: custCustomNotes.trim(),
+      lastService: effectiveService,
+      equipmentBrand: resolvedBrand,
+      equipmentTech: isServiciosTecnicos ? custEquipmentTech : "",
+      symptoms: isServiciosTecnicos ? custSymptoms : [],
+      preferredTimeSlot: isServiciosTecnicos ? custPreferredTimeSlot : "",
+      lastQuoteAt: custLastQuoteAt || (editingCustomer ? "" : new Date().toISOString()),
     });
 
     if (editingCustomer) {
@@ -6228,8 +6376,8 @@ export function AdminDashboard({
                         return (
                           <p className="text-slate-500 text-xs italic">
                             {cat.dishes.length === 0 
-                              ? "No hay platos en esta categoría." 
-                              : "No hay platos en esta categoría que coincidan con el filtro seleccionado."}
+                              ? `No hay ${bLabels.items.toLowerCase()} en esta categoría.` 
+                              : `No hay ${bLabels.items.toLowerCase()} en esta categoría que coincidan con el filtro seleccionado.`}
                           </p>
                         );
                       }
@@ -6243,21 +6391,33 @@ export function AdminDashboard({
                               dish.isAvailable ? "border-slate-800/80" : "border-slate-900 opacity-60"
                             }`}
                           >
-                            {/* Image */}
+                            {/* Image o Icono Técnico */}
                             <div className="h-20 w-20 rounded-xl bg-slate-950 overflow-hidden shrink-0 border border-slate-800 relative">
                               {(() => {
                                 const images = parseDishImages(dish.imageUrl);
                                 const primary = images[0] || null;
-                                return primary ? (
-                                  <>
-                                    <img src={primary} alt={dish.name} className="h-full w-full object-cover" />
-                                    {images.length > 1 && (
-                                      <span className="absolute bottom-1 right-1 bg-black/80 backdrop-blur text-[9px] font-bold text-amber-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                                        📷 {images.length}
-                                      </span>
-                                    )}
-                                  </>
-                                ) : (
+                                const isServicesType = bLabels.itemSingle === "Servicio" || selectedBusinessType === "SERVICES";
+                                if (primary) {
+                                  return (
+                                    <>
+                                      <img src={primary} alt={dish.name} className="h-full w-full object-cover" />
+                                      {images.length > 1 && (
+                                        <span className="absolute bottom-1 right-1 bg-black/80 backdrop-blur text-[9px] font-bold text-amber-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                          📷 {images.length}
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                }
+                                if (isServicesType) {
+                                  return (
+                                    <div className="h-full w-full flex flex-col items-center justify-center bg-cyan-950/30 text-cyan-400 gap-1 border border-cyan-500/20">
+                                      <Wrench className="w-6 h-6 text-cyan-400" />
+                                      <span className="text-[9px] font-bold uppercase tracking-wider text-cyan-300">Servicio</span>
+                                    </div>
+                                  );
+                                }
+                                return (
                                   <div className="h-full w-full flex items-center justify-center text-xs text-slate-600">Sin foto</div>
                                 );
                               })()}
@@ -6872,14 +7032,18 @@ export function AdminDashboard({
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <div>
                           <label className="block text-xs font-bold text-white tracking-wide">
-                            GALERÍA DE FOTOS DEL {bLabels.itemSingle.toUpperCase()} (HASTA 3 ÁNGULOS)
+                            {bLabels.itemSingle === "Servicio"
+                              ? "FOTOS REFERENCIALES DEL SERVICIO (OPCIONAL)"
+                              : `GALERÍA DE FOTOS DEL ${bLabels.itemSingle.toUpperCase()} (HASTA 3 ÁNGULOS)`}
                           </label>
                           <p className="text-[11px] text-slate-400 mt-0.5">
-                            Sube hasta 3 fotos (ej: Frente, Espalda / Dorso y Detalle para ropa o productos).
+                            {bLabels.itemSingle === "Servicio"
+                              ? "En servicios no es obligatorio subir fotos. Si lo deseas, puedes añadir una imagen representativa del trabajo."
+                              : "Sube hasta 3 fotos (ej: Frente, Espalda / Dorso y Detalle para ropa o productos)."}
                           </p>
                         </div>
                         <span className="text-[10px] font-semibold text-amber-400 bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                          ✨ WebP · máx 1200 px · 100–300 KB
+                          ✨ WebP · máx 1200 px · opcional
                         </span>
                       </div>
 
@@ -8496,15 +8660,19 @@ export function AdminDashboard({
                                     ? "bg-purple-500/15 text-purple-300 border-purple-500/30"
                                     : order.tableName === "Domicilio"
                                     ? "bg-sky-500/15 text-sky-300 border-sky-500/30"
+                                    : order.tableName === "Visita Técnica" || order.tableName.includes("Visita") || order.tableName.includes("Cotizac") || isServiciosTecnicos
+                                    ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/30 shadow-sm"
                                     : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
                                 }`}>
                                   {order.tableName === "Llevar" 
                                     ? "🛍 Para Llevar" 
                                     : order.tableName === "Domicilio" 
                                       ? "🛵 A Domicilio" 
-                                      : `🪑 Mesa #${order.tableName}`}
+                                      : order.tableName === "Visita Técnica" || order.tableName.includes("Visita") || isServiciosTecnicos
+                                        ? "🚗 Visita Técnica"
+                                        : `🪑 Mesa #${order.tableName}`}
                                 </span>
-                                {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && (
+                                {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && order.tableName !== "Visita Técnica" && !order.tableName.includes("Visita") && (
                                   <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
                                     👤 {order.customerName}
                                   </span>
@@ -8521,7 +8689,7 @@ export function AdminDashboard({
                                       key={it.id}
                                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-medium text-slate-200"
                                     >
-                                      <strong className="text-amber-400 font-bold">{it.quantity}×</strong>
+                                      <strong className="text-cyan-400 font-bold">{it.quantity}×</strong>
                                       <span className="truncate max-w-[140px]">{it.dishName}</span>
                                     </span>
                                   ))}
@@ -8537,7 +8705,7 @@ export function AdminDashboard({
                                   onClick={() =>
                                     setExpandedOrderId(expandedOrderId === order.id ? null : order.id)
                                   }
-                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300 hover:underline pt-0.5"
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-cyan-400 hover:text-cyan-300 hover:underline pt-0.5"
                                 >
                                   {expandedOrderId === order.id ? (
                                     <>
@@ -8547,7 +8715,7 @@ export function AdminDashboard({
                                   ) : (
                                     <>
                                       <ChevronDown className="h-3 w-3" />
-                                      <span>Ver desglose completo ({(order.items || []).length} ítems)</span>
+                                      <span>Ver desglose completo ({(order.items || []).length} detalles)</span>
                                     </>
                                   )}
                                 </button>
@@ -8572,11 +8740,29 @@ export function AdminDashboard({
                                     </a>
                                   )}
                                   {order.customerAddress && (
-                                    <div className="flex items-start gap-1 text-slate-400 text-[10px]">
-                                      <MapPin className="h-3 w-3 text-rose-500 shrink-0 mt-0.5" />
-                                      <span className="line-clamp-2" title={order.customerAddress}>
-                                        {order.customerAddress}
-                                      </span>
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-start gap-1 text-slate-400 text-[10px]">
+                                        <MapPin className="h-3 w-3 text-rose-500 shrink-0 mt-0.5" />
+                                        <span className="line-clamp-2" title={order.customerAddress}>
+                                          {order.customerAddress.replace(/\s*\[GPS:[^\]]+\]/, "")}
+                                        </span>
+                                      </div>
+                                      {order.customerAddress.includes("GPS:") && (() => {
+                                        const match = order.customerAddress.match(/GPS:\s*([-\d.]+)\s*,\s*([-\d.]+)/);
+                                        if (match) {
+                                          return (
+                                            <a
+                                              href={`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1 text-[10px] font-bold text-cyan-400 hover:text-cyan-300 underline pl-4"
+                                            >
+                                              <span>📍 Abrir ubicación GPS</span>
+                                            </a>
+                                          );
+                                        }
+                                        return null;
+                                      })()}
                                     </div>
                                   )}
                                 </div>
@@ -8587,7 +8773,7 @@ export function AdminDashboard({
 
                             <td className="py-3.5 align-top">
                               <span className="uppercase font-bold text-[10px] block text-slate-300">
-                                {order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
+                                {order.paymentMethod === "WHATSAPP_COTIZACION" ? "Cotización Express" : order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
                               </span>
                               <span suppressHydrationWarning className="text-slate-500 text-[10px] block mt-0.5">
                                 {new Date(order.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
@@ -8614,11 +8800,23 @@ export function AdminDashboard({
                                           : "bg-red-500/20 text-red-300 border-red-500/40"
                                 }`}
                               >
-                                <option value="PENDING" className="bg-slate-900 text-yellow-300">⏳ Pendiente</option>
-                                <option value="PREPARING" className="bg-slate-900 text-blue-300">🍳 En Cocina / Empaque</option>
-                                <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🛵 En Transporte</option>
-                                <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Entregado</option>
-                                <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelado</option>
+                                {isServiciosTecnicos || order.tableName.includes("Visita") ? (
+                                  <>
+                                    <option value="PENDING" className="bg-slate-900 text-yellow-300">⏳ Nueva Cotización</option>
+                                    <option value="PREPARING" className="bg-slate-900 text-blue-300">📅 Visita Agendada</option>
+                                    <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🚗 En Camino / Revisión</option>
+                                    <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Trabajo Terminado</option>
+                                    <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelada</option>
+                                  </>
+                                ) : (
+                                  <>
+                                    <option value="PENDING" className="bg-slate-900 text-yellow-300">⏳ Pendiente</option>
+                                    <option value="PREPARING" className="bg-slate-900 text-blue-300">🍳 En Cocina / Empaque</option>
+                                    <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🛵 En Transporte</option>
+                                    <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Entregado</option>
+                                    <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelado</option>
+                                  </>
+                                )}
                               </select>
                             </td>
 
@@ -8938,47 +9136,59 @@ export function AdminDashboard({
               </div>
 
               {/* Dietary Preferences Filter Row */}
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60 text-xs">
-                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
-                  <Wheat className="h-3.5 w-3.5 text-amber-400" />
-                  Dietas & Alergias:
-                </span>
-                <button
-                  onClick={() => setCrmDietaryFilter("TODOS")}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
-                    crmDietaryFilter === "TODOS"
-                      ? "bg-slate-800 text-white border border-slate-700"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-850"
-                  }`}
-                >
-                  Todas
-                </button>
-                {DIETARY_PREFERENCES_LIST.map((diet) => (
+              {!isServiciosTecnicos ? (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60 text-xs">
+                  <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
+                    <Wheat className="h-3.5 w-3.5 text-amber-400" />
+                    Dietas & Alergias:
+                  </span>
                   <button
-                    key={diet.id}
-                    onClick={() => setCrmDietaryFilter(diet.id)}
+                    onClick={() => setCrmDietaryFilter("TODOS")}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
+                      crmDietaryFilter === "TODOS"
+                        ? "bg-slate-800 text-white border border-slate-700"
+                        : "text-slate-400 hover:text-slate-200 hover:bg-slate-850"
+                    }`}
+                  >
+                    Todas
+                  </button>
+                  {DIETARY_PREFERENCES_LIST.map((diet) => (
+                    <button
+                      key={diet.id}
+                      onClick={() => setCrmDietaryFilter(diet.id)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 border ${
+                        crmDietaryFilter === diet.id
+                          ? `${diet.color} shadow-sm`
+                          : "bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      <span>{diet.emoji}</span>
+                      <span>{diet.label}</span>
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setCrmDietaryFilter("ALERGIAS")}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 border ${
-                      crmDietaryFilter === diet.id
-                        ? `${diet.color} shadow-sm`
+                      crmDietaryFilter === "ALERGIAS"
+                        ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
                         : "bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white"
                     }`}
                   >
-                    <span>{diet.emoji}</span>
-                    <span>{diet.label}</span>
+                    <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                    <span>Con Alergias</span>
                   </button>
-                ))}
-                <button
-                  onClick={() => setCrmDietaryFilter("ALERGIAS")}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 border ${
-                    crmDietaryFilter === "ALERGIAS"
-                      ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                      : "bg-slate-950/80 border-slate-800 text-slate-400 hover:text-white"
-                  }`}
-                >
-                  <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
-                  <span>Con Alergias</span>
-                </button>
-              </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60 text-xs text-slate-400">
+                  <span className="text-[11px] font-bold text-cyan-400 flex items-center gap-1 mr-1">
+                    <Wrench className="h-3.5 w-3.5" />
+                    Base de Clientes & Servicios Técnicos:
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    Captura automática de leads desde el cotizador web con registro de equipos, marcas y visitas domiciliarias.
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Customer List Table */}
@@ -8989,8 +9199,8 @@ export function AdminDashboard({
                     <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider bg-slate-950/60">
                       <th className="pb-3 pt-4 pl-4">Cliente & Contacto</th>
                       <th className="pb-3 pt-4">Categoría</th>
-                      <th className="pb-3 pt-4">Preferencias & Alergias</th>
-                      <th className="pb-3 pt-4">Plato Favorito & Visitas</th>
+                      <th className="pb-3 pt-4">{isServiciosTecnicos ? "Equipo & Marca" : "Preferencias & Alergias"}</th>
+                      <th className="pb-3 pt-4">{isServiciosTecnicos ? "Servicio & Visitas" : "Plato Favorito & Visitas"}</th>
                       <th className="pb-3 pt-4 text-right">Puntos & Total</th>
                       <th className="pb-3 pt-4">Última Visita</th>
                       <th className="pb-3 pt-4 pr-4 text-right">Acciones</th>
@@ -9094,50 +9304,106 @@ export function AdminDashboard({
                             </td>
 
                             <td className="py-3.5">
-                              <div className="flex flex-wrap gap-1 max-w-[220px]">
-                                {(meta.dietary && meta.dietary.length > 0) ? (
-                                  meta.dietary.map((d) => {
-                                    const match = DIETARY_PREFERENCES_LIST.find((dp) => dp.id === d);
-                                    return (
-                                      <span
-                                        key={d}
-                                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold border ${match?.color || "bg-slate-800 text-slate-300 border-slate-700"}`}
-                                        title={match?.label || d}
-                                      >
-                                        {match?.emoji || "🥗"} {match?.label || d}
-                                      </span>
-                                    );
-                                  })
-                                ) : null}
+                              {isServiciosTecnicos ? (
+                                <div className="space-y-1 max-w-[220px]">
+                                  {(meta.equipmentBrand || meta.equipmentTech) ? (
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      {meta.equipmentBrand && (
+                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                          <Tag className="h-3 w-3 text-amber-400" />
+                                          <span>{meta.equipmentBrand}</span>
+                                        </span>
+                                      )}
+                                      {meta.equipmentTech && (
+                                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                                          {meta.equipmentTech}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : null}
 
-                                {meta.allergies && (
-                                  <span
-                                    className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1"
-                                    title={`Alergia: ${meta.allergies}`}
-                                  >
-                                    <ShieldAlert className="h-3 w-3 text-rose-400" />
-                                    <span>{meta.allergies}</span>
-                                  </span>
-                                )}
+                                  {(meta.symptoms && meta.symptoms.length > 0) ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {meta.symptoms.slice(0, 2).map((s: string, idx: number) => (
+                                        <span
+                                          key={idx}
+                                          className="px-1.5 py-0.5 rounded text-[9px] bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-0.5"
+                                          title={s}
+                                        >
+                                          <AlertTriangle className="h-2.5 w-2.5 text-rose-400" />
+                                          <span className="truncate max-w-[120px]">{s}</span>
+                                        </span>
+                                      ))}
+                                      {meta.symptoms.length > 2 && (
+                                        <span className="text-[9px] text-slate-500">+{meta.symptoms.length - 2} más</span>
+                                      )}
+                                    </div>
+                                  ) : null}
 
-                                {(!meta.dietary || meta.dietary.length === 0) && !meta.allergies && (
-                                  <span className="text-slate-600 italic text-[11px]">Sin restricciones</span>
-                                )}
-                              </div>
+                                  {!meta.equipmentBrand && !meta.equipmentTech && (!meta.symptoms || meta.symptoms.length === 0) && (
+                                    <span className="text-slate-600 italic text-[11px]">Sin equipo registrado</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                  {(meta.dietary && meta.dietary.length > 0) ? (
+                                    meta.dietary.map((d) => {
+                                      const match = DIETARY_PREFERENCES_LIST.find((dp) => dp.id === d);
+                                      return (
+                                        <span
+                                          key={d}
+                                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold border ${match?.color || "bg-slate-800 text-slate-300 border-slate-700"}`}
+                                          title={match?.label || d}
+                                        >
+                                          {match?.emoji || "🥗"} {match?.label || d}
+                                        </span>
+                                      );
+                                    })
+                                  ) : null}
+
+                                  {meta.allergies && (
+                                    <span
+                                      className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1"
+                                      title={`Alergia: ${meta.allergies}`}
+                                    >
+                                      <ShieldAlert className="h-3 w-3 text-rose-400" />
+                                      <span>{meta.allergies}</span>
+                                    </span>
+                                  )}
+
+                                  {(!meta.dietary || meta.dietary.length === 0) && !meta.allergies && (
+                                    <span className="text-slate-600 italic text-[11px]">Sin restricciones</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
 
                             <td className="py-3.5">
-                              <div className="space-y-0.5">
-                                <div className="font-bold text-white flex items-center gap-1 text-xs">
-                                  <Utensils className="h-3 w-3 text-amber-400 shrink-0" />
-                                  <span className="truncate max-w-[150px]" title={insights.favoriteDish}>
-                                    {insights.favoriteDish}
+                              {isServiciosTecnicos ? (
+                                <div className="space-y-0.5">
+                                  <div className="font-bold text-white flex items-center gap-1 text-xs">
+                                    <Wrench className="h-3 w-3 text-cyan-400 shrink-0" />
+                                    <span className="truncate max-w-[150px]" title={meta.lastService || insights.favoriteDish || "Servicio Técnico"}>
+                                      {meta.lastService || insights.favoriteDish || "Servicio Técnico"}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-500 block">
+                                    {cust.totalOrders} {cust.totalOrders === 1 ? "visita técnica" : "visitas técnicas"}
                                   </span>
                                 </div>
-                                <span className="text-[10px] text-slate-500 block">
-                                  {cust.totalOrders} {cust.totalOrders === 1 ? "pedido / visita" : "pedidos / visitas"}
-                                </span>
-                              </div>
+                              ) : (
+                                <div className="space-y-0.5">
+                                  <div className="font-bold text-white flex items-center gap-1 text-xs">
+                                    <Utensils className="h-3 w-3 text-amber-400 shrink-0" />
+                                    <span className="truncate max-w-[150px]" title={insights.favoriteDish}>
+                                      {insights.favoriteDish}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-500 block">
+                                    {cust.totalOrders} {cust.totalOrders === 1 ? "pedido / visita" : "pedidos / visitas"}
+                                  </span>
+                                </div>
+                              )}
                             </td>
 
                             <td className="py-3.5 text-right">
@@ -9217,10 +9483,26 @@ export function AdminDashboard({
               <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
                 <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-xl w-full space-y-4 shadow-2xl my-8">
                   <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                      <Users className="h-5 w-5 text-amber-400" />
-                      {editingCustomer ? "Editar Ficha de Cliente" : "Registrar Nuevo Cliente"}
-                    </h3>
+                    <div>
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        {isServiciosTecnicos ? (
+                          <>
+                            <Wrench className="h-5 w-5 text-cyan-400" />
+                            <span>{editingCustomer ? "Ficha Técnica de Cliente" : "Registrar Cliente de Servicios"}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Users className="h-5 w-5 text-amber-400" />
+                            <span>{editingCustomer ? "Editar Ficha de Cliente" : "Registrar Nuevo Cliente"}</span>
+                          </>
+                        )}
+                      </h3>
+                      {isServiciosTecnicos && (
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Expediente del cliente, diagnóstico del equipo y condiciones de visita técnica.
+                        </p>
+                      )}
+                    </div>
                     <button
                       onClick={() => setIsCustomerModalOpen(false)}
                       className="text-slate-400 hover:text-white px-2 py-1 text-xs"
@@ -9229,210 +9511,609 @@ export function AdminDashboard({
                     </button>
                   </div>
 
-                  <form onSubmit={handleSaveCustomer} className="space-y-4 text-xs">
-                    {/* Basic Info */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold">Nombre Completo *</label>
-                        <input
-                          type="text"
-                          required
-                          value={custName}
-                          onChange={(e) => setCustName(e.target.value)}
-                          placeholder="Ej. María López"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold">Teléfono / WhatsApp *</label>
-                        <input
-                          type="tel"
-                          required
-                          value={custPhone}
-                          onChange={(e) => setCustPhone(e.target.value)}
-                          placeholder="Ej. 0991234567"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold">Categoría CRM</label>
-                        <select
-                          value={custCategory}
-                          onChange={(e) => setCustCategory(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        >
-                          <option value="NUEVO">🆕 Nuevo</option>
-                          <option value="FRECUENTE">🔥 Frecuente</option>
-                          <option value="VIP">⭐ VIP</option>
-                          <option value="INACTIVO">💤 Inactivo</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold">Ciudad / Sector</label>
-                        <input
-                          type="text"
-                          value={custCity}
-                          onChange={(e) => setCustCity(e.target.value)}
-                          placeholder="Ej. Manta / Barbasquillo"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold">Correo Electrónico</label>
-                        <input
-                          type="email"
-                          value={custEmail}
-                          onChange={(e) => setCustEmail(e.target.value)}
-                          placeholder="cliente@ejemplo.com"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-300 mb-1 font-semibold">Dirección de Entrega Habitual</label>
-                      <input
-                        type="text"
-                        value={custAddress}
-                        onChange={(e) => setCustAddress(e.target.value)}
-                        placeholder="Ej. Av. Barbasquillo #404 frente al parque"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                      />
-                    </div>
-
-                    {/* Preferencias Dietéticas (Checkboxes) */}
-                    <div className="bg-slate-950/60 border border-slate-850 p-3.5 rounded-2xl space-y-2">
-                      <label className="block text-slate-300 font-bold flex items-center gap-1.5">
-                        <Wheat className="h-4 w-4 text-emerald-400" />
-                        Preferencias Dietéticas
-                      </label>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {DIETARY_PREFERENCES_LIST.map((diet) => {
-                          const isSelected = custDietary.includes(diet.id);
-                          return (
-                            <button
-                              type="button"
-                              key={diet.id}
-                              onClick={() => {
-                                if (isSelected) {
-                                  setCustDietary(custDietary.filter((d) => d !== diet.id));
-                                } else {
-                                  setCustDietary([...custDietary, diet.id]);
-                                }
-                              }}
-                              className={`p-2 rounded-xl text-left font-bold transition flex items-center justify-between border ${
-                                isSelected
-                                  ? `${diet.color} shadow-sm`
-                                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
-                              }`}
-                            >
-                              <span className="flex items-center gap-1.5">
-                                <span>{diet.emoji}</span>
-                                <span className="text-[11px]">{diet.label}</span>
-                              </span>
-                              {isSelected ? (
-                                <CheckSquare className="h-3.5 w-3.5 text-current shrink-0" />
-                              ) : (
-                                <Square className="h-3.5 w-3.5 text-slate-600 shrink-0" />
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Alergias & Cumpleaños */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
-                          <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
-                          Alergias o Restricciones Críticas
-                        </label>
-                        <input
-                          type="text"
-                          value={custAllergies}
-                          onChange={(e) => setCustAllergies(e.target.value)}
-                          placeholder="Ej. Mariscos, Maní, Frutos secos"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
-                          <Cake className="h-3.5 w-3.5 text-pink-400" />
-                          Fecha de Cumpleaños
-                        </label>
-                        <input
-                          type="date"
-                          value={custBirthDate}
-                          onChange={(e) => setCustBirthDate(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-pink-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Plato Favorito & Puntos */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
-                          <Utensils className="h-3.5 w-3.5 text-amber-400" />
-                          Plato Favorito (Opcional)
-                        </label>
-                        <input
-                          type="text"
-                          value={custFavoriteDish}
-                          onChange={(e) => setCustFavoriteDish(e.target.value)}
-                          placeholder="Ej. Empanada de Carne y Queso"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
-                          <Award className="h-3.5 w-3.5 text-emerald-400" />
-                          Saldo de Puntos de Lealtad
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={custPoints}
-                          onChange={(e) => setCustPoints(parseInt(e.target.value, 10) || 0)}
-                          placeholder="0"
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white focus:outline-none font-bold"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Notas adicionales */}
-                    <div>
-                      <label className="block text-slate-300 mb-1 font-semibold">Notas Internas & Preferencias</label>
-                      <textarea
-                        rows={2}
-                        value={custCustomNotes}
-                        onChange={(e) => setCustCustomNotes(e.target.value)}
-                        placeholder="Ej. Le gusta mesa junto a la ventana, siempre pide salsa extra..."
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                  {/* Modular Tabs for Technical Services (Opción 2) */}
+                  {isServiciosTecnicos && (
+                    <div className="flex p-1 bg-slate-950/80 border border-slate-800 rounded-2xl gap-1">
                       <button
                         type="button"
-                        onClick={() => setIsCustomerModalOpen(false)}
-                        className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition"
+                        onClick={() => setCustModalTab("contacto")}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-bold transition ${
+                          custModalTab === "contacto"
+                            ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
                       >
-                        Cancelar
+                        <User className="h-3.5 w-3.5" />
+                        <span>1. Contacto</span>
                       </button>
                       <button
-                        type="submit"
-                        disabled={savingCustomer}
-                        className="px-5 py-2 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 text-white font-bold hover:from-red-500 hover:to-amber-500 transition shadow-lg disabled:opacity-50"
+                        type="button"
+                        onClick={() => setCustModalTab("tecnico")}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-bold transition ${
+                          custModalTab === "tecnico"
+                            ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
                       >
-                        {savingCustomer ? "Guardando..." : editingCustomer ? "Guardar Cambios" : "Crear Cliente"}
+                        <Wrench className="h-3.5 w-3.5" />
+                        <span>2. Equipo & Fallas</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustModalTab("visitas")}
+                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl text-xs font-bold transition ${
+                          custModalTab === "visitas"
+                            ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <CalendarDays className="h-3.5 w-3.5" />
+                        <span>3. Visitas & Notas</span>
+                      </button>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveCustomer} className="space-y-4 text-xs">
+                    {/* VISTA A: SERVICIOS TÉCNICOS (FICHA MODULAR POR PESTAÑAS) */}
+                    {isServiciosTecnicos ? (
+                      <>
+                        {/* PESTAÑA 1: CONTACTO & DOMICILIO */}
+                        {custModalTab === "contacto" && (
+                          <div className="space-y-3 animate-fade-in">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold">Nombre Completo *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={custName}
+                                  onChange={(e) => setCustName(e.target.value)}
+                                  placeholder="Ej. María López"
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold">Teléfono / WhatsApp *</label>
+                                <input
+                                  type="tel"
+                                  required
+                                  value={custPhone}
+                                  onChange={(e) => setCustPhone(e.target.value)}
+                                  placeholder="Ej. 0991234567"
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold">Categoría CRM</label>
+                                <select
+                                  value={custCategory}
+                                  onChange={(e) => setCustCategory(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                >
+                                  <option value="NUEVO">🆕 Nuevo</option>
+                                  <option value="FRECUENTE">🔥 Frecuente</option>
+                                  <option value="VIP">⭐ VIP</option>
+                                  <option value="INACTIVO">💤 Inactivo</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold">Ciudad / Sector</label>
+                                <input
+                                  type="text"
+                                  value={custCity}
+                                  onChange={(e) => setCustCity(e.target.value)}
+                                  placeholder="Ej. Manta / Barbasquillo"
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold">Correo Electrónico</label>
+                                <input
+                                  type="email"
+                                  value={custEmail}
+                                  onChange={(e) => setCustEmail(e.target.value)}
+                                  placeholder="cliente@ejemplo.com"
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-slate-300 font-semibold flex items-center gap-1">
+                                  <MapPin className="h-3.5 w-3.5 text-cyan-400" />
+                                  Dirección de Visita Técnica Habitual
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={handleDetectCustomerGps}
+                                  disabled={custGpsLoading}
+                                  className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-bold disabled:opacity-50"
+                                >
+                                  <MapPin className="h-3 w-3" />
+                                  {custGpsLoading ? "Detectando GPS..." : "📍 Capturar mi GPS actual"}
+                                </button>
+                              </div>
+                              <input
+                                type="text"
+                                value={custAddress}
+                                onChange={(e) => setCustAddress(e.target.value)}
+                                placeholder="Ej. Av. Barbasquillo #404 frente al parque [GPS: -1.0543,-80.7221]"
+                                className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                              />
+                              {custAddress && custAddress.includes("[GPS:") && (
+                                <div className="mt-1 flex items-center justify-between text-[11px] bg-cyan-950/30 border border-cyan-800/40 px-2.5 py-1 rounded-lg text-cyan-300">
+                                  <span>📍 Coordenadas GPS fijadas para visitas a domicilio</span>
+                                  {(() => {
+                                    const match = custAddress.match(/\[GPS:\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\]/);
+                                    if (match) {
+                                      return (
+                                        <a
+                                          href={`https://www.google.com/maps/search/?api=1&query=${match[1]},${match[2]}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="underline hover:text-white font-bold ml-2"
+                                        >
+                                          Abrir en Google Maps ↗
+                                        </a>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PESTAÑA 2: PERFIL TÉCNICO & EQUIPOS */}
+                        {custModalTab === "tecnico" && (
+                          <div className="space-y-3.5 animate-fade-in">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                                  <Tag className="h-3.5 w-3.5 text-amber-400" />
+                                  Marca del Equipo o Artefacto
+                                </label>
+                                <select
+                                  value={custEquipmentBrand}
+                                  onChange={(e) => setCustEquipmentBrand(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                >
+                                  {SERVICIOS_MARCAS_COMUNES.map((b) => (
+                                    <option key={b} value={b}>{b}</option>
+                                  ))}
+                                </select>
+                                {custEquipmentBrand === "Otra" && (
+                                  <input
+                                    type="text"
+                                    value={custCustomBrand}
+                                    onChange={(e) => setCustCustomBrand(e.target.value)}
+                                    placeholder="Escribe la marca del equipo..."
+                                    className="mt-2 w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                  />
+                                )}
+                              </div>
+
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold">Tipo de Tecnología</label>
+                                <select
+                                  value={custEquipmentTech}
+                                  onChange={(e) => setCustEquipmentTech(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                >
+                                  {SERVICIOS_TECNOLOGIAS.map((t) => (
+                                    <option key={t.id} value={t.label}>{t.label} ({t.desc})</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                                <Wrench className="h-3.5 w-3.5 text-cyan-400" />
+                                Servicio Técnico Habitual / Frecuente
+                              </label>
+                              <input
+                                type="text"
+                                value={custLastService}
+                                onChange={(e) => setCustLastService(e.target.value)}
+                                placeholder="Ej. Mantenimiento de Bombas de Agua, Split, Lavadora..."
+                                className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="bg-slate-950/60 border border-slate-850 p-3.5 rounded-2xl space-y-2">
+                              <div className="flex items-center justify-between">
+                                <label className="block text-slate-300 font-bold flex items-center gap-1.5 text-xs">
+                                  <AlertTriangle className="h-4 w-4 text-rose-400" />
+                                  Fallas y Síntomas Reportados por el Cliente
+                                </label>
+                                <span className="text-[10px] text-slate-500">Haz clic para activar</span>
+                              </div>
+
+                              <div className="flex flex-wrap gap-1.5">
+                                {SERVICIOS_SINTOMAS_HABITUALES.map((sym) => {
+                                  const isSelected = custSymptoms.includes(sym);
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={sym}
+                                      onClick={() => handleToggleCustomerSymptom(sym)}
+                                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition ${
+                                        isSelected
+                                          ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-sm"
+                                          : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                                      }`}
+                                    >
+                                      {sym}
+                                    </button>
+                                  );
+                                })}
+                                {custSymptoms.filter((s) => !SERVICIOS_SINTOMAS_HABITUALES.includes(s)).map((customSym) => (
+                                  <span
+                                    key={customSym}
+                                    className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 inline-flex items-center gap-1"
+                                  >
+                                    <span>{customSym}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleCustomerSymptom(customSym)}
+                                      className="text-amber-400 hover:text-white ml-0.5"
+                                    >
+                                      ×
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+
+                              <div className="flex items-center gap-2 pt-1.5">
+                                <input
+                                  type="text"
+                                  value={custCustomSymptom}
+                                  onChange={(e) => setCustCustomSymptom(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      handleAddCustomSymptom();
+                                    }
+                                  }}
+                                  placeholder="Escribir otra falla y pulsar '+ Agregar'..."
+                                  className="flex-1 bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleAddCustomSymptom}
+                                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+                                >
+                                  + Agregar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* PESTAÑA 3: VISITAS & NOTAS TÉCNICAS */}
+                        {custModalTab === "visitas" && (
+                          <div className="space-y-3.5 animate-fade-in">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                                  <CalendarDays className="h-3.5 w-3.5 text-cyan-400" />
+                                  Franja Horaria Preferida de Visita
+                                </label>
+                                <select
+                                  value={custPreferredTimeSlot}
+                                  onChange={(e) => setCustPreferredTimeSlot(e.target.value)}
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                                >
+                                  {SERVICIOS_FRANJAS_HORARIAS.map((f) => (
+                                    <option key={f.id} value={f.label}>{f.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                                  <Award className="h-3.5 w-3.5 text-emerald-400" />
+                                  Puntos de Lealtad (Descuento Mano de Obra)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={custPoints}
+                                  onChange={(e) => setCustPoints(parseInt(e.target.value, 10) || 0)}
+                                  placeholder="0"
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white focus:outline-none font-bold"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                                <Cake className="h-3.5 w-3.5 text-pink-400" />
+                                Fecha de Cumpleaños (Opcional)
+                              </label>
+                              <input
+                                type="date"
+                                value={custBirthDate}
+                                onChange={(e) => setCustBirthDate(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 focus:border-pink-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-slate-300 mb-1 font-semibold">Notas Técnicas & Acceso al Inmueble</label>
+                              <textarea
+                                rows={3}
+                                value={custCustomNotes}
+                                onChange={(e) => setCustCustomNotes(e.target.value)}
+                                placeholder="Ej. Timbre no funciona, llamar 15 minutos antes de llegar, perro guardián en patio, equipo ubicado en terraza del 2do piso..."
+                                className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      /* VISTA B: RESTAURANTES / GASTRONOMÍA */
+                      <>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold">Nombre Completo *</label>
+                            <input
+                              type="text"
+                              required
+                              value={custName}
+                              onChange={(e) => setCustName(e.target.value)}
+                              placeholder="Ej. María López"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold">Teléfono / WhatsApp *</label>
+                            <input
+                              type="tel"
+                              required
+                              value={custPhone}
+                              onChange={(e) => setCustPhone(e.target.value)}
+                              placeholder="Ej. 0991234567"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold">Categoría CRM</label>
+                            <select
+                              value={custCategory}
+                              onChange={(e) => setCustCategory(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            >
+                              <option value="NUEVO">🆕 Nuevo</option>
+                              <option value="FRECUENTE">🔥 Frecuente</option>
+                              <option value="VIP">⭐ VIP</option>
+                              <option value="INACTIVO">💤 Inactivo</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold">Ciudad / Sector</label>
+                            <input
+                              type="text"
+                              value={custCity}
+                              onChange={(e) => setCustCity(e.target.value)}
+                              placeholder="Ej. Manta / Barbasquillo"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold">Correo Electrónico</label>
+                            <input
+                              type="email"
+                              value={custEmail}
+                              onChange={(e) => setCustEmail(e.target.value)}
+                              placeholder="cliente@ejemplo.com"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-300 mb-1 font-semibold">Dirección de Entrega Habitual</label>
+                          <input
+                            type="text"
+                            value={custAddress}
+                            onChange={(e) => setCustAddress(e.target.value)}
+                            placeholder="Ej. Av. Barbasquillo #404 frente al parque"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Preferencias Dietéticas (Checkboxes) */}
+                        <div className="bg-slate-950/60 border border-slate-850 p-3.5 rounded-2xl space-y-2">
+                          <label className="block text-slate-300 font-bold flex items-center gap-1.5">
+                            <Wheat className="h-4 w-4 text-emerald-400" />
+                            Preferencias Dietéticas
+                          </label>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {DIETARY_PREFERENCES_LIST.map((diet) => {
+                              const isSelected = custDietary.includes(diet.id);
+                              return (
+                                <button
+                                  type="button"
+                                  key={diet.id}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setCustDietary(custDietary.filter((d) => d !== diet.id));
+                                    } else {
+                                      setCustDietary([...custDietary, diet.id]);
+                                    }
+                                  }}
+                                  className={`p-2 rounded-xl text-left font-bold transition flex items-center justify-between border ${
+                                    isSelected
+                                      ? `${diet.color} shadow-sm`
+                                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <span>{diet.emoji}</span>
+                                    <span className="text-[11px]">{diet.label}</span>
+                                  </span>
+                                  {isSelected ? (
+                                    <CheckSquare className="h-3.5 w-3.5 text-current shrink-0" />
+                                  ) : (
+                                    <Square className="h-3.5 w-3.5 text-slate-600 shrink-0" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Alergias & Cumpleaños */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                              <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                              Alergias o Restricciones Críticas
+                            </label>
+                            <input
+                              type="text"
+                              value={custAllergies}
+                              onChange={(e) => setCustAllergies(e.target.value)}
+                              placeholder="Ej. Mariscos, Maní, Frutos secos"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                              <Cake className="h-3.5 w-3.5 text-pink-400" />
+                              Fecha de Cumpleaños
+                            </label>
+                            <input
+                              type="date"
+                              value={custBirthDate}
+                              onChange={(e) => setCustBirthDate(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-pink-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Plato Favorito & Puntos */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                              <Utensils className="h-3.5 w-3.5 text-amber-400" />
+                              Plato Favorito (Opcional)
+                            </label>
+                            <input
+                              type="text"
+                              value={custFavoriteDish}
+                              onChange={(e) => setCustFavoriteDish(e.target.value)}
+                              placeholder="Ej. Empanada de Carne y Queso"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                              <Award className="h-3.5 w-3.5 text-emerald-400" />
+                              Saldo de Puntos de Lealtad
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={custPoints}
+                              onChange={(e) => setCustPoints(parseInt(e.target.value, 10) || 0)}
+                              placeholder="0"
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white focus:outline-none font-bold"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Notas adicionales */}
+                        <div>
+                          <label className="block text-slate-300 mb-1 font-semibold">Notas Internas & Preferencias</label>
+                          <textarea
+                            rows={2}
+                            value={custCustomNotes}
+                            onChange={(e) => setCustCustomNotes(e.target.value)}
+                            placeholder="Ej. Le gusta mesa junto a la ventana, siempre pide salsa extra..."
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-red-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                      <div className="flex items-center gap-1">
+                        {isServiciosTecnicos && (
+                          <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                            {custModalTab === "tecnico" && (
+                              <button
+                                type="button"
+                                onClick={() => setCustModalTab("contacto")}
+                                className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white"
+                              >
+                                ← Contacto
+                              </button>
+                            )}
+                            {custModalTab === "visitas" && (
+                              <button
+                                type="button"
+                                onClick={() => setCustModalTab("tecnico")}
+                                className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white"
+                              >
+                                ← Equipo
+                              </button>
+                            )}
+                            {custModalTab === "contacto" && (
+                              <button
+                                type="button"
+                                onClick={() => setCustModalTab("tecnico")}
+                                className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white"
+                              >
+                                Equipo & Fallas →
+                              </button>
+                            )}
+                            {custModalTab === "tecnico" && (
+                              <button
+                                type="button"
+                                onClick={() => setCustModalTab("visitas")}
+                                className="px-2 py-1 rounded bg-slate-800 text-slate-300 hover:text-white"
+                              >
+                                Visitas & Notas →
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsCustomerModalOpen(false)}
+                          className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingCustomer}
+                          className={`px-5 py-2 rounded-xl text-white font-bold transition shadow-lg disabled:opacity-50 ${
+                            isServiciosTecnicos
+                              ? "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500"
+                              : "bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500"
+                          }`}
+                        >
+                          {savingCustomer ? "Guardando..." : editingCustomer ? "Guardar Cambios" : "Crear Cliente"}
+                        </button>
+                      </div>
                     </div>
                   </form>
                 </div>
@@ -9490,9 +10171,13 @@ export function AdminDashboard({
                     {/* Stat Badges */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                       <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Visitas / Pedidos</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                          {isServiciosTecnicos ? "Visitas Técnicas" : "Visitas / Pedidos"}
+                        </span>
                         <p className="text-xl font-black text-white mt-1">{cust.totalOrders}</p>
-                        <span className="text-[10px] text-slate-500">Historial total</span>
+                        <span className="text-[10px] text-slate-500">
+                          {isServiciosTecnicos ? "Cotizaciones y visitas" : "Historial total"}
+                        </span>
                       </div>
                       <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">Gasto Acumulado</span>
@@ -9502,7 +10187,9 @@ export function AdminDashboard({
                       <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">Ticket Promedio</span>
                         <p className="text-xl font-black text-cyan-400 mt-1">${insights.avgTicket.toFixed(2)}</p>
-                        <span className="text-[10px] text-slate-500">Por visita/pedido</span>
+                        <span className="text-[10px] text-slate-500">
+                          {isServiciosTecnicos ? "Por visita técnica" : "Por visita/pedido"}
+                        </span>
                       </div>
                       <div className="bg-slate-950/80 border border-slate-850 p-3 rounded-2xl">
                         <span className="text-[10px] font-bold text-amber-400 uppercase flex items-center gap-1">
@@ -9514,73 +10201,152 @@ export function AdminDashboard({
                       </div>
                     </div>
 
-                    {/* Preferencias & Alergias & Cumpleaños Box */}
-                    <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
-                      <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
-                        <Wheat className="h-4 w-4 text-amber-400" />
-                        Perfil Alimentario & Fechas
-                      </h4>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <span className="text-[11px] font-bold text-slate-400 block mb-1">Dietas:</span>
-                          <div className="flex flex-wrap gap-1">
-                            {(meta.dietary && meta.dietary.length > 0) ? (
-                              meta.dietary.map(d => {
-                                const match = DIETARY_PREFERENCES_LIST.find(dp => dp.id === d);
-                                return (
-                                  <span key={d} className={`px-2 py-0.5 rounded-md font-bold text-[10px] border ${match?.color || "bg-slate-800 text-white"}`}>
-                                    {match?.emoji} {match?.label || d}
+                    {/* Preferencias & Alergias & Cumpleaños Box OR Perfil Técnico Box */}
+                    {isServiciosTecnicos ? (
+                      <div className="bg-slate-950/60 border border-cyan-900/40 p-4 rounded-2xl space-y-3 text-xs">
+                        <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
+                          <Wrench className="h-4 w-4 text-cyan-400" />
+                          Perfil Técnico & Diagnóstico del Equipo
+                        </h4>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Equipo & Tecnología:</span>
+                            {(meta.equipmentBrand || meta.equipmentTech) ? (
+                              <div className="space-y-1">
+                                {meta.equipmentBrand && (
+                                  <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1">
+                                    <Tag className="h-3 w-3 text-amber-400" />
+                                    {meta.equipmentBrand}
                                   </span>
-                                );
-                              })
+                                )}
+                                {meta.equipmentTech && (
+                                  <span className="px-2 py-0.5 rounded-md font-semibold text-[10px] bg-slate-800 text-slate-300 border border-slate-700 block w-fit">
+                                    {meta.equipmentTech}
+                                  </span>
+                                )}
+                              </div>
                             ) : (
-                              <span className="text-slate-500 italic text-[11px]">Sin dietas especiales</span>
+                              <span className="text-slate-500 italic text-[11px]">Sin equipo registrado</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Síntomas / Fallas Reportadas:</span>
+                            {(meta.symptoms && meta.symptoms.length > 0) ? (
+                              <div className="flex flex-wrap gap-1">
+                                {meta.symptoms.map((s: string, idx: number) => (
+                                  <span key={idx} className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 inline-flex items-center gap-1">
+                                    <AlertTriangle className="h-3 w-3 text-rose-400" />
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">Sin síntomas específicos</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Último Servicio Solicitado:</span>
+                            {meta.lastService ? (
+                              <div className="space-y-0.5">
+                                <span className="text-cyan-300 font-bold flex items-center gap-1 text-[11px]">
+                                  <Wrench className="h-3 w-3 text-cyan-400" />
+                                  {meta.lastService}
+                                </span>
+                                {meta.preferredTimeSlot && (
+                                  <span className="text-[10px] text-slate-400 block">Horario: {meta.preferredTimeSlot}</span>
+                                )}
+                                {meta.lastQuoteAt && (
+                                  <span className="text-[9px] text-slate-500 block">
+                                    Cotizado: {new Date(meta.lastQuoteAt).toLocaleDateString("es-ES")}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">No registrado</span>
                             )}
                           </div>
                         </div>
 
-                        <div>
-                          <span className="text-[11px] font-bold text-slate-400 block mb-1">Alergias / Intolerancias:</span>
-                          {meta.allergies ? (
-                            <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 inline-flex items-center gap-1">
-                              <ShieldAlert className="h-3 w-3 text-rose-400" />
-                              {meta.allergies}
-                            </span>
-                          ) : (
-                            <span className="text-slate-500 italic text-[11px]">Ninguna alergia registrada</span>
-                          )}
-                        </div>
-
-                        <div>
-                          <span className="text-[11px] font-bold text-slate-400 block mb-1">Cumpleaños:</span>
-                          {meta.birthDate ? (
-                            <div className="space-y-0.5">
-                              <span className="text-pink-300 font-bold flex items-center gap-1 text-[11px]">
-                                <Cake className="h-3 w-3 text-pink-400" />
-                                {insights.formattedBirthday}
-                              </span>
-                              {insights.isBirthdayToday ? (
-                                <span className="text-[10px] text-emerald-400 font-extrabold block">🎉 ¡Hoy cumple años!</span>
-                              ) : insights.daysUntilBirthday !== null ? (
-                                <span className="text-[10px] text-slate-500 block">Faltan {insights.daysUntilBirthday} días</span>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <span className="text-slate-500 italic text-[11px]">No registrado</span>
-                          )}
-                        </div>
+                        {meta.customNotes && (
+                          <div className="pt-2 border-t border-slate-850">
+                            <span className="text-[11px] font-bold text-slate-400 block">Notas técnicas de atención:</span>
+                            <p className="text-slate-300 text-xs mt-0.5 italic bg-slate-900/60 p-2.5 rounded-xl border border-slate-850">
+                              "{meta.customNotes}"
+                            </p>
+                          </div>
+                        )}
                       </div>
+                    ) : (
+                      <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
+                        <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
+                          <Wheat className="h-4 w-4 text-amber-400" />
+                          Perfil Alimentario & Fechas
+                        </h4>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Dietas:</span>
+                            <div className="flex flex-wrap gap-1">
+                              {(meta.dietary && meta.dietary.length > 0) ? (
+                                meta.dietary.map(d => {
+                                  const match = DIETARY_PREFERENCES_LIST.find(dp => dp.id === d);
+                                  return (
+                                    <span key={d} className={`px-2 py-0.5 rounded-md font-bold text-[10px] border ${match?.color || "bg-slate-800 text-white"}`}>
+                                      {match?.emoji} {match?.label || d}
+                                    </span>
+                                  );
+                                })
+                              ) : (
+                                <span className="text-slate-500 italic text-[11px]">Sin dietas especiales</span>
+                              )}
+                            </div>
+                          </div>
 
-                      {meta.customNotes && (
-                        <div className="pt-2 border-t border-slate-850">
-                          <span className="text-[11px] font-bold text-slate-400 block">Notas de atención:</span>
-                          <p className="text-slate-300 text-xs mt-0.5 italic bg-slate-900/60 p-2.5 rounded-xl border border-slate-850">
-                            "{meta.customNotes}"
-                          </p>
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Alergias / Intolerancias:</span>
+                            {meta.allergies ? (
+                              <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/40 inline-flex items-center gap-1">
+                                <ShieldAlert className="h-3 w-3 text-rose-400" />
+                                {meta.allergies}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">Ninguna alergia registrada</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Cumpleaños:</span>
+                            {meta.birthDate ? (
+                              <div className="space-y-0.5">
+                                <span className="text-pink-300 font-bold flex items-center gap-1 text-[11px]">
+                                  <Cake className="h-3 w-3 text-pink-400" />
+                                  {insights.formattedBirthday}
+                                </span>
+                                {insights.isBirthdayToday ? (
+                                  <span className="text-[10px] text-emerald-400 font-extrabold block">🎉 ¡Hoy cumple años!</span>
+                                ) : insights.daysUntilBirthday !== null ? (
+                                  <span className="text-[10px] text-slate-500 block">Faltan {insights.daysUntilBirthday} días</span>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">No registrado</span>
+                            )}
+                          </div>
                         </div>
-                      )}
-                    </div>
+
+                        {meta.customNotes && (
+                          <div className="pt-2 border-t border-slate-850">
+                            <span className="text-[11px] font-bold text-slate-400 block">Notas de atención:</span>
+                            <p className="text-slate-300 text-xs mt-0.5 italic bg-slate-900/60 p-2.5 rounded-xl border border-slate-850">
+                              "{meta.customNotes}"
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Quick Loyalty Points Adjustment */}
                     <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
@@ -9633,7 +10399,9 @@ export function AdminDashboard({
                     <div className="space-y-3">
                       <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
                         <History className="h-4 w-4 text-amber-400" />
-                        Historial de Pedidos ({insights.matchingOrders.length})
+                        {isServiciosTecnicos
+                          ? `Historial de Visitas y Cotizaciones (${insights.matchingOrders.length})`
+                          : `Historial de Pedidos (${insights.matchingOrders.length})`}
                       </h4>
                       {insights.matchingOrders.length === 0 ? (
                         <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-center text-slate-500 text-xs">

@@ -19,6 +19,12 @@ import {
   Star,
   Check,
   Store,
+  MessageSquare,
+  Mic,
+  Video,
+  Cpu,
+  Zap,
+  Tag,
 } from "lucide-react";
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
@@ -77,6 +83,45 @@ interface TechnicianData {
   galleryImages?: string[] | null;
 }
 
+const MARCAS_COMUNES = [
+  "Samsung",
+  "LG",
+  "Mabe",
+  "Whirlpool",
+  "Electrolux",
+  "Haceb",
+  "Indurama",
+  "Bosch",
+  "TCL",
+  "General Electric",
+  "Otra",
+];
+
+const TECNOLOGIAS = [
+  { id: "inverter", label: "Inverter ⚡", desc: "Ahorro / Digital" },
+  { id: "convencional", label: "Convencional", desc: "Estándar / Análogo" },
+  { id: "smart", label: "Smart / WiFi", desc: "Control inteligente" },
+  { id: "industrial", label: "Industrial", desc: "Comercial / Trifásico" },
+];
+
+const SINTOMAS_HABITUALES = [
+  "❄️ No enfría / congela",
+  "🔊 Ruido extraño / vibra",
+  "💧 Fuga de agua / goteo",
+  "⚡ Salta breaker / no prende",
+  "🔥 No calienta / sin chispa",
+  "⚠️ Código de error",
+  "🧼 No centrifuga / desagua",
+  "⚙️ Mantenimiento preventivo",
+];
+
+const FRANJAS_HORARIAS = [
+  { id: "manana", label: "☀️ Mañana", time: "08:00 - 12:00" },
+  { id: "tarde", label: "🌤️ Tarde", time: "13:00 - 17:00" },
+  { id: "fin_jornada", label: "🌙 Fin de Jornada", time: "17:00 - 19:30" },
+  { id: "urgente", label: "🚨 Urgencia Inmediata", time: "Prioridad máxima" },
+];
+
 export function ServiciosClient({ technician }: { technician: TechnicianData }) {
   const [currentTab, setCurrentTab] = useState<"profile" | "cotizar">("profile");
 
@@ -100,13 +145,24 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [addressReference, setAddressReference] = useState<string>("");
 
+  // Ficha Rápida del Equipo & Síntomas
+  const [equipmentBrand, setEquipmentBrand] = useState<string>("Samsung");
+  const [customBrand, setCustomBrand] = useState<string>("");
+  const [equipmentTech, setEquipmentTech] = useState<string>("inverter");
+  const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
+  const [timeSlot, setTimeSlot] = useState<string>("manana");
+
+  const toggleSymptom = (sym: string) => {
+    setSelectedSymptoms((prev) =>
+      prev.includes(sym) ? prev.filter((s) => s !== sym) : [...prev, sym]
+    );
+  };
+
   // Geolocalización
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
 
-  // Subida de Fotos
-  const [photos, setPhotos] = useState<Array<{ name: string; url: string }>>([]);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
 
@@ -137,29 +193,6 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
     );
   };
 
-  // Manejar fotos seleccionadas (simulación con preview local en base64)
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setPhotos((prev) => [
-            ...prev,
-            { name: file.name, url: event.target!.result as string },
-          ]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const removePhoto = (index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-  };
-
   // Envío del Cotizador Express
   const handleSubmitQuote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,6 +205,13 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
     setIsSubmitting(true);
 
     try {
+      const resolvedBrand =
+        equipmentBrand === "Otra"
+          ? customBrand.trim() || "Otra Marca"
+          : equipmentBrand;
+      const selectedTechObj = TECNOLOGIAS.find((t) => t.id === equipmentTech);
+      const selectedTimeObj = FRANJAS_HORARIAS.find((f) => f.id === timeSlot);
+
       const payload = {
         vertical: "servicios",
         negocio_id: technician.id,
@@ -181,11 +221,16 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
         servicio_solicitado: selectedService,
         descripcion_problema: description,
         urgencia: urgency,
+        marca_equipo: resolvedBrand,
+        tipo_tecnologia: selectedTechObj ? selectedTechObj.label : equipmentTech,
+        sintomas_detectados: selectedSymptoms,
+        franja_horaria: selectedTimeObj ? `${selectedTimeObj.label} (${selectedTimeObj.time})` : timeSlot,
+        visita_condicion: "100% deducible si se realiza el trabajo",
         latitud: gpsCoords?.lat || null,
         longitud: gpsCoords?.lng || null,
         direccion_referencia: addressReference,
         fecha_preferida: preferredDate,
-        fotos_urls: photos.map((p) => p.name),
+        fotos_urls: [],
       };
 
       const res = await fetch("/api/pedidos", {
@@ -349,14 +394,35 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
             </div>
           </div>
 
-          {/* Garantía de Servicio */}
-          <div className="p-5 rounded-2xl bg-cyan-950/20 border border-cyan-800/40 text-xs text-slate-300 space-y-2">
-            <div className="font-bold text-cyan-400 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4" />
-              <span>Garantía de Satisfacción & Transparencia</span>
+          {/* Tarifa de Visita Técnica & Diagnóstico Domiciliario (100% Deducible) */}
+          <div className="p-5 rounded-3xl bg-gradient-to-br from-cyan-950/40 via-slate-900/90 to-blue-950/40 border border-cyan-500/30 shadow-xl space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-inner">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-cyan-400 block">Política de Claridad</span>
+                  <h4 className="text-xs font-black text-white">Diagnóstico & Visita Domiciliaria</h4>
+                </div>
+              </div>
+              <span className="text-xs font-black px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                $10.00 ref.
+              </span>
             </div>
-            <p className="text-slate-400 leading-relaxed text-[11px]">
-              Al enviar tu cotización express con foto y GPS, el técnico evalúa la magnitud del trabajo y te envía el presupuesto exacto antes de acudir a tu domicilio. Sin costos ocultos.
+
+            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-white/5 space-y-2">
+              <p className="text-[11px] text-slate-200 leading-relaxed font-medium">
+                🎯 <strong className="text-cyan-300">100% DEDUCIBLE:</strong> Si apruebas el presupuesto y se realiza el trabajo, la visita técnica es <strong className="text-emerald-400 uppercase">completamente GRATIS</strong> (se descuenta íntegramente del total del servicio).
+              </p>
+              <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Sin costos ocultos ni cobros sorpresa al momento de la revisión.</span>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-slate-400 leading-tight">
+              Permite al especialista acudir equipado con instrumental técnico, revisar físicamente la falla y emitir garantía del trabajo por escrito.
             </p>
           </div>
         </div>
@@ -371,7 +437,7 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
 
             <h2 className="text-2xl font-black text-white mb-2">Solicitar Presupuesto Rápido</h2>
             <p className="text-xs text-slate-400 mb-6">
-              Sube una foto de la avería y comparte tu ubicación para recibir el costo estimado al instante en WhatsApp.
+              Detalla el trabajo y comparte tu ubicación. Al enviar, se abrirá tu WhatsApp para adjuntar fotos, videos o notas de voz del problema directamente al técnico.
             </p>
 
             {submitted ? (
@@ -381,7 +447,7 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
                 </div>
                 <h3 className="text-xl font-bold text-white">¡Cotización Enviada con Éxito!</h3>
                 <p className="text-slate-300 text-xs max-w-md mx-auto">
-                  Se ha generado el resumen con las fotos y tus coordenadas. Si no se abrió WhatsApp automáticamente, haz clic abajo:
+                  Se ha generado el resumen y tus coordenadas. Si no se abrió WhatsApp automáticamente, haz clic abajo:
                 </p>
                 <button
                   onClick={() => setSubmitted(false)}
@@ -433,64 +499,178 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
                     type="text"
                     value={selectedService}
                     onChange={(e) => setSelectedService(e.target.value)}
-                    placeholder="Ej: Fuga de agua debajo del fregadero / Cambio de tomacorriente"
+                    placeholder="Ej: Fuga de agua debajo del fregadero / Mantenimiento de aire acondicionado"
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-cyan-500"
                   />
                 </div>
 
-                {/* 3. Descripción de la avería */}
+                {/* 3. Ficha Rápida del Equipo (Marca & Tecnología) */}
+                <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Marca del Equipo / Artefacto</span>
+                    </label>
+                    <span className="text-[10px] text-cyan-400 font-bold px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+                      1 Clic
+                    </span>
+                  </div>
+
+                  {/* Chips de Marcas Comunes */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {MARCAS_COMUNES.map((brand) => (
+                      <button
+                        key={brand}
+                        type="button"
+                        onClick={() => setEquipmentBrand(brand)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                          equipmentBrand === brand
+                            ? "bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/25 scale-[1.02]"
+                            : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700"
+                        }`}
+                      >
+                        {brand}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Input si seleccionó 'Otra' */}
+                  {equipmentBrand === "Otra" && (
+                    <input
+                      type="text"
+                      value={customBrand}
+                      onChange={(e) => setCustomBrand(e.target.value)}
+                      placeholder="Escribe la marca de tu equipo (ej: Carrier, York, Oster, Oster...)"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-cyan-500/50 text-white text-xs focus:outline-none focus:border-cyan-400 animate-fade-in"
+                    />
+                  )}
+
+                  {/* Selector de Tecnología */}
+                  <div className="pt-2.5 border-t border-slate-800/80">
+                    <span className="block text-[11px] font-bold text-slate-400 mb-2 flex items-center gap-1.5">
+                      <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Tipo de Tecnología / Sistema</span>
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {TECNOLOGIAS.map((tech) => (
+                        <button
+                          key={tech.id}
+                          type="button"
+                          onClick={() => setEquipmentTech(tech.id)}
+                          className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                            equipmentTech === tech.id
+                              ? "bg-cyan-500/15 border-cyan-500 text-cyan-300 font-bold shadow-sm"
+                              : "bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700"
+                          }`}
+                        >
+                          <span className="text-xs font-bold block">{tech.label}</span>
+                          <span className="text-[10px] text-slate-500 block truncate">{tech.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. Síntomas Habituales (Multiselección en 1 Clic) */}
+                <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Síntomas Habituales (Toca para marcar)</span>
+                    </label>
+                    <span className="text-[10px] text-cyan-400 font-bold">
+                      {selectedSymptoms.length > 0 ? `${selectedSymptoms.length} seleccionados` : "Opcional"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {SINTOMAS_HABITUALES.map((sym) => {
+                      const isSelected = selectedSymptoms.includes(sym);
+                      return (
+                        <button
+                          key={sym}
+                          type="button"
+                          onClick={() => toggleSymptom(sym)}
+                          className={`p-2.5 rounded-xl border text-xs text-left transition flex items-center justify-between cursor-pointer ${
+                            isSelected
+                              ? "bg-cyan-500/20 border-cyan-500 text-cyan-200 font-bold shadow-sm"
+                              : "bg-slate-900/50 border-slate-800 text-slate-300 hover:border-slate-700"
+                          }`}
+                        >
+                          <span className="truncate">{sym}</span>
+                          {isSelected ? (
+                            <Check className="w-4 h-4 text-cyan-400 shrink-0 ml-1.5" />
+                          ) : (
+                            <span className="w-3.5 h-3.5 rounded-full border border-slate-700 shrink-0 ml-1.5" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 5. Descripción de la avería */}
                 <div>
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-                    Descripción del Problema
+                    Descripción Adicional del Problema
                   </label>
                   <textarea
                     rows={3}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Describe los detalles: ¿Gotea constantemente? ¿Saltan los breakers al prender la ducha? ¿Qué marca o modelo es el equipo?"
+                    placeholder="Detalla cualquier síntoma adicional: ¿Cuándo comenzó la falla? ¿Aparece algún código de error? ¿Gotea constantemente?"
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-cyan-500 placeholder:text-slate-600"
                   />
                 </div>
 
-                {/* 4. Subida de Fotos del Desperfecto */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>Fotos del Desperfecto (Recomendado)</span>
-                    <span className="text-[11px] text-cyan-400 font-normal">Máx. 3 fotos</span>
-                  </label>
-
-                  <div className="flex flex-wrap gap-3 items-center">
-                    <label className="cursor-pointer px-4 py-3 rounded-xl bg-slate-950 border border-dashed border-slate-700 hover:border-cyan-500 text-slate-400 hover:text-white text-xs font-bold flex items-center gap-2 transition">
-                      <Camera className="w-4 h-4 text-cyan-400" />
-                      <span>Tomar o Subir Foto</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={handlePhotoUpload}
-                        className="hidden"
-                      />
-                    </label>
-
-                    {photos.map((photo, i) => (
-                      <div
-                        key={i}
-                        className="relative w-14 h-14 rounded-xl overflow-hidden border border-slate-700 group bg-slate-950"
-                      >
-                        <Image src={photo.url} alt={photo.name} fill className="object-cover" />
-                        <button
-                          type="button"
-                          onClick={() => removePhoto(i)}
-                          className="absolute inset-0 bg-red-600/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
+                {/* 6. Envío Ágil de Fotos, Videos y Audios por WhatsApp */}
+                <div className="p-4 rounded-2xl bg-cyan-950/30 border border-cyan-500/30">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 shrink-0 mt-0.5">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>📸 🎙️ 🎥 Fotos, Audios o Videos por WhatsApp</span>
+                        </span>
+                        <span className="text-[10px] bg-cyan-500/20 text-cyan-300 font-bold px-2 py-0.5 rounded-full border border-cyan-500/30">
+                          Directo al Técnico
+                        </span>
                       </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        No necesitas subir fotos pesadas aquí. Al presionar <strong>&quot;Enviar Cotización Express a WhatsApp&quot;</strong> se abrirá tu chat directamente con el técnico, donde podrás adjuntar fotos de la avería, videos del equipo o notas de voz explicando el problema.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 7. Franjas Horarias de Visita a Domicilio */}
+                <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+                  <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Franja Horaria Preferida para la Visita</span>
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {FRANJAS_HORARIAS.map((franja) => (
+                      <button
+                        key={franja.id}
+                        type="button"
+                        onClick={() => setTimeSlot(franja.id)}
+                        className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                          timeSlot === franja.id
+                            ? "bg-cyan-500/15 border-cyan-500 text-cyan-300 font-bold shadow-sm"
+                            : "bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700"
+                        }`}
+                      >
+                        <span className="text-xs font-bold block">{franja.label}</span>
+                        <span className="text-[10px] text-slate-500 block truncate">{franja.time}</span>
+                      </button>
                     ))}
                   </div>
                 </div>
 
-                {/* 5. Geolocalización Automática GPS */}
+                {/* 8. Geolocalización Automática GPS */}
                 <div className="border-t border-slate-800 pt-4">
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
                     Ubicación del Servicio
@@ -528,7 +708,7 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
                   />
                 </div>
 
-                {/* 6. Fecha Preferida y Datos de Contacto */}
+                {/* 9. Datos de Contacto */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-400 mb-1">
@@ -559,10 +739,18 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
                   </div>
                 </div>
 
+                {/* 10. Recordatorio de Visita Deducible */}
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-cyan-950/50 to-blue-950/40 border border-cyan-500/30 flex items-center gap-2.5 text-[11px] text-cyan-200">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-cyan-400" />
+                  <span>
+                    <strong>Visita Técnica Deducible:</strong> Si apruebas el presupuesto y se realiza el trabajo, la visita técnica es <strong>100% GRATIS</strong> (se descuenta del total).
+                  </span>
+                </div>
+
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-black text-sm shadow-xl shadow-cyan-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-4"
+                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-black text-sm shadow-xl shadow-cyan-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-4 cursor-pointer"
                 >
                   {isSubmitting ? (
                     <span>Enviando cotización...</span>

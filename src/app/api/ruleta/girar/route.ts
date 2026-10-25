@@ -17,7 +17,8 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { slug, telefono, nombre, fechaNacimiento } = body || {};
+    const { slug, telefono, nombre, fechaNacimiento, isTabletMode, modo } = body || {};
+    const isTablet = Boolean(isTabletMode || ["tablet", "caja", "kiosco", "true", "1"].includes(String(modo || "").toLowerCase()));
 
     if (!slug) {
       return NextResponse.json(
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     // 2. Obtener configuración de ruleta
     const config = await getOrCreateRuletaConfig(restaurant.id);
 
-    if (!config.activa) {
+    if (!config.activa && !isTablet) {
       return NextResponse.json(
         { success: false, error: "La Ruleta de Premios no está activa en este momento." },
         { status: 400 }
@@ -136,8 +137,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Anti-Fraude B: Validar límite de giros por IP en las últimas 24 horas
-    if (giroDelegate?.count && ipAddress && ipAddress !== "127.0.0.1" && ipAddress !== "::1") {
+    // 4. Anti-Fraude B: Validar límite de giros por IP en las últimas 24 horas (exento en Modo Tablet de caja)
+    if (!isTablet && giroDelegate?.count && ipAddress && ipAddress !== "127.0.0.1" && ipAddress !== "::1") {
       const fecha24hAtras = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const girosPorIp = await giroDelegate.count({
         where: {

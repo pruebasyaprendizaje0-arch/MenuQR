@@ -438,6 +438,151 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     kmRatesList[0] || null
   );
 
+  // Sincronización en tiempo real de inventario y disponibilidad
+  const [liveStockMap, setLiveStockMap] = useState<
+    Record<
+      string,
+      {
+        stock: number | null;
+        isAvailable: boolean;
+        trackStock: boolean;
+        minStock: number;
+      }
+    >
+  >(() => {
+    const initialMap: Record<
+      string,
+      {
+        stock: number | null;
+        isAvailable: boolean;
+        trackStock: boolean;
+        minStock: number;
+      }
+    > = {};
+    for (const cat of restaurant.categories || []) {
+      for (const d of cat.dishes || []) {
+        initialMap[d.id] = {
+          stock: d.stock ?? null,
+          isAvailable: d.isAvailable,
+          trackStock: Boolean(d.trackStock),
+          minStock: d.minStock ?? 0,
+        };
+      }
+    }
+    return initialMap;
+  });
+
+  // Categorías con inventario y disponibilidad en vivo
+  const categories = useMemo(() => {
+    return (restaurant.categories || []).map((cat) => ({
+      ...cat,
+      dishes: (cat.dishes || []).map((d) => {
+        const live = liveStockMap[d.id];
+        if (!live) return d;
+        return {
+          ...d,
+          stock: live.stock,
+          isAvailable: live.isAvailable,
+          trackStock: live.trackStock,
+          minStock: live.minStock,
+        };
+      }),
+    }));
+  }, [restaurant.categories, liveStockMap]);
+
+  // Función para sincronizar existencias de productos desde el servidor
+  const refreshLiveStock = async (showCartAlerts = false) => {
+    try {
+      const res = await fetch(`/api/stock-check?restaurantId=${restaurant.id}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && data?.dishes) {
+        setLiveStockMap(data.dishes);
+
+        // Validar y ajustar el carrito si algún producto se agotó o disminuyó
+        setCart((prevCart) => {
+          let hasAdjustments = false;
+          const adjustedCart: CartItem[] = [];
+          const messages: string[] = [];
+
+          for (const it of prevCart) {
+            const fresh = data.dishes[it.dish.id];
+            if (!fresh) {
+              adjustedCart.push(it);
+              continue;
+            }
+            if (!fresh.isAvailable || (fresh.trackStock && (fresh.stock ?? 0) <= 0)) {
+              hasAdjustments = true;
+              messages.push(`"${it.dish.name}" se agotó recientemente y fue retirado de tu pedido.`);
+              continue;
+            }
+            if (fresh.trackStock && typeof fresh.stock === "number" && it.quantity > fresh.stock) {
+              hasAdjustments = true;
+              messages.push(
+                `Solo quedan ${fresh.stock} unidad(es) de "${it.dish.name}". Se ajustó la cantidad en tu orden.`
+              );
+              adjustedCart.push({
+                ...it,
+                quantity: fresh.stock,
+                dish: { ...it.dish, stock: fresh.stock },
+              });
+              continue;
+            }
+            adjustedCart.push({
+              ...it,
+              dish: {
+                ...it.dish,
+                stock: fresh.stock,
+                isAvailable: fresh.isAvailable,
+                trackStock: fresh.trackStock,
+              },
+            });
+          }
+
+          if (showCartAlerts && hasAdjustments && messages.length > 0) {
+            alert(messages.join("\n"));
+          }
+          return adjustedCart;
+        });
+      }
+    } catch {}
+  };
+
+  // Sondeo en segundo plano (cada 25s o al volver a enfocar la pestaña)
+  useEffect(() => {
+    refreshLiveStock(false);
+
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        refreshLiveStock(false);
+      }
+    }, 25000);
+
+    const handleFocus = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        refreshLiveStock(false);
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [restaurant.id]);
+
+  // Al abrir el carrito, validar existencias frescas inmediatamente
+  useEffect(() => {
+    if (isCartOpen) {
+      refreshLiveStock(true);
+    }
+  }, [isCartOpen]);
+
   // States for Logo and Cover upload
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
@@ -445,7 +590,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [coverModalOpen, setCoverModalOpen] = useState(false);
 
   // Find the first dish that has an imageUrl to use as a beautiful cover background!
-  const firstDishWithImage = restaurant.categories
+  const firstDishWithImage = categories
     .flatMap((c) => c.dishes)
     .find((d) => d.imageUrl);
 
@@ -657,10 +802,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   }, [openTableSession, selectedTable, restaurant.id, restaurant.slug, customerName]);
 
   useEffect(() => {
-    if (restaurant.categories.length > 0) {
-      setActiveCategory(restaurant.categories[0].id);
+    if (categories.length > 0) {
+      setActiveCategory(categories[0].id);
     }
-  }, [restaurant]);
+  }, [categories]);
 
   // Handle active category tracking on scroll
   useEffect(() => {
@@ -705,7 +850,12 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   };
 
   const addToCart = (dish: Dish) => {
-    if (dish.trackStock && ((dish.stock ?? 0) <= 0 || !dish.isAvailable)) {
+    const live = liveStockMap[dish.id];
+    const isTracked = live ? live.trackStock : Boolean(dish.trackStock);
+    const curStock = live ? (live.stock ?? 0) : (dish.stock ?? 0);
+    const isAvailable = live ? live.isAvailable : dish.isAvailable;
+
+    if (isTracked && (curStock <= 0 || !isAvailable)) {
       alert(`¡Lo sentimos! "${dish.name}" se encuentra agotado.`);
       return;
     }
@@ -715,19 +865,31 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     setCart((prevCart) => {
       const existing = prevCart.find((item) => item.dish.id === dish.id);
       if (existing) {
-        if (dish.trackStock && existing.quantity >= (dish.stock ?? 0)) {
+        if (isTracked && existing.quantity >= curStock) {
           reachedStockLimit = true;
           return prevCart;
         }
         return prevCart.map((item) =>
-          item.dish.id === dish.id ? { ...item, quantity: item.quantity + 1 } : item
+          item.dish.id === dish.id
+            ? {
+                ...item,
+                quantity: item.quantity + 1,
+                dish: { ...item.dish, stock: curStock, isAvailable, trackStock: isTracked },
+              }
+            : item
         );
       }
-      return [...prevCart, { dish, quantity: 1 }];
+      return [
+        ...prevCart,
+        {
+          dish: { ...dish, stock: curStock, isAvailable, trackStock: isTracked },
+          quantity: 1,
+        },
+      ];
     });
 
     if (reachedStockLimit) {
-      alert(`Solo quedan ${dish.stock} porción(es) disponibles de "${dish.name}".`);
+      alert(`Solo quedan ${curStock} unidad(es) disponibles de "${dish.name}".`);
       return;
     }
 
@@ -877,6 +1039,31 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return;
     }
 
+    // Pre-validar existencias de stock en el servidor en tiempo real
+    try {
+      const stockCheckRes = await fetch("/api/stock-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantId: restaurant.id,
+          items: cart.map((i) => ({ dishId: i.dish.id, quantity: i.quantity })),
+        }),
+      });
+      if (stockCheckRes.ok) {
+        const checkData = await stockCheckRes.json();
+        if (checkData && checkData.dishes) {
+          setLiveStockMap(checkData.dishes);
+        }
+        if (checkData && !checkData.valid && Array.isArray(checkData.adjustments)) {
+          const msgs = checkData.adjustments.map((a: any) => a.message);
+          alert("Aviso de disponibilidad de productos:\n\n" + msgs.join("\n"));
+          await refreshLiveStock(false);
+          setIsSubmittingOrder(false);
+          return;
+        }
+      }
+    } catch {}
+
     // Save order in database first
     const itemsData = cart.map((item) => ({
       dishId: item.dish.id,
@@ -922,8 +1109,30 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
     if (result.error) {
       alert(result.error);
+      await refreshLiveStock(true);
+      setIsSubmittingOrder(false);
       return;
     }
+
+    // Actualización optimista inmediata del stock para que este y otros clientes vean el producto agotado o reducido
+    setLiveStockMap((prev) => {
+      const next = { ...prev };
+      for (const item of cart) {
+        const cur = next[item.dish.id];
+        if (cur && cur.trackStock && typeof cur.stock === "number") {
+          const nextStock = Math.max(0, cur.stock - item.quantity);
+          next[item.dish.id] = {
+            ...cur,
+            stock: nextStock,
+            isAvailable: nextStock > 0 ? cur.isAvailable : false,
+          };
+        }
+      }
+      return next;
+    });
+
+    // Sincronizar en segundo plano
+    refreshLiveStock(false);
 
     // Persistir datos del cliente en localStorage para futuros pedidos
     try {
@@ -1332,7 +1541,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         {currentTab === "menu" && (
           <div className="bg-slate-950/40 border-t border-slate-900/60 scrollbar-none overflow-x-auto">
             <div className="max-w-6xl xl:max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex gap-2.5 py-3">
-            {restaurant.categories.map((cat) => (
+            {categories.map((cat) => (
               <button
                 key={cat.id}
                 onClick={() => scrollToCategory(cat.id)}
@@ -2007,7 +2216,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               );
             })()}
           </div>
-        ) : restaurant.categories.length === 0 ? (
+        ) : categories.length === 0 ? (
           <div className="py-20 text-center text-slate-500">
             <Utensils className="h-12 w-12 mx-auto text-slate-700 mb-3" />
             <p className="text-sm">Este restaurante aún no tiene categorías ni platos disponibles.</p>
@@ -2069,7 +2278,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
             {/* Platos Sugeridos / Especiales del Día */}
             {(() => {
-              const allDishes = restaurant.categories.flatMap(cat => cat.dishes);
+              const allDishes = categories.flatMap(cat => cat.dishes);
               const suggestedDishes = allDishes.filter(dish => suggestedDishIds.includes(dish.id) && dish.isAvailable);
 
               if (suggestedDishes.length === 0) return null;
@@ -2218,7 +2427,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
             {/* Popular Dishes Slider */}
             {(() => {
-              const allDishes = restaurant.categories.flatMap(cat => cat.dishes);
+              const allDishes = categories.flatMap(cat => cat.dishes);
               const popularDishes = allDishes.filter(dish => 
                 ["Pizza Margherita", "Pizza Pepperoni", "Lasagna de Carne", "Fettuccine Alfredo"].includes(dish.name)
               ).slice(0, 4);
@@ -2357,7 +2566,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             })()}
 
             {/* Categorías y Platos */}
-            {restaurant.categories.map((cat) => {
+            {categories.map((cat) => {
               const isComboCategory = cat.name.toLowerCase().includes("combo");
               const isCategory916 = (cat.imageAspectRatio && cat.imageAspectRatio !== "DEFAULT")
                 ? cat.imageAspectRatio === "9:16"

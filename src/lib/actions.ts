@@ -1357,6 +1357,7 @@ export async function toggleDishAvailabilityAction(dishId: string, isAvailable: 
 
     revalidatePath(`/${updated.category.restaurant.slug}`);
     revalidatePath("/admin");
+    revalidatePath("/caja");
     return { success: true };
   } catch (error) {
     console.error("Error toggling dish availability:", error);
@@ -1427,6 +1428,7 @@ export async function quickUpdateDishStockAction(dishId: string, newStock: numbe
 
     revalidatePath(`/${updated.category.restaurant.slug}`);
     revalidatePath("/admin");
+    revalidatePath("/caja");
     return { success: true, dish: updated };
   } catch (error) {
     console.error("Error actualizando stock rápido:", error);
@@ -2250,8 +2252,9 @@ export async function createOrderAction(data: {
       }
 
       // Stock check para platos con control de inventario activo
-      if (dbDish.trackStock) {
-        const availableStock = dbDish.stock ?? 0;
+      const shouldTrackStock = Boolean(dbDish.trackStock);
+      if (shouldTrackStock) {
+        const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
         if (availableStock <= 0) {
           return { error: `El producto "${dbDish.name}" se encuentra agotado.` };
         }
@@ -2508,21 +2511,37 @@ export async function createOrderAction(data: {
         });
       }
 
-      // Descontar inventario para platos con control de stock y apagar si llega a 0
+      // Descontar inventario de forma atómica con verificación en caliente para evitar sobreventa
       for (const item of data.items) {
         const dbDish = dishMap.get(item.dishId);
-        if (dbDish && dbDish.trackStock) {
-          const currentStock = dbDish.stock ?? 0;
-          const updatedStock = Math.max(0, currentStock - item.quantity);
-          const isStillAvailable = updatedStock > 0;
-
-          await tx.dish.update({
+        const shouldTrackStock = Boolean(dbDish?.trackStock);
+        if (dbDish && shouldTrackStock) {
+          const freshDish = await tx.dish.findUnique({
             where: { id: dbDish.id },
-            data: {
-              stock: updatedStock,
-              isAvailable: isStillAvailable,
-            },
+            select: { id: true, name: true, stock: true, isAvailable: true },
           });
+
+          if (freshDish) {
+            const currentStock = freshDish.stock ?? 0;
+            if (currentStock < item.quantity) {
+              throw new Error(
+                currentStock <= 0
+                  ? `El producto "${freshDish.name}" se acaba de agotar.`
+                  : `Solo quedan ${currentStock} unidad(es) disponibles de "${freshDish.name}". Por favor ajusta tu pedido.`
+              );
+            }
+            const updatedStock = Math.max(0, currentStock - item.quantity);
+            const isStillAvailable = updatedStock > 0;
+
+            await tx.dish.update({
+              where: { id: freshDish.id },
+              data: {
+                stock: updatedStock,
+                trackStock: true,
+                isAvailable: isStillAvailable,
+              },
+            });
+          }
         }
       }
 
@@ -4057,6 +4076,36 @@ export async function superAdminToggleRestaurantModuleAction(
     }
 
     customObj.disabledModules = disabledModules;
+
+    const isInventoryOn = !disabledModules.includes("inventory");
+    const isCajaOn = !disabledModules.includes("caja");
+
+    // Si ambos módulos (Bodega y Caja POS) están habilitados en Super Admin,
+    // garantizar que todos los platos comerciales (no servicios) tengan trackStock: true
+    // y stock no nulo (mínimo 0) para que el inventario funcione de inmediato.
+    if (isInventoryOn && isCajaOn) {
+      await prismaTenant.dish.updateMany({
+        where: {
+          restaurantId,
+          isService: false,
+          stock: null,
+        },
+        data: {
+          stock: 0,
+          trackStock: true,
+        },
+      });
+      await prismaTenant.dish.updateMany({
+        where: {
+          restaurantId,
+          isService: false,
+          trackStock: false,
+        },
+        data: {
+          trackStock: true,
+        },
+      });
+    }
 
     await prismaTenant.restaurant.update({
       where: { id: restaurantId },

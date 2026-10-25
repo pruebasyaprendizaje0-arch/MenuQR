@@ -18,6 +18,7 @@ import {
   RotateCw,
   RefreshCw,
   Tag,
+  Tablet,
 } from "lucide-react";
 import { SectorItem, RuletaConfigData } from "@/lib/ruleta-types";
 
@@ -47,6 +48,7 @@ export interface RuletaNegocioProps {
   onClose?: () => void;
   isEmbedded?: boolean;
   isAdminPreview?: boolean;
+  isTabletMode?: boolean;
 }
 
 const TIPO_EMOJIS: Record<string, string> = {
@@ -71,7 +73,33 @@ export default function RuletaNegocio({
   onClose,
   isEmbedded = false,
   isAdminPreview = false,
+  isTabletMode: propIsTabletMode = false,
 }: RuletaNegocioProps) {
+  // Detección reactiva de modo Tablet / Caja (vía prop o query param ?modo=tablet)
+  const [isTablet, setIsTablet] = useState(() => {
+    if (propIsTabletMode) return true;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const modo = (params.get("modo") || params.get("tablet") || params.get("kiosk") || "").toLowerCase();
+      return ["tablet", "caja", "kiosco", "true", "1"].includes(modo);
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (propIsTabletMode) {
+      setIsTablet(true);
+      return;
+    }
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const modo = (params.get("modo") || params.get("tablet") || params.get("kiosk") || "").toLowerCase();
+      if (["tablet", "caja", "kiosco", "true", "1"].includes(modo)) {
+        setIsTablet(true);
+      }
+    }
+  }, [propIsTabletMode]);
+
   const [loadingConfig, setLoadingConfig] = useState(!initialConfig);
   const [config, setConfig] = useState<RuletaConfigData | null>(initialConfig || null);
   const [restaurant, setRestaurant] = useState(initialRestaurantInfo || null);
@@ -125,7 +153,8 @@ export default function RuletaNegocio({
     async function loadConfig() {
       try {
         setLoadingConfig(true);
-        const res = await fetch(`/api/ruleta/config/${slug}`);
+        const queryParam = isTablet ? "?modo=tablet" : "";
+        const res = await fetch(`/api/ruleta/config/${slug}${queryParam}`);
         const data = await res.json();
         if (isMounted) {
           if (data.success) {
@@ -149,10 +178,11 @@ export default function RuletaNegocio({
     return () => {
       isMounted = false;
     };
-  }, [slug, initialConfig]);
+  }, [slug, initialConfig, isTablet]);
 
-  // Check localStorage for UX persistence
+  // Check localStorage for UX persistence (en modo tablet se omite para permitir múltiples clientes seguidos)
   useEffect(() => {
+    if (isTablet) return;
     try {
       const saved = localStorage.getItem(localKey);
       if (saved) {
@@ -170,7 +200,7 @@ export default function RuletaNegocio({
     } catch {
       // Ignorar errores de storage
     }
-  }, [localKey]);
+  }, [localKey, isTablet]);
 
   // 6 sectores
   const sectores: SectorItem[] = useMemo(() => {
@@ -277,13 +307,33 @@ export default function RuletaNegocio({
   };
 
   /**
+   * Resetear estado para atender al siguiente cliente (Modo Tablet / Caja)
+   */
+  const handleResetForNextCustomer = () => {
+    setNombre("");
+    setWhatsapp("");
+    setFechaNacimiento("");
+    setPrizeResult(null);
+    setSelectedSector(null);
+    setHasSpun(false);
+    setShowPrizeModal(false);
+    setShowClaimFormModal(false);
+    setErrorMsg("");
+    setCopiedCode(false);
+    try {
+      localStorage.removeItem(localKey);
+    } catch {}
+    showToast("✨ Listo para el siguiente cliente.");
+  };
+
+  /**
    * Manejador Principal al presionar GIRAR
    */
   const handleSpin = async () => {
     if (isSpinning) return;
 
-    // Si ya ganó previamente y tiene cupón guardado (y no es vista previa de admin), mostrar modal
-    if (!isAdminPreview && hasSpun && prizeResult?.codigoCupon) {
+    // Si ya ganó previamente y tiene cupón guardado (y no es vista previa de admin ni modo tablet), mostrar modal
+    if (!isAdminPreview && !isTablet && hasSpun && prizeResult?.codigoCupon) {
       setShowPrizeModal(true);
       return;
     }
@@ -343,6 +393,7 @@ export default function RuletaNegocio({
           telefono: whatsapp,
           nombre,
           fechaNacimiento,
+          isTabletMode: isTablet,
         }),
       });
 
@@ -402,16 +453,19 @@ export default function RuletaNegocio({
           });
         }
 
-        try {
-          localStorage.setItem(
-            localKey,
-            JSON.stringify({
-              timestamp: Date.now(),
-              phone: cleanPhone,
-              result: prizeData,
-            })
-          );
-        } catch {}
+        // Solo persistir bloqueo en localStorage si es cliente normal, NO en tablet de local
+        if (!isTablet) {
+          try {
+            localStorage.setItem(
+              localKey,
+              JSON.stringify({
+                timestamp: Date.now(),
+                phone: cleanPhone,
+                result: prizeData,
+              })
+            );
+          } catch {}
+        }
         setTimeout(() => setShowConfetti(false), 5000);
       });
     } catch (err) {
@@ -455,6 +509,7 @@ export default function RuletaNegocio({
           telefono: whatsapp,
           nombre,
           fechaNacimiento,
+          isTabletMode: isTablet,
         }),
       });
 
@@ -491,16 +546,18 @@ export default function RuletaNegocio({
       setShowPrizeModal(true);
       setShowConfetti(true);
 
-      try {
-        localStorage.setItem(
-          localKey,
-          JSON.stringify({
-            timestamp: Date.now(),
-            phone: cleanPhone,
-            result: prizeData,
-          })
-        );
-      } catch {}
+      if (!isTablet) {
+        try {
+          localStorage.setItem(
+            localKey,
+            JSON.stringify({
+              timestamp: Date.now(),
+              phone: cleanPhone,
+              result: prizeData,
+            })
+          );
+        } catch {}
+      }
 
       setTimeout(() => setShowConfetti(false), 5000);
     } catch (err: any) {
@@ -604,6 +661,30 @@ export default function RuletaNegocio({
 
       {/* Contenedor Principal */}
       <div className="w-full max-w-xl mx-auto flex flex-col items-center text-center">
+        {/* Banner de Modo Tablet / Caja para Captura de Leads */}
+        {isTablet && (
+          <div className="w-full max-w-lg mb-4 flex items-center justify-between px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-amber-500/15 border border-amber-500/30 text-amber-300 text-xs shadow-lg backdrop-blur animate-in fade-in">
+            <div className="flex items-center gap-2 font-bold text-left">
+              <span className="p-1 rounded-lg bg-amber-500/20 text-amber-300">
+                <Tablet className="w-4 h-4" />
+              </span>
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-wider text-amber-200">Modo Tablet en Caja</div>
+                <div className="text-[10px] text-amber-400/80 font-medium">Captura de leads presencial activa</div>
+              </div>
+            </div>
+            <button
+              onClick={handleResetForNextCustomer}
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[11px] font-black uppercase tracking-wider transition active:scale-95 cursor-pointer border border-amber-500/40"
+              title="Limpiar formulario para atender al siguiente cliente"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Nuevo Cliente</span>
+            </button>
+          </div>
+        )}
+
         {/* Header con Badge */}
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 border border-white/15 text-xs font-black uppercase tracking-wider backdrop-blur mb-3 shadow-sm">
           <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
@@ -813,20 +894,30 @@ export default function RuletaNegocio({
               >
                 Ver Mi Cupón de Descuento
               </button>
-              <button
-                onClick={() => {
-                  try {
-                    localStorage.removeItem(localKey);
-                  } catch {}
-                  setHasSpun(false);
-                  setPrizeResult(null);
-                  setErrorMsg("");
-                }}
-                className="inline-flex items-center justify-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition underline cursor-pointer py-1"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>Reiniciar y probar otro giro</span>
-              </button>
+              {isTablet ? (
+                <button
+                  onClick={handleResetForNextCustomer}
+                  className="w-full px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black uppercase tracking-wider transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>✨ Atender Siguiente Cliente</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem(localKey);
+                    } catch {}
+                    setHasSpun(false);
+                    setPrizeResult(null);
+                    setErrorMsg("");
+                  }}
+                  className="inline-flex items-center justify-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition underline cursor-pointer py-1"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Reiniciar y probar otro giro</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1025,12 +1116,23 @@ export default function RuletaNegocio({
               <span>{orderContext?.isPostCheckout ? "Enviar Cupón Ganado por WhatsApp" : "Reclamar / Usar por WhatsApp"}</span>
             </button>
 
+            {/* En Modo Tablet / Caja: Botón destacado para atender al siguiente comensal */}
+            {isTablet && (
+              <button
+                onClick={handleResetForNextCustomer}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 transition duration-200 active:scale-95 cursor-pointer"
+              >
+                <RefreshCw className="w-5 h-5" />
+                <span>✨ Atender Siguiente Cliente (Nuevo Giro)</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setShowPrizeModal(false);
                 if (onClose) onClose();
               }}
-              className="text-xs text-slate-400 hover:text-white underline font-semibold transition"
+              className="text-xs text-slate-400 hover:text-white underline font-semibold transition cursor-pointer"
             >
               {orderContext?.isPostCheckout ? "Cerrar y volver al inicio" : "Continuar viendo el menú"}
             </button>

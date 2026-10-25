@@ -37,12 +37,17 @@ export async function GET(
       );
     }
 
+    const { searchParams } = new URL(request.url);
+    const modo = (searchParams.get("modo") || searchParams.get("tablet") || searchParams.get("kiosk") || "").toLowerCase();
+    const isTabletMode = ["tablet", "caja", "kiosco", "true", "1"].includes(modo);
+
     const config = await getOrCreateRuletaConfig(restaurant.id);
 
-    if (!config.activa) {
+    if (!config.activa && !isTabletMode) {
       return NextResponse.json({
         success: true,
         activa: false,
+        isTabletMode: false,
         restaurant: {
           id: restaurant.id,
           name: restaurant.name,

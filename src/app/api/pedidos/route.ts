@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado } from "@/lib/socket-server";
+import { prisma } from "@/lib/db";
+import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -148,6 +150,11 @@ export async function POST(req: NextRequest) {
       descripcion_problema,
       fotos_urls = [],
       urgencia = "normal",
+      marca_equipo,
+      tipo_tecnologia,
+      sintomas_detectados = [],
+      franja_horaria,
+      visita_condicion,
       latitud,
       longitud,
       direccion_referencia,
@@ -535,6 +542,11 @@ export async function POST(req: NextRequest) {
           servicio_solicitado: servicio_solicitado || "Cotización Técnica",
           descripcion_problema: descripcion_problema || "",
           urgencia: urgencia || "normal",
+          marca_equipo: marca_equipo || null,
+          tipo_tecnologia: tipo_tecnologia || null,
+          sintomas_detectados: Array.isArray(sintomas_detectados) ? sintomas_detectados : [],
+          franja_horaria: franja_horaria || null,
+          visita_condicion: visita_condicion || "100% deducible si se realiza el trabajo",
           latitud: latitud || null,
           longitud: longitud || null,
           direccion_referencia: direccion_referencia || cliente_direccion || "",
@@ -567,11 +579,175 @@ export async function POST(req: NextRequest) {
 
         await client.query("COMMIT");
 
+        // =========================================================================
+        // SINCRONIZACIÓN AUTOMÁTICA DUAL (Prisma Order para Historial & Customer para CRM)
+        // =========================================================================
+        try {
+          let targetRestaurant = null;
+          if (slug) {
+            targetRestaurant = await prisma.restaurant.findUnique({
+              where: { slug: String(slug).toLowerCase().trim() },
+              select: { id: true, name: true, slug: true }
+            });
+          }
+          if (!targetRestaurant && resolvedNegocioId) {
+            targetRestaurant = await prisma.restaurant.findFirst({
+              where: {
+                OR: [
+                  { id: String(resolvedNegocioId) },
+                  { slug: String(slug || "").toLowerCase().trim() }
+                ]
+              },
+              select: { id: true, name: true, slug: true }
+            });
+          }
+
+          if (targetRestaurant) {
+            const rawCustPhone = cliente_telefono ? String(cliente_telefono).trim() : "";
+            const cleanCustName = cliente_nombre ? String(cliente_nombre).trim() : "Cliente Solicitante";
+            const fullAddress = `${direccion_referencia || cliente_direccion || ""}${latitud && longitud ? ` [GPS: ${latitud},${longitud}]` : ""}`.trim();
+
+            // A. Registrar en Order (para que aparezca en "Historial de Pedidos")
+            const orderItemsData: Array<{ dishName: string; price: number; quantity: number }> = [
+              {
+                dishName: servicio_solicitado || "Cotización de Servicio Técnico",
+                price: 0,
+                quantity: 1,
+              }
+            ];
+
+            if (marca_equipo) {
+              orderItemsData.push({
+                dishName: `Marca: ${marca_equipo}${tipo_tecnologia ? ` • ${tipo_tecnologia}` : ""}`,
+                price: 0,
+                quantity: 1,
+              });
+            }
+
+            if (Array.isArray(sintomas_detectados) && sintomas_detectados.length > 0) {
+              orderItemsData.push({
+                dishName: `Síntomas: ${sintomas_detectados.join(", ")}`,
+                price: 0,
+                quantity: 1,
+              });
+            }
+
+            if (franja_horaria) {
+              orderItemsData.push({
+                dishName: `Horario: ${franja_horaria}`,
+                price: 0,
+                quantity: 1,
+              });
+            }
+
+            await prisma.order.create({
+              data: {
+                restaurantId: targetRestaurant.id,
+                tableName: "Visita Técnica",
+                customerName: cleanCustName,
+                customerPhone: rawCustPhone || null,
+                customerAddress: fullAddress || null,
+                status: "PENDING",
+                subtotal: 0,
+                iva: 0,
+                serviceCharge: 0,
+                tip: 0,
+                deliveryCost: 0,
+                discountAmount: 0,
+                total: 0,
+                paymentMethod: "WHATSAPP_COTIZACION",
+                isTest: false,
+                items: {
+                  create: orderItemsData,
+                },
+              },
+            });
+
+            // B. Capturar Lead en Customer (CRM Clientes)
+            if (rawCustPhone) {
+              const existingCustomer = await prisma.customer.findFirst({
+                where: {
+                  restaurantId: targetRestaurant.id,
+                  phone: rawCustPhone,
+                },
+              });
+
+              if (existingCustomer) {
+                let existingMeta: any = {};
+                try {
+                  existingMeta = JSON.parse(existingCustomer.notes || "{}");
+                } catch {}
+
+                const updatedMeta = JSON.stringify({
+                  ...existingMeta,
+                  lastService: servicio_solicitado || existingMeta.lastService || "Servicio Técnico",
+                  equipmentBrand: marca_equipo || existingMeta.equipmentBrand || "",
+                  equipmentTech: tipo_tecnologia || existingMeta.equipmentTech || "",
+                  symptoms: Array.isArray(sintomas_detectados) && sintomas_detectados.length > 0
+                    ? sintomas_detectados
+                    : existingMeta.symptoms || [],
+                  preferredTimeSlot: franja_horaria || existingMeta.preferredTimeSlot || "",
+                  lastQuoteAt: new Date().toISOString(),
+                });
+
+                await prisma.customer.update({
+                  where: { id: existingCustomer.id },
+                  data: {
+                    name: cleanCustName !== "Cliente Solicitante" ? cleanCustName : existingCustomer.name,
+                    address: fullAddress || existingCustomer.address,
+                    totalOrders: existingCustomer.totalOrders + 1,
+                    lastOrderAt: new Date(),
+                    notes: updatedMeta,
+                  },
+                });
+              } else {
+                const initialMeta = JSON.stringify({
+                  dietary: [],
+                  allergies: "",
+                  birthDate: "",
+                  points: 0,
+                  favoriteDish: servicio_solicitado || "Servicio Técnico",
+                  lastService: servicio_solicitado || "Servicio Técnico",
+                  equipmentBrand: marca_equipo || "",
+                  equipmentTech: tipo_tecnologia || "",
+                  symptoms: Array.isArray(sintomas_detectados) ? sintomas_detectados : [],
+                  preferredTimeSlot: franja_horaria || "",
+                  lastQuoteAt: new Date().toISOString(),
+                });
+
+                await prisma.customer.create({
+                  data: {
+                    restaurantId: targetRestaurant.id,
+                    name: cleanCustName,
+                    phone: rawCustPhone,
+                    address: fullAddress || null,
+                    category: "NUEVO",
+                    totalOrders: 1,
+                    totalSpent: 0,
+                    lastOrderAt: new Date(),
+                    notes: initialMeta,
+                  },
+                });
+              }
+            }
+
+            try {
+              revalidatePath("/admin");
+            } catch {}
+          }
+        } catch (prismaSyncErr) {
+          console.error("Error sincronizando cotización con Prisma Order/Customer:", prismaSyncErr);
+        }
+
         // Construir enlace de Google Maps si se envió lat/lng
         let mapsLink = "";
         if (latitud && longitud) {
           mapsLink = `https://www.google.com/maps/search/?api=1&query=${latitud},${longitud}`;
         }
+
+        const formattedSymptoms = Array.isArray(sintomas_detectados) && sintomas_detectados.length > 0
+          ? sintomas_detectados.join(", ")
+          : "";
 
         whatsappMessageText = `*🔧 Nueva Solicitud de Cotización Express*\n` +
           `*Profesional / Empresa:* ${businessName}\n` +
@@ -579,12 +755,19 @@ export async function POST(req: NextRequest) {
           `*Teléfono:* ${cliente_telefono || "No indicado"}\n` +
           `*Servicio Requerido:* ${servicio_solicitado || "Asistencia Técnica"}\n` +
           `*Nivel de Urgencia:* ${urgencia === "urgente_24_7" ? "🚨 Urgencia Inmediata (24/7)" : "Estándar / Programada"}\n` +
+          (marca_equipo ? `*Marca del Equipo:* ${marca_equipo}\n` : "") +
+          (tipo_tecnologia ? `*Tecnología:* ${tipo_tecnologia}\n` : "") +
+          (formattedSymptoms ? `*Síntomas:* ${formattedSymptoms}\n` : "") +
+          (franja_horaria ? `*Franja Horaria:* ${franja_horaria}\n` : "") +
+          `*Condición de Visita:* Diagnóstico en domicilio (100% deducible si se realiza el trabajo)\n` +
           `*Fecha Preferida:* ${fecha_preferida || "A convenir"}\n` +
           (direccion_referencia ? `*Dirección / Referencia:* ${direccion_referencia}\n` : "") +
           (mapsLink ? `*📍 Ubicación GPS:* ${mapsLink}\n` : "") +
-          (descripcion_problema ? `\n*Descripción del trabajo/avería:*\n"${descripcion_problema}"\n` : "") +
+          (descripcion_problema ? `\n*Detalles adicionales:*\n"${descripcion_problema}"\n` : "") +
           (fotos_urls.length > 0 ? `\n*Fotos adjuntas (${fotos_urls.length}):*\n` + fotos_urls.slice(0, 3).map((f: string, i: number) => `• Foto ${i + 1}: ${f}`).join("\n") + "\n" : "") +
-          `\n_Por favor envía el presupuesto preliminar y disponibilidad._`;
+          `\n--------------------------------\n` +
+          `📸🎙️ *ADJUNTA AQUÍ:* Envía a continuación fotos, audios o videos de la avería para darte el presupuesto exacto.\n\n` +
+          `_Por favor confirma disponibilidad y presupuesto preliminar._`;
 
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";

@@ -327,10 +327,12 @@ export async function processCajaSaleAction(
           throw new Error(`El producto "${it.name}" no fue encontrado en este negocio.`);
         }
 
-        if (dish.trackStock && typeof dish.stock === "number") {
-          if (dish.stock < it.quantity) {
+        const shouldTrack = Boolean(dish.trackStock || typeof dish.stock === "number");
+        if (shouldTrack) {
+          const currentStock = typeof dish.stock === "number" ? dish.stock : 0;
+          if (currentStock < it.quantity) {
             throw new Error(
-              `Stock insuficiente para "${dish.name}". Disponible: ${dish.stock}, solicitado: ${it.quantity}.`
+              `Stock insuficiente para "${dish.name}". Disponible: ${currentStock}, solicitado: ${it.quantity}.`
             );
           }
         }
@@ -359,7 +361,7 @@ export async function processCajaSaleAction(
         },
       });
 
-      // 3. Descontar Stock
+      // 3. Descontar Stock y marcar agotado si llega a 0
       for (const it of data.items) {
         const dish = await tx.dish.findUnique({
           where: { id: it.dishId },
@@ -367,14 +369,15 @@ export async function processCajaSaleAction(
         });
 
         if (dish) {
-          const currentStock = dish.stock ?? 0;
+          const currentStock = typeof dish.stock === "number" ? dish.stock : 0;
           const newStock = Math.max(0, currentStock - it.quantity);
-          const stillAvailable = dish.trackStock && newStock <= 0 ? false : dish.isAvailable;
+          const stillAvailable = newStock > 0;
 
           await tx.dish.update({
             where: { id: it.dishId },
             data: {
               stock: newStock,
+              trackStock: true,
               isAvailable: stillAvailable,
             },
           });

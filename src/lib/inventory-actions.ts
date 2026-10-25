@@ -383,16 +383,23 @@ export async function adjustInventoryStockAction(params: {
     await refreshUserSession();
     const { itemType, itemId, delta } = params;
 
+    let restaurantSlug: string | null = null;
     if (itemType === "DISH") {
       const dish = await prisma.dish.findUnique({
         where: { id: itemId },
-        select: { id: true, restaurantId: true, stock: true },
+        select: {
+          id: true,
+          restaurantId: true,
+          stock: true,
+          restaurant: { select: { slug: true } },
+        },
       });
       if (!dish) return { error: "Producto no encontrado." };
 
       const auth = await verifyRestaurantOwnership(dish.restaurantId);
       if (!auth.authorized) return { error: auth.error };
 
+      restaurantSlug = dish.restaurant.slug;
       const current = typeof dish.stock === "number" ? dish.stock : 0;
       const nextStock = Math.max(0, current + delta);
 
@@ -407,13 +414,19 @@ export async function adjustInventoryStockAction(params: {
     } else {
       const supply = await prisma.supplyItem.findUnique({
         where: { id: itemId },
-        select: { id: true, restaurantId: true, currentStock: true },
+        select: {
+          id: true,
+          restaurantId: true,
+          currentStock: true,
+          restaurant: { select: { slug: true } },
+        },
       });
       if (!supply) return { error: "Insumo no encontrado." };
 
       const auth = await verifyRestaurantOwnership(supply.restaurantId);
       if (!auth.authorized) return { error: auth.error };
 
+      restaurantSlug = supply.restaurant.slug;
       const current = supply.currentStock || 0;
       const nextStock = Math.max(0, current + delta);
 
@@ -426,6 +439,10 @@ export async function adjustInventoryStockAction(params: {
     }
 
     revalidatePath("/admin");
+    revalidatePath("/caja");
+    if (restaurantSlug) {
+      revalidatePath(`/${restaurantSlug}`);
+    }
     return { success: true };
   } catch (error: any) {
     console.error("Error in adjustInventoryStockAction:", error);
@@ -443,16 +460,22 @@ export async function setInventoryStockAction(params: {
     const { itemType, itemId, newStock } = params;
     const sanitizedStock = Math.max(0, Number(newStock) || 0);
 
+    let restaurantSlug: string | null = null;
     if (itemType === "DISH") {
       const dish = await prisma.dish.findUnique({
         where: { id: itemId },
-        select: { id: true, restaurantId: true },
+        select: {
+          id: true,
+          restaurantId: true,
+          restaurant: { select: { slug: true } },
+        },
       });
       if (!dish) return { error: "Producto no encontrado." };
 
       const auth = await verifyRestaurantOwnership(dish.restaurantId);
       if (!auth.authorized) return { error: auth.error };
 
+      restaurantSlug = dish.restaurant.slug;
       await prisma.dish.update({
         where: { id: itemId },
         data: {
@@ -464,13 +487,18 @@ export async function setInventoryStockAction(params: {
     } else {
       const supply = await prisma.supplyItem.findUnique({
         where: { id: itemId },
-        select: { id: true, restaurantId: true },
+        select: {
+          id: true,
+          restaurantId: true,
+          restaurant: { select: { slug: true } },
+        },
       });
       if (!supply) return { error: "Insumo no encontrado." };
 
       const auth = await verifyRestaurantOwnership(supply.restaurantId);
       if (!auth.authorized) return { error: auth.error };
 
+      restaurantSlug = supply.restaurant.slug;
       await prisma.supplyItem.update({
         where: { id: itemId },
         data: {
@@ -480,6 +508,10 @@ export async function setInventoryStockAction(params: {
     }
 
     revalidatePath("/admin");
+    revalidatePath("/caja");
+    if (restaurantSlug) {
+      revalidatePath(`/${restaurantSlug}`);
+    }
     return { success: true };
   } catch (error: any) {
     console.error("Error in setInventoryStockAction:", error);
@@ -818,6 +850,11 @@ export async function updateDishInventoryAction(
       if (data.trackStock === undefined && data.stock !== null) {
         updatePayload.trackStock = true;
       }
+      if (data.stock !== null && data.stock <= 0) {
+        updatePayload.isAvailable = false;
+      } else if (data.stock !== null && data.stock > 0) {
+        updatePayload.isAvailable = true;
+      }
     }
     if (data.minStock !== undefined) {
       updatePayload.minStock = Math.max(0, Math.round(Number(data.minStock)));
@@ -836,12 +873,22 @@ export async function updateDishInventoryAction(
       where: { id: dishId },
       data: updatePayload,
       include: {
-        category: { select: { id: true, name: true } },
+        category: {
+          select: {
+            id: true,
+            name: true,
+            restaurant: { select: { slug: true } },
+          },
+        },
         supplier: { select: { id: true, name: true, phone: true } },
       },
     });
 
     revalidatePath("/admin");
+    revalidatePath("/caja");
+    if (updated.category?.restaurant?.slug) {
+      revalidatePath(`/${updated.category.restaurant.slug}`);
+    }
     return { success: true, dish: updated };
   } catch (error: any) {
     console.error("Error in updateDishInventoryAction:", error);
