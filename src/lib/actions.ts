@@ -1970,8 +1970,22 @@ export async function switchActiveRestaurantAction(restaurantId: string) {
     path: "/",
   });
 
-  await setUserSession(session.userId, session.email, restaurant.id);
+  const targetUserId = (isSuperAdmin && restaurant.userId) ? restaurant.userId : session.userId;
+  let targetEmail = session.email;
+  if (isSuperAdmin && restaurant.userId && restaurant.userId !== session.userId) {
+    const ownerUser = await prismaControl.user.findUnique({
+      where: { id: restaurant.userId },
+      select: { email: true }
+    });
+    if (ownerUser?.email) {
+      targetEmail = ownerUser.email;
+    }
+  }
+
+  await setUserSession(targetUserId, targetEmail, restaurant.id);
   revalidatePath("/admin");
+  revalidatePath("/cocina");
+  revalidatePath("/mesas");
   return { success: true, restaurantName: restaurant.name, slug: restaurant.slug };
 }
 

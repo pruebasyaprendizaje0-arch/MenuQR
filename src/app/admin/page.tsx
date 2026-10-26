@@ -1,4 +1,4 @@
-import { getUserSession } from "@/lib/auth";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -29,6 +29,7 @@ export default async function AdminPage() {
     redirect("/login");
   }
 
+  const isSuperAdmin = await getSuperAdminSession();
   const cookieStore = await cookies();
   const activeRestaurantId = session.restaurantId || cookieStore.get("active_restaurant_id")?.value;
 
@@ -36,7 +37,9 @@ export default async function AdminPage() {
   try {
     if (activeRestaurantId) {
       restaurant = await prisma.restaurant.findFirst({
-        where: { id: activeRestaurantId, userId: session.userId },
+        where: isSuperAdmin
+          ? { id: activeRestaurantId }
+          : { id: activeRestaurantId, userId: session.userId },
         include: {
           categories: {
             orderBy: { order: "asc" },
@@ -69,6 +72,7 @@ export default async function AdminPage() {
     if (!restaurant) {
       restaurant = await prisma.restaurant.findFirst({
         where: { userId: session.userId },
+        orderBy: { createdAt: "asc" },
         include: {
           categories: {
             orderBy: { order: "asc" },

@@ -24,7 +24,9 @@ export default async function RuletaAdminPage() {
   let restaurant = null;
   if (activeRestaurantId) {
     restaurant = await prisma.restaurant.findFirst({
-      where: session ? { id: activeRestaurantId, userId: session.userId } : { id: activeRestaurantId },
+      where: superAdmin
+        ? { id: activeRestaurantId }
+        : { id: activeRestaurantId, ...(session?.userId ? { userId: session.userId } : {}) },
       select: {
         id: true,
         name: true,
@@ -36,9 +38,24 @@ export default async function RuletaAdminPage() {
     });
   }
 
-  if (!restaurant && session) {
+  if (!restaurant && session?.userId) {
     restaurant = await prisma.restaurant.findFirst({
       where: { userId: session.userId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        themeColor: true,
+        logoUrl: true,
+        whatsapp: true,
+      },
+    });
+  }
+
+  if (!restaurant && superAdmin) {
+    restaurant = await prisma.restaurant.findFirst({
+      orderBy: { createdAt: "asc" },
       select: {
         id: true,
         name: true,

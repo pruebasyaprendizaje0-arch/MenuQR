@@ -1,4 +1,4 @@
-import { getUserSession } from "@/lib/auth";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
@@ -14,26 +14,35 @@ export const metadata = {
 };
 
 export default async function CajaPage() {
-  let session: any = null;
-  try {
-    session = await getUserSession();
-  } catch (err) {
-    console.error("Error fetching user session in CajaPage:", err);
-  }
+  const session = await getUserSession();
+  const isSuperAdmin = await getSuperAdminSession();
 
-  if (!session) {
+  if (!session && !isSuperAdmin) {
     redirect("/login?next=/caja");
   }
 
   const cookieStore = await cookies();
-  const activeRestaurantId = session.restaurantId || cookieStore.get("active_restaurant_id")?.value;
+  const sessionUserId = session?.userId || "";
+  const activeRestaurantId = session?.restaurantId || cookieStore.get("active_restaurant_id")?.value;
 
-  let restaurant: any = null;
+  type CajaRestaurant = NonNullable<Awaited<ReturnType<typeof prisma.restaurant.findFirst<{
+    select: {
+      id: true;
+      name: true;
+      slug: true;
+      themeColor: true;
+      customLabels: true;
+    };
+  }>>>>;
+
+  let restaurant: CajaRestaurant | null = null;
 
   try {
     if (activeRestaurantId) {
       restaurant = await prisma.restaurant.findFirst({
-        where: { id: activeRestaurantId, userId: session.userId },
+        where: isSuperAdmin
+          ? { id: activeRestaurantId }
+          : { id: activeRestaurantId, ...(sessionUserId ? { userId: sessionUserId } : {}) },
         select: {
           id: true,
           name: true,
@@ -44,9 +53,23 @@ export default async function CajaPage() {
       });
     }
 
-    if (!restaurant) {
+    if (!restaurant && sessionUserId) {
       restaurant = await prisma.restaurant.findFirst({
-        where: { userId: session.userId },
+        where: { userId: sessionUserId },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          themeColor: true,
+          customLabels: true,
+        },
+      });
+    }
+
+    if (!restaurant && isSuperAdmin) {
+      restaurant = await prisma.restaurant.findFirst({
+        orderBy: { createdAt: "asc" },
         select: {
           id: true,
           name: true,
@@ -81,7 +104,7 @@ export default async function CajaPage() {
   }
 
   // Verify if Caja POS is disabled by Super Admin
-  let customObj: any = {};
+  let customObj: Record<string, unknown> = {};
   if (restaurant.customLabels) {
     try {
       customObj = typeof restaurant.customLabels === "string" 

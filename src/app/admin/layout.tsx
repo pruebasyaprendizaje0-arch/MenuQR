@@ -21,8 +21,8 @@ export default async function AdminLayout({
 
   const isSuperAdmin = await getSuperAdminSession();
   const cookieStore = await cookies();
-  const sessionUserId = (session as any).userId || (session as any).id || "";
-  const activeRestaurantId = (session as any).restaurantId || cookieStore.get("active_restaurant_id")?.value;
+  const sessionUserId = session.userId || "";
+  const activeRestaurantId = session.restaurantId || cookieStore.get("active_restaurant_id")?.value;
 
   // Lista de todos los negocios del usuario para el selector multi-empresa
   const userRestaurants = await prisma.restaurant.findMany({
@@ -132,7 +132,7 @@ export default async function AdminLayout({
           {isGastro && (
             <>
               <Link
-                href="/cocina"
+                href={userRestaurant?.slug ? `/${userRestaurant.slug}/cocina` : "/cocina"}
                 target="_blank"
                 className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 hover:bg-orange-500/20 transition font-bold"
               >
@@ -140,7 +140,7 @@ export default async function AdminLayout({
                 <span>Módulo Cocina</span>
               </Link>
               <Link
-                href="/mesas"
+                href={userRestaurant?.slug ? `/${userRestaurant.slug}/mesas` : "/mesas"}
                 target="_blank"
                 className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition font-bold"
               >
