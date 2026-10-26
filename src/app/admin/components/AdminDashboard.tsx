@@ -131,6 +131,7 @@ import ReservasAdminTab from "./ReservasAdminTab";
 import OrderTicketModal from "./OrderTicketModal";
 import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
 import { AISettingsTab } from "./AISettingsTab";
+import StaffAdminTab from "./StaffAdminTab";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
 
@@ -615,7 +616,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "crm" | "citas" | "reservas" | "subscription" | "ai-settings">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "staff" | "crm" | "citas" | "reservas" | "subscription" | "ai-settings">("metrics");
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
@@ -2560,6 +2561,26 @@ export function AdminDashboard({
               >
                 <Utensils className="h-4 w-4 text-amber-400" />
                 <span>Dividir Cuenta en Mesa</span>
+              </button>
+            )}
+
+            {/* Equipo & Accesos (PIN Meseros & Cocina) - Restaurantes / Cafeterías / Gastro */}
+            {(bLabels.isGastro || selectedPreset === "RESTAURANT" || enableTableOrdering) && (
+              <button
+                onClick={() => setActiveTab("staff")}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "staff"
+                    ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500 shadow-sm"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="h-4 w-4 text-amber-400" />
+                  <span>Equipo y Accesos (PIN)</span>
+                </div>
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  PIN
+                </span>
               </button>
             )}
             {bLabels.showCrm && (
@@ -9009,6 +9030,11 @@ export function AdminDashboard({
           <TableSplitMonitor restaurantId={restaurant.id} tablesConfig={restaurant.tablesConfig} />
         )}
 
+        {/* Equipo y Accesos (PIN Meseros & Cocina) Tab */}
+        {activeTab === "staff" && (
+          <StaffAdminTab restaurant={restaurant} />
+        )}
+
         {/* CRM Clientes Tab */}
         {activeTab === "crm" && (
           <div className="space-y-6 animate-fade-in">
@@ -11189,6 +11215,19 @@ export function AdminDashboard({
           <ShoppingBag className="h-5 w-5" />
           <span className="text-[9px] font-bold uppercase tracking-wider">Historial</span>
         </button>
+
+        {/* Staff & Kitchen PIN (Mobile) */}
+        {(bLabels.isGastro || selectedPreset === "RESTAURANT" || enableTableOrdering) && (
+          <button
+            onClick={() => setActiveTab("staff")}
+            className="flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition duration-200"
+            style={{ color: activeTab === "staff" ? "#f59e0b" : "#94a3b8" }}
+            title="Equipo y Accesos (PIN)"
+          >
+            <ShieldCheck className="h-5 w-5 text-amber-400" />
+            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400">PINs</span>
+          </button>
+        )}
 
         {/* Reservas Tab */}
         {isLodging && !disabledModules.includes("reservas") && (

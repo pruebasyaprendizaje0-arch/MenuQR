@@ -31,9 +31,11 @@ import {
   Trash2,
   Ban,
   Package,
+  Lock,
 } from "lucide-react";
 import { kitchenAudio } from "@/lib/kitchen-audio";
 import { QRCodeSVG } from "qrcode.react";
+import { CocinaPinLockScreen } from "./CocinaPinLockScreen";
 
 interface PedidoItem {
   id: string;
@@ -75,11 +77,36 @@ interface Negocio {
   numero_mesas: number;
 }
 
-export function CocinaClient({ initialSlug }: { initialSlug: string }) {
+export function CocinaClient({
+  initialSlug,
+  negocioNombre,
+  kitchenPinRequired = false,
+}: {
+  initialSlug: string;
+  negocioNombre?: string;
+  kitchenPinRequired?: boolean;
+}) {
   const [negocio, setNegocio] = useState<Negocio | null>(null);
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Estado de bloqueo por PIN de seguridad de Cocina KDS
+  const [isKitchenUnlocked, setIsKitchenUnlocked] = useState<boolean>(() => {
+    if (!kitchenPinRequired) return true;
+    try {
+      return sessionStorage.getItem(`menuqr_cocina_unlocked_${initialSlug}`) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const handleLockKitchen = () => {
+    try {
+      sessionStorage.removeItem(`menuqr_cocina_unlocked_${initialSlug}`);
+    } catch {}
+    setIsKitchenUnlocked(false);
+  };
 
   // Estados de conexión en tiempo real (Dual: SSE + Socket.IO)
   const [isLiveConnected, setIsLiveConnected] = useState(false);
@@ -664,6 +691,17 @@ export function CocinaClient({ initialSlug }: { initialSlug: string }) {
 
   const isConnected = isLiveConnected || socketConnected;
 
+  // Si se requiere PIN de seguridad y la pantalla no ha sido desbloqueada en esta sesión
+  if (kitchenPinRequired && !isKitchenUnlocked) {
+    return (
+      <CocinaPinLockScreen
+        slug={initialSlug}
+        negocioNombre={negocioNombre || negocio?.nombre || initialSlug}
+        onUnlock={() => setIsKitchenUnlocked(true)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-black">
       {/* HEADER SUPERIOR */}
@@ -794,6 +832,19 @@ export function CocinaClient({ initialSlug }: { initialSlug: string }) {
             >
               {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>
+
+            {/* BOTÓN BLOQUEAR PANTALLA (SI REQUIERE PIN) */}
+            {kitchenPinRequired && (
+              <button
+                type="button"
+                onClick={handleLockKitchen}
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-orange-950/40 text-orange-300 border border-orange-700/60 hover:bg-orange-900/40 font-bold transition shadow-sm"
+                title="Bloquear pantalla de cocina (cerrar turno)"
+              >
+                <Lock className="w-3.5 h-3.5 text-orange-400" />
+                <span className="hidden sm:inline">Bloquear</span>
+              </button>
+            )}
 
             {/* ENLACE DIRECTO A MESAS CON SLUG */}
             <a

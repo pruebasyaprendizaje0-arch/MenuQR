@@ -26,6 +26,9 @@ export interface CustomLabels {
   suggestedCardBadge?: string;       // Ej: "Especial del Día", "Destacado"
   suggestedSectionSubtitle?: string; // Ej: "Recomendaciones especiales preparadas para hoy"
   suggestedDefaultDesc?: string;     // Ej: "Especialidad sugerida por la casa."
+  kitchenPin?: string;               // PIN de 4-6 dígitos para acceso a Cocina KDS
+  kitchenPinRequired?: boolean;      // Requerir PIN obligatorio al entrar a Cocina KDS
+  waiterPinRequired?: boolean;       // Requerir PIN obligatorio al entrar a Módulo Mesero
 }
 
 export interface ProductVariant {

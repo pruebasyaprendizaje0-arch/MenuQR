@@ -21,6 +21,7 @@ export default async function SlugCocinaPage({
       slug: true,
       businessType: true,
       enableTableOrdering: true,
+      customLabels: true,
     },
   });
 
@@ -65,5 +66,21 @@ export default async function SlugCocinaPage({
     );
   }
 
-  return <CocinaClient initialSlug={restaurant.slug} />;
+  let customObj: Record<string, any> = {};
+  if (restaurant.customLabels) {
+    try {
+      customObj = typeof restaurant.customLabels === "string"
+        ? JSON.parse(restaurant.customLabels)
+        : restaurant.customLabels;
+    } catch {}
+  }
+  const kitchenPinRequired = Boolean(customObj.kitchenPinRequired && customObj.kitchenPin);
+
+  return (
+    <CocinaClient
+      initialSlug={restaurant.slug}
+      negocioNombre={restaurant.name}
+      kitchenPinRequired={kitchenPinRequired}
+    />
+  );
 }
