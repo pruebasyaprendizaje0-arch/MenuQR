@@ -441,6 +441,14 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
   const paymentQrUrlInput = formData.get("paymentQrUrl") as string;
   let paymentQrUrl: string | null = null;
 
+  const payphoneQrFile = formData.get("payphoneQrFile") as File | null;
+  const payphoneQrUrlInput = formData.get("payphoneQrUrl") as string;
+  let payphoneQrUrl: string | null = null;
+
+  const deunaPhone = (formData.get("deunaPhone") as string)?.trim() || null;
+  const payphoneUrl = (formData.get("payphoneUrl") as string)?.trim() || null;
+  const payphonePhone = (formData.get("payphonePhone") as string)?.trim() || null;
+
   const currentRestaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId },
     select: { 
@@ -448,6 +456,10 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       logoUrl: true, 
       coverUrl: true, 
       qrCobroUrl: true, 
+      payphoneQrUrl: true,
+      deunaPhone: true,
+      payphoneUrl: true,
+      payphonePhone: true,
       seoImage: true,
       ivaPercent: true,
       servicePercent: true,
@@ -530,6 +542,18 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
     paymentQrUrl = val.cleanUrl;
   }
 
+  const uploadedPayphoneQr = await saveUploadedFile(payphoneQrFile);
+  if (uploadedPayphoneQr) {
+    payphoneQrUrl = uploadedPayphoneQr;
+  } else if (payphoneQrUrlInput && payphoneQrUrlInput.trim() !== "") {
+    const isSameAsCurrent = payphoneQrUrlInput.trim() === (currentRestaurant as any)?.payphoneQrUrl;
+    const val = await validateExternalImageUrl(payphoneQrUrlInput, { allowLegacyUploads: isSameAsCurrent });
+    if (!val.isValid) {
+      return { error: val.error || "URL de QR de Payphone inválida." };
+    }
+    payphoneQrUrl = val.cleanUrl;
+  }
+
   let cleanSeoImage: string | null = null;
   if (seoImage && seoImage.trim() !== "") {
     const isSameAsCurrent = seoImage.trim() === currentRestaurant?.seoImage;
@@ -569,6 +593,10 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       logoUrl: logoUrl || null,
       coverUrl: coverUrl || null,
       qrCobroUrl: paymentQrUrl || null,
+      deunaPhone: deunaPhone || null,
+      payphoneUrl: payphoneUrl || null,
+      payphonePhone: payphonePhone || null,
+      payphoneQrUrl: payphoneQrUrl || null,
       instagram: instagram || null,
       facebook: facebook || null,
       tiktok: tiktok || null,
@@ -2193,6 +2221,7 @@ export async function createOrderAction(data: {
   discountAmount?: number;
   total?: number;
   paymentMethod: string;
+  paymentDetails?: string;
   items: { dishId: string; dishName?: string; price?: number; quantity: number }[];
 }) {
   try {
@@ -2205,7 +2234,7 @@ export async function createOrderAction(data: {
     }
 
     const rawMethod = (data.paymentMethod || "").trim().toLowerCase();
-    const validMethods = ["cash", "efectivo", "qr", "deuna", "transferencia", "transfer", "tarjeta"];
+    const validMethods = ["cash", "efectivo", "qr", "deuna", "payphone", "transferencia", "transfer", "tarjeta", "card"];
     if (!rawMethod || !validMethods.includes(rawMethod)) {
       return { error: "Método de pago no válido." };
     }
@@ -2486,6 +2515,7 @@ export async function createOrderAction(data: {
           discountAmount: finalDiscount,
           total: finalTotal,
           paymentMethod: rawMethod,
+          paymentDetails: data.paymentDetails?.slice(0, 500) || null,
           isTest: isTestOrder,
           items: {
             create: verifiedOrderItems.map((item) => ({

@@ -559,7 +559,7 @@ export async function POST(req: NextRequest) {
           (envio > 0 ? `*Envío ${zonaEnvio ? `(${zonaEnvio})` : ""}:* $${envio.toFixed(2)}\n` : "") +
           (propina > 0 ? `*Propina:* $${propina.toFixed(2)}\n` : "") +
           `*TOTAL A PAGAR: $${orderTotal.toFixed(2)}*` +
-          (metodoPago.toLowerCase().includes("transferencia") || metodoPago.toLowerCase().includes("qr") ? `\n\n📸 *Adjunto comprobante de pago/transferencia.*` : "");
+          (metodoPago.toLowerCase().includes("transferencia") || metodoPago.toLowerCase().includes("qr") || metodoPago.toLowerCase().includes("deuna") || metodoPago.toLowerCase().includes("payphone") ? `\n\n📸 *Adjunto comprobante de pago.*` : "");
 
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";

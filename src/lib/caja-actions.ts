@@ -302,7 +302,7 @@ export async function processCajaSaleAction(
   restaurantId: string,
   data: {
     items: Array<{ dishId: string; quantity: number; price: number; name: string }>;
-    paymentMethod: "EFECTIVO" | "DEUNA" | "TARJETA";
+    paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA";
     customerName?: string;
   }
 ) {

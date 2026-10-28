@@ -29,6 +29,8 @@ import {
   AlertCircle,
   QrCode,
   Navigation,
+  ExternalLink,
+  Zap,
 } from "lucide-react";
 
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
@@ -108,6 +110,10 @@ interface StoreData {
   mapEmbedUrl?: string | null;
   qrCobroUrl?: string | null;
   paymentQrUrl?: string | null;
+  deunaPhone?: string | null;
+  payphoneUrl?: string | null;
+  payphonePhone?: string | null;
+  payphoneQrUrl?: string | null;
   bankName?: string | null;
   bankAccountType?: string | null;
   bankAccountNumber?: string | null;
@@ -164,7 +170,8 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
   // Formulario de checkout
   const [deliveryMethod, setDeliveryMethod] = useState<"domicilio" | "retiro">("domicilio");
-  const [paymentMethod, setPaymentMethod] = useState<"efectivo" | "transferencia">("efectivo");
+  const [paymentMethod, setPaymentMethod] = useState<"efectivo" | "deuna" | "payphone" | "transferencia">("efectivo");
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [customerAddress, setCustomerAddress] = useState<string>("");
@@ -650,7 +657,14 @@ export function CtaloClient({ store }: { store: StoreData }) {
         metodo_entrega: deliveryMethod,
         costo_envio: effectiveDeliveryCost,
         zona_envio: deliveryMethod === "domicilio" ? selectedKmRate?.label : undefined,
-        metodo_pago: paymentMethod === "transferencia" ? "QR Deuna / Transferencia Bancaria" : "Efectivo / Local",
+        metodo_pago:
+          paymentMethod === "deuna"
+            ? "Deuna (Banco Pichincha)"
+            : paymentMethod === "payphone"
+            ? "Payphone (Tarjeta o Saldo)"
+            : paymentMethod === "transferencia"
+            ? "QR Deuna / Transferencia Bancaria"
+            : "Efectivo / Local",
         codigo_cupon: appliedCoupon?.code || undefined,
         descuento: discountAmount > 0 ? discountAmount : undefined,
         propina: tipAmount > 0 ? tipAmount : undefined,
@@ -1491,31 +1505,44 @@ export function CtaloClient({ store }: { store: StoreData }) {
                         </label>
                         <span className="text-[10px] text-slate-400">Selecciona cómo deseas pagar</span>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         <button
                           type="button"
                           onClick={() => setPaymentMethod("efectivo")}
                           className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all duration-200 cursor-pointer ${
                             paymentMethod === "efectivo"
-                              ? "border-amber-500 bg-amber-500/10 text-white shadow-md shadow-amber-500/10"
+                              ? "border-emerald-500 bg-emerald-500/10 text-white shadow-md shadow-emerald-500/10"
                               : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
                           }`}
                         >
                           <span className="text-lg">💵</span>
-                          <span className="text-xs font-bold mt-1 text-white">Efectivo / Local</span>
+                          <span className="text-xs font-bold mt-1 text-white">Efectivo</span>
                         </button>
 
                         <button
                           type="button"
-                          onClick={() => setPaymentMethod("transferencia")}
+                          onClick={() => setPaymentMethod("deuna")}
                           className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all duration-200 cursor-pointer ${
-                            paymentMethod === "transferencia"
-                              ? "border-amber-500 bg-amber-500/10 text-white shadow-md shadow-amber-500/10"
+                            paymentMethod === "deuna" || paymentMethod === "transferencia"
+                              ? "border-teal-500 bg-teal-500/10 text-white shadow-md shadow-teal-500/10"
                               : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
                           }`}
                         >
-                          <QrCode className="h-5 w-5 text-amber-400" />
-                          <span className="text-xs font-bold mt-1 text-white">QR Cobro (Deuna)</span>
+                          <span className="text-lg">⚡</span>
+                          <span className="text-xs font-bold mt-1 text-white">Deuna</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPaymentMethod("payphone")}
+                          className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition-all duration-200 cursor-pointer ${
+                            paymentMethod === "payphone"
+                              ? "border-orange-500 bg-orange-500/10 text-white shadow-md shadow-orange-500/10"
+                              : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                          }`}
+                        >
+                          <CreditCard className="h-5 w-5 text-orange-400" />
+                          <span className="text-xs font-bold mt-1 text-white">Payphone</span>
                         </button>
                       </div>
 
@@ -1529,12 +1556,37 @@ export function CtaloClient({ store }: { store: StoreData }) {
                         </div>
                       )}
 
-                      {/* Datos de Transferencia y QR Deuna */}
-                      {paymentMethod === "transferencia" && (
+                      {/* Datos de Deuna y Transferencia */}
+                      {(paymentMethod === "deuna" || paymentMethod === "transferencia") && (
                         <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl text-center space-y-3">
-                          <span className="text-[10px] uppercase tracking-wider font-extrabold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20 inline-block">
-                            Pago Móvil o Transferencia Bancaria
+                          <span className="text-[10px] uppercase tracking-wider font-extrabold text-teal-400 bg-teal-500/10 px-2.5 py-1 rounded-full border border-teal-500/20 inline-block">
+                            Pago Móvil Deuna (Banco Pichincha)
                           </span>
+
+                          {/* Número celular Deuna con botón Copiar */}
+                          {(store.deunaPhone || store.whatsapp) && (
+                            <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex items-center justify-between text-left">
+                              <div>
+                                <span className="text-[10px] text-slate-400 block uppercase font-bold">Celular Deuna:</span>
+                                <span className="text-xs font-bold text-teal-300 tracking-wider">
+                                  {store.deunaPhone || store.whatsapp}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const num = store.deunaPhone || store.whatsapp || "";
+                                  navigator.clipboard.writeText(num);
+                                  setCopiedField("deuna");
+                                  setTimeout(() => setCopiedField(null), 2500);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                              >
+                                {copiedField === "deuna" ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedField === "deuna" ? "¡Copiado!" : "Copiar"}</span>
+                              </button>
+                            </div>
+                          )}
 
                           {/* QR Deuna si está cargado en el panel admin */}
                           {(store.qrCobroUrl || store.paymentQrUrl) && (
@@ -1601,14 +1653,90 @@ export function CtaloClient({ store }: { store: StoreData }) {
                                 )}
                               </div>
                             </div>
-                          ) : !(store.qrCobroUrl || store.paymentQrUrl) && (
+                          ) : !(store.qrCobroUrl || store.paymentQrUrl) && !(store.deunaPhone || store.whatsapp) && (
                             <div className="py-2 text-slate-400 text-xs italic">
                               Coordinarás los datos de transferencia directamente al enviar el pedido por WhatsApp.
                             </div>
                           )}
 
                           <p className="text-[10px] text-slate-400 italic leading-relaxed pt-1 border-t border-slate-850">
-                            📸 Recuerda tomar una captura de pantalla del comprobante de transferencia o pago y adjuntarla en el chat de WhatsApp al enviar tu orden.
+                            📸 Recuerda realizar tu pago por el total de <strong className="text-teal-400">${grandTotal.toFixed(2)}</strong> y adjuntar el capture en WhatsApp.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Datos de Payphone */}
+                      {paymentMethod === "payphone" && (
+                        <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl text-center space-y-3">
+                          <span className="text-[10px] uppercase tracking-wider font-extrabold text-orange-400 bg-orange-500/10 px-2.5 py-1 rounded-full border border-orange-500/20 inline-block">
+                            Pago con Payphone (Tarjetas y App)
+                          </span>
+
+                          {/* Botón directo a Payphone */}
+                          {store.payphoneUrl && (
+                            <div className="pt-1">
+                              <a
+                                href={store.payphoneUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs shadow-md shadow-orange-500/20 flex items-center justify-center gap-2 transition active:scale-95"
+                              >
+                                <CreditCard className="w-4 h-4" />
+                                <span>Pagar en Payphone (${grandTotal.toFixed(2)})</span>
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            </div>
+                          )}
+
+                          {/* Teléfono Payphone */}
+                          {store.payphonePhone && (
+                            <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex items-center justify-between text-left">
+                              <div>
+                                <span className="text-[10px] text-slate-400 block uppercase font-bold">Celular Payphone:</span>
+                                <span className="text-xs font-bold text-orange-300 tracking-wider">
+                                  {store.payphonePhone}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const num = store.payphonePhone || "";
+                                  navigator.clipboard.writeText(num);
+                                  setCopiedField("payphone");
+                                  setTimeout(() => setCopiedField(null), 2500);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                              >
+                                {copiedField === "payphone" ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                <span>{copiedField === "payphone" ? "¡Copiado!" : "Copiar"}</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {/* QR de Payphone */}
+                          {store.payphoneQrUrl && (
+                            <div className="space-y-2 pt-1">
+                              <p className="text-[11px] text-slate-300">
+                                Escanea el código QR de cobro de <strong>Payphone</strong>:
+                              </p>
+                              <div className="bg-white p-2.5 rounded-2xl max-w-[170px] mx-auto border border-slate-800 shadow-lg">
+                                <img
+                                  src={store.payphoneQrUrl}
+                                  alt="QR de Cobro Payphone"
+                                  className="w-full h-auto aspect-square object-contain"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {!store.payphoneUrl && !store.payphonePhone && !store.payphoneQrUrl && (
+                            <div className="py-2 text-slate-400 text-xs italic">
+                              Coordina el pago por Payphone o tarjeta directamente al enviar tu orden por WhatsApp.
+                            </div>
+                          )}
+
+                          <p className="text-[10px] text-slate-400 italic leading-relaxed pt-1 border-t border-slate-850">
+                            Acepta tarjetas de crédito/débito y saldo Payphone. Adjunta el comprobante al enviar tu orden.
                           </p>
                         </div>
                       )}

@@ -132,9 +132,21 @@ export default function OrderTicketModal({
               <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
                 Información de Entrega y Contacto
               </span>
-              <span className="text-[11px] font-mono text-slate-300 font-semibold">
-                Pago: {order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
-              </span>
+              <div className="text-right">
+                <span className="text-[11px] font-mono text-slate-300 font-semibold block">
+                  Pago: {
+                    order.paymentMethod === "deuna" ? "Deuna (Pichincha)" :
+                    order.paymentMethod === "payphone" ? "Payphone" :
+                    order.paymentMethod === "qr" ? "QR de Cobro" :
+                    "Efectivo / Local"
+                  }
+                </span>
+                {(order as any).paymentDetails && (
+                  <span className="text-[10px] text-amber-300 font-semibold block">
+                    {(order as any).paymentDetails}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="space-y-1.5 pt-1">

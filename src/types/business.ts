@@ -16,7 +16,7 @@ export interface CustomLabels {
   vertical?: string;    // "menuqr" | "catalogo" | "servicios" | "citas" | "reservas"
   businessSubType?: string; // "RESTAURANT" | "RETAIL" | "SERVICIOS" | "CITAS" | "RESERVAS"
   enabledModules?: string[]; // Ej: ["tables", "reservas", "citas", "cotizador", "ecommerce"]
-  disabledModules?: string[]; // Ej: ["tables", "split-bill", "ruleta", "seasons", "coupons", "ai-settings", "crm"]
+  disabledModules?: string[]; // Ej: ["tables", "split-bill", "ruleta", "seasons", "coupons", "crm"]
   showSplitBill?: boolean;
   imageAspectRatio?: ImageAspectRatio; // "1:1" (Estándar/Horizontal) o "9:16" (Vertical/Reels/Botellas)
   suggestedAspectRatio?: ImageAspectRatio; // Formato para platos sugeridos / especial del día

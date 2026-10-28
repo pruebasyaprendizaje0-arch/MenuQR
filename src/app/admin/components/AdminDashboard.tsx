@@ -130,7 +130,6 @@ import CitasAdminTab from "./CitasAdminTab";
 import ReservasAdminTab from "./ReservasAdminTab";
 import OrderTicketModal from "./OrderTicketModal";
 import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
-import { AISettingsTab } from "./AISettingsTab";
 import StaffAdminTab from "./StaffAdminTab";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
@@ -230,6 +229,10 @@ type Restaurant = {
   logoUrl: string | null;
   coverUrl: string | null;
   paymentQrUrl: string | null;
+  deunaPhone?: string | null;
+  payphoneUrl?: string | null;
+  payphonePhone?: string | null;
+  payphoneQrUrl?: string | null;
   whatsappNumber: string;
   themeColor: string;
   trialEndsAt: string | Date;
@@ -616,7 +619,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "staff" | "crm" | "citas" | "reservas" | "subscription" | "ai-settings">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "staff" | "crm" | "citas" | "reservas" | "subscription">("metrics");
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
@@ -1779,17 +1782,21 @@ export function AdminDashboard({
   const [logoUrlInput, setLogoUrlInput] = useState(restaurant.logoUrl || "");
   const [coverUrlInput, setCoverUrlInput] = useState(restaurant.coverUrl || "");
   const [paymentQrUrlInput, setPaymentQrUrlInput] = useState(restaurant.paymentQrUrl || "");
+  const [payphoneQrUrlInput, setPayphoneQrUrlInput] = useState(restaurant.payphoneQrUrl || "");
   const [logoHasError, setLogoHasError] = useState(false);
   const [coverHasError, setCoverHasError] = useState(false);
   const [paymentQrHasError, setPaymentQrHasError] = useState(false);
+  const [payphoneQrHasError, setPayphoneQrHasError] = useState(false);
   const [dishImageHasError, setDishImageHasError] = useState(false);
 
   const logoFileInputRef = React.useRef<HTMLInputElement>(null);
   const coverFileInputRef = React.useRef<HTMLInputElement>(null);
   const paymentQrFileInputRef = React.useRef<HTMLInputElement>(null);
+  const payphoneQrFileInputRef = React.useRef<HTMLInputElement>(null);
   const [logoFileName, setLogoFileName] = useState<string | null>(null);
   const [coverFileName, setCoverFileName] = useState<string | null>(null);
   const [paymentQrFileName, setPaymentQrFileName] = useState<string | null>(null);
+  const [payphoneQrFileName, setPayphoneQrFileName] = useState<string | null>(null);
 
   const [logoBase64, setLogoBase64] = useState<string>("");
   const [dishBase64s, setDishBase64s] = useState<string[]>([]);
@@ -4581,7 +4588,6 @@ export function AdminDashboard({
                         { id: "ruleta", label: "Ruleta de Premios (¡Gira y Gana!)", desc: "Botón flotante en el catálogo y premios de fidelización", icon: Gift },
                         { id: "seasons", label: "Tarifas Dinámicas y Temporadas", desc: "Ajuste de precios para feriados, fines de semana o temporada alta", icon: CalendarDays },
                         { id: "coupons", label: "Cupones de Descuento", desc: "Códigos promocionales de descuento para tus clientes", icon: Tag },
-                        { id: "ai-settings", label: "Asistente IA de Ventas (BYOK)", desc: "Bot inteligente para recomendación y atención 24/7", icon: Bot },
                         { id: "crm", label: "CRM & Historial de Clientes", desc: "Base de datos de compradores, preferencias y hábitos", icon: Users },
                       ].map((mod) => {
                         const isHidden = disabledModules.includes(mod.id);
@@ -5380,18 +5386,31 @@ export function AdminDashboard({
                         className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
                       />
                     </div>
+
+                    <div className="space-y-1 pt-1">
+                      <label className="block text-[11px] font-semibold text-slate-300">Número Celular para Deuna (Cobro Directo)</label>
+                      <input
+                        type="text"
+                        name="deunaPhone"
+                        defaultValue={(restaurant as any).deunaPhone || ""}
+                        placeholder="Ej. 0991234567"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                      <p className="text-[10px] text-slate-400">Los clientes podrán copiar este número con un solo clic para transferir desde su app Deuna.</p>
+                    </div>
+
                     <p className="text-[11px] text-slate-400 leading-snug">
-                      El código QR se mostrará en el perfil comercial para que tus clientes puedan escanearlo y transferirte directamente.
+                      El código QR se mostrará en el perfil comercial y checkout para que tus clientes puedan escanearlo y transferirte directamente.
                     </p>
                   </div>
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-slate-300">Vista Previa</label>
+                    <label className="block text-xs font-semibold text-slate-300">Vista Previa QR Deuna</label>
                     <div className="h-28 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-2 relative overflow-hidden">
                       {paymentQrUrlInput && paymentQrUrlInput.trim() !== "" ? (
                         !paymentQrHasError ? (
                           <img
                             src={paymentQrUrlInput.trim()}
-                            alt="Vista previa QR"
+                            alt="Vista previa QR Deuna"
                             onError={() => setPaymentQrHasError(true)}
                             className="max-h-full max-w-full object-contain rounded-lg shadow"
                           />
@@ -5403,6 +5422,135 @@ export function AdminDashboard({
                         )
                       ) : (
                         <span className="text-xs text-slate-500 italic">Sin QR</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payphone Settings Section */}
+              <div className="border-t border-slate-800/80 pt-6 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span className="p-1 rounded-lg bg-orange-500/20 text-orange-400">💳</span>
+                    <span>Cobro con Payphone (Tarjetas y App en Ecuador)</span>
+                  </h4>
+                  <span className="text-[11px] font-semibold text-orange-400 bg-orange-950/40 border border-orange-500/30 px-2.5 py-1 rounded-full">
+                    ✨ Acepta Visa, Mastercard y saldo Payphone
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-semibold text-slate-300">Link Personal de Cobro Payphone</label>
+                    <input
+                      type="url"
+                      name="payphoneUrl"
+                      defaultValue={(restaurant as any).payphoneUrl || ""}
+                      placeholder="https://payp.page.link/xxxx o https://live.payphone.app/..."
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                    />
+                    <p className="text-[10px] text-slate-400">Tus clientes podrán hacer clic directamente y pagar desde su navegador o app.</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[11px] font-semibold text-slate-300">Número Celular registrado en Payphone</label>
+                    <input
+                      type="text"
+                      name="payphonePhone"
+                      defaultValue={(restaurant as any).payphonePhone || ""}
+                      placeholder="Ej. 0991234567"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                    />
+                    <p className="text-[10px] text-slate-400">Para clientes que deseen enviar el pago directamente desde su app Payphone.</p>
+                  </div>
+                </div>
+
+                {/* Payphone QR File / URL */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start pt-2">
+                  <div className="md:col-span-2 space-y-3">
+                    <label className="block text-[11px] font-semibold text-slate-300">Código QR de Payphone (Opcional)</label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => payphoneQrFileInputRef.current?.click()}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-900 border border-slate-700 hover:border-orange-400 hover:bg-slate-800 text-white transition-all active:scale-95 cursor-pointer shadow-md"
+                      >
+                        📁 Subir QR de Payphone
+                      </button>
+                      {payphoneQrFileName && (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 truncate max-w-[220px]">
+                          ✓ {payphoneQrFileName}
+                        </span>
+                      )}
+                      {(payphoneQrUrlInput || payphoneQrFileName) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPayphoneQrUrlInput("");
+                            setPayphoneQrFileName(null);
+                            setPayphoneQrHasError(false);
+                            if (payphoneQrFileInputRef.current) payphoneQrFileInputRef.current.value = "";
+                          }}
+                          className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded transition-colors cursor-pointer"
+                        >
+                          ✕ Quitar
+                        </button>
+                      )}
+                    </div>
+
+                    <input
+                      ref={payphoneQrFileInputRef}
+                      type="file"
+                      name="payphoneQrFile"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setPayphoneQrFileName(file.name);
+                          const previewUrl = URL.createObjectURL(file);
+                          setPayphoneQrUrlInput(previewUrl);
+                          setPayphoneQrHasError(false);
+                        }
+                      }}
+                    />
+
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-semibold text-slate-400">O pega una URL directa del QR de Payphone</label>
+                      <input
+                        type="text"
+                        name="payphoneQrUrl"
+                        value={payphoneQrUrlInput}
+                        onChange={(e) => {
+                          setPayphoneQrUrlInput(e.target.value);
+                          setPayphoneQrHasError(false);
+                        }}
+                        placeholder="https://i.postimg.cc/xxxxx/payphone-qr.webp o /uploads/..."
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 block px-4 py-2.5 rounded-xl text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">Vista Previa QR Payphone</label>
+                    <div className="h-28 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center p-2 relative overflow-hidden">
+                      {payphoneQrUrlInput && payphoneQrUrlInput.trim() !== "" ? (
+                        !payphoneQrHasError ? (
+                          <img
+                            src={payphoneQrUrlInput.trim()}
+                            alt="Vista previa QR Payphone"
+                            onError={() => setPayphoneQrHasError(true)}
+                            className="max-h-full max-w-full object-contain rounded-lg shadow"
+                          />
+                        ) : (
+                          <div className="text-center p-2">
+                            <p className="text-[11px] text-red-400 font-semibold">⚠️ No se pudo cargar.</p>
+                            <p className="text-[10px] text-slate-400">Verifica la URL o sube un archivo.</p>
+                          </div>
+                        )
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">Sin QR Payphone</span>
                       )}
                     </div>
                   </div>
@@ -8617,15 +8765,6 @@ export function AdminDashboard({
           </div>
         )}
 
-        {/* Asistente IA (BYOK) Tab */}
-        {activeTab === "ai-settings" && (
-          <div className="space-y-6 animate-fade-in">
-            <AISettingsTab
-              restaurantId={restaurant.id}
-              restaurantSlug={restaurant.slug}
-            />
-          </div>
-        )}
         {activeTab === "orders" && (
           <div className="space-y-6 animate-fade-in">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

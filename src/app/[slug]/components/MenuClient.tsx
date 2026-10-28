@@ -45,6 +45,8 @@ import {
   ShieldCheck,
   ShoppingBag,
   Flame,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -303,7 +305,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "qr">("cash");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "deuna" | "payphone" | "qr">("cash");
+  const [cashBillAmount, setCashBillAmount] = useState<string>("exact");
+  const [customCashAmount, setCustomCashAmount] = useState<string>("");
+  const [copiedPhoneField, setCopiedPhoneField] = useState<string | null>(null);
   const [tipPercentage, setTipPercentage] = useState<number>(0);
   const [reservationDate, setReservationDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const categoryRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
@@ -994,7 +999,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     );
   };
 
-  const handleSendOrder = async (selectedMethod: "cash" | "qr") => {
+  const handleSendOrder = async (selectedMethod: "cash" | "deuna" | "payphone" | "qr") => {
     if (cart.length === 0) return;
 
     const isTableOrder = Boolean(selectedTable && selectedTable !== "" && selectedTable !== "Llevar" && selectedTable !== "Domicilio");
@@ -1108,6 +1113,30 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           : deliveryAddress.trim())
       : undefined;
 
+    let paymentDetailsStr: string | undefined = undefined;
+    let normalizedMethod = "efectivo";
+
+    if (selectedMethod === "deuna" || selectedMethod === "qr") {
+      normalizedMethod = "deuna";
+      paymentDetailsStr = "Pago móvil Deuna (Banco Pichincha)";
+    } else if (selectedMethod === "payphone") {
+      normalizedMethod = "payphone";
+      paymentDetailsStr = "Payphone (Tarjeta o Saldo)";
+    } else {
+      normalizedMethod = "efectivo";
+      if (cashBillAmount === "exact") {
+        paymentDetailsStr = "Monto exacto (sin cambio)";
+      } else {
+        const val = cashBillAmount === "custom" ? parseFloat(customCashAmount) : parseFloat(cashBillAmount);
+        if (!isNaN(val) && val > total) {
+          const change = val - total;
+          paymentDetailsStr = `Paga con $${val.toFixed(2)} (Llevar cambio: $${change.toFixed(2)})`;
+        } else {
+          paymentDetailsStr = "Pago en efectivo";
+        }
+      }
+    }
+
     let result: any;
     try {
       result = await createOrderAction({
@@ -1127,7 +1156,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         couponCode: appliedCoupon ? appliedCoupon.code : undefined,
         discountAmount: couponDiscount,
         total,
-        paymentMethod: selectedMethod,
+        paymentMethod: normalizedMethod,
+        paymentDetails: paymentDetailsStr,
         items: itemsData,
       });
     } catch (actionErr: any) {
@@ -1292,13 +1322,35 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     }
     message += `*Propina:* $${tip.toFixed(2)}\n`;
     message += `*Total a Pagar:* $${total.toFixed(2)}\n`;
-    message += `*Método de Pago:* ${selectedMethod === "qr" ? "QR de Cobro (Deuna / Transferencia)" : "Efectivo / Contra entrega en local"}\n`;
 
-    if (selectedMethod === "qr" && restaurant.paymentQrUrl) {
+    let paymentMethodText = "Efectivo / Contra entrega en local";
+    if (selectedMethod === "deuna" || selectedMethod === "qr") {
+      paymentMethodText = "Deuna (Banco Pichincha) - Adjunto comprobante 📲";
+    } else if (selectedMethod === "payphone") {
+      paymentMethodText = "Payphone (Tarjeta / Saldo) - Adjunto comprobante 💳";
+    } else {
+      if (cashBillAmount === "exact") {
+        paymentMethodText = "Efectivo (Monto exacto, sin cambio) 💵";
+      } else {
+        const val = cashBillAmount === "custom" ? parseFloat(customCashAmount) : parseFloat(cashBillAmount);
+        if (!isNaN(val) && val > total) {
+          const change = val - total;
+          paymentMethodText = `Efectivo (Paga con: $${val.toFixed(2)} | Cambio a llevar: $${change.toFixed(2)}) 💵`;
+        } else {
+          paymentMethodText = "Efectivo contra entrega 💵";
+        }
+      }
+    }
+    message += `*Método de Pago:* ${paymentMethodText}\n`;
+
+    if ((selectedMethod === "deuna" || selectedMethod === "qr") && restaurant.paymentQrUrl) {
       const qrFullUrl = restaurant.paymentQrUrl.startsWith("http") 
         ? restaurant.paymentQrUrl 
         : `${window.location.origin}${restaurant.paymentQrUrl}`;
-      message += `*QR de Cobro:* ${qrFullUrl}\n`;
+      message += `*QR Deuna:* ${qrFullUrl}\n`;
+    }
+    if (selectedMethod === "payphone" && (restaurant as any).payphoneUrl) {
+      message += `*Link Payphone:* ${(restaurant as any).payphoneUrl}\n`;
     }
 
     const trackingUrl = `${window.location.origin}/${restaurant.slug}/rastreo?order=${result.orderNumber || result.orderId}`;
@@ -3219,129 +3271,347 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               </button>
             </div>
 
-            {/* Payment Method Options */}
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("cash")}
-                className={`p-4 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all duration-200 ${
-                  paymentMethod === "cash"
-                    ? "border-transparent text-white"
-                    : "border-slate-800 bg-slate-950/40 text-slate-400 hover:text-slate-200"
-                }`}
-                style={{
-                  backgroundColor: paymentMethod === "cash" ? restaurant.themeColor : undefined
-                }}
-              >
-                <DollarSign className="h-5 w-5" />
-                <span className="text-xs font-bold mt-2">Efectivo / Local</span>
-              </button>
+            {/* Payment Method Options (Efectivo, Deuna, Payphone) */}
+            {(() => {
+              const checkoutSubtotal = cartTotal;
+              const checkoutCouponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
+              const checkoutSubtotalAfterCoupon = Math.max(0, checkoutSubtotal - checkoutCouponDiscount);
+              const checkoutIva = (restaurant.ivaPercent > 0 && !restaurant.ivaOnTable) ? (checkoutSubtotalAfterCoupon * (restaurant.ivaPercent / 100)) : 0;
+              const checkoutService = (restaurant.servicePercent > 0 && !restaurant.serviceOnTable) ? (checkoutSubtotalAfterCoupon * (restaurant.servicePercent / 100)) : 0;
+              const checkoutTip = checkoutSubtotalAfterCoupon * (tipPercentage / 100);
+              const checkoutDelivery = selectedTable === "Domicilio" ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
+              const currentTotal = checkoutSubtotalAfterCoupon + checkoutIva + checkoutService + checkoutTip + checkoutDelivery;
 
-              <button
-                type="button"
-                onClick={() => setPaymentMethod("qr")}
-                className={`p-4 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all duration-200 ${
-                  paymentMethod === "qr"
-                    ? "border-transparent text-white"
-                    : "border-slate-800 bg-slate-950/40 text-slate-400 hover:text-slate-200"
-                }`}
-                style={{
-                  backgroundColor: paymentMethod === "qr" ? restaurant.themeColor : undefined
-                }}
-              >
-                <QrCode className="h-5 w-5" />
-                <span className="text-xs font-bold mt-2">QR Cobro (Deuna)</span>
-              </button>
-            </div>
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("cash")}
+                      className={`p-3 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all duration-200 cursor-pointer ${
+                        paymentMethod === "cash"
+                          ? "border-emerald-400 bg-emerald-500/20 text-white shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-400"
+                          : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                        <DollarSign className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold block text-white">Efectivo</span>
+                        <span className="text-[10px] text-slate-400 block line-clamp-1">Local / Entrega</span>
+                      </div>
+                    </button>
 
-            {/* Payment Details / QR display */}
-            {paymentMethod === "qr" && (
-              <div className="bg-slate-950/80 border border-slate-850 p-4 rounded-2xl text-center space-y-3">
-                <span className="text-[10px] uppercase tracking-wider font-extrabold text-amber-500 bg-amber-500/10 px-2.5 py-1 rounded-full">
-                  Pago Móvil o Transferencia Bancaria
-                </span>
-                
-                {restaurant.paymentQrUrl && (
-                  <div className="space-y-3 pt-2">
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Escanea este código con tu app de <strong>Deuna</strong> o banca móvil preferida para pagar:
-                    </p>
-                    <div className="bg-white p-3 rounded-2xl max-w-[200px] mx-auto border border-slate-800">
-                      <img 
-                        src={restaurant.paymentQrUrl} 
-                        alt="Deuna QR de Cobro" 
-                        className="w-full h-auto aspect-square object-contain"
-                      />
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("deuna")}
+                      className={`p-3 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all duration-200 cursor-pointer ${
+                        paymentMethod === "deuna" || paymentMethod === "qr"
+                          ? "border-teal-400 bg-teal-500/20 text-white shadow-lg shadow-teal-500/10 ring-1 ring-teal-400"
+                          : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-300">
+                        <Zap className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold block text-white">Deuna</span>
+                        <span className="text-[10px] text-teal-300/80 block line-clamp-1">Pichincha QR</span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("payphone")}
+                      className={`p-3 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all duration-200 cursor-pointer ${
+                        paymentMethod === "payphone"
+                          ? "border-orange-400 bg-orange-500/20 text-white shadow-lg shadow-orange-500/10 ring-1 ring-orange-400"
+                          : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="w-8 h-8 rounded-xl bg-orange-500/20 border border-orange-500/30 flex items-center justify-center text-orange-400">
+                        <CreditCard className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold block text-white">Payphone</span>
+                        <span className="text-[10px] text-orange-300/80 block line-clamp-1">Tarjetas / App</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Detalle Efectivo con selector de cambio */}
+                  {paymentMethod === "cash" && (
+                    <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-extrabold tracking-wider text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
+                          💵 Pago en Efectivo
+                        </span>
+                        <span className="text-[11px] text-slate-400 font-medium">Contra entrega o retiro</span>
+                      </div>
+
+                      <div className="space-y-2 pt-1">
+                        <label className="block text-[11px] font-semibold text-slate-300">
+                          ¿Con cuánto vas a pagar? <span className="text-slate-400 font-normal">(Llevaremos tu cambio exacto)</span>
+                        </label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setCashBillAmount("exact")}
+                            className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition text-center cursor-pointer ${
+                              cashBillAmount === "exact"
+                                ? "bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-sm"
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            Exacto
+                          </button>
+                          {[5, 10, 20, 50].filter(b => b >= currentTotal).slice(0, 4).map((b) => (
+                            <button
+                              key={b}
+                              type="button"
+                              onClick={() => setCashBillAmount(String(b))}
+                              className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition text-center cursor-pointer ${
+                                cashBillAmount === String(b)
+                                  ? "bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-sm"
+                                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              ${b}.00
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setCashBillAmount("custom")}
+                            className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition text-center cursor-pointer ${
+                              cashBillAmount === "custom"
+                                ? "bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-sm"
+                                : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                            }`}
+                          >
+                            Otro valor
+                          </button>
+                        </div>
+
+                        {cashBillAmount === "custom" && (
+                          <div className="pt-1">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min={currentTotal}
+                              placeholder={`Ingresa monto ej: $${(Math.ceil(currentTotal / 10) * 10 || 20).toFixed(2)}`}
+                              value={customCashAmount}
+                              onChange={(e) => setCustomCashAmount(e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 px-3 py-2 rounded-xl text-white text-xs focus:outline-none"
+                            />
+                          </div>
+                        )}
+
+                        {(() => {
+                          const payVal = cashBillAmount === "custom" ? parseFloat(customCashAmount) : parseFloat(cashBillAmount);
+                          if (!isNaN(payVal) && payVal > currentTotal) {
+                            const change = payVal - currentTotal;
+                            return (
+                              <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center justify-between">
+                                <span>Tu cambio a recibir:</span>
+                                <span className="font-extrabold text-sm">${change.toFixed(2)}</span>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Bank account details if configured */}
-                {(restaurant.bankName || restaurant.bankAccountNumber) && (
-                  <div className="border-t border-slate-850/80 pt-3 mt-3 text-left space-y-2 text-xs">
-                    <p className="font-extrabold text-slate-300 border-b border-slate-900 pb-1 mb-2 text-center uppercase tracking-wider text-[10px]">
-                      Datos para Transferencia Bancaria
-                    </p>
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px] text-slate-350">
-                      {restaurant.bankName && (
-                        <>
-                          <span className="font-bold text-slate-400">Banco:</span>
-                          <span className="text-right font-medium text-white">{restaurant.bankName}</span>
-                        </>
+                  {/* Detalle Deuna */}
+                  {(paymentMethod === "deuna" || paymentMethod === "qr") && (
+                    <div className="bg-slate-950/80 border border-slate-850 p-4 rounded-2xl text-center space-y-3">
+                      <span className="text-[10px] uppercase tracking-wider font-extrabold text-teal-400 bg-teal-500/10 border border-teal-500/20 px-2.5 py-1 rounded-full">
+                        Pago Móvil Deuna (Banco Pichincha)
+                      </span>
+
+                      {/* Teléfono Deuna con botón Copiar */}
+                      {((restaurant as any).deunaPhone || restaurant.whatsappNumber) && (
+                        <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-2xl flex items-center justify-between text-left">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Número Celular Deuna</span>
+                            <span className="text-sm font-extrabold text-teal-300 tracking-wider">
+                              {(restaurant as any).deunaPhone || restaurant.whatsappNumber}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const num = (restaurant as any).deunaPhone || restaurant.whatsappNumber;
+                              navigator.clipboard.writeText(num);
+                              setCopiedPhoneField("deuna");
+                              setTimeout(() => setCopiedPhoneField(null), 2500);
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 border border-teal-500/30 text-teal-300 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                          >
+                            {copiedPhoneField === "deuna" ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedPhoneField === "deuna" ? "¡Copiado!" : "Copiar"}</span>
+                          </button>
+                        </div>
                       )}
-                      {restaurant.bankAccountType && (
-                        <>
-                          <span className="font-bold text-slate-400">Tipo:</span>
-                          <span className="text-right font-medium text-white">{restaurant.bankAccountType}</span>
-                        </>
+                      
+                      {/* Código QR Deuna */}
+                      {restaurant.paymentQrUrl && (
+                        <div className="space-y-2 pt-1">
+                          <p className="text-xs text-slate-400 leading-relaxed">
+                            Escanea este código con tu app de <strong>Deuna</strong> o banca móvil:
+                          </p>
+                          <div className="bg-white p-3 rounded-2xl max-w-[190px] mx-auto border border-slate-800 shadow-xl">
+                            <img 
+                              src={restaurant.paymentQrUrl} 
+                              alt="Deuna QR de Cobro" 
+                              className="w-full h-auto aspect-square object-contain"
+                            />
+                          </div>
+                        </div>
                       )}
-                      {restaurant.bankAccountNumber && (
-                        <>
-                          <span className="font-bold text-slate-400">Nro. Cuenta:</span>
-                          <span className="text-right font-bold text-amber-400 select-all">{restaurant.bankAccountNumber}</span>
-                        </>
+
+                      {/* Datos bancarios si están configurados */}
+                      {(restaurant.bankName || restaurant.bankAccountNumber) && (
+                        <div className="border-t border-slate-850/80 pt-3 mt-3 text-left space-y-2 text-xs">
+                          <p className="font-extrabold text-slate-300 border-b border-slate-900 pb-1 mb-2 text-center uppercase tracking-wider text-[10px]">
+                            Datos para Transferencia Bancaria
+                          </p>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px] text-slate-350">
+                            {restaurant.bankName && (
+                              <>
+                                <span className="font-bold text-slate-400">Banco:</span>
+                                <span className="text-right font-medium text-white">{restaurant.bankName}</span>
+                              </>
+                            )}
+                            {restaurant.bankAccountType && (
+                              <>
+                                <span className="font-bold text-slate-400">Tipo:</span>
+                                <span className="text-right font-medium text-white">{restaurant.bankAccountType}</span>
+                              </>
+                            )}
+                            {restaurant.bankAccountNumber && (
+                              <>
+                                <span className="font-bold text-slate-400">Nro. Cuenta:</span>
+                                <span className="text-right font-bold text-teal-400 select-all">{restaurant.bankAccountNumber}</span>
+                              </>
+                            )}
+                            {restaurant.bankAccountName && (
+                              <>
+                                <span className="font-bold text-slate-400">Beneficiario:</span>
+                                <span className="text-right font-medium text-white line-clamp-1">{restaurant.bankAccountName}</span>
+                              </>
+                            )}
+                            {restaurant.bankAccountDocument && (
+                              <>
+                                <span className="font-bold text-slate-400">CI / RUC:</span>
+                                <span className="text-right font-medium text-white select-all">{restaurant.bankAccountDocument}</span>
+                              </>
+                            )}
+                            {restaurant.bankAccountEmail && (
+                              <>
+                                <span className="font-bold text-slate-400">Correo:</span>
+                                <span className="text-right font-medium text-white select-all line-clamp-1">{restaurant.bankAccountEmail}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       )}
-                      {restaurant.bankAccountName && (
-                        <>
-                          <span className="font-bold text-slate-400">Beneficiario:</span>
-                          <span className="text-right font-medium text-white line-clamp-1">{restaurant.bankAccountName}</span>
-                        </>
+
+                      {!restaurant.paymentQrUrl && !(restaurant as any).deunaPhone && !restaurant.bankAccountNumber && (
+                        <div className="py-4 text-slate-400 text-xs italic leading-relaxed">
+                          Puedes coordinar los detalles de pago por Deuna o transferencia al enviar tu orden por WhatsApp.
+                        </div>
                       )}
-                      {restaurant.bankAccountDocument && (
-                        <>
-                          <span className="font-bold text-slate-400">CI / RUC:</span>
-                          <span className="text-right font-medium text-white select-all">{restaurant.bankAccountDocument}</span>
-                        </>
-                      )}
-                      {restaurant.bankAccountEmail && (
-                        <>
-                          <span className="font-bold text-slate-400">Correo:</span>
-                          <span className="text-right font-medium text-white select-all line-clamp-1">{restaurant.bankAccountEmail}</span>
-                        </>
-                      )}
+
+                      <p className="text-[10px] text-slate-500 italic mt-2 leading-relaxed">
+                        Transfiere el valor exacto de <strong className="text-teal-400">${currentTotal.toFixed(2)}</strong> y adjunta el comprobante en WhatsApp.
+                      </p>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {!restaurant.paymentQrUrl && !restaurant.bankName && !restaurant.bankAccountNumber && (
-                  <div className="py-6 text-slate-500 text-xs italic leading-relaxed">
-                    El restaurante no ha configurado datos de transferencia ni QR de cobro. Puedes coordinar los detalles al enviar el pedido por WhatsApp.
-                  </div>
-                )}
+                  {/* Detalle Payphone */}
+                  {paymentMethod === "payphone" && (
+                    <div className="bg-slate-950/80 border border-slate-850 p-4 rounded-2xl text-center space-y-3">
+                      <span className="text-[10px] uppercase tracking-wider font-extrabold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2.5 py-1 rounded-full">
+                        Pago con Payphone (Tarjetas y App)
+                      </span>
 
-                <p className="text-[10px] text-slate-500 italic mt-2 leading-relaxed">
-                  Recuerda tomar una captura de pantalla del comprobante de transferencia o pago y adjuntarla en el chat de WhatsApp al enviar tu orden.
-                </p>
-              </div>
-            )}
+                      {/* Botón directo para Link de Cobro Payphone */}
+                      {(restaurant as any).payphoneUrl && (
+                        <div className="pt-1">
+                          <a
+                            href={(restaurant as any).payphoneUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold text-xs shadow-lg shadow-orange-500/25 flex items-center justify-center gap-2 transition active:scale-95"
+                          >
+                            <CreditCard className="w-4 h-4" />
+                            <span>Abrir Link Payphone (${currentTotal.toFixed(2)})</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                          <p className="text-[10px] text-slate-400 mt-1.5">
+                            Se abrirá el enlace de cobro de Payphone en una pestaña nueva para pagar con tarjeta o saldo.
+                          </p>
+                        </div>
+                      )}
 
-            {/* Cash details */}
-            {paymentMethod === "cash" && (
-              <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-2 text-xs text-slate-400">
-                <p className="font-bold text-slate-350">Pago en efectivo o entrega local</p>
-                <p className="leading-relaxed">Pagarás tu orden en el local al retirar o cuando recibas la entrega. El comercio coordinará los detalles contigo por WhatsApp.</p>
-              </div>
-            )}
+                      {/* Teléfono Payphone con botón Copiar */}
+                      {(restaurant as any).payphonePhone && (
+                        <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-2xl flex items-center justify-between text-left">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Número Celular Payphone</span>
+                            <span className="text-sm font-extrabold text-orange-300 tracking-wider">
+                              {(restaurant as any).payphonePhone}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const num = (restaurant as any).payphonePhone;
+                              navigator.clipboard.writeText(num);
+                              setCopiedPhoneField("payphone");
+                              setTimeout(() => setCopiedPhoneField(null), 2500);
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/30 text-orange-300 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                          >
+                            {copiedPhoneField === "payphone" ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedPhoneField === "payphone" ? "¡Copiado!" : "Copiar"}</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* QR de Payphone si existe */}
+                      {(restaurant as any).payphoneQrUrl && (
+                        <div className="space-y-2 pt-1">
+                          <p className="text-xs text-slate-400 leading-relaxed">
+                            O escanea el código QR de cobro de <strong>Payphone</strong>:
+                          </p>
+                          <div className="bg-white p-3 rounded-2xl max-w-[190px] mx-auto border border-slate-800 shadow-xl">
+                            <img 
+                              src={(restaurant as any).payphoneQrUrl} 
+                              alt="Payphone QR de Cobro" 
+                              className="w-full h-auto aspect-square object-contain"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {!(restaurant as any).payphoneUrl && !(restaurant as any).payphonePhone && !(restaurant as any).payphoneQrUrl && (
+                        <div className="py-4 text-slate-400 text-xs italic leading-relaxed">
+                          Puedes coordinar el pago por Payphone o tarjeta directamente con el restaurante al enviar tu orden por WhatsApp.
+                        </div>
+                      )}
+
+                      <p className="text-[10px] text-slate-500 italic mt-2 leading-relaxed">
+                        Acepta tarjetas de crédito o débito (Visa/Mastercard) y saldo Payphone. Adjunta el comprobante al enviar tu orden.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Delivery / Table Modality Selector inside Checkout */}
             {(() => {
@@ -4435,24 +4705,24 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                   onClick={() => setBillPaymentMethod("qr")}
                   className={`py-3 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-1 text-center transition ${
                     billPaymentMethod === "qr"
-                      ? "bg-emerald-600 text-white border-transparent shadow-lg"
+                      ? "bg-teal-600 text-white border-transparent shadow-lg"
                       : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white"
                   }`}
                 >
-                  <QrCode className="w-4 h-4" />
-                  <span>QR / Transf.</span>
+                  <Zap className="w-4 h-4" />
+                  <span>Deuna / QR</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setBillPaymentMethod("card")}
                   className={`py-3 px-2 rounded-xl text-xs font-black border flex flex-col items-center justify-center gap-1 text-center transition ${
                     billPaymentMethod === "card"
-                      ? "bg-emerald-600 text-white border-transparent shadow-lg"
+                      ? "bg-orange-600 text-white border-transparent shadow-lg"
                       : "bg-slate-950/60 border-slate-800 text-slate-400 hover:text-white"
                   }`}
                 >
                   <CreditCard className="w-4 h-4" />
-                  <span>Tarjeta</span>
+                  <span>Payphone / Tarjeta</span>
                 </button>
               </div>
             </div>

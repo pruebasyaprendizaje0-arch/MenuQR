@@ -9,7 +9,7 @@ type PaymentInput = { payerName?: string; paymentMethod: string; idempotencyKey?
 const cents = (n: number) => Math.round((n + Number.EPSILON) * 100);
 const money = (n: number) => cents(n) / 100;
 const ACTIVE = ["PENDING", "PREPARING", "IN_TRANSIT", "DELIVERED"];
-const METHODS = ["cash", "efectivo", "qr", "deuna", "transferencia", "transfer", "tarjeta", "card"];
+const METHODS = ["cash", "efectivo", "qr", "deuna", "payphone", "transferencia", "transfer", "tarjeta", "card"];
 
 async function owner(id: string) {
   try {

@@ -415,7 +415,23 @@ function TrackingContent({ slug }: { slug: string }) {
                             <span className="text-slate-400">Dirección:</span> <strong className="text-amber-300">{order.customerAddress}</strong>
                           </p>
                         )}
-                        <p><span className="text-slate-400">Método de Pago:</span> <strong className="text-white uppercase">{order.paymentMethod === "qr" ? "QR / Transferencia" : "Efectivo contra entrega"}</strong></p>
+                        <div>
+                          <span className="text-slate-400">Método de Pago:</span>{" "}
+                          <strong className="text-white uppercase">
+                            {order.paymentMethod === "deuna"
+                              ? "🟢 Deuna (Banco Pichincha)"
+                              : order.paymentMethod === "payphone"
+                              ? "🟠 Payphone (Tarjetas / App)"
+                              : order.paymentMethod === "qr"
+                              ? "📱 QR / Transferencia"
+                              : "💵 Efectivo contra entrega"}
+                          </strong>
+                          {(order as any).paymentDetails && (
+                            <span className="block text-xs text-amber-300 font-medium mt-0.5">
+                              {(order as any).paymentDetails}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 

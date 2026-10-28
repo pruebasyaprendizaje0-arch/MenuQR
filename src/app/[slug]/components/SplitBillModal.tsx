@@ -15,6 +15,9 @@ import {
   CreditCard,
   QrCode,
   DollarSign,
+  Smartphone,
+  ExternalLink,
+  Copy,
   CheckCircle2,
   AlertCircle,
   Loader2,
@@ -33,6 +36,10 @@ interface SplitBillModalProps {
     name: string;
     themeColor: string;
     paymentQrUrl?: string | null;
+    deunaPhone?: string | null;
+    payphoneUrl?: string | null;
+    payphonePhone?: string | null;
+    payphoneQrUrl?: string | null;
     bankName?: string | null;
     bankAccountNumber?: string | null;
     bankAccountName?: string | null;
@@ -65,9 +72,16 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
 
   // Common payment state
   const [payerName, setPayerName] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"deuna" | "efectivo" | "transferencia">("deuna");
+  const [paymentMethod, setPaymentMethod] = useState<"deuna" | "payphone" | "efectivo" | "transferencia">("deuna");
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [completedPayment, setCompletedPayment] = useState<any>(null);
+
+  const copyToClipboard = (text: string, fieldId: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldId);
+    setTimeout(() => setCopiedField(null), 2500);
+  };
 
   // Fetch session data on open
   useEffect(() => {
@@ -455,51 +469,138 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                 </div>
 
                 {/* Payment Method Selector */}
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">
                     Método de Pago
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("deuna")}
-                      className={`p-3 rounded-2xl border text-center text-xs font-bold transition ${
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
                         paymentMethod === "deuna"
                           ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
                       }`}
                       style={{ backgroundColor: paymentMethod === "deuna" ? restaurant.themeColor : undefined }}
                     >
-                      <QrCode className="h-4 w-4 mx-auto mb-1" />
-                      <span>Deuna / QR</span>
+                      <QrCode className="h-4 w-4 mx-auto mb-1 text-emerald-400" />
+                      <span>DeUna</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("payphone")}
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
+                        paymentMethod === "payphone"
+                          ? "text-white border-transparent shadow-lg"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
+                      }`}
+                      style={{ backgroundColor: paymentMethod === "payphone" ? restaurant.themeColor : undefined }}
+                    >
+                      <Smartphone className="h-4 w-4 mx-auto mb-1 text-orange-400" />
+                      <span>Payphone</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("efectivo")}
-                      className={`p-3 rounded-2xl border text-center text-xs font-bold transition ${
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
                         paymentMethod === "efectivo"
                           ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
                       }`}
                       style={{ backgroundColor: paymentMethod === "efectivo" ? restaurant.themeColor : undefined }}
                     >
-                      <DollarSign className="h-4 w-4 mx-auto mb-1" />
+                      <DollarSign className="h-4 w-4 mx-auto mb-1 text-emerald-300" />
                       <span>Efectivo</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("transferencia")}
-                      className={`p-3 rounded-2xl border text-center text-xs font-bold transition ${
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
                         paymentMethod === "transferencia"
                           ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
                       }`}
                       style={{ backgroundColor: paymentMethod === "transferencia" ? restaurant.themeColor : undefined }}
                     >
-                      <CreditCard className="h-4 w-4 mx-auto mb-1" />
-                      <span>Transferencia</span>
+                      <CreditCard className="h-4 w-4 mx-auto mb-1 text-blue-400" />
+                      <span>Transf.</span>
                     </button>
                   </div>
+
+                  {/* Payment Details Helper */}
+                  {paymentMethod === "deuna" && (
+                    <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-emerald-300 font-bold">📲 Pagar con DeUna</span>
+                        {restaurant.deunaPhone && (
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(restaurant.deunaPhone!, "equal-deuna")}
+                            className="flex items-center gap-1 text-[11px] font-bold bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-500/40 hover:bg-emerald-500/30 transition cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copiedField === "equal-deuna" ? "¡Copiado!" : restaurant.deunaPhone}</span>
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Abre tu app DeUna y transfiere al número o solicita el QR al mesero.
+                      </p>
+                    </div>
+                  )}
+
+                  {paymentMethod === "payphone" && (
+                    <div className="bg-orange-950/30 border border-orange-500/30 rounded-2xl p-3 text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-orange-300 font-bold">💳 Pagar con Payphone</span>
+                        {restaurant.payphonePhone && (
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(restaurant.payphonePhone!, "equal-payphone")}
+                            className="flex items-center gap-1 text-[11px] font-bold bg-orange-500/20 text-orange-300 px-2.5 py-1 rounded-lg border border-orange-500/40 hover:bg-orange-500/30 transition cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copiedField === "equal-payphone" ? "¡Copiado!" : restaurant.payphonePhone}</span>
+                          </button>
+                        )}
+                      </div>
+                      {restaurant.payphoneUrl && (
+                        <a
+                          href={restaurant.payphoneUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-center gap-1.5 w-full py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold text-xs rounded-xl shadow-md hover:brightness-110 transition"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Pagar ahora en Payphone</span>
+                        </a>
+                      )}
+                      <p className="text-[11px] text-slate-400">
+                        Paga con tarjeta débito o crédito a través del link de Payphone del negocio.
+                      </p>
+                    </div>
+                  )}
+
+                  {paymentMethod === "efectivo" && (
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 text-xs">
+                      <p className="text-[11px] text-slate-300 font-medium">
+                        💵 Realiza tu pago en efectivo directamente al mesero o en caja al pedir la cuenta.
+                      </p>
+                    </div>
+                  )}
+
+                  {paymentMethod === "transferencia" && restaurant.bankAccountNumber && (
+                    <div className="bg-blue-950/30 border border-blue-500/30 rounded-2xl p-3 text-xs space-y-1">
+                      <div className="flex justify-between items-center text-blue-300 font-bold">
+                        <span>{restaurant.bankName || "Banco"}</span>
+                        <span>{restaurant.bankAccountNumber}</span>
+                      </div>
+                      {restaurant.bankAccountName && (
+                        <p className="text-[11px] text-slate-400">Titular: {restaurant.bankAccountName}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <button
@@ -636,51 +737,138 @@ export function SplitBillModal({ restaurant, tableName, isOpen, onClose }: Split
                 </div>
 
                 {/* Payment Method Selector */}
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   <label className="text-xs font-extrabold text-slate-400 uppercase tracking-wider block">
                     Método de Pago
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("deuna")}
-                      className={`p-3 rounded-2xl border text-center text-xs font-bold transition ${
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
                         paymentMethod === "deuna"
                           ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
                       }`}
                       style={{ backgroundColor: paymentMethod === "deuna" ? restaurant.themeColor : undefined }}
                     >
-                      <QrCode className="h-4 w-4 mx-auto mb-1" />
-                      <span>Deuna / QR</span>
+                      <QrCode className="h-4 w-4 mx-auto mb-1 text-emerald-400" />
+                      <span>DeUna</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("payphone")}
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
+                        paymentMethod === "payphone"
+                          ? "text-white border-transparent shadow-lg"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
+                      }`}
+                      style={{ backgroundColor: paymentMethod === "payphone" ? restaurant.themeColor : undefined }}
+                    >
+                      <Smartphone className="h-4 w-4 mx-auto mb-1 text-orange-400" />
+                      <span>Payphone</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("efectivo")}
-                      className={`p-3 rounded-2xl border text-center text-xs font-bold transition ${
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
                         paymentMethod === "efectivo"
                           ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
                       }`}
                       style={{ backgroundColor: paymentMethod === "efectivo" ? restaurant.themeColor : undefined }}
                     >
-                      <DollarSign className="h-4 w-4 mx-auto mb-1" />
+                      <DollarSign className="h-4 w-4 mx-auto mb-1 text-emerald-300" />
                       <span>Efectivo</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setPaymentMethod("transferencia")}
-                      className={`p-3 rounded-2xl border text-center text-xs font-bold transition ${
+                      className={`p-2.5 rounded-2xl border text-center text-xs font-bold transition cursor-pointer ${
                         paymentMethod === "transferencia"
                           ? "text-white border-transparent shadow-lg"
-                          : "text-slate-400 bg-slate-950/60 border-slate-800"
+                          : "text-slate-400 bg-slate-950/60 border-slate-800 hover:border-slate-700"
                       }`}
                       style={{ backgroundColor: paymentMethod === "transferencia" ? restaurant.themeColor : undefined }}
                     >
-                      <CreditCard className="h-4 w-4 mx-auto mb-1" />
-                      <span>Transferencia</span>
+                      <CreditCard className="h-4 w-4 mx-auto mb-1 text-blue-400" />
+                      <span>Transf.</span>
                     </button>
                   </div>
+
+                  {/* Payment Details Helper */}
+                  {paymentMethod === "deuna" && (
+                    <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-3 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-emerald-300 font-bold">📲 Pagar con DeUna</span>
+                        {restaurant.deunaPhone && (
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(restaurant.deunaPhone!, "prod-deuna")}
+                            className="flex items-center gap-1 text-[11px] font-bold bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-lg border border-emerald-500/40 hover:bg-emerald-500/30 transition cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copiedField === "prod-deuna" ? "¡Copiado!" : restaurant.deunaPhone}</span>
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Abre tu app DeUna y transfiere al número o solicita el QR al mesero.
+                      </p>
+                    </div>
+                  )}
+
+                  {paymentMethod === "payphone" && (
+                    <div className="bg-orange-950/30 border border-orange-500/30 rounded-2xl p-3 text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-orange-300 font-bold">💳 Pagar con Payphone</span>
+                        {restaurant.payphonePhone && (
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(restaurant.payphonePhone!, "prod-payphone")}
+                            className="flex items-center gap-1 text-[11px] font-bold bg-orange-500/20 text-orange-300 px-2.5 py-1 rounded-lg border border-orange-500/40 hover:bg-orange-500/30 transition cursor-pointer"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>{copiedField === "prod-payphone" ? "¡Copiado!" : restaurant.payphonePhone}</span>
+                          </button>
+                        )}
+                      </div>
+                      {restaurant.payphoneUrl && (
+                        <a
+                          href={restaurant.payphoneUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-center gap-1.5 w-full py-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-bold text-xs rounded-xl shadow-md hover:brightness-110 transition"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Pagar ahora en Payphone</span>
+                        </a>
+                      )}
+                      <p className="text-[11px] text-slate-400">
+                        Paga con tarjeta débito o crédito a través del link de Payphone del negocio.
+                      </p>
+                    </div>
+                  )}
+
+                  {paymentMethod === "efectivo" && (
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 text-xs">
+                      <p className="text-[11px] text-slate-300 font-medium">
+                        💵 Realiza tu pago en efectivo directamente al mesero o en caja al pedir la cuenta.
+                      </p>
+                    </div>
+                  )}
+
+                  {paymentMethod === "transferencia" && restaurant.bankAccountNumber && (
+                    <div className="bg-blue-950/30 border border-blue-500/30 rounded-2xl p-3 text-xs space-y-1">
+                      <div className="flex justify-between items-center text-blue-300 font-bold">
+                        <span>{restaurant.bankName || "Banco"}</span>
+                        <span>{restaurant.bankAccountNumber}</span>
+                      </div>
+                      {restaurant.bankAccountName && (
+                        <p className="text-[11px] text-slate-400">Titular: {restaurant.bankAccountName}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <button

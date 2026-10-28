@@ -362,10 +362,20 @@ export default function DeliveryDriverPanelPage({ params }: { params: Promise<{ 
                     {/* Payment info bar */}
                     <div className="flex items-center justify-between bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
                       <div>
-                        <span className="text-[10px] uppercase font-black text-slate-400 block">Forma de Pago</span>
-                        <span className="font-extrabold text-white text-xs uppercase">
-                          {order.paymentMethod === "qr" ? "💳 QR / Ya Pagado" : "💵 Efectivo (Cobrar en entrega)"}
+                        <span className="font-extrabold text-white text-xs uppercase block">
+                          {order.paymentMethod === "deuna"
+                            ? "🟢 Deuna (Verificar comprobante)"
+                            : order.paymentMethod === "payphone"
+                            ? "🟠 Payphone (Tarjeta / Saldo)"
+                            : order.paymentMethod === "qr"
+                            ? "💳 QR / Ya Pagado"
+                            : "💵 Efectivo (Cobrar en entrega)"}
                         </span>
+                        {(order as any).paymentDetails && (
+                          <span className="text-[10.5px] text-amber-300 font-bold block mt-0.5">
+                            {(order as any).paymentDetails}
+                          </span>
+                        )}
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] uppercase font-black text-slate-400 block">Monto a Cobrar</span>

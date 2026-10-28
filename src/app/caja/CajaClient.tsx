@@ -20,6 +20,7 @@ import {
   CreditCard,
   Banknote,
   QrCode,
+  Smartphone,
   Volume2,
   VolumeX,
   Keyboard,
@@ -108,7 +109,7 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
   const [newProductUnitsPerBox, setNewProductUnitsPerBox] = useState("12");
 
   // Payment method for sale
-  const [paymentMethod, setPaymentMethod] = useState<"EFECTIVO" | "DEUNA" | "TARJETA">("EFECTIVO");
+  const [paymentMethod, setPaymentMethod] = useState<"EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA">("EFECTIVO");
 
   // Success Confirmation modal
   const [successInfo, setSuccessInfo] = useState<{
@@ -727,10 +728,11 @@ export function CajaClient({ restaurant, categories }: CajaClientProps) {
         <div className="max-w-md mx-auto space-y-3">
           {/* Si está en VENTA: selector de método de pago */}
           {!isEntrada && (
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-1.5">
               {[
                 { id: "EFECTIVO", label: "Efectivo", icon: Banknote },
                 { id: "DEUNA", label: "DeUna", icon: Zap },
+                { id: "PAYPHONE", label: "Payphone", icon: Smartphone },
                 { id: "TARJETA", label: "Tarjeta", icon: CreditCard },
               ].map((m) => {
                 const IconComp = m.icon;

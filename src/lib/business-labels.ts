@@ -19,7 +19,6 @@ export interface ResolvedBusinessLabels {
   showRuleta: boolean;
   showSeasons: boolean;
   showCoupons: boolean;
-  showAiSettings: boolean;
   showCrm: boolean;
   showTablesConfig: boolean;
   showInventory: boolean;
@@ -62,7 +61,6 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showRuleta: true,
     showSeasons: true,
     showCoupons: true,
-    showAiSettings: true,
     showCrm: true,
     showTablesConfig: true,
     showInventory: true,
@@ -103,7 +101,6 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showRuleta: true,
     showSeasons: true,
     showCoupons: true,
-    showAiSettings: true,
     showCrm: true,
     showTablesConfig: false,
     showInventory: true,
@@ -144,7 +141,6 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showRuleta: true,
     showSeasons: true,
     showCoupons: true,
-    showAiSettings: true,
     showCrm: true,
     showTablesConfig: false,
     showInventory: true,
@@ -185,7 +181,6 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     showRuleta: true,
     showSeasons: true,
     showCoupons: true,
-    showAiSettings: true,
     showCrm: true,
     showTablesConfig: false,
     showInventory: true,
@@ -325,7 +320,6 @@ export function getBusinessLabels(
       showRuleta: !disabledModules.includes("ruleta"),
       showSeasons: !disabledModules.includes("seasons"),
       showCoupons: !disabledModules.includes("coupons"),
-      showAiSettings: !disabledModules.includes("ai-settings"),
       showCrm: !disabledModules.includes("crm"),
       showInventory: !disabledModules.includes("inventory"),
       showCajaPos: !disabledModules.includes("caja"),
