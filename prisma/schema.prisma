@@ -141,8 +141,6 @@ model Restaurant {
   manualSubscriptionPayments ManualSubscriptionPayment[]
   ruletaConfig   RuletaConfig?
   ruletaGiros    RuletaGiro[]
-  whatsappSession WhatsAppSession?
-  whatsappLogs   WhatsAppLog[]
   whatsappInstance WhatsAppInstance?
   whatsappTemplates WhatsAppTemplate[]
   whatsappBotEnabled Boolean @default(true)
@@ -562,40 +560,7 @@ enum WhatsAppBotState {
   IN_HUMAN_HANDOFF
 }
 
-model WhatsAppSession {
-  id           String      @id @default(uuid())
-  restaurantId String      @unique
-  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  status       String      @default("DISCONNECTED") // DISCONNECTED, CONNECTING, QR_READY, CONNECTED
-  qr           String?     @db.Text
-  creds        String?     @db.Text                 // Cifrado AES-256 + BufferJSON
-  keys         String?     @db.Text                 // Mapa de SignalKeys cifrado + BufferJSON
-  phoneNumber  String?                              // Telefono detectado de la sesion
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  logs         WhatsAppLog[]
 
-  @@index([restaurantId])
-}
-
-model WhatsAppLog {
-  id           String           @id @default(uuid())
-  sessionId    String?
-  session      WhatsAppSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  restaurantId String?
-  restaurant   Restaurant?      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
-  messageId    String           @unique
-  direction    String           // INCOMING | OUTGOING
-  fromMe       Boolean          @default(false)
-  phone        String
-  text         String?
-  rawPayload   String?
-  createdAt    DateTime         @default(now())
-
-  @@index([messageId])
-  @@index([phone])
-  @@index([restaurantId])
-}
 
 model WhatsAppInstance {
   id             String     @id @default(uuid())

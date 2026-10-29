@@ -21,7 +21,6 @@ import {
   createManualSubscriptionPaymentAction,
   approveManualSubscriptionPaymentAction,
   rejectManualSubscriptionPaymentAction,
-  toggleWhatsAppBotAction,
   toggleRestaurantSuspensionAction,
   createEliteTaskAction,
   updateEliteTaskStatusAction,
@@ -29,7 +28,6 @@ import {
   superAdminToggleRestaurantModuleAction
 } from "@/lib/actions";
 import { SmartLogo } from "@/components/SmartImage";
-import { BotToggleButton } from "@/app/admin/components/BotToggleButton";
 import { 
   Building, 
   Smartphone, 
@@ -342,8 +340,8 @@ export function SuperAdminDashboard({
   analyticsData?: any;
   globalAnnouncement?: any;
 }) {
-  const validTabs = ["directory", "analytics", "announcements", "collections", "elite_ops", "kanban", "prospects", "reminders", "bots", "ops"];
-  const [activeTab, setActiveTab] = useState<"directory" | "analytics" | "announcements" | "collections" | "elite_ops" | "kanban" | "prospects" | "reminders" | "bots" | "ops">(
+  const validTabs = ["directory", "analytics", "announcements", "collections", "elite_ops", "kanban", "prospects", "reminders", "ops"];
+  const [activeTab, setActiveTab] = useState<"directory" | "analytics" | "announcements" | "collections" | "elite_ops" | "kanban" | "prospects" | "reminders" | "ops">(
     initialTab && validTabs.includes(initialTab)
       ? (initialTab as any)
       : "directory"
@@ -390,26 +388,6 @@ export function SuperAdminDashboard({
   const [paymentHistoryStatus, setPaymentHistoryStatus] = useState<"ALL" | "APPROVED" | "PENDING" | "REJECTED">("ALL");
   const [paymentHistoryPlan, setPaymentHistoryPlan] = useState<"ALL" | "PRO" | "ELITE">("ALL");
 
-  // WhatsApp Bot State per restaurant
-  const [waBotStates, setWaBotStates] = useState<Record<string, boolean>>({});
-  const [botSearchTerm, setBotSearchTerm] = useState("");
-
-  const isBotActive = (res: Restaurant) => {
-    return waBotStates[res.id] !== undefined ? waBotStates[res.id] : (res.whatsappBotEnabled ?? true);
-  };
-
-  const botsActivosCount = restaurantList.filter((r) => isBotActive(r)).length;
-  const botsPausadosCount = restaurantList.length - botsActivosCount;
-
-  const handleToggleBot = async (restaurantId: string, currentStatus: boolean) => {
-    const newStatus = !currentStatus;
-    setWaBotStates(prev => ({ ...prev, [restaurantId]: newStatus }));
-    const res = await toggleWhatsAppBotAction(restaurantId, newStatus);
-    if (res?.error) {
-      alert(res.error);
-      setWaBotStates(prev => ({ ...prev, [restaurantId]: currentStatus }));
-    }
-  };
 
   // Reassign / Adjudicate Modal State
   const [reassignModalTarget, setReassignModalTarget] = useState<Restaurant | null>(null);
@@ -546,12 +524,6 @@ export function SuperAdminDashboard({
       (l.email && l.email.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  const filteredBotRestaurants = restaurantList.filter(
-    (r) =>
-      r.name.toLowerCase().includes(botSearchTerm.toLowerCase()) ||
-      r.slug.toLowerCase().includes(botSearchTerm.toLowerCase()) ||
-      (r.whatsappNumber && r.whatsappNumber.includes(botSearchTerm))
-  );
 
   // Reminders Due Today or Overdue
   const todayStr = new Date().toISOString().split("T")[0];
@@ -927,7 +899,7 @@ export function SuperAdminDashboard({
               <h1 className="font-extrabold text-white text-base tracking-tight flex items-center gap-2">
                 Super Admin Console <span className="bg-red-500/20 text-red-400 border border-red-500/30 text-[10px] px-2 py-0.5 rounded-full font-mono">Unificado v2.0</span>
               </h1>
-              <p className="text-xs text-slate-400">Pipeline Comercial, Gestión de Licencias y Automatización WhatsApp (Baileys)</p>
+              <p className="text-xs text-slate-400">Pipeline Comercial, Gestión de Licencias y Operaciones SaaS</p>
             </div>
           </div>
 
@@ -1065,20 +1037,6 @@ export function SuperAdminDashboard({
             )}
           </button>
 
-          <button
-            onClick={() => setActiveTab("bots")}
-            className={`flex items-center gap-2 py-3 px-5 text-xs font-bold border-b-2 transition whitespace-nowrap ${
-              activeTab === "bots" 
-                ? "border-emerald-500 text-emerald-400 bg-emerald-500/5" 
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <Bot className="h-4 w-4 text-emerald-400" />
-            Bots WhatsApp (Baileys)
-            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-              {botsActivosCount} ON
-            </span>
-          </button>
 
           <button
             onClick={() => setActiveTab("ops")}
@@ -3066,208 +3024,7 @@ export function SuperAdminDashboard({
           </div>
         )}
 
-        {/* TAB 5: BOTS WHATSAPP & SERVIDOR BAILEYS */}
-        {activeTab === "bots" && (
-          <div className="space-y-6">
-            {/* Banner Informativo Baileys */}
-            <div className="bg-slate-900/40 border border-slate-800 p-6 rounded-2xl backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20 shadow-inner">
-                  <Bot className="w-7 h-7" />
-                </span>
-                <div>
-                  <h2 className="text-xl md:text-2xl font-extrabold tracking-tight text-white flex items-center gap-2">
-                    Control de Bots WhatsApp (Baileys)
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                      En Vivo
-                    </span>
-                  </h2>
-                  <p className="text-slate-400 text-xs md:text-sm mt-0.5">
-                    Gestión integral de WhatsApp nativo (Baileys) en puerto 3000 sin intermediarios externos.
-                  </p>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-950 text-emerald-400 border border-emerald-500/30 shadow-sm">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> PostgreSQL Cifrado (AES-256)
-                </span>
-                <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800">
-                  Node.js Event-Loop
-                </span>
-              </div>
-            </div>
-
-            {/* Tarjetas de Métricas de Bots */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-wider font-semibold text-slate-400">Total Restaurantes</p>
-                  <p className="text-2xl font-bold text-white mt-1">{restaurants.length}</p>
-                </div>
-                <div className="p-3 bg-slate-800 rounded-xl text-slate-300">
-                  <Store className="w-5 h-5" />
-                </div>
-              </div>
-
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-wider font-semibold text-emerald-400">Bots Activos (ON)</p>
-                  <p className="text-2xl font-bold text-emerald-400 mt-1">{botsActivosCount}</p>
-                </div>
-                <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-              </div>
-
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-wider font-semibold text-amber-400">Bots en Pausa (OFF)</p>
-                  <p className="text-2xl font-bold text-amber-400 mt-1">{botsPausadosCount}</p>
-                </div>
-                <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-                  <PauseCircle className="w-5 h-5" />
-                </div>
-              </div>
-
-              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-lg flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-wider font-semibold text-blue-400">Platos Activos</p>
-                  <p className="text-2xl font-bold text-blue-400 mt-1">{metrics.totalDishes}</p>
-                </div>
-                <div className="p-3 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20">
-                  <Utensils className="w-5 h-5" />
-                </div>
-              </div>
-            </div>
-
-            {/* Tabla de Restaurantes y Control On/Off de WhatsApp Bot */}
-            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-emerald-400" />
-                    Control de Negocios y Automatización WhatsApp
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Los cambios de estado del bot se aplican de forma inmediata en PostgreSQL y en la memoria del servidor Baileys.
-                  </p>
-                </div>
-                <div className="w-full sm:w-64">
-                  <input
-                    type="text"
-                    placeholder="Filtrar por nombre, slug o teléfono..."
-                    value={botSearchTerm}
-                    onChange={(e) => setBotSearchTerm(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-slate-300">
-                  <thead className="bg-slate-950/80 text-xs font-semibold uppercase text-slate-400 border-b border-slate-800 tracking-wider">
-                    <tr>
-                      <th className="px-6 py-4">Negocio / Slug</th>
-                      <th className="px-6 py-4">WhatsApp Conectado</th>
-                      <th className="px-6 py-4">Platos en Menú</th>
-                      <th className="px-6 py-4">Plan SaaS</th>
-                      <th className="px-6 py-4 text-right">Interruptor de Bot</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {filteredBotRestaurants.map((restaurant) => {
-                      const active = isBotActive(restaurant);
-                      return (
-                        <tr key={restaurant.id} className="hover:bg-slate-800/40 transition">
-                          {/* Nombre y Enlace al Menú Público */}
-                          <td className="px-6 py-4 font-medium text-white">
-                            <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-xs uppercase border border-emerald-500/20 shadow-inner">
-                                {restaurant.name.charAt(0)}
-                              </div>
-                              <div>
-                                <div className="font-semibold text-slate-100 flex items-center gap-1.5">
-                                  {restaurant.name}
-                                  <a
-                                    href={`https://menuqr.ubicame.cc/${restaurant.slug}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    title="Ver carta digital"
-                                    className="text-slate-500 hover:text-emerald-400 transition"
-                                  >
-                                    <ExternalLink className="w-3.5 h-3.5" />
-                                  </a>
-                                </div>
-                                <div className="text-xs font-mono text-slate-500">
-                                  /{restaurant.slug}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Número de WhatsApp Oficial */}
-                          <td className="px-6 py-4 font-mono text-xs text-slate-300">
-                            {restaurant.whatsappNumber || (restaurant as any).whatsapp ? (
-                              <span className="inline-flex items-center gap-1.5 text-slate-300">
-                                <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-                                {restaurant.whatsappNumber || (restaurant as any).whatsapp}
-                              </span>
-                            ) : (
-                              <span className="text-slate-500 italic">No configurado</span>
-                            )}
-                          </td>
-
-                          {/* Conteo de Platos y Categorías */}
-                          <td className="px-6 py-4 text-xs font-medium text-slate-400">
-                            <span className="text-slate-200 font-semibold">{restaurant._count?.dishes ?? 0}</span> platos
-                            <span className="text-slate-500 text-[11px] block">
-                              ({restaurant._count?.categories ?? 0} categorías)
-                            </span>
-                          </td>
-
-                          {/* Badge de Plan */}
-                          <td className="px-6 py-4">
-                            <span
-                              className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                                restaurant.plan === "PRO"
-                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                  : "bg-slate-800 text-slate-400 border-slate-700"
-                              }`}
-                            >
-                              {restaurant.plan}
-                            </span>
-                          </td>
-
-                          {/* Control de Bot en Tiempo Real */}
-                          <td className="px-6 py-4 text-right">
-                            <div className="inline-block text-left">
-                              <BotToggleButton
-                                restaurantId={restaurant.id}
-                                restaurantName={restaurant.name}
-                                initialState={active}
-                                compact={true}
-                                onToggle={(newVal) => setWaBotStates(prev => ({ ...prev, [restaurant.id]: newVal }))}
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-
-                    {filteredBotRestaurants.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
-                          No se encontraron restaurantes registrados.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* TAB 8: ANALÍTICA & GMV */}
         {activeTab === "analytics" && (

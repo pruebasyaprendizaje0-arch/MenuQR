@@ -263,7 +263,7 @@ export function SuperAdminOpsTab({ restaurants, manualPayments, leads }: OpsTabP
                 </span>
               </div>
               <h4 className="text-sm font-bold text-white">WhatsApp Evolution API</h4>
-              <p className="text-xs text-slate-400 mt-1">Conectividad Baileys & Webhooks.</p>
+              <p className="text-xs text-slate-400 mt-1">Conectividad API & Webhooks.</p>
             </div>
             <div className="mt-4 pt-3 border-t border-slate-800/80 text-xs text-slate-300 font-mono truncate">
               {healthData?.evolution?.message || "Verificando endpoint..."}

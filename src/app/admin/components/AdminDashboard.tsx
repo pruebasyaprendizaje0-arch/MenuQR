@@ -129,7 +129,6 @@ import InventoryAdminTab from "./InventoryAdminTab";
 import CitasAdminTab from "./CitasAdminTab";
 import ReservasAdminTab from "./ReservasAdminTab";
 import OrderTicketModal from "./OrderTicketModal";
-import { WhatsAppConnectTab } from "./WhatsAppConnectTab";
 import StaffAdminTab from "./StaffAdminTab";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
@@ -961,12 +960,12 @@ export function AdminDashboard({
     }
   };
 
-  // Si el bot de WhatsApp no está habilitado por SuperAdmin, bloquear acceso a la pestaña
+  // Redirigir a metrics si activeTab es whatsapp
   useEffect(() => {
-    if (activeTab === "whatsapp" && !restaurant.whatsappBotEnabled) {
+    if (activeTab === "whatsapp") {
       setActiveTab("metrics");
     }
-  }, [activeTab, restaurant.whatsappBotEnabled]);
+  }, [activeTab]);
   const isLikelyStore = /licor|tienda|boutique|farmacia|ferreter|repuesto|minimarket|comercio/i.test(restaurant.name || "");
   const defaultBusinessType = (restaurant as any).businessType && (restaurant as any).businessType !== "RESTAURANT"
     ? (restaurant as any).businessType
@@ -2532,19 +2531,7 @@ export function AdminDashboard({
               Código QR
             </button>
  
-            {restaurant.whatsappBotEnabled && (
-              <button
-                onClick={() => setActiveTab("whatsapp")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "whatsapp" 
-                    ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-400 border-l-4 border-emerald-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <Smartphone className="h-4 w-4 text-emerald-400" />
-                Conectar WhatsApp
-              </button>
-            )}
+
             
             <button
               onClick={() => setActiveTab("orders")}
@@ -8755,15 +8742,7 @@ export function AdminDashboard({
           </div>
         )}
 
-        {/* WhatsApp Connect Tab */}
-        {activeTab === "whatsapp" && restaurant.whatsappBotEnabled && (
-          <div className="space-y-6 animate-fade-in">
-            <WhatsAppConnectTab
-              restaurantId={restaurant.id}
-              restaurantSlug={restaurant.slug}
-            />
-          </div>
-        )}
+
 
         {activeTab === "orders" && (
           <div className="space-y-6 animate-fade-in">
@@ -11333,17 +11312,7 @@ export function AdminDashboard({
           <span className="text-[9px] font-bold uppercase tracking-wider">QR</span>
         </button>
 
-        {/* WhatsApp Tab */}
-        {restaurant.whatsappBotEnabled && (
-          <button
-            onClick={() => setActiveTab("whatsapp")}
-            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-            style={{ color: activeTab === "whatsapp" ? "#10b981" : "#94a3b8" }}
-          >
-            <Smartphone className="h-5 w-5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">WhatsApp</span>
-          </button>
-        )}
+
 
         {/* Orders Tab */}
         <button

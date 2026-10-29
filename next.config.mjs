@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-  serverExternalPackages: ["@whiskeysockets/baileys", "pino", "pg"],
+  serverExternalPackages: ["pg"],
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**" },

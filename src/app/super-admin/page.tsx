@@ -33,10 +33,10 @@ export default async function SuperAdminPage({
   }
 
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const validTabs = ["directory", "analytics", "announcements", "collections", "elite_ops", "kanban", "prospects", "reminders", "bots", "ops"];
+  const validTabs = ["directory", "analytics", "announcements", "collections", "elite_ops", "kanban", "prospects", "reminders", "ops"];
   const initialTab = (
     resolvedSearchParams?.tab && validTabs.includes(resolvedSearchParams.tab)
-  ) ? (resolvedSearchParams.tab as "directory" | "analytics" | "announcements" | "collections" | "elite_ops" | "kanban" | "prospects" | "reminders" | "bots" | "ops") : "directory";
+  ) ? (resolvedSearchParams.tab as "directory" | "analytics" | "announcements" | "collections" | "elite_ops" | "kanban" | "prospects" | "reminders" | "ops") : "directory";
 
   // Cargar todos los restaurantes incluyendo conteo de categorías, platos, fotos y órdenes para Health Score
   let restaurants: any[] = [];

@@ -27,11 +27,15 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: WhatsAppCon
   const [phoneNumber, setPhoneNumber] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
+  const [nativeDisabled, setNativeDisabled] = useState<boolean>(false);
 
   const fetchStatus = useCallback(async (autoInit = true) => {
     try {
       const res = await fetch(`/api/whatsapp/qr?restaurantId=${restaurantId}&init=${autoInit}`);
       const data = await res.json();
+      if (data.nativeDisabled) {
+        setNativeDisabled(true);
+      }
       if (data.success) {
         setStatus(data.status);
         setQrCode(data.qr);
@@ -45,13 +49,19 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: WhatsAppCon
   }, [restaurantId]);
 
   useEffect(() => {
-    fetchStatus(true);
-    // Polling solo cuando no está conectado
+    let isMounted = true;
+    void (async () => {
+      if (isMounted) await fetchStatus(true);
+    })();
+    if (nativeDisabled) return;
     const interval = setInterval(() => {
-      fetchStatus(false);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+      if (isMounted) fetchStatus(false);
+    }, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [fetchStatus, nativeDisabled]);
 
   const handleAction = async (action: "connect" | "disconnect" | "restart") => {
     setActionLoading(true);
@@ -218,6 +228,26 @@ export function WhatsAppConnectTab({ restaurantId, restaurantSlug }: WhatsAppCon
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${actionLoading ? "animate-spin" : ""}`} /> Regenerar QR
                 </button>
+              </div>
+            </div>
+          ) : nativeDisabled ? (
+            <div className="text-center py-10 space-y-4">
+              <div className="w-14 h-14 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <CheckCircle2 className="w-7 h-7" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white">Servicio Nativo Desacoplado</h3>
+                <p className="text-sm text-slate-400 max-w-md mx-auto mt-1">
+                  La conexión interna por Baileys se ha desinstalado para optimizar el consumo de memoria RAM del servidor.
+                </p>
+              </div>
+              <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl max-w-md mx-auto text-xs text-slate-300 text-left space-y-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-semibold">
+                  <CheckCircle2 className="w-4 h-4" /> Servidor Web Optimizado
+                </div>
+                <p className="text-slate-400">
+                  Las plantillas de respuesta y configuración de IA siguen activas en las pestañas superiores y listas para ser enlazadas a un servicio externo dedicado (Evolution API o Meta Cloud API).
+                </p>
               </div>
             </div>
           ) : (
