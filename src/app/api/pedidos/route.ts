@@ -4,6 +4,7 @@ import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado } from "@/li
 import { prisma } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { deductStockUniversal } from "@/lib/stock-service";
+import { sendTelegramAlert } from "@/lib/telegram-alert";
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
       WHERE p.negocio_id = $1
     `;
 
-    const params: any[] = [targetNegocioId];
+    const params: (string | number | boolean)[] = [targetNegocioId];
 
     if (soloActivos) {
       params.push("pagado");
@@ -116,10 +117,11 @@ export async function GET(req: NextRequest) {
     const { rows: pedidos } = await pool.query(query, params);
 
     return NextResponse.json({ ok: true, pedidos });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[GET /api/pedidos] Error:", err);
+    const msg = err instanceof Error ? err.message : "Error al obtener pedidos";
     return NextResponse.json(
-      { ok: false, error: err.message || "Error al obtener pedidos" },
+      { ok: false, error: msg },
       { status: 500 }
     );
   }
@@ -226,10 +228,10 @@ export async function POST(req: NextRequest) {
       await client.query("BEGIN");
 
       let createdOrderId: string;
-      let responseOrder: any = null;
+      let responseOrder: Record<string, unknown> | null = null;
       let whatsappMessageText = "";
       let orderTotal = 0;
-      let insertedItems: any[] = [];
+      const insertedItems: Record<string, unknown>[] = [];
 
       // =========================================================================
       // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
@@ -249,10 +251,10 @@ export async function POST(req: NextRequest) {
         if (resolvedNegocioId) {
           const deductRes = await deductStockUniversal(
             resolvedNegocioId,
-            items.map((it: any) => ({
+            items.map((it: { dishId?: string; productId?: string; id?: string; nombre?: string; cantidad: string | number }) => ({
               dishId: it.dishId || it.productId || it.id,
               name: it.nombre,
-              quantity: parseInt(it.cantidad) || 1,
+              quantity: parseInt(String(it.cantidad)) || 1,
             }))
           );
           if (!deductRes.success) {
@@ -334,6 +336,13 @@ export async function POST(req: NextRequest) {
           // Notificar vía Socket.IO en tiempo real a cocina/camareros
           emitItemsAñadidos(resolvedNegocioId, mesaStr, insertedItems);
           emitPedidoActualizado(resolvedNegocioId, responseOrder);
+
+          // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
+          void sendTelegramAlert({
+            mensaje: `🍽️ Platos adicionales en ${mesaStr} (${businessName}): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")} | Total acumulado mesa: $${responseOrder.total.toFixed(2)}`,
+            cliente: cliente_nombre ? String(cliente_nombre).trim() : "Comensal",
+            negocio: businessName,
+          });
 
           // Generar mensaje WhatsApp para comensal
           whatsappMessageText = `*🍽️ Platos adicionales en Mesa ${mesaStr}*\n` +
@@ -426,6 +435,13 @@ export async function POST(req: NextRequest) {
           // Notificar vía Socket.IO en tiempo real
           emitNuevoPedido(resolvedNegocioId, responseOrder);
 
+          // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
+          void sendTelegramAlert({
+            mensaje: `🍽️ Nuevo pedido en ${mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr} (${businessName}) por $${orderTotal.toFixed(2)} (${insertedItems.length} platos): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
+            cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente",
+            negocio: businessName,
+          });
+
           whatsappMessageText = `*🍽️ Nuevo Pedido - MenuQR Pro*\n` +
             `*Restaurante:* ${businessName}\n` +
             `*Lugar:* ${mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr}\n` +
@@ -465,10 +481,10 @@ export async function POST(req: NextRequest) {
         if (resolvedNegocioId) {
           const deductRes = await deductStockUniversal(
             resolvedNegocioId,
-            items.map((it: any) => ({
+            items.map((it: { dishId?: string; productId?: string; id?: string; nombre?: string; cantidad: string | number }) => ({
               dishId: it.dishId || it.productId || it.id,
               name: it.nombre,
-              quantity: parseInt(it.cantidad) || 1,
+              quantity: parseInt(String(it.cantidad)) || 1,
             }))
           );
           if (!deductRes.success) {
@@ -543,6 +559,13 @@ export async function POST(req: NextRequest) {
         }
 
         await client.query("COMMIT");
+
+        // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
+        void sendTelegramAlert({
+          mensaje: `🛍️ Nuevo pedido de catálogo (${businessName}) por $${orderTotal.toFixed(2)} [${metodo_entrega === "domicilio" ? "Domicilio 🛵" : "Retiro en Tienda 🏬"}]: ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
+          cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente Tienda",
+          negocio: businessName,
+        });
 
         whatsappMessageText = `*🛍️ Nuevo Pedido de Tienda / Catálogo*\n` +
           `*Tienda:* ${businessName}\n` +
@@ -712,7 +735,7 @@ export async function POST(req: NextRequest) {
               });
 
               if (existingCustomer) {
-                let existingMeta: any = {};
+                let existingMeta: Record<string, unknown> = {};
                 try {
                   existingMeta = JSON.parse(existingCustomer.notes || "{}");
                 } catch {}
@@ -811,6 +834,13 @@ export async function POST(req: NextRequest) {
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
 
+        // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
+        void sendTelegramAlert({
+          mensaje: `🛠️ Nueva cotización técnica (${businessName}): ${servicio_solicitado || "Servicio Técnico"}${marca_equipo ? ` [${marca_equipo}]` : ""}${franja_horaria ? ` | Horario: ${franja_horaria}` : ""}`,
+          cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente Solicitante",
+          negocio: businessName,
+        });
+
         return NextResponse.json({
           ok: true,
           id: createdOrderId,
@@ -877,6 +907,13 @@ export async function POST(req: NextRequest) {
 
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+        // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
+        void sendTelegramAlert({
+          mensaje: `🗓️ Nueva cita agendada (${businessName}): ${servicio_nombre || "Cita"} con ${especialista_nombre || "Profesional"} | Fecha: ${fecha_cita || "Por confirmar"} ${hora_cita || ""}`,
+          cliente: cliente_nombre ? String(cliente_nombre).trim() : "Paciente / Cliente",
+          negocio: businessName,
+        });
 
         return NextResponse.json({
           ok: true,
@@ -946,12 +983,19 @@ export async function POST(req: NextRequest) {
           `*Noches:* ${noches}\n` +
           `*Huéspedes:* ${huespedes_adultos} Adulto(s)` + (huespedes_ninos > 0 ? `, ${huespedes_ninos} Niño(s)` : "") + `\n` +
           (hora_llegada_estimada ? `*Hora estimada de llegada:* ${hora_llegada_estimada}\n` : "") +
-          (extras.length > 0 ? `*Servicios adicionales:* ${extras.map((e: any) => e.nombre || e).join(", ")}\n` : "") +
+          (extras.length > 0 ? `*Servicios adicionales:* ${extras.map((e: { nombre?: string } | string) => (typeof e === "object" ? e.nombre : e) || e).join(", ")}\n` : "") +
           `\n*VALOR TOTAL ESTIMADO:* $${orderTotal.toFixed(2)}\n\n` +
           `_Por favor confirmar disponibilidad y detalles para el abono o garantía de reserva._`;
 
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+        // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
+        void sendTelegramAlert({
+          mensaje: `🏡 Nueva reserva de hospedaje (${businessName}): ${tipo_habitacion || "Alojamiento"} por $${orderTotal.toFixed(2)} | Check-in: ${check_in} -> Check-out: ${check_out} (${noches} noche/s)`,
+          cliente: cliente_nombre ? String(cliente_nombre).trim() : "Huésped Titular",
+          negocio: businessName,
+        });
 
         return NextResponse.json({
           ok: true,
@@ -974,10 +1018,11 @@ export async function POST(req: NextRequest) {
     } finally {
       client.release();
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[POST /api/pedidos] Error:", err);
+    const msg = err instanceof Error ? err.message : "Error al procesar pedido";
     return NextResponse.json(
-      { ok: false, error: err.message || "Error al procesar pedido" },
+      { ok: false, error: msg },
       { status: 500 }
     );
   }
