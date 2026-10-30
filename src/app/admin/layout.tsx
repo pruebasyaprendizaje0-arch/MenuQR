@@ -5,6 +5,8 @@ import { cookies } from "next/headers";
 import { Sparkles, ArrowLeft, ChefHat, Users, LayoutDashboard, Trees, Calendar, Wrench, ShoppingBag, ExternalLink } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { RestaurantSwitcher } from "./components/RestaurantSwitcher";
+import { getActiveNotificationsForRestaurant } from "@/lib/notifications";
+import { AdminNotificationHost, AdminNotificationBell } from "./components/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -94,8 +96,16 @@ export default async function AdminLayout({
     (userRestaurant?.businessType === "RESTAURANT" && !isReservas && !isServicios && !isCitas)
   );
 
+  // Carga SSR de notificaciones in-app vigentes (directas + globales)
+  const activeNotifications = userRestaurant?.id
+    ? await getActiveNotificationsForRestaurant(userRestaurant.id)
+    : [];
+
   return (
-    <>
+    <AdminNotificationHost
+      restaurantId={userRestaurant?.id || ""}
+      initialNotifications={activeNotifications}
+    >
       {isSuperAdmin && (
         <div className="bg-gradient-to-r from-red-650 via-amber-600 to-amber-500 text-white text-xs py-2.5 px-4 flex flex-wrap items-center justify-between gap-3 shadow-xl relative z-50 border-b border-amber-400/30">
           <div className="flex items-center gap-2.5 font-bold">
@@ -200,6 +210,8 @@ export default async function AdminLayout({
         </div>
 
         <div className="flex items-center gap-3">
+          <AdminNotificationBell />
+
           {userRestaurant && userRestaurants.length > 1 && (
             <RestaurantSwitcher
               currentRestaurantId={userRestaurant.id}
@@ -214,6 +226,6 @@ export default async function AdminLayout({
       </div>
 
       {children}
-    </>
+    </AdminNotificationHost>
   );
 }

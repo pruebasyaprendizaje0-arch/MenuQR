@@ -2711,56 +2711,6 @@ export function AdminDashboard({
       <div className="flex-1 min-w-0 overflow-y-auto pb-28 md:pb-0">
         {/* Main Content Area */}
         <main className="w-full max-w-7xl mx-auto p-6 pb-28 md:p-10 space-y-6">
-        {/* Comunicado Global In-App emitido por SuperAdmin */}
-        {globalAnnouncement?.active && !dismissedAnnouncement && (
-          <div
-            className={`p-4 rounded-2xl border flex items-center justify-between gap-4 text-xs sm:text-sm shadow-xl transition-all animate-fadeIn ${
-              globalAnnouncement.type === "success"
-                ? "bg-gradient-to-r from-emerald-950/70 via-slate-900 to-slate-900 border-emerald-500/40 text-emerald-200"
-                : globalAnnouncement.type === "warning"
-                ? "bg-gradient-to-r from-amber-950/70 via-slate-900 to-slate-900 border-amber-500/40 text-amber-200"
-                : globalAnnouncement.type === "promo"
-                ? "bg-gradient-to-r from-purple-950/70 via-slate-900 to-slate-900 border-purple-500/40 text-purple-200"
-                : "bg-gradient-to-r from-blue-950/70 via-slate-900 to-slate-900 border-blue-500/40 text-blue-200"
-            }`}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="p-2 rounded-xl bg-white/10 shrink-0">
-                <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
-              </span>
-              <div className="min-w-0">
-                <div className="font-extrabold flex items-center gap-2">
-                  <span className="uppercase text-[9.5px] tracking-wider px-2 py-0.5 rounded-full bg-white/10 font-black">
-                    Aviso Oficial de la Plataforma
-                  </span>
-                </div>
-                <p className="mt-0.5 text-xs sm:text-sm font-semibold text-white leading-relaxed">
-                  {globalAnnouncement.text}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              {globalAnnouncement.link && (
-                <a
-                  href={globalAnnouncement.link}
-                  className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs transition"
-                >
-                  Conocer más ↗
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={() => setDismissedAnnouncement(true)}
-                className="p-1.5 rounded-xl hover:bg-white/10 text-white/70 hover:text-white transition cursor-pointer"
-                title="Cerrar aviso"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Subscription / Plan Banner */}
         {(() => {
           const trialEnds = currentTrialEndsAt;

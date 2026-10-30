@@ -38,6 +38,22 @@ enum CampaignDiscountType {
   CUSTOM
 }
 
+enum NotificationType {
+  WARNING_EXPIRING
+  SUSPENDED
+  METRIC_SUMMARY
+  MAINTENANCE
+  PROMO
+  INFO
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
 model User {
   id               String       @id @default(uuid())
   email            String       @unique
@@ -158,6 +174,8 @@ model Restaurant {
   lastMaintenanceAt DateTime?
   eliteTasks        EliteTask[]
   campaigns         BusinessCampaign[]
+  inAppNotifications     InAppNotification[]
+  inAppNotificationReads InAppNotificationRead[]
   createdAt         DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -742,6 +760,48 @@ model CampaignDish {
   @@unique([campaignId, dishId])
   @@index([campaignId])
   @@index([dishId])
+}
+
+model InAppNotification {
+  id           String               @id @default(uuid())
+  restaurantId String?
+  restaurant   Restaurant?          @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  type         NotificationType     @default(INFO)
+  priority     NotificationPriority @default(NORMAL)
+  title        String
+  message      String               @db.Text
+  actionUrl    String?
+  actionLabel  String?
+  metadata     Json?
+  isRead       Boolean              @default(false)
+  readAt       DateTime?
+  dismissedAt  DateTime?
+  expiresAt    DateTime?
+  source       String               @default("N8N")
+  readReceipts InAppNotificationRead[]
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([restaurantId, isRead, createdAt])
+  @@index([restaurantId, expiresAt])
+  @@index([type, priority])
+  @@index([createdAt])
+}
+
+model InAppNotificationRead {
+  id             String            @id @default(uuid())
+  notificationId String
+  notification   InAppNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  restaurantId   String
+  restaurant     Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  isRead         Boolean           @default(false)
+  readAt         DateTime?
+  isDismissed    Boolean           @default(false)
+  dismissedAt    DateTime?
+  createdAt      DateTime          @default(now())
+
+  @@unique([notificationId, restaurantId])
+  @@index([restaurantId, isDismissed])
 }
 
 
