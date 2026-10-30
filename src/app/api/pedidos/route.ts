@@ -127,6 +127,29 @@ export async function GET(req: NextRequest) {
   }
 }
 
+interface InsertedOrderItem {
+  id?: string;
+  pedido_id?: string;
+  nombre: string;
+  cantidad: number;
+  precio: number;
+  notas?: string | null;
+  es_añadido?: boolean;
+  estado_item?: string | null;
+  [key: string]: unknown;
+}
+
+interface ResponseOrder {
+  id: string;
+  total: number;
+  mesa?: string | null;
+  estado?: string | null;
+  camarero_id?: string | null;
+  camarero_nombre?: string | null;
+  items?: InsertedOrderItem[] | unknown[];
+  [key: string]: unknown;
+}
+
 // POST /api/pedidos - Endpoint unificado para procesar pedidos/solicitudes de todas las verticales
 export async function POST(req: NextRequest) {
   try {
@@ -228,10 +251,10 @@ export async function POST(req: NextRequest) {
       await client.query("BEGIN");
 
       let createdOrderId: string;
-      let responseOrder: Record<string, unknown> | null = null;
+      let responseOrder: ResponseOrder | null = null;
       let whatsappMessageText = "";
       let orderTotal = 0;
-      const insertedItems: Record<string, unknown>[] = [];
+      const insertedItems: InsertedOrderItem[] = [];
 
       // =========================================================================
       // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
@@ -339,7 +362,7 @@ export async function POST(req: NextRequest) {
 
           // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
           void sendTelegramAlert({
-            mensaje: `🍽️ Platos adicionales en ${mesaStr} (${businessName}): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")} | Total acumulado mesa: $${responseOrder.total.toFixed(2)}`,
+            mensaje: `🍽️ Platos adicionales en ${mesaStr} (${businessName}): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")} | Total acumulado mesa: $${Number(responseOrder?.total ?? orderTotal ?? 0).toFixed(2)}`,
             cliente: cliente_nombre ? String(cliente_nombre).trim() : "Comensal",
             negocio: businessName,
           });
@@ -349,8 +372,8 @@ export async function POST(req: NextRequest) {
             `*Local:* ${businessName}\n` +
             `*Comensal:* ${cliente_nombre || "Cliente"}\n\n` +
             `*Platos añadidos:*\n` +
-            insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(it.precio * it.cantidad).toFixed(2)})`).join("\n") +
-            `\n\n*Total acumulado de la mesa:* $${responseOrder.total.toFixed(2)}`;
+            insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)})`).join("\n") +
+            `\n\n*Total acumulado de la mesa:* $${Number(responseOrder?.total ?? orderTotal ?? 0).toFixed(2)}`;
 
           const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
           const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
@@ -448,7 +471,7 @@ export async function POST(req: NextRequest) {
             `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
             (cliente_telefono ? `*Teléfono:* ${cliente_telefono}\n` : "") +
             `\n*Detalle del pedido:*\n` +
-            insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(it.precio * it.cantidad).toFixed(2)})`).join("\n") +
+            insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)})`).join("\n") +
             `\n\n*Total a pagar:* $${orderTotal.toFixed(2)}`;
 
           const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
@@ -576,7 +599,7 @@ export async function POST(req: NextRequest) {
           `*Método de Pago:* ${metodoPago}\n` +
           (notas_entrega ? `*Notas:* ${notas_entrega}\n` : "") +
           `\n*Artículos seleccionados:*\n` +
-          insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ${it.notas ? `(${it.notas})` : ""} - $${(it.precio * it.cantidad).toFixed(2)}`).join("\n") +
+          insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ${it.notas ? `(${it.notas})` : ""} - $${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)}`).join("\n") +
           `\n\n*Subtotal Base:* $${subtotal.toFixed(2)}\n` +
           (descuento > 0 ? `*Descuento (${codigoCupon || "Cupón"}):* -$${descuento.toFixed(2)}\n` : "") +
           (envio > 0 ? `*Envío ${zonaEnvio ? `(${zonaEnvio})` : ""}:* $${envio.toFixed(2)}\n` : "") +
