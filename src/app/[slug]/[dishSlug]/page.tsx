@@ -19,57 +19,61 @@ interface Props {
 }
 
 const getDishWithRestaurant = cache(async (restaurantSlug: string, dishSlug: string) => {
-  const cleanRestSlug = restaurantSlug.toLowerCase().trim();
-  const cleanDishSlug = dishSlug.toLowerCase().trim();
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanDishSlug);
+  let cleanRestSlug = restaurantSlug.trim().toLowerCase();
+  let cleanDishSlug = dishSlug.trim().toLowerCase();
+  try {
+    cleanRestSlug = decodeURIComponent(restaurantSlug).trim().toLowerCase();
+  } catch {}
+  try {
+    cleanDishSlug = decodeURIComponent(dishSlug).trim().toLowerCase();
+  } catch {}
 
-  // 1. Consulta directa e indexada en PostgreSQL
-  const directMatch = await prismaTenant.dish.findFirst({
-    where: {
-      ...(isUuid
-        ? { id: cleanDishSlug }
-        : {
-            OR: [
-              { name: { equals: cleanDishSlug, mode: "insensitive" } },
-              { name: { equals: unslugify(cleanDishSlug), mode: "insensitive" } },
-            ],
-          }),
-      restaurant: {
-        slug: cleanRestSlug,
-        isSuspended: false,
-      },
-      isAvailable: true,
+  const restaurant = await prismaTenant.restaurant.findUnique({
+    where: { 
+      slug: cleanRestSlug,
+      isSuspended: false 
     },
     include: {
-      category: true,
-      restaurant: true,
-    },
+      dishes: {
+        where: { isAvailable: true },
+        include: { category: true }
+      }
+    }
   });
 
-  if (directMatch) {
-    return directMatch;
+  if (!restaurant) {
+    notFound();
   }
 
-  // 2. Fallback de coincidencia con normalizeSlug para nombres con tildes / caracteres especiales
-  const candidateDishes = await prismaTenant.dish.findMany({
-    where: {
-      restaurant: {
-        slug: cleanRestSlug,
-        isSuspended: false,
-      },
-      isAvailable: true,
-    },
-    include: {
-      category: true,
-      restaurant: true,
-    },
+  // Matching flexible del plato:
+  const normalizedCleanDishSlug = normalizeSlug(cleanDishSlug);
+  const unslugifiedDishSlug = unslugify(cleanDishSlug).toLowerCase();
+
+  const dish = restaurant.dishes.find(d => {
+    // 1. Coincidencia por ID directo (UUID)
+    if (d.id === cleanDishSlug) return true;
+    
+    // 2. Coincidencia por campo slug (si existe en el modelo)
+    if ((d as any).slug && (d as any).slug.toLowerCase() === cleanDishSlug) return true;
+    
+    // 3. Coincidencia por nombre normalizado (sin paréntesis, tildes ni símbolos)
+    const normalizedDishName = normalizeSlug(d.name);
+    if (normalizedDishName === cleanDishSlug || normalizedDishName === normalizedCleanDishSlug) return true;
+    
+    // 4. Coincidencia por unslugify del slug recibido
+    if (d.name.toLowerCase() === unslugifiedDishSlug) return true;
+
+    return false;
   });
 
-  return (
-    candidateDishes.find(
-      (d) => normalizeSlug(d.name) === cleanDishSlug || d.id === cleanDishSlug
-    ) || null
-  );
+  if (!dish) {
+    notFound();
+  }
+
+  return {
+    ...dish,
+    restaurant
+  };
 });
 
 export async function generateMetadata({ params: paramsPromise }: Props): Promise<Metadata> {
