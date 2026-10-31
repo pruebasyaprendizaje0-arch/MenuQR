@@ -3,6 +3,11 @@ import { prismaTenant } from "@/lib/db";
 import { getBaseUrl, normalizeSlug, resolvePublicImageUrl } from "@/lib/seo";
 import { ecuadorData } from "@/lib/ecuador";
 
+function sanitizeUrl(rawUrl: string): string {
+  if (!rawUrl) return "";
+  return rawUrl.trim().replace(/&(?!(amp|lt|gt|quot|apos);)/g, "&amp;");
+}
+
 export default async function sitemap(): Promise<any> {
   const baseUrl = getBaseUrl();
 
@@ -183,9 +188,19 @@ export default async function sitemap(): Promise<any> {
       });
     });
 
-    return [...staticRoutes, ...geoRoutes, ...restaurantRoutes] as any;
+    const allRoutes = [...staticRoutes, ...geoRoutes, ...restaurantRoutes];
+    return allRoutes.map((route: any) => ({
+      ...route,
+      url: sanitizeUrl(route.url),
+      ...(Array.isArray(route.images)
+        ? { images: route.images.map((img: string) => sanitizeUrl(img)) }
+        : {}),
+    })) as any;
   } catch (error) {
     console.warn("[Sitemap Warning] Error loading restaurants for sitemap:", error);
-    return staticRoutes;
+    return staticRoutes.map((route) => ({
+      ...route,
+      url: sanitizeUrl(route.url),
+    }));
   }
 }
