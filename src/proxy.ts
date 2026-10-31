@@ -114,6 +114,18 @@ export function proxy(request: NextRequest) {
   if (detectedSubdomain && VERTICAL_SUBDOMAINS[detectedSubdomain]) {
     const verticalFolder = VERTICAL_SUBDOMAINS[detectedSubdomain];
 
+    // Para la vertical gastronómica principal (menuqr) en su propio dominio:
+    // Solo la raíz '/' se reescribe a la landing comercial '/menuqr'.
+    // Las rutas de restaurantes, platos y submódulos (/[slug], /[slug]/[dishSlug], /[slug]/cocina, etc.)
+    // deben servirse directamente desde src/app/[slug] y src/app/[slug]/[dishSlug]
+    if (detectedSubdomain === "menuqr" && pathname !== "/") {
+      const response = NextResponse.next();
+      response.headers.set("x-subdomain", "menuqr");
+      response.headers.set("x-vertical", "menuqr");
+      response.headers.set("x-current-host", hostHeader);
+      return response;
+    }
+
     // Evitar duplicar el prefijo si ya viene con /verticalFolder
     if (pathname.startsWith(`/${verticalFolder}`)) {
       const response = NextResponse.next();
@@ -123,7 +135,7 @@ export function proxy(request: NextRequest) {
     }
 
     // Si es la raíz del subdominio (ej: menuqr.ubicame.cc/ -> /menuqr)
-    // Si tiene slug (ej: menuqr.ubicame.cc/mi-restaurante -> /menuqr/mi-restaurante)
+    // Si tiene slug para otras verticales (ej: citas.ubicame.cc/mi-negocio -> /citas/mi-negocio)
     const targetPath = pathname === "/" ? `/${verticalFolder}` : `/${verticalFolder}${pathname}`;
     const rewriteUrl = new URL(targetPath, request.url);
 
