@@ -59,10 +59,12 @@ import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButt
 import { BusinessCampaignSection } from "@/components/public/BusinessCampaignSection";
 import { BusinessCampaignData } from "@/lib/campaign-types";
 import { calculateItemPromoPrice } from "@/lib/campaign-utils";
+import { normalizeSlug } from "@/lib/seo";
 
 type Dish = {
   id: string;
   name: string;
+  slug?: string | null;
   description: string | null;
   price: number;
   imageUrl: string | null;
@@ -2509,7 +2511,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         <div className="flex-1 flex flex-col justify-between min-w-0">
                           <div>
                             <h3 className="font-extrabold text-white text-sm group-hover:text-amber-300 transition-colors line-clamp-1">
-                              {dish.name}
+                              <Link href={`/${restaurant.slug}/${dish.slug || normalizeSlug(dish.name)}`} className="hover:underline">
+                                {dish.name}
+                              </Link>
                             </h3>
                             <p className="text-slate-400 text-[11px] mt-1 line-clamp-2 leading-relaxed">
                               {dish.description || bLabels.suggestedDefaultDesc}
@@ -2665,7 +2669,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         </div>
                         <div className="flex-1 flex flex-col justify-between min-w-0">
                           <div>
-                            <h3 className="font-extrabold text-white text-xs truncate group-hover:text-red-400 transition-colors">{dish.name}</h3>
+                            <h3 className="font-extrabold text-white text-xs truncate group-hover:text-red-400 transition-colors">
+                              <Link href={`/${restaurant.slug}/${dish.slug || normalizeSlug(dish.name)}`} className="hover:underline">
+                                {dish.name}
+                              </Link>
+                            </h3>
                             <ExpandableDescription
                               description={dish.description}
                               defaultText="Receta clásica."
@@ -2785,7 +2793,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                             <div className="flex-1 flex flex-col justify-between py-0.5 min-w-0">
                               <div>
-                                <h3 className="font-extrabold text-white text-base group-hover:text-amber-400 transition-colors truncate">{dish.name}</h3>
+                                <h3 className="font-extrabold text-white text-base group-hover:text-amber-400 transition-colors truncate">
+                                  <Link href={`/${restaurant.slug}/${dish.slug || normalizeSlug(dish.name)}`} className="hover:underline">
+                                    {dish.name}
+                                  </Link>
+                                </h3>
                                 <ExpandableDescription
                                   description={dish.description}
                                   defaultText="Pack especial seleccionado."
@@ -2879,7 +2891,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                             <div className="flex-1 flex flex-col justify-between pt-2.5 min-w-0">
                               <div>
                                 <h3 className="font-extrabold text-white text-xs sm:text-sm group-hover:text-red-400 transition-colors line-clamp-2 leading-snug">
-                                  {dish.name}
+                                  <Link href={`/${restaurant.slug}/${dish.slug || normalizeSlug(dish.name)}`} className="hover:underline">
+                                    {dish.name}
+                                  </Link>
                                 </h3>
                                 {dish.description && (
                                   <ExpandableDescription
@@ -2979,7 +2993,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
                           <div className="flex-1 flex flex-col justify-between py-1 min-w-0">
                             <div>
-                              <h3 className="font-extrabold text-white text-sm group-hover:text-red-400 transition-colors truncate">{dish.name}</h3>
+                              <h3 className="font-extrabold text-white text-sm group-hover:text-red-400 transition-colors truncate">
+                                <Link href={`/${restaurant.slug}/${dish.slug || normalizeSlug(dish.name)}`} className="hover:underline">
+                                  {dish.name}
+                                </Link>
+                              </h3>
                               <ExpandableDescription
                                 description={dish.description}
                                 defaultText="Nuestra receta clásica seleccionada."

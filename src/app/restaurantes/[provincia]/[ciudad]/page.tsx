@@ -2,7 +2,7 @@ import { prismaTenant } from "@/lib/db";
 import Link from "next/link";
 import { UtensilsCrossed, MapPin, ArrowRight, Sparkles, ChevronRight, HelpCircle } from "lucide-react";
 import type { Metadata } from "next";
-import { getBaseUrl, unslugify, generateBreadcrumbJsonLd, generateCityCategoryJsonLd } from "@/lib/seo";
+import { getBaseUrl, unslugify, ECUADOR_CANONICAL_LOCALITIES, generateBreadcrumbJsonLd, generateCityCategoryJsonLd } from "@/lib/seo";
 import { SmartLogo } from "@/components/SmartImage";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,9 @@ interface Props {
 
 export async function generateMetadata({ params: paramsPromise }: Props): Promise<Metadata> {
   const params = await paramsPromise;
-  const cityName = unslugify(params.ciudad);
+  const citySlug = params.ciudad.toLowerCase().trim();
+  const targetCity = ECUADOR_CANONICAL_LOCALITIES[citySlug] || unslugify(params.ciudad);
+  const cityName = targetCity;
   const provName = unslugify(params.provincia);
   const baseUrl = getBaseUrl();
 
@@ -24,11 +26,16 @@ export async function generateMetadata({ params: paramsPromise }: Props): Promis
   try {
     count = await prismaTenant.restaurant.count({
       where: {
+        isSuspended: false,
         OR: [
-          { city: { equals: cityName, mode: "insensitive" } },
-          { sector: { equals: cityName, mode: "insensitive" } },
-          { parish: { equals: cityName, mode: "insensitive" } },
-          { locality: { contains: cityName, mode: "insensitive" } },
+          { city: { equals: targetCity, mode: "insensitive" } },
+          { parish: { equals: targetCity, mode: "insensitive" } },
+          { sector: { equals: targetCity, mode: "insensitive" } },
+          { city: { equals: unslugify(params.ciudad), mode: "insensitive" } },
+          { sector: { equals: unslugify(params.ciudad), mode: "insensitive" } },
+          { parish: { equals: unslugify(params.ciudad), mode: "insensitive" } },
+          { locality: { contains: targetCity, mode: "insensitive" } },
+          { locality: { contains: unslugify(params.ciudad), mode: "insensitive" } },
         ],
       },
     });
@@ -58,7 +65,9 @@ export async function generateMetadata({ params: paramsPromise }: Props): Promis
 
 export default async function CityDirectoryPage({ params: paramsPromise }: Props) {
   const params = await paramsPromise;
-  const cityName = unslugify(params.ciudad);
+  const citySlug = params.ciudad.toLowerCase().trim();
+  const targetCity = ECUADOR_CANONICAL_LOCALITIES[citySlug] || unslugify(params.ciudad);
+  const cityName = targetCity;
   const provName = unslugify(params.provincia);
   const baseUrl = getBaseUrl();
 
@@ -66,11 +75,16 @@ export default async function CityDirectoryPage({ params: paramsPromise }: Props
   try {
     restaurants = await prismaTenant.restaurant.findMany({
       where: {
+        isSuspended: false,
         OR: [
-          { city: { equals: cityName, mode: "insensitive" } },
-          { sector: { equals: cityName, mode: "insensitive" } },
-          { parish: { equals: cityName, mode: "insensitive" } },
-          { locality: { contains: cityName, mode: "insensitive" } },
+          { city: { equals: targetCity, mode: "insensitive" } },
+          { parish: { equals: targetCity, mode: "insensitive" } },
+          { sector: { equals: targetCity, mode: "insensitive" } },
+          { city: { equals: unslugify(params.ciudad), mode: "insensitive" } },
+          { sector: { equals: unslugify(params.ciudad), mode: "insensitive" } },
+          { parish: { equals: unslugify(params.ciudad), mode: "insensitive" } },
+          { locality: { contains: targetCity, mode: "insensitive" } },
+          { locality: { contains: unslugify(params.ciudad), mode: "insensitive" } },
         ],
       },
       select: {

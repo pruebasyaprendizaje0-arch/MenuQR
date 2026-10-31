@@ -1,8 +1,9 @@
+import { cache } from "react";
 import { prismaTenant } from "@/lib/db";
 import Link from "next/link";
 import { UtensilsCrossed, MapPin, ArrowLeft, MessageSquare, Check, Sparkles, ChevronRight } from "lucide-react";
 import type { Metadata } from "next";
-import { getBaseUrl, normalizeSlug, generateBreadcrumbJsonLd, resolvePublicImageUrl } from "@/lib/seo";
+import { getBaseUrl, normalizeSlug, unslugify, generateBreadcrumbJsonLd, resolvePublicImageUrl } from "@/lib/seo";
 import { parseDishImages } from "@/lib/dish-images";
 import { notFound } from "next/navigation";
 import { SmartLogo } from "@/components/SmartImage";
@@ -17,26 +18,78 @@ interface Props {
   }>;
 }
 
+const getDishWithRestaurant = cache(async (restaurantSlug: string, dishSlug: string) => {
+  const cleanRestSlug = restaurantSlug.toLowerCase().trim();
+  const cleanDishSlug = dishSlug.toLowerCase().trim();
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanDishSlug);
+
+  // 1. Consulta directa e indexada en PostgreSQL
+  const directMatch = await prismaTenant.dish.findFirst({
+    where: {
+      ...(isUuid
+        ? { id: cleanDishSlug }
+        : {
+            OR: [
+              { name: { equals: cleanDishSlug, mode: "insensitive" } },
+              { name: { equals: unslugify(cleanDishSlug), mode: "insensitive" } },
+            ],
+          }),
+      restaurant: {
+        slug: cleanRestSlug,
+        isSuspended: false,
+      },
+      isAvailable: true,
+    },
+    include: {
+      category: true,
+      restaurant: true,
+    },
+  });
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  // 2. Fallback de coincidencia con normalizeSlug para nombres con tildes / caracteres especiales
+  const candidateDishes = await prismaTenant.dish.findMany({
+    where: {
+      restaurant: {
+        slug: cleanRestSlug,
+        isSuspended: false,
+      },
+      isAvailable: true,
+    },
+    include: {
+      category: true,
+      restaurant: true,
+    },
+  });
+
+  return (
+    candidateDishes.find(
+      (d) => normalizeSlug(d.name) === cleanDishSlug || d.id === cleanDishSlug
+    ) || null
+  );
+});
+
 export async function generateMetadata({ params: paramsPromise }: Props): Promise<Metadata> {
   const params = await paramsPromise;
   const { slug, dishSlug } = params;
 
   try {
-    const restaurant = await prismaTenant.restaurant.findUnique({
-      where: { slug: slug.toLowerCase() },
-      include: {
-        dishes: true,
-      },
-    });
+    const dish = await getDishWithRestaurant(slug, dishSlug);
 
-    if (!restaurant) return {};
+    if (!dish || !dish.restaurant) {
+      return {
+        title: "Platillo no disponible | MenuQR Pro",
+        robots: {
+          index: false,
+          follow: false,
+        },
+      };
+    }
 
-    const dish = restaurant.dishes.find(
-      (d: any) => normalizeSlug(d.name) === dishSlug.toLowerCase() || d.id === dishSlug
-    );
-
-    if (!dish) return {};
-
+    const restaurant = dish.restaurant;
     const location = restaurant.city || restaurant.locality || "Ecuador";
     const title = `${dish.name} - $${Number(dish.price).toFixed(2)} | ${restaurant.name} en ${location}`;
     const description = dish.description 
@@ -70,7 +123,13 @@ export async function generateMetadata({ params: paramsPromise }: Props): Promis
       },
     };
   } catch {
-    return {};
+    return {
+      title: "Platillo | MenuQR Pro",
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
   }
 }
 
@@ -78,29 +137,13 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
   const params = await paramsPromise;
   const { slug, dishSlug } = params;
 
-  const restaurant = await prismaTenant.restaurant.findUnique({
-    where: { slug: slug.toLowerCase() },
-    include: {
-      dishes: {
-        include: {
-          category: true,
-        },
-      },
-    },
-  });
+  const dish = await getDishWithRestaurant(slug, dishSlug);
 
-  if (!restaurant) {
+  if (!dish || !dish.restaurant) {
     notFound();
   }
 
-  const dish = restaurant.dishes.find(
-    (d: any) => normalizeSlug(d.name) === dishSlug.toLowerCase() || d.id === dishSlug
-  );
-
-  if (!dish) {
-    notFound();
-  }
-
+  const restaurant = dish.restaurant;
   const baseUrl = getBaseUrl();
   const location = restaurant.city || restaurant.locality || "Ecuador";
 
@@ -124,6 +167,7 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
 
   const breadcrumbSchema = generateBreadcrumbJsonLd(breadcrumbs);
   const sanitizedDishImage = resolvePublicImageUrl(dish.imageUrl);
+  const dishUrl = `${baseUrl}/${restaurant.slug}/${dishSlug}`;
 
   const menuItemSchema = {
     "@context": "https://schema.org",
@@ -131,10 +175,12 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
     "name": dish.name,
     "description": dish.description || `${dish.name} en ${restaurant.name}`,
     "image": sanitizedDishImage || undefined,
+    "url": dishUrl,
     "offers": {
       "@type": "Offer",
       "price": String(dish.price || 0),
       "priceCurrency": "USD",
+      "url": dishUrl,
       "availability": dish.isAvailable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
     },
   };
@@ -220,6 +266,36 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
               {dish.description || `Platillo preparado por ${restaurant.name} en ${location}.`}
             </p>
           </div>
+
+          {/* Ficha Semántica AEO (Answer Engine Optimization) */}
+          <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-xs">
+            <div>
+              <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Categoría</dt>
+              <dd className="font-semibold text-slate-200 mt-0.5">{dish.category?.name || "Carta General"}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Precio</dt>
+              <dd className="font-semibold text-amber-400 mt-0.5">${Number(dish.price).toFixed(2)} USD</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Disponibilidad</dt>
+              <dd className="font-semibold text-emerald-400 mt-0.5">
+                {dish.isAvailable ? "Disponible de Inmediato" : "Agotado Temporalmente"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Restaurante</dt>
+              <dd className="font-semibold text-slate-200 mt-0.5">{restaurant.name}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Ubicación</dt>
+              <dd className="font-semibold text-slate-200 mt-0.5">{location}</dd>
+            </div>
+            <div>
+              <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Canal de Pedido</dt>
+              <dd className="font-semibold text-slate-200 mt-0.5">WhatsApp Directo</dd>
+            </div>
+          </dl>
 
           <div className="flex items-center justify-between pt-4 border-t border-slate-800">
             <div>

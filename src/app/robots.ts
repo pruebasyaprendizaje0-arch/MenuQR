@@ -4,12 +4,24 @@ import { getBaseUrl } from "@/lib/seo";
 export default function robots(): MetadataRoute.Robots {
   const baseUrl = getBaseUrl();
 
+  const operationalDisallows = [
+    "/admin/",
+    "/super-admin/",
+    "/api/",
+    "/caja",
+    "/cocina",
+    "/*/cocina",
+    "/*/mesas",
+    "/*/repartidor",
+    "/*/rastreo",
+  ];
+
   return {
     rules: [
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/admin/", "/super-admin/", "/api/"],
+        disallow: operationalDisallows,
       },
       {
         userAgent: [
@@ -20,9 +32,12 @@ export default function robots(): MetadataRoute.Robots {
           "Claude-Web",
           "Google-Extended",
           "Amazonbot",
+          "Applebot-Extended",
+          "Meta-ExternalAgent",
+          "CCBot",
         ],
-        allow: ["/", "/llms.txt", "/restaurantes", "/faq"],
-        disallow: ["/admin/", "/super-admin/", "/api/"],
+        allow: ["/", "/llms.txt", "/llms-full.txt", "/restaurantes", "/marketplace", "/catalogos", "/faq"],
+        disallow: operationalDisallows,
       },
     ],
     sitemap: `${baseUrl}/sitemap.xml`,

@@ -18,6 +18,29 @@ export function unslugify(slug: string): string {
     .join(" ");
 }
 
+export const ECUADOR_CANONICAL_LOCALITIES: Record<string, string> = {
+  montanita: "Montañita",
+  olon: "Olón",
+  banos: "Baños",
+  canar: "Cañar",
+  chordeleg: "Chordeleg",
+  samborondon: "Samborondón",
+  duran: "Durán",
+  "santa-elena": "Santa Elena",
+  guayaquil: "Guayaquil",
+  quito: "Quito",
+  cuenca: "Cuenca",
+  manta: "Manta",
+  portoviejo: "Portoviejo",
+  machala: "Machala",
+  loja: "Loja",
+  ambato: "Ambato",
+  ibarra: "Ibarra",
+  esmeraldas: "Esmeraldas",
+  salinas: "Salinas",
+  manglaralto: "Manglaralto",
+};
+
 export function getBaseUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || "https://menuqr.ubicame.cc";
 }
@@ -207,10 +230,13 @@ export interface RestaurantMinimalData {
   latitude?: number | string | null;
   longitude?: number | string | null;
   slug: string;
+  ratingCount?: number | null;
+  ratingAverage?: number | null;
   categories?: Array<{
     name: string;
     dishes?: Array<{
       name: string;
+      slug?: string | null;
       description?: string | null;
       imageUrl?: string | null;
       price?: number | string | null;
@@ -314,14 +340,18 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
     name: cat.name,
     hasMenuItem: (cat.dishes || []).map((dish) => {
       const dishImage = resolvePublicImageUrl(dish.imageUrl);
+      const dishSlug = (dish as any).slug || normalizeSlug(dish.name);
+      const dishUrl = `${siteUrl}/${dishSlug}`;
       const menuItemObj: Record<string, unknown> = {
         "@type": "MenuItem",
         name: dish.name,
         description: dish.description || `${dish.name} disponible en ${restaurant.name}`,
+        url: dishUrl,
         offers: {
           "@type": "Offer",
           price: String(dish.price || 0),
           priceCurrency: "USD",
+          url: dishUrl,
           availability: dish.isAvailable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
         },
       };
@@ -373,6 +403,14 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
     longitude: number;
   }
 
+  interface AggregateRatingSchema {
+    "@type": "AggregateRating";
+    ratingValue: string;
+    reviewCount: number;
+    bestRating: string;
+    worstRating: string;
+  }
+
   interface RestaurantGraphItem {
     "@type": string[];
     "@id": string;
@@ -393,6 +431,7 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
       hasMenuSection: typeof menuSections;
     };
     geo?: GeoCoordinatesSchema;
+    aggregateRating?: AggregateRatingSchema;
   }
 
   const resolvedMainImage = resolvePublicImageUrl(restaurant.logoUrl) || resolvePublicImageUrl(restaurant.coverUrl);
@@ -415,6 +454,15 @@ export function generateRestaurantJsonLd(restaurant: RestaurantMinimalData) {
       url: siteUrl,
       hasMenuSection: menuSections,
     },
+    ...(restaurant.ratingCount && restaurant.ratingAverage ? {
+      aggregateRating: {
+        "@type": "AggregateRating" as const,
+        ratingValue: Number(restaurant.ratingAverage).toFixed(1),
+        reviewCount: Number(restaurant.ratingCount),
+        bestRating: "5",
+        worstRating: "1",
+      },
+    } : {}),
   };
 
   if (resolvedMainImage) {

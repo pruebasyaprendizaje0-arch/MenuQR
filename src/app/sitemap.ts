@@ -20,6 +20,18 @@ export default async function sitemap(): Promise<any> {
       priority: 0.95,
     },
     {
+      url: `${baseUrl}/marketplace`,
+      lastModified: new Date(),
+      changeFrequency: "daily",
+      priority: 0.9,
+    },
+    {
+      url: `${baseUrl}/catalogos`,
+      lastModified: new Date(),
+      changeFrequency: "weekly",
+      priority: 0.85,
+    },
+    {
       url: `${baseUrl}/faq`,
       lastModified: new Date(),
       changeFrequency: "weekly",
@@ -54,6 +66,9 @@ export default async function sitemap(): Promise<any> {
   // Dynamic restaurant menu routes & active GEO routes
   try {
     const restaurants = await prismaTenant.restaurant.findMany({
+      where: {
+        isSuspended: false,
+      },
       select: {
         slug: true,
         province: true,
@@ -150,13 +165,6 @@ export default async function sitemap(): Promise<any> {
         changeFrequency: "daily",
         priority: 0.9,
         images: images.length > 0 ? images : undefined,
-      });
-
-      restaurantRoutes.push({
-        url: `${baseUrl}/${r.slug}/menu`,
-        lastModified: r.updatedAt,
-        changeFrequency: "daily",
-        priority: 0.85,
       });
 
       // Include dishes that have valid public images
