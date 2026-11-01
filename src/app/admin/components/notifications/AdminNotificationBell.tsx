@@ -12,6 +12,7 @@ import {
   Info,
   ExternalLink,
   Clock,
+  X,
 } from "lucide-react";
 import { CleanInAppNotification } from "@/lib/notifications";
 import { useNotifications } from "./AdminNotificationHost";
@@ -46,6 +47,59 @@ export function AdminNotificationBell() {
 
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [mobileCoords, setMobileCoords] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
+
+  // Calcular posición adaptativa y confinamiento seguro para pantallas móviles
+  useEffect(() => {
+    function updatePosition() {
+      if (!isOpen || !buttonRef.current) return;
+      if (typeof window === "undefined") return;
+
+      const isMobile = window.innerWidth < 640;
+      if (!isMobile) {
+        setMobileCoords(null);
+        return;
+      }
+
+      const rect = buttonRef.current.getBoundingClientRect();
+      const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
+      const padding = 12; // 12px de margen con los bordes de la pantalla
+      const targetWidth = Math.min(380, screenWidth - padding * 2);
+
+      // Centrar el popover respecto al botón si es posible, clamp entre padding y screenWidth - padding - targetWidth
+      let left = rect.left + rect.width / 2 - targetWidth / 2;
+      left = Math.max(padding, Math.min(left, screenWidth - padding - targetWidth));
+
+      // Posición vertical: justo debajo del botón
+      const top = Math.min(rect.bottom + 8, screenHeight - 140);
+      const maxHeight = Math.max(220, screenHeight - top - 24);
+
+      setMobileCoords({
+        top,
+        left,
+        width: targetWidth,
+        maxHeight,
+      });
+    }
+
+    if (isOpen) {
+      updatePosition();
+      window.addEventListener("resize", updatePosition);
+      window.addEventListener("scroll", updatePosition, true);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isOpen]);
 
   // Cerrar al hacer clic fuera o presionar Escape
   useEffect(() => {
@@ -104,6 +158,7 @@ export function AdminNotificationBell() {
     <div className="relative" ref={popoverRef}>
       {/* Botón de Campana */}
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
         className="relative p-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer flex items-center justify-center"
@@ -121,32 +176,71 @@ export function AdminNotificationBell() {
 
       {/* Menú Desplegable (Popover) */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl z-50 overflow-hidden animate-fadeIn text-xs">
-          {/* Cabecera del Popover */}
-          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-white text-sm">Notificaciones</span>
-              {unreadCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/30 text-red-300 text-[10px] font-black">
-                  {unreadCount} nuevas
-                </span>
-              )}
+        <>
+          {/* Telón de fondo oscuro para móvil (cierra al tocar fuera de la ventana) */}
+          <div
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 sm:hidden"
+            onClick={() => setIsOpen(false)}
+            aria-hidden="true"
+          />
+
+          <div
+            style={
+              mobileCoords
+                ? {
+                    top: `${mobileCoords.top}px`,
+                    left: `${mobileCoords.left}px`,
+                    width: `${mobileCoords.width}px`,
+                    maxHeight: `${mobileCoords.maxHeight}px`,
+                  }
+                : undefined
+            }
+            className={`
+              rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl z-[60] overflow-hidden animate-fadeIn text-xs flex flex-col
+              ${
+                mobileCoords
+                  ? "fixed"
+                  : "fixed inset-x-3 max-w-sm mx-auto sm:max-w-none sm:mx-0 sm:absolute sm:inset-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96"
+              }
+            `}
+          >
+            {/* Cabecera del Popover */}
+            <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-white text-sm">Notificaciones</span>
+                {unreadCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/30 text-red-300 text-[10px] font-black">
+                    {unreadCount} nuevas
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => markAllAsRead()}
+                    className="text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" />
+                    <span>Marcar leídas</span>
+                  </button>
+                )}
+
+                {/* Botón cerrar para vista móvil */}
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition sm:hidden flex items-center justify-center cursor-pointer"
+                  aria-label="Cerrar notificaciones"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                onClick={() => markAllAsRead()}
-                className="text-[11px] font-bold text-slate-400 hover:text-emerald-400 transition flex items-center gap-1 cursor-pointer"
-              >
-                <CheckCheck className="w-3.5 h-3.5" />
-                <span>Marcar leídas</span>
-              </button>
-            )}
-          </div>
-
-          {/* Lista de Notificaciones */}
-          <div className="max-h-80 overflow-y-auto divide-y divide-slate-800/80">
+            {/* Lista de Notificaciones */}
+            <div className="flex-1 max-h-80 sm:max-h-80 overflow-y-auto divide-y divide-slate-800/80 overscroll-contain">
             {notifications.length === 0 ? (
               <div className="p-6 text-center text-slate-400 space-y-1">
                 <Bell className="w-6 h-6 mx-auto text-slate-400 mb-2 opacity-50" />
@@ -220,7 +314,8 @@ export function AdminNotificationBell() {
             )}
           </div>
         </div>
-      )}
-    </div>
-  );
+      </>
+    )}
+  </div>
+);
 }

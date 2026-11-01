@@ -1,4 +1,4 @@
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, unlink } from "fs/promises";
 import { join } from "path";
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -118,4 +118,24 @@ export function getStorageProvider(): IStorageProvider {
 export async function saveUploadedFile(file: File | null): Promise<string | null> {
   const provider = getStorageProvider();
   return provider.saveFile(file);
+}
+
+export async function deleteUploadedFile(relativeUrl: string | null | undefined): Promise<boolean> {
+  if (!relativeUrl || typeof relativeUrl !== "string") return false;
+  const trimmed = relativeUrl.trim();
+  if (!trimmed.startsWith("/uploads/") && !trimmed.startsWith("uploads/")) return false;
+
+  try {
+    const filename = trimmed.replace(/^\/?uploads\//, "").trim();
+    // Prevenir Directory Traversal
+    if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+      return false;
+    }
+    const filepath = join(process.cwd(), "public", "uploads", filename);
+    await unlink(filepath);
+    return true;
+  } catch (error) {
+    // Si el archivo ya no existía o falló, no romper la ejecución
+    return false;
+  }
 }

@@ -11,7 +11,7 @@ import { randomBytes } from "crypto";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { recordSlugChange, sanitizeSlug } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
-import { saveUploadedFile } from "@/lib/storage";
+import { saveUploadedFile, deleteUploadedFile } from "@/lib/storage";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { pool } from "@/lib/db-pool";
 import { parseDishImages, serializeDishImages } from "@/lib/dish-images";
@@ -1048,6 +1048,201 @@ export async function createDishAction(categoryId: string, formData: FormData) {
 
   revalidatePath(`/${category.restaurant.slug}`);
   revalidatePath("/admin");
+  return { success: true };
+}
+
+/**
+ * Acciones exclusivas para el Tablero Exprés de Menú / Almuerzo del Día (Máximo 4 platos)
+ */
+export async function createDailyMenuCategoryAction(restaurantId: string) {
+  await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  // Verificar si ya existe una categoría que corresponda a Menú del Día
+  const existing = await prisma.category.findFirst({
+    where: {
+      restaurantId,
+      OR: [
+        { name: { contains: "Menú del Día", mode: "insensitive" } },
+        { name: { contains: "Menu del Dia", mode: "insensitive" } },
+        { name: { contains: "Almuerzo", mode: "insensitive" } },
+        { name: { contains: "Plato del Día", mode: "insensitive" } },
+      ],
+    },
+  });
+
+  if (existing) {
+    return { success: true, category: existing };
+  }
+
+  // Crear la categoría en orden 0 para que se muestre primero en la carta digital
+  const category = await prisma.category.create({
+    data: {
+      name: "Menú del Día",
+      order: 0,
+      restaurantId,
+    },
+  });
+
+  revalidatePath("/admin");
+  return { success: true, category };
+}
+
+export async function saveDailyMenuDishAction(formData: FormData) {
+  await refreshUserSession();
+
+  const restaurantId = formData.get("restaurantId") as string;
+  const categoryId = formData.get("categoryId") as string;
+  const dishId = (formData.get("dishId") as string)?.trim() || null;
+  const name = (formData.get("name") as string)?.trim();
+  const description = (formData.get("description") as string)?.trim() || "";
+  const price = parseFloat((formData.get("price") as string) || "0");
+  const isAvailable = formData.get("isAvailable") === "true";
+  const dishFile = formData.get("dishFile") as File | null;
+
+  if (!restaurantId || !categoryId) {
+    return { error: "Faltan identificadores de restaurante o categoría." };
+  }
+
+  if (!name) {
+    return { error: "El nombre del menú del día es obligatorio." };
+  }
+
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  const category = await prisma.category.findFirst({
+    where: { id: categoryId, restaurantId },
+    include: { restaurant: true },
+  });
+
+  if (!category) {
+    return { error: "Categoría no encontrada o no pertenece al restaurante." };
+  }
+
+  // RESTRICCIÓN ESTRICTA: Máximo 4 platos en la categoría de Menú del Día
+  if (!dishId) {
+    const totalInCat = await prisma.dish.count({
+      where: { categoryId, restaurantId },
+    });
+    if (totalInCat >= 4) {
+      return { error: "Límite alcanzado: solo se permiten hasta 4 opciones para el Menú del Día." };
+    }
+  }
+
+  let finalImageUrl: string | null = null;
+  let previousImageUrl: string | null = null;
+
+  if (dishId) {
+    const existing = await prisma.dish.findFirst({
+      where: { id: dishId, restaurantId },
+    });
+    if (!existing) {
+      return { error: "El plato a actualizar no existe." };
+    }
+    previousImageUrl = existing.imageUrl;
+    finalImageUrl = existing.imageUrl;
+  }
+
+  // Si se subió foto directa tomada con la cámara
+  if (dishFile && dishFile.size > 0) {
+    const uploaded = await saveUploadedFile(dishFile);
+    if (uploaded) {
+      finalImageUrl = uploaded;
+      // Eliminar foto anterior si era un archivo local en /uploads/ para no saturar disco
+      if (previousImageUrl && previousImageUrl !== uploaded) {
+        await deleteUploadedFile(previousImageUrl);
+      }
+    }
+  }
+
+  let savedDish: any;
+  if (dishId) {
+    savedDish = await prisma.dish.update({
+      where: { id: dishId },
+      data: {
+        name,
+        description,
+        price: isNaN(price) ? 0 : price,
+        isAvailable,
+        imageUrl: finalImageUrl,
+      },
+    });
+  } else {
+    savedDish = await prisma.dish.create({
+      data: {
+        name,
+        description,
+        price: isNaN(price) ? 0 : price,
+        isAvailable,
+        imageUrl: finalImageUrl,
+        categoryId,
+        restaurantId,
+      },
+    });
+  }
+
+  if (category.restaurant?.slug) {
+    revalidatePath(`/${category.restaurant.slug}`);
+  }
+  revalidatePath("/admin");
+
+  return { success: true, dish: savedDish };
+}
+
+export async function toggleAllDailyMenuDishesAction(
+  categoryId: string,
+  restaurantId: string,
+  isAvailable: boolean
+) {
+  await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  await prisma.dish.updateMany({
+    where: { categoryId, restaurantId },
+    data: { isAvailable },
+  });
+
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { slug: true },
+  });
+
+  if (restaurant?.slug) {
+    revalidatePath(`/${restaurant.slug}`);
+  }
+  revalidatePath("/admin");
+
+  return { success: true };
+}
+
+export async function deleteDailyMenuDishAction(dishId: string, restaurantId: string) {
+  await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  const dish = await prisma.dish.findFirst({
+    where: { id: dishId, restaurantId },
+    include: { restaurant: true },
+  });
+
+  if (!dish) return { error: "Plato no encontrado." };
+
+  if (dish.imageUrl) {
+    await deleteUploadedFile(dish.imageUrl);
+  }
+
+  await prisma.dish.delete({
+    where: { id: dishId },
+  });
+
+  if (dish.restaurant?.slug) {
+    revalidatePath(`/${dish.restaurant.slug}`);
+  }
+  revalidatePath("/admin");
+
   return { success: true };
 }
 

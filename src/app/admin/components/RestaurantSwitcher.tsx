@@ -68,7 +68,7 @@ export function RestaurantSwitcher({ currentRestaurantId, restaurants }: Restaur
       {isOpen && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 mt-1.5 w-64 origin-top-right rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-1.5 space-y-1 z-40">
+          <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-64 max-w-[calc(100vw-2rem)] origin-top-left sm:origin-top-right rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-1.5 space-y-1 z-40">
             <div className="px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 border-b border-slate-800">
               Mis Negocios Registrados
             </div>

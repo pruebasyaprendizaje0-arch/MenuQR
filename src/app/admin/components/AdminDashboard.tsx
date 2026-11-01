@@ -130,6 +130,7 @@ import CitasAdminTab from "./CitasAdminTab";
 import ReservasAdminTab from "./ReservasAdminTab";
 import OrderTicketModal from "./OrderTicketModal";
 import StaffAdminTab from "./StaffAdminTab";
+import { DailyMenuBoard } from "./DailyMenuBoard";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
 
@@ -6330,6 +6331,18 @@ export function AdminDashboard({
                 </button>
               </div>
             </div>
+
+            {/* Tablero Exprés de Menú & Almuerzo del Día (Fotos en Vivo con Celular, Máx. 4 Opciones) */}
+            {(bLabels.isGastro || categoriesList.some((c) => {
+              const lower = c.name.toLowerCase();
+              return lower.includes("menú") || lower.includes("menu") || lower.includes("almuerzo");
+            })) && (
+              <DailyMenuBoard
+                restaurantId={restaurant.id}
+                restaurantSlug={restaurant.slug}
+                categories={categoriesList as any}
+              />
+            )}
 
             {/* Resumen de Inventario y Control de Stock */}
             {categoriesList.length > 0 && (
