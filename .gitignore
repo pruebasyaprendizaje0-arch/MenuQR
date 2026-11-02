@@ -19,14 +19,13 @@
 # misc
 .DS_Store
 *.pem
+*.key
+*.cert
 
 # debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# local env files
-.env*.local
 
 # vercel
 .vercel
@@ -38,12 +37,13 @@ next-env.d.ts
 # uploads
 public/uploads/
 
-# env files
+# environment variables & secrets (strict isolation)
 .env
-.env.local
-.env.production
-.env.development
+.env.*
+.env*.local
+!.env.example
 
+# database & prisma artifacts
 /src/generated/prisma
-d e v . d b  
- p r i s m a / d e v . d b
+dev.db
+prisma/dev.db

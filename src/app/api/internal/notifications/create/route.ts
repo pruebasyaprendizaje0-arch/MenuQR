@@ -21,6 +21,13 @@ export async function POST(req: NextRequest) {
         {
           success: false,
           error: "Datos de notificación inválidos",
+          allowedTypes: ["WARNING_EXPIRING", "SUSPENDED", "METRIC_SUMMARY", "MAINTENANCE", "PROMO", "INFO"],
+          allowedPriorities: ["LOW", "NORMAL", "HIGH", "URGENT"],
+          requiredFields: {
+            title: "string (min 2, max 150 caracteres)",
+            message: "string (min 2, max 4000 caracteres)",
+            target: "Se debe incluir 'restaurantId' (UUID), 'restaurantSlug' (string) o 'broadcastAll: true'",
+          },
           details: parseResult.error.format(),
         },
         { status: 400 }

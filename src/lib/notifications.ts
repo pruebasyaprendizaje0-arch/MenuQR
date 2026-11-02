@@ -2,8 +2,70 @@ import { prisma } from "@/lib/prisma";
 import { NotificationPriority, NotificationType, Prisma } from "@prisma/client";
 import { z } from "zod";
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Esquema de validación para la creación de notificaciones (n8n o SuperAdmin)
-export const CreateNotificationInputSchema = z.object({
+export const CreateNotificationInputSchema = z.preprocess((raw: any) => {
+  if (!raw || typeof raw !== "object") return raw;
+
+  const copy = { ...raw };
+
+  // 1. Normalización de type (insensible a mayúsculas y alias comunes)
+  if (typeof copy.type === "string") {
+    const t = copy.type.trim().toUpperCase();
+    if (["WARNING", "EXPIRING", "WARNING_EXPIRING", "TRIAL_EXPIRING", "EXPIRATION", "EXPIRANDO"].includes(t)) {
+      copy.type = "WARNING_EXPIRING";
+    } else if (["SUSPENDED", "SUSPEND", "SUSPENDIDO", "PAUSED", "OVERDUE"].includes(t)) {
+      copy.type = "SUSPENDED";
+    } else if (["METRIC_SUMMARY", "METRICS", "METRIC", "SUMMARY", "RESUMEN"].includes(t)) {
+      copy.type = "METRIC_SUMMARY";
+    } else if (["MAINTENANCE", "MANTENIMIENTO"].includes(t)) {
+      copy.type = "MAINTENANCE";
+    } else if (["PROMO", "PROMOTION", "PROMOCION"].includes(t)) {
+      copy.type = "PROMO";
+    } else if (["INFO", "INFORMATION", "INFORMACION", "ALERT", "AVISO"].includes(t)) {
+      copy.type = "INFO";
+    } else {
+      copy.type = t;
+    }
+  }
+
+  // 2. Normalización de priority
+  if (typeof copy.priority === "string") {
+    const p = copy.priority.trim().toUpperCase();
+    if (p === "MEDIUM") {
+      copy.priority = "NORMAL";
+    } else if (p === "CRITICAL") {
+      copy.priority = "URGENT";
+    } else {
+      copy.priority = p;
+    }
+  }
+
+  // 3. Fallbacks de campo para título y mensaje
+  if (!copy.title && copy.subject) copy.title = copy.subject;
+  if (!copy.title && copy.headline) copy.title = copy.headline;
+
+  if (!copy.message && copy.body) copy.message = copy.body;
+  if (!copy.message && copy.content) copy.message = copy.content;
+  if (!copy.message && copy.text) copy.message = copy.text;
+  if (!copy.message && copy.description) copy.message = copy.description;
+
+  // 4. Si restaurantId viene con un slug en vez de UUID, reubicar a restaurantSlug
+  if (copy.restaurantId && typeof copy.restaurantId === "string" && !UUID_REGEX.test(copy.restaurantId.trim())) {
+    if (!copy.restaurantSlug) {
+      copy.restaurantSlug = copy.restaurantId.trim();
+    }
+    copy.restaurantId = null;
+  }
+
+  // 5. Normalizar broadcastAll si viene como string
+  if (typeof copy.broadcastAll === "string") {
+    copy.broadcastAll = copy.broadcastAll === "true";
+  }
+
+  return copy;
+}, z.object({
   restaurantId: z.string().uuid("El restaurantId debe ser un UUID válido").optional().nullable(),
   restaurantSlug: z.string().min(1).optional().nullable(),
   broadcastAll: z.boolean().optional().default(false),
@@ -24,7 +86,7 @@ export const CreateNotificationInputSchema = z.object({
   expiresAt: z.union([z.string(), z.date()]).optional().nullable(),
   expiresInHours: z.number().positive().optional().nullable(),
   source: z.string().optional().default("N8N"),
-});
+}));
 
 export type CreateNotificationInput = z.input<typeof CreateNotificationInputSchema>;
 

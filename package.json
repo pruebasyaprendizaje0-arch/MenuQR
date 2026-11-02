@@ -7,7 +7,7 @@
     "build": "prisma generate && next build",
     "start": "npx prisma migrate deploy && node .next/standalone/server.js",
     "lint": "eslint .",
-    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/split-bill.test.ts && npx tsx src/lib/batch-dishes.test.ts && npx tsx src/lib/impersonation.test.ts && npx tsx src/lib/ruleta-flow.test.ts && npx tsx src/lib/ruleta-tablet-mode.test.ts && npx tsx src/lib/suggested-dishes.test.ts && npx tsx src/lib/stock-control.test.ts && npx tsx src/lib/table-token.test.ts && npx tsx src/lib/whatsapp-templates.test.ts && npx tsx src/lib/marketplace.test.ts && npx tsx src/lib/caja-pos.test.ts && npx tsx src/lib/gallery-profiles.test.ts && npx tsx src/lib/floating-whatsapp.test.ts && npx tsx src/lib/catalog-multistore.test.ts && npx tsx src/lib/superadmin-features.test.ts && npx tsx src/lib/servicios-quote.test.ts && npx tsx src/lib/stock-universal.test.ts && npx tsx src/lib/staff-security.test.ts && npx tsx src/lib/telegram-alert.test.ts && npx tsx src/lib/notifications-flow.test.ts && npx tsx src/lib/daily-menu.test.ts"
+    "test": "npx tsx src/lib/order-security.test.ts && npx tsx src/lib/gastro-search.test.ts && npx tsx src/lib/price-and-api.test.ts && npx tsx src/lib/split-bill.test.ts && npx tsx src/lib/batch-dishes.test.ts && npx tsx src/lib/impersonation.test.ts && npx tsx src/lib/ruleta-flow.test.ts && npx tsx src/lib/ruleta-tablet-mode.test.ts && npx tsx src/lib/suggested-dishes.test.ts && npx tsx src/lib/stock-control.test.ts && npx tsx src/lib/table-token.test.ts && npx tsx src/lib/whatsapp-templates.test.ts && npx tsx src/lib/marketplace.test.ts && npx tsx src/lib/caja-pos.test.ts && npx tsx src/lib/gallery-profiles.test.ts && npx tsx src/lib/floating-whatsapp.test.ts && npx tsx src/lib/catalog-multistore.test.ts && npx tsx src/lib/superadmin-features.test.ts && npx tsx src/lib/servicios-quote.test.ts && npx tsx src/lib/stock-universal.test.ts && npx tsx src/lib/staff-security.test.ts && npx tsx src/lib/telegram-alert.test.ts && npx tsx src/lib/notifications-flow.test.ts && npx tsx src/lib/daily-menu.test.ts && npx tsx src/lib/subscriptions-check.test.ts"
   },
   "engines": {
     "node": ">=20.9.0",
@@ -20,7 +20,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.28.0",
     "next": "^16.3.4",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^10.3.1",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
@@ -37,7 +37,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
-    "@types/nodemailer": "^8.0.1",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.18",

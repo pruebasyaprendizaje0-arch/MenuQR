@@ -3,9 +3,17 @@ const nextConfig = {
   output: "standalone",
   serverExternalPackages: ["pg"],
   images: {
+    // Restricción estricta de orígenes autorizados para mitigar SSRF (Server-Side Request Forgery)
     remotePatterns: [
-      { protocol: "https", hostname: "**" },
-      { protocol: "http", hostname: "**" },
+      { protocol: "https", hostname: "images.unsplash.com" },
+      { protocol: "https", hostname: "i.postimg.cc" },
+      { protocol: "https", hostname: "postimg.cc" },
+      { protocol: "https", hostname: "res.cloudinary.com" },
+      { protocol: "https", hostname: "*.supabase.co" },
+      { protocol: "https", hostname: "lh3.googleusercontent.com" },
+      { protocol: "https", hostname: "ubicame.cc" },
+      { protocol: "https", hostname: "*.ubicame.cc" },
+      { protocol: "https", hostname: "menuqr.ubicame.cc" },
     ],
   },
   async rewrites() {
@@ -25,6 +33,7 @@ const nextConfig = {
       {
         source: "/:path*",
         headers: [
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

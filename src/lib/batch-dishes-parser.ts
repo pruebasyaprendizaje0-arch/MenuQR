@@ -80,7 +80,10 @@ export interface ExtractedDishRow {
 }
 
 export function extractDishRow(row: Record<string, any>): ExtractedDishRow {
-  const keys = Object.keys(row || {});
+  // Defensa en profundidad contra Prototype Pollution
+  const keys = Object.keys(row || {}).filter(
+    (k) => k !== "__proto__" && k !== "constructor" && k !== "prototype"
+  );
 
   const getVal = (exactMatches: string[], partialFallbacks: string[] = []): string => {
     // 1. Coincidencia exacta normalizada
