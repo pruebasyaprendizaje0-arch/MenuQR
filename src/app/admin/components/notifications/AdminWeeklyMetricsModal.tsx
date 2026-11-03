@@ -16,8 +16,8 @@ import {
   Home,
   Wrench,
 } from "lucide-react";
-import { CleanInAppNotification } from "@/lib/notifications";
-import { getVerticalMetricLabels, VerticalMetricLabels } from "@/lib/metrics-engine";
+import type { CleanInAppNotification } from "@/lib/notifications";
+import { getVerticalMetricLabels, type VerticalMetricLabels } from "@/lib/metrics-labels";
 
 interface AdminWeeklyMetricsModalProps {
   notification: CleanInAppNotification;

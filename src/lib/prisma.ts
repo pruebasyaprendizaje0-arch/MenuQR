@@ -15,6 +15,11 @@ if (globalForPrisma.prismaVersion !== PRISMA_SCHEMA_VERSION) {
 }
 
 function getDatabaseUrl(): string {
+  if (typeof window !== "undefined") {
+    // En el navegador, Prisma Client nunca debe inicializarse ni lanzar un error que rompa la UI
+    return "postgresql://client-mock:mock@localhost:5432/mock";
+  }
+
   const url =
     process.env.DATABASE_URL ||
     process.env.CONTROL_DATABASE_URL ||
