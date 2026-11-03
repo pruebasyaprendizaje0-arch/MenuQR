@@ -11,8 +11,13 @@ import {
   CheckCircle2,
   Calendar,
   Sparkles,
+  Package,
+  UserCheck,
+  Home,
+  Wrench,
 } from "lucide-react";
 import { CleanInAppNotification } from "@/lib/notifications";
+import { getVerticalMetricLabels, VerticalMetricLabels } from "@/lib/metrics-engine";
 
 interface AdminWeeklyMetricsModalProps {
   notification: CleanInAppNotification;
@@ -26,6 +31,9 @@ export function AdminWeeklyMetricsModal({
   onMarkAsRead,
 }: AdminWeeklyMetricsModalProps) {
   const metadata = notification.metadata || {};
+
+  const labels: Partial<VerticalMetricLabels> =
+    metadata.labels || getVerticalMetricLabels(metadata.vertical || "restaurante");
 
   const period = metadata.period || {
     formattedRange: "Semana Anterior",
@@ -51,6 +59,14 @@ export function AdminWeeklyMetricsModal({
   const handleAcknowledge = () => {
     onMarkAsRead(notification.id);
     onClose();
+  };
+
+  const getChannelIcon = () => {
+    if (labels.vertical === "citas") return <UserCheck className="w-5 h-5" />;
+    if (labels.vertical === "retail") return <Package className="w-5 h-5" />;
+    if (labels.vertical === "reservas") return <Home className="w-5 h-5" />;
+    if (labels.vertical === "servicios") return <Wrench className="w-5 h-5" />;
+    return <UtensilsCrossed className="w-5 h-5" />;
   };
 
   return (
@@ -110,12 +126,12 @@ export function AdminWeeklyMetricsModal({
 
               <div className="pt-3 sm:pt-0 sm:px-4">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Pedidos Atendidos
+                  {labels.ordersCountLabel || "Pedidos Atendidos"}
                 </span>
                 <span className="text-2xl sm:text-3xl font-black text-white tracking-tight mt-1 block">
                   {financials.totalOrders || 0}
                 </span>
-                <span className="text-[11px] text-slate-400">Órdenes completadas</span>
+                <span className="text-[11px] text-slate-400">{labels.ordersCountSublabel || "Órdenes completadas"}</span>
               </div>
 
               <div className="pt-3 sm:pt-0 sm:pl-4">
@@ -130,70 +146,70 @@ export function AdminWeeklyMetricsModal({
             </div>
           </div>
 
-          {/* Cards Secundarias: Plato Estrella y Mesa Líder */}
+          {/* Cards Secundarias: Ítem Estrella y Canal/Mesa Líder */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Plato Estrella */}
+            {/* Ítem Estrella */}
             <div className="p-4 rounded-2xl bg-slate-950/40 border border-slate-800/80 flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
                 <Award className="w-5 h-5" />
               </div>
               <div className="min-w-0 flex-1">
                 <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
-                  Plato Estrella ⭐
+                  {labels.topItemTitle || "Plato Estrella ⭐"}
                 </span>
                 <h4 className="text-sm font-bold text-white truncate mt-0.5">
-                  {topDish ? topDish.name : "Sin ventas registradas"}
+                  {topDish ? topDish.name : (labels.topItemEmpty || "Sin ventas registradas")}
                 </h4>
                 {topDish ? (
                   <p className="text-xs text-slate-400 mt-0.5">
-                    <strong>{topDish.quantitySold}</strong> unid. vendidas · Recaudó{" "}
+                    <strong>{topDish.quantitySold}</strong> {labels.isGastro ? "unid. vendidas" : "solicitudes / unid."} · Recaudó{" "}
                     <strong className="text-emerald-400">${Number(topDish.revenue || 0).toFixed(2)}</strong>
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-400 mt-0.5">Esperando primeros pedidos</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{labels.topItemEmpty || "Esperando primeros pedidos"}</p>
                 )}
               </div>
             </div>
 
-            {/* Mesa Más Concurrida */}
+            {/* Mesa / Canal / Ubicación Líder */}
             <div className="p-4 rounded-2xl bg-slate-950/40 border border-slate-800/80 flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 shrink-0">
-                <UtensilsCrossed className="w-5 h-5" />
+                {getChannelIcon()}
               </div>
               <div className="min-w-0 flex-1">
                 <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider block">
-                  Mesa Más Activa 🪑
+                  {labels.topChannelTitle || "Mesa Más Activa 🪑"}
                 </span>
                 <h4 className="text-sm font-bold text-white truncate mt-0.5">
-                  {topTable ? topTable.name : "Sin pedidos en mesa"}
+                  {topTable ? topTable.name : (labels.topChannelEmpty || "Sin registros")}
                 </h4>
                 {topTable ? (
                   <p className="text-xs text-slate-400 mt-0.5">
-                    <strong>{topTable.orderCount}</strong> pedidos registrados en el salón
+                    <strong>{topTable.orderCount}</strong> {labels.isGastro ? "pedidos registrados en el salón" : "registros completados"}
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-400 mt-0.5">Pedidos recibidos solo por delivery/retiro</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{labels.topChannelEmpty || "Sin actividad en este canal"}</p>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Desglose de Canales (Salón vs Retiro vs Domicilio) */}
+          {/* Desglose de Canales adaptado por vertical */}
           <div className="p-5 rounded-2xl bg-slate-950/40 border border-slate-800/80 space-y-3">
             <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
               <ShoppingBag className="w-3.5 h-3.5 text-slate-400" />
-              <span>Distribución por Canal de Venta</span>
+              <span>{labels.channelsTitle || "Distribución por Canal de Venta"}</span>
             </h4>
 
             <div className="space-y-3 text-xs">
-              {/* Salón */}
+              {/* Canal 1 */}
               <div>
                 <div className="flex justify-between items-center mb-1 text-slate-300">
                   <span className="font-semibold flex items-center gap-1.5">
-                    <span>🪑</span> Salón / En Mesa
+                    <span>{labels.channel1Icon || "🪑"}</span> {labels.channel1Label || "Salón / En Mesa"}
                   </span>
                   <span className="font-mono text-slate-400">
-                    {channelDistribution.dineIn?.count || 0} pedidos (
+                    {channelDistribution.dineIn?.count || 0} {labels.isGastro ? "pedidos" : "solicitudes"} (
                     {channelDistribution.dineIn?.percentage || 0}%) · $
                     {Number(channelDistribution.dineIn?.revenue || 0).toFixed(2)}
                   </span>
@@ -206,14 +222,14 @@ export function AdminWeeklyMetricsModal({
                 </div>
               </div>
 
-              {/* Para Llevar */}
+              {/* Canal 2 */}
               <div>
                 <div className="flex justify-between items-center mb-1 text-slate-300">
                   <span className="font-semibold flex items-center gap-1.5">
-                    <span>🛍️</span> Para Llevar / Retiro
+                    <span>{labels.channel2Icon || "🛍️"}</span> {labels.channel2Label || "Para Llevar / Retiro"}
                   </span>
                   <span className="font-mono text-slate-400">
-                    {channelDistribution.takeout?.count || 0} pedidos (
+                    {channelDistribution.takeout?.count || 0} {labels.isGastro ? "pedidos" : "solicitudes"} (
                     {channelDistribution.takeout?.percentage || 0}%) · $
                     {Number(channelDistribution.takeout?.revenue || 0).toFixed(2)}
                   </span>
@@ -226,14 +242,14 @@ export function AdminWeeklyMetricsModal({
                 </div>
               </div>
 
-              {/* Domicilio */}
+              {/* Canal 3 */}
               <div>
                 <div className="flex justify-between items-center mb-1 text-slate-300">
                   <span className="font-semibold flex items-center gap-1.5">
-                    <span>🛵</span> A Domicilio (Delivery)
+                    <span>{labels.channel3Icon || "🛵"}</span> {labels.channel3Label || "A Domicilio (Delivery)"}
                   </span>
                   <span className="font-mono text-slate-400">
-                    {channelDistribution.delivery?.count || 0} pedidos (
+                    {channelDistribution.delivery?.count || 0} {labels.isGastro ? "pedidos" : "solicitudes"} (
                     {channelDistribution.delivery?.percentage || 0}%) · $
                     {Number(channelDistribution.delivery?.revenue || 0).toFixed(2)}
                   </span>

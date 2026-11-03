@@ -1,6 +1,5 @@
 import assert from "assert";
 import { NextRequest } from "next/server";
-import { prisma } from "./prisma";
 import { CreateNotificationInputSchema } from "./notifications";
 import { GET as getSubscriptionsCheckRoute, POST as postSubscriptionsCheckRoute } from "@/app/api/internal/subscriptions/check-status/route";
 
@@ -86,8 +85,34 @@ async function runSubscriptionsCheckTestSuite() {
   }
   console.log("✅ [PASS] 4: Normalización defensiva de Zod verificada al 100%");
 
+  // 5. Probar etiquetas polimórficas por vertical
+  console.log("5. Probando resolución de etiquetas polimórficas para las 5 verticales...");
+  const { getVerticalMetricLabels } = await import("./metrics-engine");
+  const gastroLabels = getVerticalMetricLabels("restaurante");
+  const retailLabels = getVerticalMetricLabels("retail");
+  const citasLabels = getVerticalMetricLabels("citas");
+  const reservasLabels = getVerticalMetricLabels("reservas");
+  const serviciosLabels = getVerticalMetricLabels("servicios");
+
+  assert.strictEqual(gastroLabels.topItemTitle, "Plato Estrella ⭐");
+  assert.strictEqual(gastroLabels.topChannelTitle, "Mesa Más Activa 🪑");
+
+  assert.strictEqual(retailLabels.topItemTitle, "Producto Estrella ⭐");
+  assert.strictEqual(retailLabels.topChannelTitle, "Canal de Entrega Líder 📦");
+
+  assert.strictEqual(citasLabels.topItemTitle, "Servicio / Tratamiento Estrella ⭐");
+  assert.strictEqual(citasLabels.topChannelTitle, "Modalidad / Especialista Líder 👨‍⚕️");
+
+  assert.strictEqual(reservasLabels.topItemTitle, "Alojamiento / Cabaña Estrella 🏡");
+  assert.strictEqual(reservasLabels.topChannelTitle, "Canal de Reserva Preferido 📱");
+
+  assert.strictEqual(serviciosLabels.topItemTitle, "Servicio Técnico Estrella 🔧");
+  assert.strictEqual(serviciosLabels.topChannelTitle, "Modalidad / Zona Líder 📍");
+
+  console.log("✅ [PASS] 5: Adaptación polimórfica para las 5 verticales verificada al 100%");
+
   console.log("==================================================");
-  console.log("🎉 TODAS LAS PRUEBAS DE SUBSCRIPCIONES PASARON (4/4)");
+  console.log("🎉 TODAS LAS PRUEBAS DE SUBSCRIPCIONES Y REPORTES PASARON (5/5)");
   console.log("==================================================");
 }
 
