@@ -4,6 +4,7 @@ import { getUserSession, setUserSession } from "@/lib/auth";
 import { prismaTenant } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 
 export async function createGoogleBusinessAction(prevState: unknown, formData: FormData) {
   const session = await getUserSession();
@@ -145,6 +146,17 @@ export async function createGoogleBusinessAction(prevState: unknown, formData: F
       deliveryRates: defaultRates,
       customLabels: customLabelsInitial,
     },
+  });
+
+  const telefono =
+    (formData.get("whatsapp") as string) ||
+    (formData.get("telefono") as string) ||
+    (formData.get("phone") as string) ||
+    "";
+
+  notificarSuperAdmin({
+    mensaje: `🚀 Nuevo comercio registrado en plataforma (Google Onboarding). WhatsApp: ${telefono || "No especificado"}`,
+    cliente: restaurantName || "Nuevo Comercio",
   });
 
   await setUserSession(session.userId, session.email, restaurant.id);

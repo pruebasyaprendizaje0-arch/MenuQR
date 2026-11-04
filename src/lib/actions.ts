@@ -16,6 +16,7 @@ import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { pool } from "@/lib/db-pool";
 import { parseDishImages, serializeDishImages } from "@/lib/dish-images";
 import { emitStockActualizado, emitProductoActualizado } from "@/lib/socket-server";
+import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 
 
 /**
@@ -352,6 +353,17 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
       },
     });
 
+    const telefono =
+      (formData.get("whatsapp") as string) ||
+      (formData.get("telefono") as string) ||
+      (formData.get("phone") as string) ||
+      "";
+
+    notificarSuperAdmin({
+      mensaje: `🚀 Nuevo comercio registrado en plataforma. WhatsApp: ${telefono || "No especificado"}`,
+      cliente: restaurantName || "Nuevo Comercio",
+    });
+
     await setUserSession(user.id, user.email);
     redirect("/admin");
   } catch (error: any) {
@@ -359,6 +371,10 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
       throw error;
     }
     console.error("Error in registerUserAction:", error);
+    notificarSuperAdmin({
+      mensaje: `⚠️ Error Crítico en registerUserAction: ${error?.message || "Fallo desconocido"}`,
+      cliente: "Alerta Servidor",
+    });
     return { error: "Ocurrió un error inesperado al registrar el usuario. Por favor reintente." };
   }
 }
@@ -2276,7 +2292,7 @@ export async function createManualSubscriptionPaymentAction(input: {
   if (!input.restaurantId || !Number.isFinite(input.amount) || input.amount <= 0) {
     return { error: "Restaurante e importe válido son obligatorios." };
   }
-  const restaurant = await prismaTenant.restaurant.findUnique({ where: { id: input.restaurantId }, select: { id: true } });
+  const restaurant = await prismaTenant.restaurant.findUnique({ where: { id: input.restaurantId }, select: { id: true, name: true } });
   if (!restaurant) return { error: "Restaurante no encontrado." };
 
   const payment = await prismaTenant.manualSubscriptionPayment.create({
@@ -2291,6 +2307,11 @@ export async function createManualSubscriptionPaymentAction(input: {
     },
   });
   revalidatePath("/super-admin");
+  notificarSuperAdmin({
+    mensaje: `💳 Nuevo comprobante de pago registrado ($${input.amount ? input.amount.toFixed(2) : "15.00"} USD). Requiere verificación.`,
+    cliente: restaurant.name || "Cliente Registrado",
+  });
+
   return { success: true, paymentId: payment.id };
 }
 

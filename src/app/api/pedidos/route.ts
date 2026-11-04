@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { deductStockUniversal } from "@/lib/stock-service";
 import { sendTelegramAlert } from "@/lib/telegram-alert";
+import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +121,10 @@ export async function GET(req: NextRequest) {
   } catch (err: unknown) {
     console.error("[GET /api/pedidos] Error:", err);
     const msg = err instanceof Error ? err.message : "Error al obtener pedidos";
+    notificarSuperAdmin({
+      mensaje: `⚠️ Error Crítico en GET /api/pedidos: ${msg}`,
+      cliente: "Alerta Servidor",
+    });
     return NextResponse.json(
       { ok: false, error: msg },
       { status: 500 }
@@ -1044,6 +1049,10 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     console.error("[POST /api/pedidos] Error:", err);
     const msg = err instanceof Error ? err.message : "Error al procesar pedido";
+    notificarSuperAdmin({
+      mensaje: `⚠️ Error Crítico en POST /api/pedidos: ${msg}`,
+      cliente: "Alerta Servidor",
+    });
     return NextResponse.json(
       { ok: false, error: msg },
       { status: 500 }
