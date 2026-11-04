@@ -4,7 +4,7 @@ import { dismissNotification } from "@/lib/notifications";
 
 export async function PATCH(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> | { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   const auth = await resolveAdminAuth(req);
   if (auth.success === false) {
@@ -12,7 +12,7 @@ export async function PATCH(
   }
 
   try {
-    const resolvedParams = await Promise.resolve(context.params);
+    const resolvedParams = await context.params;
     const notificationId = resolvedParams.id;
 
     if (!notificationId) {

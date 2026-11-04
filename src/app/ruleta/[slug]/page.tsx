@@ -7,12 +7,12 @@ import type { Metadata } from "next";
 export const dynamic = "force-dynamic";
 
 interface Props {
-  params: Promise<{ slug: string }> | { slug: string };
-  searchParams?: Promise<{ modo?: string; tablet?: string; kiosk?: string }> | { modo?: string; tablet?: string; kiosk?: string };
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ modo?: string; tablet?: string; kiosk?: string }>;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const resolvedParams = await Promise.resolve(params);
+  const resolvedParams = await params;
   const slug = resolvedParams?.slug || "";
   const restaurant = await prisma.restaurant.findUnique({
     where: { slug },
@@ -26,10 +26,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function RuletaLandingPage({ params, searchParams }: Props) {
-  const resolvedParams = await Promise.resolve(params);
+  const resolvedParams = await params;
   const slug = resolvedParams?.slug || "";
 
-  const resolvedSearchParams = searchParams ? await Promise.resolve(searchParams) : {};
+  const resolvedSearchParams = searchParams ? await searchParams : {};
   const modo = (resolvedSearchParams?.modo || resolvedSearchParams?.tablet || resolvedSearchParams?.kiosk || "").toLowerCase();
   const isTabletMode = ["tablet", "caja", "kiosco", "true", "1"].includes(modo);
 

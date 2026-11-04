@@ -104,6 +104,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   // Catálogo drawer para añadir productos
   const [showCatalogDrawer, setShowCatalogDrawer] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("TODAS");
   const [cartToAdd, setCartToAdd] = useState<{
     [productId: string]: { producto: Producto; cantidad: number; notas: string };
   }>({});
@@ -531,6 +532,30 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
     }
   };
 
+  // Categorías y conteo para filtros de catálogo
+  const { categories, categoryCounts } = React.useMemo(() => {
+    const counts: Record<string, number> = { TODAS: productos.length };
+    const catSet = new Set<string>();
+    productos.forEach((p) => {
+      const catName = p.category?.name?.trim() || "Otros";
+      counts[catName] = (counts[catName] || 0) + 1;
+      catSet.add(catName);
+    });
+    return {
+      categories: Array.from(catSet).sort((a, b) => a.localeCompare(b)),
+      categoryCounts: counts,
+    };
+  }, [productos]);
+
+  const filteredCatalogProductos = React.useMemo(() => {
+    return productos.filter((p) => {
+      const pCat = p.category?.name?.trim() || "Otros";
+      const matchesCategory = selectedCategory === "TODAS" || pCat === selectedCategory;
+      const matchesSearch = !catalogSearch.trim() || p.name.toLowerCase().includes(catalogSearch.toLowerCase().trim());
+      return matchesCategory && matchesSearch;
+    });
+  }, [productos, selectedCategory, catalogSearch]);
+
   const updateCartQty = (producto: Producto, delta: number) => {
     setCartToAdd((prev) => {
       const current = prev[producto.id]?.cantidad || 0;
@@ -595,6 +620,8 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       if (data.ok) {
         setCartToAdd({});
         setShowCatalogDrawer(false);
+        setCatalogSearch("");
+        setSelectedCategory("TODAS");
         if (data.pedido) {
           setPedidos((prev) => {
             const index = prev.findIndex((p) => p.id === data.pedido.id);
@@ -937,6 +964,8 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                   setActiveMesaNumber(num);
                   setCartToAdd({});
                   setShowCatalogDrawer(false);
+                  setCatalogSearch("");
+                  setSelectedCategory("TODAS");
                 }}
                 className={`relative rounded-2xl p-4 text-left border-2 transition-all duration-200 transform hover:-translate-y-1 hover:shadow-xl active:scale-95 flex flex-col justify-between min-h-[140px] ${
                   isLlamaMesero
@@ -1236,14 +1265,91 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                       placeholder="Buscar por nombre..."
                       value={catalogSearch}
                       onChange={(e) => setCatalogSearch(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-9 pr-8 py-2 text-xs text-white outline-none focus:border-emerald-500 placeholder:text-slate-500"
                     />
+                    {catalogSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setCatalogSearch("")}
+                        className="absolute right-2.5 top-2.5 text-slate-500 hover:text-slate-300"
+                        title="Limpiar búsqueda"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
 
+                  {/* PILLS DE CATEGORÍAS */}
+                  {categories.length > 0 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCategory("TODAS")}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                          selectedCategory === "TODAS"
+                            ? "bg-emerald-500 text-slate-950 font-bold shadow-sm shadow-emerald-500/30"
+                            : "bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800"
+                        }`}
+                      >
+                        <span>Todas</span>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                            selectedCategory === "TODAS"
+                              ? "bg-slate-950/20 text-slate-950 font-bold"
+                              : "bg-slate-800 text-slate-400"
+                          }`}
+                        >
+                          {categoryCounts["TODAS"] || 0}
+                        </span>
+                      </button>
+
+                      {categories.map((cat) => {
+                        const isSelected = selectedCategory === cat;
+                        const count = categoryCounts[cat] || 0;
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setSelectedCategory(cat)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                              isSelected
+                                ? "bg-emerald-500 text-slate-950 font-bold shadow-sm shadow-emerald-500/30"
+                                : "bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800"
+                            }`}
+                          >
+                            <span>{cat}</span>
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono ${
+                                isSelected
+                                  ? "bg-slate-950/20 text-slate-950 font-bold"
+                                  : "bg-slate-800 text-slate-400"
+                              }`}
+                            >
+                              {count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <div className="max-h-60 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
-                    {productos
-                      .filter((p) => p.name.toLowerCase().includes(catalogSearch.toLowerCase()))
-                      .map((prod) => {
+                    {filteredCatalogProductos.length === 0 ? (
+                      <div className="py-8 text-center text-slate-500 text-xs space-y-1">
+                        <p>No se encontraron platos</p>
+                        {selectedCategory !== "TODAS" && (
+                          <p className="text-[11px] text-slate-600">
+                            en categoría <span className="text-emerald-400">&quot;{selectedCategory}&quot;</span>
+                          </p>
+                        )}
+                        {catalogSearch && (
+                          <p className="text-[11px] text-slate-600">
+                            con el texto <span className="text-slate-400">&quot;{catalogSearch}&quot;</span>
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      filteredCatalogProductos.map((prod) => {
                         const inCart = cartToAdd[prod.id];
                         const qty = inCart?.cantidad || 0;
 
@@ -1255,8 +1361,15 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <div>
-                                <span className="font-bold text-white block">{prod.name}</span>
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-white block">{prod.name}</span>
+                                  {prod.category?.name && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-medium border border-slate-700/50">
+                                      {prod.category.name}
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="text-emerald-400 font-mono font-semibold">${prod.price.toFixed(2)}</span>
                               </div>
 
@@ -1290,7 +1403,8 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                             )}
                           </div>
                         );
-                      })}
+                      })
+                    )}
                   </div>
 
                   {Object.keys(cartToAdd).length > 0 && (

@@ -8,11 +8,11 @@ import { ArrowLeft } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 interface Props {
-  params: Promise<{ id: string }> | { id: string };
+  params: Promise<{ id: string }>;
 }
 
 export default async function NegocioRuletaAdminPage({ params }: Props) {
-  const resolvedParams = await Promise.resolve(params);
+  const resolvedParams = await params;
   const id = resolvedParams?.id || "";
   const [session, superAdmin] = await Promise.all([
     getUserSession(),
