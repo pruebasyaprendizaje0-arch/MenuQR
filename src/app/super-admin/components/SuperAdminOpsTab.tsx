@@ -5,17 +5,11 @@ import {
   Server,
   Activity,
   Database,
-  Radio,
   Mail,
   HardDrive,
   Download,
   FileSpreadsheet,
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
   RefreshCw,
-  FileText,
-  ShieldCheck,
 } from "lucide-react";
 import { checkInfrastructureHealthAction } from "@/lib/superadmin-extra-actions";
 
@@ -29,7 +23,6 @@ export function SuperAdminOpsTab({ restaurants, manualPayments, leads }: OpsTabP
   const [isChecking, setIsChecking] = useState(false);
   const [healthData, setHealthData] = useState<{
     db: { status: "OK" | "WARNING" | "ERROR"; latencyMs: number; message: string };
-    evolution: { status: "OK" | "WARNING" | "ERROR"; latencyMs: number; url: string; message: string };
     email: { status: "OK" | "WARNING" | "ERROR"; provider: string; message: string };
     timestamp: string;
   } | null>(null);
@@ -215,7 +208,7 @@ export function SuperAdminOpsTab({ restaurants, manualPayments, leads }: OpsTabP
           <span>Estado de Infraestructura & Microservicios</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Base de Datos PostgreSQL */}
           <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 shadow-xl flex flex-col justify-between">
             <div>
@@ -240,33 +233,6 @@ export function SuperAdminOpsTab({ restaurants, manualPayments, leads }: OpsTabP
             </div>
             <div className="mt-4 pt-3 border-t border-slate-800/80 text-xs text-slate-300 font-mono">
               {healthData?.db?.message || "Comprobando ping..."}
-            </div>
-          </div>
-
-          {/* WhatsApp Evolution API */}
-          <div className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 shadow-xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <Radio className="w-5 h-5" />
-                </div>
-                <span
-                  className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full border ${
-                    healthData?.evolution?.status === "OK"
-                      ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                      : healthData?.evolution?.status === "WARNING"
-                      ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                      : "bg-red-500/20 text-red-400 border-red-500/30"
-                  }`}
-                >
-                  {healthData?.evolution?.status || "VERIFICANDO"}
-                </span>
-              </div>
-              <h4 className="text-sm font-bold text-white">WhatsApp Evolution API</h4>
-              <p className="text-xs text-slate-400 mt-1">Conectividad API & Webhooks.</p>
-            </div>
-            <div className="mt-4 pt-3 border-t border-slate-800/80 text-xs text-slate-300 font-mono truncate">
-              {healthData?.evolution?.message || "Verificando endpoint..."}
             </div>
           </div>
 

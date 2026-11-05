@@ -58,12 +58,6 @@ export async function checkInfrastructureHealthAction() {
       latencyMs: 0,
       message: "Sin comprobar",
     },
-    evolution: {
-      status: "ERROR" as "OK" | "WARNING" | "ERROR",
-      latencyMs: 0,
-      url: process.env.EVOLUTION_API_URL || "No configurada",
-      message: "Sin comprobar",
-    },
     email: {
       status: "ERROR" as "OK" | "WARNING" | "ERROR",
       provider: "Resend / SMTP",
@@ -84,43 +78,7 @@ export async function checkInfrastructureHealthAction() {
     results.db.message = err?.message?.slice(0, 80) || "Fallo de conexión a Postgres";
   }
 
-  // 2. Check WhatsApp Evolution API
-  const evoUrl = process.env.EVOLUTION_API_URL?.trim();
-  const evoKey = process.env.EVOLUTION_API_KEY?.trim();
-  if (!evoUrl) {
-    results.evolution.status = "WARNING";
-    results.evolution.message = "Variable EVOLUTION_API_URL no configurada";
-  } else {
-    const startEvo = Date.now();
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-      const checkUrl = `${evoUrl.replace(/\/$/, "")}/instance/fetchInstances`;
-      const res = await fetch(checkUrl, {
-        headers: evoKey ? { apikey: evoKey } : {},
-        signal: controller.signal,
-        cache: "no-store",
-      });
-      clearTimeout(timeoutId);
-
-      results.evolution.latencyMs = Date.now() - startEvo;
-      if (res.ok) {
-        results.evolution.status = "OK";
-        results.evolution.message = `API en línea (${results.evolution.latencyMs}ms)`;
-      } else {
-        results.evolution.status = "WARNING";
-        results.evolution.message = `Respondió con código HTTP ${res.status}`;
-      }
-    } catch (err: any) {
-      results.evolution.status = "ERROR";
-      results.evolution.message = err?.name === "AbortError" 
-        ? "Tiempo de espera agotado (>4s)" 
-        : (err?.message?.slice(0, 60) || "Inalcanzable");
-    }
-  }
-
-  // 3. Check Email Provider (Resend or SMTP configured)
+  // 2. Check Email Provider (Resend or SMTP configured)
   const hasResend = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.startsWith("re_"));
   const hasSmtp = Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
 

@@ -14,6 +14,8 @@ const nextConfig = {
       { protocol: "https", hostname: "ubicame.cc" },
       { protocol: "https", hostname: "*.ubicame.cc" },
       { protocol: "https", hostname: "menuqr.ubicame.cc" },
+      { protocol: "https", hostname: "encrypted-tbn0.gstatic.com" },
+      { protocol: "https", hostname: "*.gstatic.com" },
     ],
   },
   async rewrites() {

@@ -300,6 +300,16 @@ export function EcosystemFooter({
                   Cobertura en Quito, Guayaquil, Cuenca y más
                 </a>
               </li>
+              <li className="flex items-center gap-2 pt-1 border-t border-slate-800/80">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <Link
+                  href="/pass"
+                  className="text-emerald-400 hover:text-emerald-300 font-bold transition flex items-center gap-1"
+                >
+                  <span>Ubícame Pass (Mi Pase de Cliente)</span>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">PWA</span>
+                </Link>
+              </li>
             </ul>
           </div>
 

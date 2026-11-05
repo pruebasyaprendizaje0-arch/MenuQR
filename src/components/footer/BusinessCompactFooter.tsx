@@ -306,6 +306,14 @@ export function BusinessCompactFooter({
               Términos
             </Link>
             <span>•</span>
+            <Link
+              href="/pass"
+              target="_blank"
+              className="text-emerald-400 hover:text-emerald-300 font-bold transition flex items-center gap-1"
+            >
+              <span>Ubícame Pass</span>
+            </Link>
+            <span>•</span>
             <a
               href="https://ubicame.info"
               target="_blank"

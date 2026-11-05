@@ -7,6 +7,7 @@ import { SmartLogo, SmartCover } from "@/components/SmartImage";
 import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
 import { parseDishImages, getPrimaryDishImage } from "@/lib/dish-images";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
+import { syncTableOrderToPass } from "@/lib/ubicame-pass";
 import { 
   Utensils, 
   ShoppingCart, 
@@ -47,6 +48,7 @@ import {
   Flame,
   Copy,
   ExternalLink,
+  Heart,
 } from "lucide-react";
 import { SplitBillModal } from "./SplitBillModal";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
@@ -370,6 +372,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [llamadaMeseroEnviada, setLlamadaMeseroEnviada] = useState(false);
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
   const [isTableDetailModalOpen, setIsTableDetailModalOpen] = useState(false);
+  const [isPassQuickModalOpen, setIsPassQuickModalOpen] = useState(false);
   const [billPaymentMethod, setBillPaymentMethod] = useState<"cash" | "qr" | "card">("cash");
   const [billTipPercent, setBillTipPercent] = useState<number>(0);
   const [isSubmittingBill, setIsSubmittingBill] = useState(false);
@@ -794,12 +797,58 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             if (activeOrder.cliente_nombre && !customerName) {
               setCustomerName(activeOrder.cliente_nombre);
             }
+
+            // Sincronizar todos los productos acumulados de la mesa hacia Ubícame Pass
+            if (Array.isArray(activeOrder.items) && activeOrder.items.length > 0) {
+              const flatCatalog: Dish[] = [];
+              restaurant.categories.forEach((c) => c.dishes.forEach((d) => flatCatalog.push(d)));
+
+              syncTableOrderToPass({
+                restaurant: {
+                  id: restaurant.id,
+                  slug: restaurant.slug,
+                  name: restaurant.name,
+                  logoUrl: restaurant.logoUrl,
+                  coverUrl: restaurant.coverUrl,
+                  specialty: restaurant.specialty,
+                  city: restaurant.city || "Ecuador",
+                },
+                items: activeOrder.items,
+                allCatalogDishes: flatCatalog,
+                total: activeOrder.total,
+                orderStatus: activeOrder.estado === "listo" ? "¡Listo en Mesa!" : "En Cocina",
+                customerName: activeOrder.cliente_nombre || customerName,
+                customerPhone: activeOrder.cliente_telefono || customerPhone,
+              });
+            }
           } else if (openTableSession) {
             // Si la mesa estaba abierta pero ya no tiene pedido activo, revisar si se pagó
             const paidOrder = data.pedidos.find(
               (p: any) => String(p.mesa) === String(activeMesa) && p.estado === "pagado"
             );
             if (paidOrder) {
+              if (Array.isArray(paidOrder.items) && paidOrder.items.length > 0) {
+                const flatCatalog: Dish[] = [];
+                restaurant.categories.forEach((c) => c.dishes.forEach((d) => flatCatalog.push(d)));
+
+                syncTableOrderToPass({
+                  restaurant: {
+                    id: restaurant.id,
+                    slug: restaurant.slug,
+                    name: restaurant.name,
+                    logoUrl: restaurant.logoUrl,
+                    coverUrl: restaurant.coverUrl,
+                    specialty: restaurant.specialty,
+                    city: restaurant.city || "Ecuador",
+                  },
+                  items: paidOrder.items,
+                  allCatalogDishes: flatCatalog,
+                  total: paidOrder.total,
+                  orderStatus: "Pagado",
+                  customerName: paidOrder.cliente_nombre || customerName,
+                  customerPhone: paidOrder.cliente_telefono || customerPhone,
+                });
+              }
               setOrderFinalizedNotice(
                 `🎉 ¡La cuenta de la Mesa #${activeMesa} ha sido pagada y cerrada con éxito! Muchas gracias por visitarnos.`
               );
@@ -1196,7 +1245,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     // Sincronizar en segundo plano
     refreshLiveStock(false);
 
-    // Persistir datos del cliente en localStorage para futuros pedidos
+    // Persistir datos del cliente en localStorage para futuros pedidos y sincronizar con Ubícame Pass
     try {
       localStorage.setItem(
         "menuqr_saved_customer",
@@ -1205,6 +1254,60 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           phone: trimmedCustomerPhone,
         })
       );
+
+      // Sincronización automática de perfil, restaurante e items en Ubícame Pass
+      if (typeof window !== "undefined") {
+        const existingProfileRaw = localStorage.getItem("ubicame_pass_profile");
+        const existingProfile = existingProfileRaw ? JSON.parse(existingProfileRaw) : {};
+        localStorage.setItem(
+          "ubicame_pass_profile",
+          JSON.stringify({
+            ...existingProfile,
+            name: trimmedCustomerName,
+            phone: trimmedCustomerPhone,
+            updatedAt: new Date().toISOString(),
+          })
+        );
+
+        // Guardar local en favoritos de Ubícame Pass si aún no está guardado
+        const rawPlaces = localStorage.getItem("ubicame_pass_favorite_places");
+        const places = rawPlaces ? JSON.parse(rawPlaces) : [];
+        if (!places.some((p: any) => p.slug === restaurant.slug || p.id === restaurant.id)) {
+          const newPlace = {
+            id: restaurant.id,
+            name: restaurant.name,
+            slug: restaurant.slug,
+            logoUrl: restaurant.logoUrl,
+            coverUrl: restaurant.coverUrl,
+            vertical: "menuqr",
+            category: restaurant.specialty || "Restaurante",
+            city: restaurant.city || "Ecuador",
+          };
+          localStorage.setItem("ubicame_pass_favorite_places", JSON.stringify([newPlace, ...places].slice(0, 50)));
+        }
+
+        // Guardar platos pedidos en favoritos / habituales de Ubícame Pass
+        const rawItems = localStorage.getItem("ubicame_pass_favorite_items");
+        const items = rawItems ? JSON.parse(rawItems) : [];
+        cart.forEach((cItem) => {
+          const existingItemIndex = items.findIndex((it: any) => it.id === cItem.dish.id);
+          if (existingItemIndex >= 0) {
+            items[existingItemIndex].orderCount = (items[existingItemIndex].orderCount || 1) + 1;
+          } else {
+            items.unshift({
+              id: cItem.dish.id,
+              name: cItem.dish.name,
+              price: cItem.dish.price,
+              imageUrl: cItem.dish.imageUrl,
+              businessName: restaurant.name,
+              businessSlug: restaurant.slug,
+              vertical: "menuqr",
+              orderCount: 1,
+            });
+          }
+        });
+        localStorage.setItem("ubicame_pass_favorite_items", JSON.stringify(items.slice(0, 50)));
+      }
     } catch {}
 
     // Si es pedido en mesa, sincronizar con el KDS de cocina / mesero en PostgreSQL
@@ -4465,9 +4568,19 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     Mesa Manual
                   </span>
                 )}
-                <span className="text-xs font-semibold text-emerald-400 ml-1 truncate">
-                  👤 {openTableSession.customerName}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsPassQuickModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-400 text-xs font-bold transition active:scale-95 group ml-1 shrink-0"
+                  title="Ver mi Ubícame Pass"
+                >
+                  <span className="truncate max-w-[110px] sm:max-w-[170px]">
+                    👤 {openTableSession.customerName}
+                  </span>
+                  <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-500 text-slate-950 px-1.5 py-0.2 rounded-full group-hover:bg-emerald-400 shadow-sm">
+                    Pass
+                  </span>
+                </button>
               </div>
             </div>
 
@@ -4823,6 +4936,22 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             <p className="text-xs text-slate-300 leading-relaxed">
               {orderFinalizedNotice}
             </p>
+            <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-left space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-black text-emerald-400">
+                <span>🎫</span>
+                <span>Visita Guardada en Ubícame Pass</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-snug">
+                Guardamos <strong>{restaurant.name}</strong> y tus platos en tu pase digital para que puedas repetir pedidos en 1 clic.
+              </p>
+              <Link
+                href="/pass"
+                target="_blank"
+                className="inline-block text-[11px] font-black text-emerald-400 hover:text-emerald-300 underline pt-0.5"
+              >
+                Abrir Mi Ubícame Pass ↗
+              </Link>
+            </div>
             <button
               onClick={() => {
                 setOrderFinalizedNotice(null);
@@ -4833,6 +4962,100 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             >
               ¡Muchas Gracias! Cerrar
             </button>
+          </div>
+        </div>
+      )}
+
+      
+      {/* Modal Rápido: Ubícame Pass del Comensal */}
+      {isPassQuickModalOpen && (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative animate-scaleUp">
+            {/* Header Modal */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-slate-950 shadow-md">
+                  <MapPin className="w-4 h-4 fill-slate-950 stroke-slate-950" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-black text-white">Ubícame Pass</h3>
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold px-1.5 py-0.2 rounded-full uppercase">
+                      VIP
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Tu pase digital de fidelidad multi-comercio</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPassQuickModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+                title="Cerrar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tarjeta de Identidad del Cliente */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shrink-0 shadow-md">
+                <div className="w-full h-full bg-slate-900 rounded-[10px] flex items-center justify-center">
+                  <span className="text-lg font-black text-emerald-400">
+                    {(openTableSession?.customerName || customerName || "U")[0]?.toUpperCase()}
+                  </span>
+                </div>
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider block">
+                  Cliente Registrado
+                </span>
+                <h4 className="text-sm font-black text-white truncate">
+                  {openTableSession?.customerName || customerName || "Comensal"}
+                </h4>
+                <p className="text-xs text-slate-400 font-mono truncate">
+                  {openTableSession?.customerPhone || customerPhone || "Sin teléfono registrado"}
+                </p>
+              </div>
+            </div>
+
+            {/* Estado del local actual */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/50 border border-slate-800/80 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Comercio actual:</span>
+                <span className="font-bold text-white truncate max-w-[170px]">{restaurant.name}</span>
+              </div>
+              {openTableSession?.tableName && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Mesa activa:</span>
+                  <span className="font-bold text-emerald-400 font-mono">Mesa #{openTableSession.tableName}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Fidelidad:</span>
+                <span className="text-rose-400 font-bold flex items-center gap-1 text-[11px]">
+                  <Heart className="w-3 h-3 fill-rose-500" /> Guardado en Favoritos
+                </span>
+              </div>
+            </div>
+
+            {/* Acciones */}
+            <div className="space-y-2 pt-1">
+              <Link
+                href="/pass"
+                target="_blank"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider text-center block transition shadow-lg shadow-emerald-500/20 active:scale-95"
+              >
+                Abrir Mi Ubícame Pass Completo ↗
+              </Link>
+              <button
+                type="button"
+                onClick={() => setIsPassQuickModalOpen(false)}
+                className="w-full py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 transition"
+              >
+                Continuar en mi Mesa
+              </button>
+            </div>
           </div>
         </div>
       )}
