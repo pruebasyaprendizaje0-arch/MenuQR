@@ -4,6 +4,20 @@ import { emitPedidoActualizado, emitPedidoCancelado } from "@/lib/socket-server"
 
 export const dynamic = "force-dynamic";
 
+function getMesaVariants(mesa: string): string[] {
+  if (!mesa) return [];
+  const trimmed = mesa.trim();
+  const clean = trimmed.replace(/^(mesa\s*#?|#)/i, "").trim();
+  const variants = new Set<string>([
+    trimmed.toLowerCase(),
+    clean.toLowerCase(),
+    `mesa ${clean}`.toLowerCase(),
+    `mesa #${clean}`.toLowerCase(),
+    `#${clean}`.toLowerCase(),
+  ]);
+  return Array.from(variants).filter(Boolean);
+}
+
 // PUT /api/pedidos/[id] - Cambia estado (nuevo -> en_cocina -> listo -> por_pagar -> pagado -> cancelado)
 export async function PUT(
   req: NextRequest,
@@ -30,7 +44,7 @@ export async function PUT(
     const { rows: updatedRows } = await pool.query(
       `UPDATE pedidos 
        SET estado = COALESCE($1, estado),
-           solicita_mesero = COALESCE($2, solicita_mesero),
+           solicita_mesero = CASE WHEN $1 IN ('pagado', 'cancelado') THEN false ELSE COALESCE($2, solicita_mesero) END,
            motivo_cancelacion = CASE WHEN $1 = 'cancelado' THEN COALESCE($3, motivo_cancelacion, 'Cancelado por usuario') ELSE motivo_cancelacion END,
            cancelado_por = CASE WHEN $1 = 'cancelado' THEN COALESCE($4, cancelado_por, 'sistema') ELSE cancelado_por END,
            cancelado_at = CASE WHEN $1 = 'cancelado' THEN NOW() ELSE cancelado_at END
@@ -53,6 +67,23 @@ export async function PUT(
     }
 
     const pedido = updatedRows[0];
+
+    // Si se pagó o canceló la mesa, limpiar y liberar TODAS las comandas activas huérfanas de esa misma mesa
+    if ((estado === "pagado" || estado === "cancelado") && pedido.mesa && pedido.mesa !== "Delivery") {
+      const mesaVariants = getMesaVariants(pedido.mesa);
+      await pool.query(
+        `UPDATE pedidos 
+         SET estado = $1,
+             solicita_mesero = false,
+             motivo_cancelacion = CASE WHEN $1 = 'cancelado' THEN COALESCE($2, motivo_cancelacion, 'Mesa liberada') ELSE motivo_cancelacion END,
+             cancelado_por = CASE WHEN $1 = 'cancelado' THEN COALESCE($3, cancelado_por, 'mesero') ELSE cancelado_por END,
+             cancelado_at = CASE WHEN $1 = 'cancelado' THEN NOW() ELSE cancelado_at END
+         WHERE negocio_id = $4 
+           AND LOWER(TRIM(mesa)) = ANY($5::text[])
+           AND estado NOT IN ('pagado', 'cancelado')`,
+        [estado, motivo || null, cancelado_por || null, pedido.negocio_id, mesaVariants]
+      );
+    }
 
     // Si se canceló el pedido completo, cancelar también sus items
     if (estado === "cancelado") {
@@ -139,6 +170,7 @@ export async function DELETE(
     const { rows } = await pool.query(
       `UPDATE pedidos 
        SET estado = 'cancelado',
+           solicita_mesero = false,
            motivo_cancelacion = $1,
            cancelado_por = $2,
            cancelado_at = NOW()
@@ -152,6 +184,23 @@ export async function DELETE(
     }
 
     const pedido = rows[0];
+
+    // Si se cancela la comanda de una mesa, liberar y cancelar todas las comandas activas huérfanas de esa mesa
+    if (pedido.mesa && pedido.mesa !== "Delivery") {
+      const mesaVariants = getMesaVariants(pedido.mesa);
+      await pool.query(
+        `UPDATE pedidos 
+         SET estado = 'cancelado',
+             solicita_mesero = false,
+             motivo_cancelacion = $1,
+             cancelado_por = $2,
+             cancelado_at = NOW()
+         WHERE negocio_id = $3 
+           AND LOWER(TRIM(mesa)) = ANY($4::text[])
+           AND estado NOT IN ('pagado', 'cancelado')`,
+        [motivo, cancelado_por, pedido.negocio_id, mesaVariants]
+      );
+    }
 
     // Marcar items como cancelados
     await pool.query(

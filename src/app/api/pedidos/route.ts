@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
 
     query += `
       GROUP BY p.id, c.nombre, p.cliente_nombre, p.cliente_telefono, p.solicita_mesero, p.vertical, p.metadata
-      ORDER BY p.created_at ASC
+      ORDER BY p.created_at DESC
     `;
 
     const { rows: pedidos } = await pool.query(query, params);

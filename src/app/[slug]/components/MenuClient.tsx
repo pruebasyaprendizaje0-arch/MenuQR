@@ -805,7 +805,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         if (isPollingMounted && data.ok && Array.isArray(data.pedidos)) {
           const normMesa = (m: string) => String(m || "").replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase();
           const activeOrder = data.pedidos.find(
-            (p: any) => normMesa(p.mesa) === normMesa(activeMesa) && p.estado !== "pagado"
+            (p: any) =>
+              normMesa(p.mesa) === normMesa(activeMesa) &&
+              p.estado !== "pagado" &&
+              p.estado !== "cancelado"
           );
 
           if (activeOrder) {
@@ -837,41 +840,58 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 customerPhone: activeOrder.cliente_telefono || customerPhone,
               });
             }
-          } else if (openTableSession) {
-            // Si la mesa estaba abierta pero ya no tiene pedido activo, revisar si se pagó
-            const paidOrder = data.pedidos.find(
-              (p: any) => normMesa(p.mesa) === normMesa(activeMesa) && p.estado === "pagado"
-            );
-            if (paidOrder) {
-              if (Array.isArray(paidOrder.items) && paidOrder.items.length > 0) {
-                const flatCatalog: Dish[] = [];
-                restaurant.categories.forEach((c) => c.dishes.forEach((d) => flatCatalog.push(d)));
-
-                syncTableOrderToPass({
-                  restaurant: {
-                    id: restaurant.id,
-                    slug: restaurant.slug,
-                    name: restaurant.name,
-                    logoUrl: restaurant.logoUrl,
-                    coverUrl: restaurant.coverUrl,
-                    specialty: restaurant.specialty,
-                    city: restaurant.city || "Ecuador",
-                  },
-                  items: paidOrder.items,
-                  allCatalogDishes: flatCatalog,
-                  total: paidOrder.total,
-                  orderStatus: "Pagado",
-                  customerName: paidOrder.cliente_nombre || customerName,
-                  customerPhone: paidOrder.cliente_telefono || customerPhone,
-                });
-              }
-              setOrderFinalizedNotice(
-                `🎉 ¡La cuenta de la Mesa #${activeMesa} ha sido pagada y cerrada con éxito! Muchas gracias por visitarnos.`
+          } else {
+            // No hay pedido activo en esta mesa: la mesa está libre, pagada o cancelada
+            if (openTableSession) {
+              const closedOrder = data.pedidos.find(
+                (p: any) =>
+                  normMesa(p.mesa) === normMesa(activeMesa) &&
+                  (p.estado === "pagado" || p.estado === "cancelado")
               );
+
+              if (closedOrder) {
+                if (closedOrder.estado === "pagado") {
+                  setOrderFinalizedNotice(
+                    `🎉 ¡La cuenta de la Mesa #${activeMesa} ha sido pagada y cerrada con éxito! Muchas gracias por visitarnos.`
+                  );
+                } else {
+                  setOrderFinalizedNotice(
+                    `ℹ️ La comanda de la Mesa #${activeMesa} ha sido liberada por el restaurante.`
+                  );
+                }
+
+                if (Array.isArray(closedOrder.items) && closedOrder.items.length > 0) {
+                  const flatCatalog: Dish[] = [];
+                  restaurant.categories.forEach((c) => c.dishes.forEach((d) => flatCatalog.push(d)));
+
+                  syncTableOrderToPass({
+                    restaurant: {
+                      id: restaurant.id,
+                      slug: restaurant.slug,
+                      name: restaurant.name,
+                      logoUrl: restaurant.logoUrl,
+                      coverUrl: restaurant.coverUrl,
+                      specialty: restaurant.specialty,
+                      city: restaurant.city || "Ecuador",
+                    },
+                    items: closedOrder.items,
+                    allCatalogDishes: flatCatalog,
+                    total: closedOrder.total,
+                    orderStatus: closedOrder.estado === "pagado" ? "Pagado" : "Liberado",
+                    customerName: closedOrder.cliente_nombre || customerName,
+                    customerPhone: closedOrder.cliente_telefono || customerPhone,
+                  });
+                }
+              }
+
+              // Limpiar de forma definitiva la sesión de mesa abierta local en localStorage y React state
               try {
                 localStorage.removeItem(`menuqr_open_table_${restaurant.slug}`);
               } catch {}
               setOpenTableSession(null);
+              setLiveTableOrder(null);
+              setLlamadaMeseroEnviada(false);
+            } else {
               setLiveTableOrder(null);
             }
           }

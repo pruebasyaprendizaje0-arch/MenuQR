@@ -550,10 +550,16 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       const res = await fetch(`/api/pedidos/${pedidoId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ estado: "pagado" }),
+        body: JSON.stringify({ estado: "pagado", solicita_mesero: false }),
       });
       if (res.ok) {
-        setPedidos((prev) => prev.filter((p) => p.id !== pedidoId));
+        setPedidos((prev) =>
+          prev.filter(
+            (p) =>
+              p.id !== pedidoId &&
+              (activeMesaNumber === null || String(p.mesa) !== String(activeMesaNumber))
+          )
+        );
         setActiveMesaNumber(null);
         refreshMetricas();
       }
