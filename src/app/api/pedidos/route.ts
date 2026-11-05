@@ -52,29 +52,71 @@ export async function GET(req: NextRequest) {
     const mesa = searchParams.get("mesa");
     const vertical = searchParams.get("vertical");
 
-    let targetNegocioId = negocioId;
+    const isUuid = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+    const validNegocioIds = new Set<string>();
 
-    if (!targetNegocioId && slug) {
-      const { rows: negRows } = await pool.query(
-        "SELECT id FROM negocios WHERE slug = $1 LIMIT 1",
-        [slug.toLowerCase().trim()]
-      );
-      if (negRows[0]) {
-        targetNegocioId = negRows[0].id;
-      }
+    if (negocioId && isUuid(negocioId)) {
+      validNegocioIds.add(negocioId);
     }
 
-    if (!targetNegocioId) {
-      // Tomar el primer negocio disponible si no se envía negocio_id
+    if (slug) {
+      const { rows: negRows } = await pool.query(
+        "SELECT id FROM negocios WHERE slug = $1",
+        [slug.toLowerCase().trim()]
+      );
+      negRows.forEach((r) => {
+        if (isUuid(r.id)) validNegocioIds.add(r.id);
+      });
+
+      try {
+        const { rows: restRows } = await pool.query(
+          `SELECT id FROM "Restaurant" WHERE slug = $1`,
+          [slug.toLowerCase().trim()]
+        );
+        restRows.forEach((r) => {
+          if (isUuid(r.id)) validNegocioIds.add(r.id);
+        });
+      } catch {}
+    }
+
+    if (negocioId) {
+      const { rows: idRows } = await pool.query(
+        "SELECT id, slug FROM negocios WHERE id::text = $1",
+        [negocioId]
+      );
+      idRows.forEach((r) => {
+        if (isUuid(r.id)) validNegocioIds.add(r.id);
+      });
+
+      try {
+        const { rows: restIdRows } = await pool.query(
+          `SELECT id, slug FROM "Restaurant" WHERE id::text = $1`,
+          [negocioId]
+        );
+        for (const r of restIdRows) {
+          if (isUuid(r.id)) validNegocioIds.add(r.id);
+          if (r.slug) {
+            const { rows: negBySlug } = await pool.query(
+              "SELECT id FROM negocios WHERE slug = $1",
+              [r.slug.toLowerCase().trim()]
+            );
+            negBySlug.forEach((nb) => {
+              if (isUuid(nb.id)) validNegocioIds.add(nb.id);
+            });
+          }
+        }
+      } catch {}
+    }
+
+    const targetIdsArray = Array.from(validNegocioIds);
+
+    if (targetIdsArray.length === 0) {
+      // Fallback al primer negocio disponible
       const { rows: firstNegocio } = await pool.query("SELECT id FROM negocios LIMIT 1");
       if (firstNegocio.length === 0) {
         return NextResponse.json({ ok: true, pedidos: [] });
       }
-      return NextResponse.json({
-        ok: true,
-        pedidos: [],
-        sugerencia_negocio_id: firstNegocio[0].id,
-      });
+      targetIdsArray.push(firstNegocio[0].id);
     }
 
     let query = `
@@ -109,10 +151,10 @@ export async function GET(req: NextRequest) {
       FROM pedidos p
       LEFT JOIN camareros c ON p.camarero_id = c.id
       LEFT JOIN pedido_items pi ON pi.pedido_id = p.id AND (pi.estado_item IS NULL OR pi.estado_item != 'cancelado')
-      WHERE p.negocio_id = $1
+      WHERE p.negocio_id = ANY($1::uuid[])
     `;
 
-    const params: (string | number | boolean | string[])[] = [targetNegocioId];
+    const params: (string | number | boolean | string[])[] = [targetIdsArray];
 
     if (soloActivos) {
       params.push("pagado");
@@ -186,6 +228,7 @@ export async function POST(req: NextRequest) {
       vertical = "menuqr", // "menuqr" | "catalogo" | "servicios" | "citas" | "reservas"
       negocio_id,
       slug,
+      skip_stock_deduction = false, // Evita deducción doble cuando ya se ejecutó createOrderAction en el cliente
       cliente_nombre,
       cliente_telefono,
       cliente_direccion,
@@ -232,44 +275,61 @@ export async function POST(req: NextRequest) {
       hora_llegada_estimada,
     } = body;
 
-    // 1. Resolver ID del negocio y obtener datos de contacto para WhatsApp
-    let resolvedNegocioId = negocio_id;
+    // 1. Resolver negocio tanto en "Restaurant" (Prisma) como en "negocios" (PostgreSQL FK)
+    let businessSlug = slug ? String(slug).toLowerCase().trim() : null;
     let businessName = "Comercio";
     let businessPhone = "";
+    let restaurantPrismaId = negocio_id ? String(negocio_id) : null;
+    let negocioDbId: string | null = null;
 
-    // Buscar negocio por slug si no se proveyó ID
-    if (!resolvedNegocioId && slug) {
-      const { rows: negSlugRows } = await pool.query(
-        "SELECT id, nombre, slug FROM negocios WHERE slug = $1 LIMIT 1",
-        [String(slug).toLowerCase().trim()]
+    // Consultar en "Restaurant"
+    try {
+      const { rows: restRows } = await pool.query(
+        `SELECT id, name, slug, whatsapp FROM "Restaurant" WHERE id::text = $1 OR slug = $2 LIMIT 1`,
+        [negocio_id || "", businessSlug || ""]
       );
-      if (negSlugRows[0]) {
-        resolvedNegocioId = negSlugRows[0].id;
-        businessName = negSlugRows[0].nombre;
+      if (restRows[0]) {
+        restaurantPrismaId = restRows[0].id;
+        businessName = restRows[0].name || businessName;
+        if (restRows[0].slug) businessSlug = restRows[0].slug;
+        if (restRows[0].whatsapp) businessPhone = restRows[0].whatsapp;
+      }
+    } catch {}
+
+    // Consultar en "negocios"
+    const { rows: negRows } = await pool.query(
+      `SELECT id, nombre, slug FROM negocios WHERE id::text = $1 OR slug = $2 LIMIT 1`,
+      [negocio_id || "", businessSlug || ""]
+    );
+    if (negRows[0]) {
+      negocioDbId = negRows[0].id;
+      if (!businessName || businessName === "Comercio") businessName = negRows[0].nombre;
+    } else {
+      // Sincronizar negocio en tabla negocios si aún no existe para garantizar foreign keys válidas
+      const isUuid = restaurantPrismaId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(restaurantPrismaId);
+      const { rows: createdNeg } = await pool.query(
+        `INSERT INTO negocios (id, nombre, slug, numero_mesas)
+         VALUES (${isUuid ? "$1::uuid" : "gen_random_uuid()"}, $2, $3, 10)
+         ON CONFLICT (slug) DO UPDATE SET nombre = EXCLUDED.nombre
+         RETURNING id`,
+        isUuid
+          ? [restaurantPrismaId, businessName, businessSlug || `negocio-${Date.now()}`]
+          : [businessName, businessSlug || `negocio-${Date.now()}`]
+      );
+      if (createdNeg[0]) {
+        negocioDbId = createdNeg[0].id;
       }
     }
 
-    // Si aún no hay negocio, intentar buscar el primer negocio o crear uno demo
-    if (!resolvedNegocioId) {
+    if (!negocioDbId) {
       const { rows: fallbackNeg } = await pool.query("SELECT id, nombre FROM negocios LIMIT 1");
       if (fallbackNeg[0]) {
-        resolvedNegocioId = fallbackNeg[0].id;
+        negocioDbId = fallbackNeg[0].id;
         businessName = fallbackNeg[0].nombre;
       }
     }
 
-    // Buscar teléfono de WhatsApp configurado en Restaurant
-    try {
-      const { rows: restRows } = await pool.query(
-        `SELECT id, name, slug, whatsapp FROM "Restaurant" WHERE id::text = $1 OR slug = $2 LIMIT 1`,
-        [resolvedNegocioId || "", slug || ""]
-      );
-      if (restRows[0]) {
-        if (restRows[0].name) businessName = restRows[0].name;
-        if (restRows[0].whatsapp) businessPhone = restRows[0].whatsapp;
-        if (!resolvedNegocioId) resolvedNegocioId = restRows[0].id;
-      }
-    } catch {}
+    const resolvedNegocioId = negocioDbId;
 
     const client = await pool.connect();
 
@@ -298,10 +358,11 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        // Deducción y validación atómica universal de stock en Prisma
-        if (resolvedNegocioId) {
+        // Deducción y validación atómica universal de stock en Prisma (si no fue deducido previamente en createOrderAction)
+        if (!skip_stock_deduction && (restaurantPrismaId || businessSlug || resolvedNegocioId)) {
+          const deductTarget = restaurantPrismaId || businessSlug || resolvedNegocioId!;
           const deductRes = await deductStockUniversal(
-            resolvedNegocioId,
+            deductTarget,
             items.map((it: { dishId?: string; productId?: string; id?: string; nombre?: string; cantidad: string | number }) => ({
               dishId: it.dishId || it.productId || it.id,
               name: it.nombre,
@@ -319,13 +380,14 @@ export async function POST(req: NextRequest) {
 
         // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
         const mesaVariants = getMesaVariants(rawMesa);
+        const searchIds = Array.from(new Set([resolvedNegocioId, restaurantPrismaId].filter(Boolean)));
         const { rows: existingOrders } = await pool.query(
           `SELECT * FROM pedidos 
-           WHERE negocio_id = $1 
+           WHERE (negocio_id = ANY($1::uuid[])${businessSlug ? " OR negocio_id IN (SELECT id FROM negocios WHERE slug = $3)" : ""})
              AND LOWER(TRIM(mesa)) = ANY($2::text[])
              AND estado NOT IN ('pagado', 'cancelado')
            ORDER BY created_at DESC LIMIT 1`,
-          [resolvedNegocioId, mesaVariants]
+          businessSlug ? [searchIds, mesaVariants, businessSlug] : [searchIds, mesaVariants]
         );
 
         if (existingOrders.length > 0 && mesaStr !== "Delivery") {

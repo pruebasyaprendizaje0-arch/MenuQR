@@ -30,9 +30,15 @@ import {
   Lock,
   LogOut,
   KeyRound,
+  BookOpen,
+  ChevronLeft,
+  ChevronRight,
+  Minus,
+  Send,
 } from "lucide-react";
 import { kitchenAudio } from "@/lib/kitchen-audio";
 import { MesasPinLockScreen } from "./MesasPinLockScreen";
+import { getPrimaryDishImage } from "@/lib/dish-images";
 
 interface PedidoItem {
   id: string;
@@ -108,6 +114,30 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   const [cartToAdd, setCartToAdd] = useState<{
     [productId: string]: { producto: Producto; cantidad: number; notas: string };
   }>({});
+
+  // Modo Mesa: Carta Digital Gigante para el cliente en el móvil del mesero
+  const [showClientShowcase, setShowClientShowcase] = useState(false);
+  const [showcaseCategory, setShowcaseCategory] = useState<string>("TODAS");
+  const [showcaseIndex, setShowcaseIndex] = useState(0);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+
+  const showcaseCategories = React.useMemo(() => {
+    const cats = new Set<string>();
+    productos.forEach((p) => {
+      if (p.category?.name) cats.add(p.category.name);
+    });
+    return ["TODAS", ...Array.from(cats)];
+  }, [productos]);
+
+  const showcaseDishes = React.useMemo(() => {
+    if (showcaseCategory === "TODAS") return productos;
+    return productos.filter((p) => p.category?.name === showcaseCategory);
+  }, [productos, showcaseCategory]);
+
+  const currentShowcaseDish = showcaseDishes[showcaseIndex] || showcaseDishes[0] || null;
+  const currentShowcaseQty = currentShowcaseDish ? cartToAdd[currentShowcaseDish.id]?.cantidad || 0 : 0;
+  const totalShowcasePlatos = Object.values(cartToAdd).reduce((acc, it) => acc + it.cantidad, 0);
+  const totalShowcaseMonto = Object.values(cartToAdd).reduce((acc, it) => acc + it.cantidad * it.producto.price, 0);
 
   // Gestión / Edición de meseros
   const [showWaitersModal, setShowWaitersModal] = useState(false);
@@ -593,6 +623,8 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
     if (!activeMesaNumber || !negocioInfo?.id) return;
 
     const itemsToSend = Object.values(cartToAdd).map((item) => ({
+      dishId: item.producto.id,
+      id: item.producto.id,
       nombre: item.producto.name,
       cantidad: item.cantidad,
       precio: item.producto.price,
@@ -610,6 +642,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           negocio_id: negocioInfo.id,
+          slug: negocioInfo.slug,
           mesa: String(activeMesaNumber),
           camarero_id: activeCamarero?.id || selectedCamareroId || undefined,
           items: itemsToSend,
@@ -620,6 +653,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       if (data.ok) {
         setCartToAdd({});
         setShowCatalogDrawer(false);
+        setShowClientShowcase(false);
         setCatalogSearch("");
         setSelectedCategory("TODAS");
         if (data.pedido) {
@@ -1426,11 +1460,25 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
             {/* BOTONES ACCIÓN FOOTER */}
             <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-wrap gap-2.5">
+              {/* Botón MODO MESA: Mostrar Carta al Cliente */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClientShowcase(true);
+                  setShowcaseIndex(0);
+                  setShowcaseCategory("TODAS");
+                }}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center space-x-2 shadow-lg shadow-emerald-500/25 transition active:scale-95 border border-emerald-400/40"
+              >
+                <BookOpen className="w-4 h-4 text-slate-950" />
+                <span>MOSTRAR CARTA AL CLIENTE 📖📱</span>
+              </button>
+
               <button
                 onClick={() => setShowCatalogDrawer(!showCatalogDrawer)}
-                className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-md shadow-emerald-600/20 transition active:scale-95"
+                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-md transition active:scale-95"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4 text-emerald-400" />
                 <span>+ Añadir Producto</span>
               </button>
 
@@ -1470,6 +1518,193 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ================= MODO MESA: CARTA GIGANTE PARA CLIENTE (MÓVIL DEL MESERO) ================= */}
+      {showClientShowcase && activeMesaNumber !== null && (
+        <div className="fixed inset-0 z-[120] bg-white text-slate-950 flex flex-col select-none overflow-hidden animate-fadeIn">
+          {/* HEADER ALTO CONTRASTE PARA EXTERIORES / SOL */}
+          <div className="px-4 py-3 bg-slate-100 border-b border-slate-300 flex items-center justify-between shrink-0 shadow-sm">
+            <button
+              onClick={() => setShowClientShowcase(false)}
+              className="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs flex items-center gap-1 transition active:scale-95"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Volver</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <span className="px-3.5 py-1 rounded-full bg-emerald-600 text-white font-black text-sm shadow">
+                🪑 Mesa #{activeMesaNumber}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-black text-slate-700 bg-white border border-slate-300 px-2.5 py-1 rounded-full shadow-sm">
+                🛒 {totalShowcasePlatos} platos (${totalShowcaseMonto.toFixed(2)})
+              </span>
+            </div>
+          </div>
+
+          {/* BARRA DE CATEGORÍAS */}
+          <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
+            {showcaseCategories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => {
+                  setShowcaseCategory(cat);
+                  setShowcaseIndex(0);
+                }}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap transition-all shadow-sm ${
+                  showcaseCategory === cat
+                    ? "bg-emerald-600 text-white scale-105 shadow-md shadow-emerald-600/30"
+                    : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* CONTENEDOR PRINCIPAL: SLIDER TIPO HISTORIAS DE INSTAGRAM */}
+          <div
+            className="flex-1 flex flex-col items-center justify-center p-4 relative overflow-hidden bg-gradient-to-b from-white to-slate-50"
+            onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
+            onTouchEnd={(e) => {
+              if (touchStartX === null) return;
+              const diffX = touchStartX - e.changedTouches[0].clientX;
+              if (diffX > 40 && showcaseIndex < showcaseDishes.length - 1) {
+                setShowcaseIndex((prev) => prev + 1);
+              } else if (diffX < -40 && showcaseIndex > 0) {
+                setShowcaseIndex((prev) => prev - 1);
+              }
+              setTouchStartX(null);
+            }}
+          >
+            {/* Flecha Izquierda */}
+            {showcaseIndex > 0 && (
+              <button
+                onClick={() => setShowcaseIndex((prev) => prev - 1)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-slate-900/10 hover:bg-slate-900/20 text-slate-900 flex items-center justify-center backdrop-blur-sm shadow-md transition active:scale-90"
+                aria-label="Plato anterior"
+              >
+                <ChevronLeft className="w-8 h-8" />
+              </button>
+            )}
+
+            {/* Flecha Derecha */}
+            {showcaseIndex < showcaseDishes.length - 1 && (
+              <button
+                onClick={() => setShowcaseIndex((prev) => prev + 1)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-12 h-12 rounded-full bg-slate-900/10 hover:bg-slate-900/20 text-slate-900 flex items-center justify-center backdrop-blur-sm shadow-md transition active:scale-90"
+                aria-label="Plato siguiente"
+              >
+                <ChevronRight className="w-8 h-8" />
+              </button>
+            )}
+
+            {currentShowcaseDish ? (
+              <div className="w-full max-w-sm flex flex-col items-center space-y-4">
+                {/* Foto Amplificada */}
+                <div className="w-full aspect-[4/3] rounded-3xl overflow-hidden shadow-2xl bg-slate-100 border-2 border-slate-200 relative">
+                  <img
+                    src={getPrimaryDishImage(currentShowcaseDish.imageUrl) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80"}
+                    alt={currentShowcaseDish.name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src =
+                        "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80";
+                    }}
+                  />
+                  {currentShowcaseDish.category?.name && (
+                    <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-slate-900/80 text-white font-extrabold text-[11px] backdrop-blur-md uppercase tracking-wider">
+                      {currentShowcaseDish.category.name}
+                    </span>
+                  )}
+                  <span className="absolute bottom-3 right-3 px-2.5 py-0.5 rounded-full bg-white/95 text-slate-900 font-bold text-[10px] shadow">
+                    {showcaseIndex + 1} de {showcaseDishes.length}
+                  </span>
+                </div>
+
+                {/* Nombre y Precio 2x */}
+                <div className="text-center space-y-1 px-2">
+                  <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight leading-tight line-clamp-2">
+                    {currentShowcaseDish.name}
+                  </h2>
+                  <div className="text-3xl sm:text-4xl font-black font-mono text-emerald-600">
+                    ${Number(currentShowcaseDish.price).toFixed(2)}
+                  </div>
+                </div>
+
+                {/* Botón de Agregar Táctil */}
+                <div className="w-full pt-1">
+                  {currentShowcaseDish.isAvailable === false ? (
+                    <button
+                      disabled
+                      className="w-full py-4 rounded-2xl bg-slate-200 text-slate-400 font-black text-sm uppercase tracking-wider cursor-not-allowed"
+                    >
+                      ⛔ Agotado
+                    </button>
+                  ) : currentShowcaseQty === 0 ? (
+                    <button
+                      onClick={() => updateCartQty(currentShowcaseDish, 1)}
+                      className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-base uppercase tracking-wider shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 active:scale-95 transition"
+                    >
+                      <Plus className="w-6 h-6 stroke-[3]" />
+                      <span>Pedir este Plato</span>
+                    </button>
+                  ) : (
+                    <div className="w-full flex items-center justify-between bg-emerald-50 border-2 border-emerald-500 rounded-2xl p-2 shadow-lg">
+                      <button
+                        onClick={() => updateCartQty(currentShowcaseDish, -1)}
+                        className="w-14 h-12 rounded-xl bg-white text-emerald-700 hover:bg-emerald-100 flex items-center justify-center font-black text-xl shadow active:scale-95 transition"
+                      >
+                        <Minus className="w-6 h-6 stroke-[3]" />
+                      </button>
+                      <div className="text-center">
+                        <span className="text-2xl font-black text-emerald-900 font-mono">
+                          {currentShowcaseQty}
+                        </span>
+                        <span className="block text-[10px] font-bold text-emerald-700 uppercase">
+                          en comanda
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => updateCartQty(currentShowcaseDish, 1)}
+                        className="w-14 h-12 rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 flex items-center justify-center font-black text-xl shadow active:scale-95 transition"
+                      >
+                        <Plus className="w-6 h-6 stroke-[3]" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center text-slate-400">
+                <p className="font-bold">No hay platos disponibles en esta categoría.</p>
+              </div>
+            )}
+          </div>
+
+          {/* BARRA INFERIOR FLOTANTE DE CONFIRMACIÓN */}
+          {totalShowcasePlatos > 0 && (
+            <div className="p-3 bg-white border-t-2 border-emerald-500 shadow-2xl flex items-center justify-between gap-3 shrink-0 animate-slide-in">
+              <div>
+                <span className="text-[11px] font-bold text-slate-500 block uppercase">Por Enviar:</span>
+                <span className="text-lg font-black font-mono text-emerald-700">
+                  {totalShowcasePlatos} platos (${totalShowcaseMonto.toFixed(2)})
+                </span>
+              </div>
+              <button
+                onClick={submitAddItemsToMesa}
+                className="flex-1 py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 active:scale-95 transition"
+              >
+                <Send className="w-4 h-4" />
+                <span>Enviar a Cocina</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

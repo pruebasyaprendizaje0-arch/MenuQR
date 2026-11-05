@@ -43,14 +43,24 @@ export async function deductStockUniversal(
     const dishIds = items.map((i) => i.dishId).filter(Boolean) as string[];
     const itemNames = items.map((i) => i.name?.trim()).filter(Boolean) as string[];
 
-    // Buscar platos candidatos en la base de datos pertenecientes al negocio
+    // Buscar platos candidatos en la base de datos pertenecientes al negocio (por ID o slug)
     const dbDishes = await tx.dish.findMany({
       where: {
-        restaurantId,
-        OR: [
-          dishIds.length > 0 ? { id: { in: dishIds } } : undefined,
-          itemNames.length > 0 ? { name: { in: itemNames, mode: "insensitive" } } : undefined,
-        ].filter(Boolean) as any,
+        AND: [
+          {
+            OR: [
+              { restaurantId },
+              { restaurant: { id: restaurantId } },
+              { restaurant: { slug: restaurantId } },
+            ],
+          },
+          {
+            OR: [
+              dishIds.length > 0 ? { id: { in: dishIds } } : undefined,
+              itemNames.length > 0 ? { name: { in: itemNames, mode: "insensitive" } } : undefined,
+            ].filter(Boolean) as any,
+          },
+        ],
       },
       select: {
         id: true,

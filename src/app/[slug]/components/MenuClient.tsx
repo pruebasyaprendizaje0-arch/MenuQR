@@ -798,7 +798,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch(
-          `/api/pedidos?negocio_id=${restaurant.id}&mesa=${encodeURIComponent(activeMesa)}&activos=false`,
+          `/api/pedidos?negocio_id=${restaurant.id}&slug=${encodeURIComponent(restaurant.slug)}&mesa=${encodeURIComponent(activeMesa)}&activos=false`,
           { cache: "no-store" }
         );
         const data = await res.json();
@@ -1367,7 +1367,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             negocio_id: restaurant.id,
+            slug: restaurant.slug,
             mesa: selectedTable,
+            skip_stock_deduction: true, // createOrderAction ya dedució atómicamente el stock
             items: cart.map((i) => ({
               dishId: i.dish.id,
               id: i.dish.id,
