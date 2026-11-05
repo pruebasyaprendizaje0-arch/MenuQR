@@ -324,10 +324,10 @@ export function CtaloClient({ store }: { store: StoreData }) {
   const isProductAvailable = useCallback(
     (productId: string): boolean => {
       if (liveStockMap[productId]) {
-        return liveStockMap[productId].isAvailable;
+        return Boolean(liveStockMap[productId].isAvailable);
       }
       const prod = allProducts.find((p) => p.id === productId);
-      return prod?.isAvailable !== false && (typeof prod?.stock !== "number" || prod.stock > 0);
+      return Boolean(prod?.isAvailable !== false && typeof prod?.stock === "number" && prod.stock > 0);
     },
     [liveStockMap, allProducts]
   );
@@ -352,10 +352,11 @@ export function CtaloClient({ store }: { store: StoreData }) {
                 .map((it) => {
                   const fresh = data.dishes[it.productId];
                   if (fresh) {
-                    const curStock = typeof fresh.stock === "number" ? fresh.stock : 999999;
-                    if (fresh.isAvailable === false || curStock <= 0) {
+                    const isConfigured = typeof fresh.stock === "number" && fresh.stock !== null;
+                    const curStock = isConfigured ? fresh.stock : 0;
+                    if (!isConfigured || fresh.isAvailable === false || curStock <= 0) {
                       hasAdjustments = true;
-                      messages.push(`"${it.name}" se encuentra agotado y fue removido de tu orden.`);
+                      messages.push(`"${it.name}" se encuentra agotado o sin stock configurado y fue removido de tu orden.`);
                       return null;
                     }
                     if (it.cantidad > curStock) {

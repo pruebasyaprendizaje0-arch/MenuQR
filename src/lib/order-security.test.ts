@@ -54,6 +54,8 @@ async function runOrderSecurityTests() {
     data: {
       name: "Hamburguesa Real",
       price: 10.0,
+      stock: 500,
+      trackStock: true,
       isAvailable: true,
       categoryId: category.id,
       restaurantId: restaurant.id,

@@ -2511,18 +2511,20 @@ export async function createOrderAction(data: {
         return { error: `El producto "${dbDish.name}" no está disponible actualmente.` };
       }
 
-      // Stock check estricto para platos
-      const shouldTrackStock = Boolean(dbDish.trackStock || typeof dbDish.stock === "number");
-      if (shouldTrackStock) {
-        const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
-        if (availableStock <= 0 || !dbDish.isAvailable) {
-          return { error: `El producto "${dbDish.name}" se encuentra agotado.` };
-        }
-        if (item.quantity > availableStock) {
-          return {
-            error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
-          };
-        }
+      // Stock check estricto para platos: no se puede pedir si no está configurado o si no hay stock
+      if (dbDish.stock === null || dbDish.stock === undefined) {
+        return {
+          error: `No se puede procesar el pedido: El producto "${dbDish.name}" no tiene el stock configurado en el sistema.`,
+        };
+      }
+      const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
+      if (availableStock <= 0 || !dbDish.isAvailable) {
+        return { error: `El producto "${dbDish.name}" se encuentra agotado.` };
+      }
+      if (item.quantity > availableStock) {
+        return {
+          error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
+        };
       }
 
       const serverPrice = dbDish.price;
@@ -2776,20 +2778,25 @@ export async function createOrderAction(data: {
       // Descontar inventario de forma atómica con verificación en caliente para evitar sobreventa
       for (const item of data.items) {
         const dbDish = dishMap.get(item.dishId);
-        const shouldTrackStock = Boolean(dbDish?.trackStock || typeof dbDish?.stock === "number");
-        if (dbDish && shouldTrackStock) {
+        if (dbDish) {
           const freshDish = await tx.dish.findUnique({
             where: { id: dbDish.id },
             select: { id: true, name: true, stock: true, isAvailable: true },
           });
 
           if (freshDish) {
-            const currentStock = freshDish.stock ?? 0;
-            if (currentStock < item.quantity || !freshDish.isAvailable) {
+            if (freshDish.stock === null || freshDish.stock === undefined) {
               throw new Error(
-                currentStock <= 0 || !freshDish.isAvailable
-                  ? `El producto "${freshDish.name}" se acaba de agotar.`
-                  : `Solo quedan ${currentStock} unidad(es) disponibles de "${freshDish.name}". Por favor ajusta tu pedido.`
+                `El producto "${freshDish.name}" no tiene el stock configurado en el sistema.`
+              );
+            }
+            const currentStock = typeof freshDish.stock === "number" ? freshDish.stock : 0;
+            if (currentStock <= 0 || !freshDish.isAvailable) {
+              throw new Error(`El producto "${freshDish.name}" se acaba de agotar.`);
+            }
+            if (currentStock < item.quantity) {
+              throw new Error(
+                `Solo quedan ${currentStock} unidad(es) disponibles de "${freshDish.name}". Por favor ajusta tu pedido.`
               );
             }
             const updatedStock = Math.max(0, currentStock - item.quantity);

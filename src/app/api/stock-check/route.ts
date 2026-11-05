@@ -73,19 +73,14 @@ export async function GET(req: Request) {
     > = {};
 
     for (const d of dishes) {
-      const shouldTrack = Boolean(d.trackStock || (forceTrackStock && !d.isService));
-      const effectiveStock = shouldTrack
-        ? typeof d.stock === "number"
-          ? d.stock
-          : 0
-        : d.stock;
-      const effectiveAvailable =
-        d.isAvailable && (!shouldTrack || (effectiveStock ?? 0) > 0);
+      const isConfigured = typeof d.stock === "number" && d.stock !== null;
+      const effectiveStock = isConfigured ? d.stock : null;
+      const effectiveAvailable = Boolean(d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
 
       stockMap[d.id] = {
         stock: effectiveStock,
         isAvailable: effectiveAvailable,
-        trackStock: shouldTrack,
+        trackStock: true,
         minStock: d.minStock ?? 0,
       };
     }
@@ -185,19 +180,14 @@ export async function POST(req: Request) {
     > = {};
 
     for (const d of dbDishes) {
-      const shouldTrack = Boolean(d.trackStock || (forceTrackStock && !d.isService));
-      const effectiveStock = shouldTrack
-        ? typeof d.stock === "number"
-          ? d.stock
-          : 0
-        : d.stock;
-      const effectiveAvailable =
-        d.isAvailable && (!shouldTrack || (effectiveStock ?? 0) > 0);
+      const isConfigured = typeof d.stock === "number" && d.stock !== null;
+      const effectiveStock = isConfigured ? d.stock : null;
+      const effectiveAvailable = Boolean(d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
 
       stockMap[d.id] = {
         stock: effectiveStock,
         isAvailable: effectiveAvailable,
-        trackStock: shouldTrack,
+        trackStock: true,
         minStock: d.minStock ?? 0,
       };
     }
@@ -216,14 +206,18 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const shouldTrack = Boolean(d.trackStock || (forceTrackStock && !d.isService));
-      const currentStock = shouldTrack
-        ? typeof d.stock === "number"
-          ? d.stock
-          : 0
-        : d.stock;
+      const isConfigured = typeof d.stock === "number" && d.stock !== null;
 
-      if (!d.isAvailable || (shouldTrack && (currentStock ?? 0) <= 0)) {
+      if (!isConfigured) {
+        adjustments.push({
+          dishId: d.id,
+          name: d.name,
+          requested: item.quantity,
+          available: 0,
+          status: "SOLD_OUT",
+          message: `El producto "${d.name}" no tiene el stock configurado en el sistema y no puede ser ordenado.`,
+        });
+      } else if (!d.isAvailable || (d.stock ?? 0) <= 0) {
         adjustments.push({
           dishId: d.id,
           name: d.name,
@@ -232,14 +226,14 @@ export async function POST(req: Request) {
           status: "SOLD_OUT",
           message: `"${d.name}" se encuentra agotado.`,
         });
-      } else if (shouldTrack && typeof currentStock === "number" && item.quantity > currentStock) {
+      } else if (typeof d.stock === "number" && item.quantity > d.stock) {
         adjustments.push({
           dishId: d.id,
           name: d.name,
           requested: item.quantity,
-          available: currentStock,
+          available: d.stock,
           status: "REDUCED",
-          message: `Solo quedan ${currentStock} unidad(es) disponibles de "${d.name}".`,
+          message: `Solo quedan ${d.stock} unidad(es) disponibles de "${d.name}".`,
         });
       }
     }

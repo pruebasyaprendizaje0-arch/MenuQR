@@ -20,6 +20,26 @@ function formatWhatsAppNumber(phone: string): string {
   return cleaned;
 }
 
+// Helper para escapar expresiones regulares de forma segura
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Helper para generar variantes seguras de identificación de mesa (sin REGEXP SQL)
+function getMesaVariants(mesa: string): string[] {
+  if (!mesa) return [];
+  const trimmed = mesa.trim();
+  const clean = trimmed.replace(/^(mesa\s*#?|#)/i, "").trim();
+  const variants = new Set<string>([
+    trimmed.toLowerCase(),
+    clean.toLowerCase(),
+    `mesa ${clean}`.toLowerCase(),
+    `mesa #${clean}`.toLowerCase(),
+    `#${clean}`.toLowerCase(),
+  ]);
+  return Array.from(variants).filter(Boolean);
+}
+
 // GET /api/pedidos?negocio_id=...&activos=true&vertical=...
 export async function GET(req: NextRequest) {
   try {
@@ -92,7 +112,7 @@ export async function GET(req: NextRequest) {
       WHERE p.negocio_id = $1
     `;
 
-    const params: (string | number | boolean)[] = [targetNegocioId];
+    const params: (string | number | boolean | string[])[] = [targetNegocioId];
 
     if (soloActivos) {
       params.push("pagado");
@@ -101,8 +121,9 @@ export async function GET(req: NextRequest) {
     }
 
     if (mesa) {
-      params.push(mesa);
-      query += ` AND p.mesa = $${params.length}`;
+      const mesaVariants = getMesaVariants(mesa);
+      params.push(mesaVariants);
+      query += ` AND LOWER(TRIM(p.mesa)) = ANY($${params.length}::text[])`;
     }
 
     if (vertical) {
@@ -265,7 +286,9 @@ export async function POST(req: NextRequest) {
       // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
       // =========================================================================
       if (vertical === "menuqr") {
-        const mesaStr = mesa ? String(mesa).trim() : "Delivery";
+        const rawMesa = mesa ? String(mesa).trim() : "Delivery";
+        const cleanMesa = rawMesa === "Delivery" ? "Delivery" : rawMesa.replace(/^(mesa\s*#?|#)/i, "").trim();
+        const mesaStr = rawMesa === "Delivery" ? "Delivery" : cleanMesa;
 
         if (!Array.isArray(items) || items.length === 0) {
           await client.query("ROLLBACK");
@@ -295,11 +318,14 @@ export async function POST(req: NextRequest) {
         }
 
         // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
+        const mesaVariants = getMesaVariants(rawMesa);
         const { rows: existingOrders } = await pool.query(
           `SELECT * FROM pedidos 
-           WHERE negocio_id = $1 AND mesa = $2 AND estado NOT IN ('pagado', 'cancelado')
+           WHERE negocio_id = $1 
+             AND LOWER(TRIM(mesa)) = ANY($2::text[])
+             AND estado NOT IN ('pagado', 'cancelado')
            ORDER BY created_at DESC LIMIT 1`,
-          [resolvedNegocioId, mesaStr]
+          [resolvedNegocioId, mesaVariants]
         );
 
         if (existingOrders.length > 0 && mesaStr !== "Delivery") {

@@ -476,10 +476,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     > = {};
     for (const cat of restaurant.categories || []) {
       for (const d of cat.dishes || []) {
+        const isConfigured = typeof d.stock === "number" && d.stock !== null;
+        const curStock = isConfigured ? d.stock : null;
+        const isAvail = Boolean(d.isAvailable && isConfigured && (curStock ?? 0) > 0);
         initialMap[d.id] = {
-          stock: d.stock ?? null,
-          isAvailable: d.isAvailable,
-          trackStock: Boolean(d.trackStock),
+          stock: curStock,
+          isAvailable: isAvail,
+          trackStock: true,
           minStock: d.minStock ?? 0,
         };
       }
@@ -493,13 +496,19 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       ...cat,
       dishes: (cat.dishes || []).map((d) => {
         const live = liveStockMap[d.id];
-        if (!live) return d;
+        const isConfigured = live
+          ? typeof live.stock === "number" && live.stock !== null
+          : typeof d.stock === "number" && d.stock !== null;
+        const curStock = live ? live.stock : (isConfigured ? d.stock : null);
+        const isAvail = live
+          ? live.isAvailable
+          : Boolean(d.isAvailable && isConfigured && (curStock ?? 0) > 0);
         return {
           ...d,
-          stock: live.stock,
-          isAvailable: live.isAvailable,
-          trackStock: live.trackStock,
-          minStock: live.minStock,
+          stock: curStock,
+          isAvailable: Boolean(isAvail && isConfigured && (curStock ?? 0) > 0),
+          trackStock: true,
+          minStock: live?.minStock ?? d.minStock ?? 0,
         };
       }),
     }));
@@ -528,12 +537,18 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               adjustedCart.push(it);
               continue;
             }
-            if (!fresh.isAvailable || (fresh.trackStock && (fresh.stock ?? 0) <= 0)) {
+            const isConfigured = typeof fresh.stock === "number" && fresh.stock !== null;
+            if (!isConfigured) {
+              hasAdjustments = true;
+              messages.push(`"${it.dish.name}" no tiene el stock configurado en el sistema y fue retirado de tu pedido.`);
+              continue;
+            }
+            if (!fresh.isAvailable || (fresh.stock ?? 0) <= 0) {
               hasAdjustments = true;
               messages.push(`"${it.dish.name}" se agotó recientemente y fue retirado de tu pedido.`);
               continue;
             }
-            if (fresh.trackStock && typeof fresh.stock === "number" && it.quantity > fresh.stock) {
+            if (typeof fresh.stock === "number" && it.quantity > fresh.stock) {
               hasAdjustments = true;
               messages.push(
                 `Solo quedan ${fresh.stock} unidad(es) de "${it.dish.name}". Se ajustó la cantidad en tu orden.`
@@ -551,7 +566,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 ...it.dish,
                 stock: fresh.stock,
                 isAvailable: fresh.isAvailable,
-                trackStock: fresh.trackStock,
+                trackStock: true,
               },
             });
           }
@@ -788,8 +803,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         );
         const data = await res.json();
         if (isPollingMounted && data.ok && Array.isArray(data.pedidos)) {
+          const normMesa = (m: string) => String(m || "").replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase();
           const activeOrder = data.pedidos.find(
-            (p: any) => String(p.mesa) === String(activeMesa) && p.estado !== "pagado"
+            (p: any) => normMesa(p.mesa) === normMesa(activeMesa) && p.estado !== "pagado"
           );
 
           if (activeOrder) {
@@ -824,7 +840,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           } else if (openTableSession) {
             // Si la mesa estaba abierta pero ya no tiene pedido activo, revisar si se pagó
             const paidOrder = data.pedidos.find(
-              (p: any) => String(p.mesa) === String(activeMesa) && p.estado === "pagado"
+              (p: any) => normMesa(p.mesa) === normMesa(activeMesa) && p.estado === "pagado"
             );
             if (paidOrder) {
               if (Array.isArray(paidOrder.items) && paidOrder.items.length > 0) {
@@ -935,11 +951,18 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
   const addToCart = (dish: Dish) => {
     const live = liveStockMap[dish.id];
-    const isTracked = live ? live.trackStock : Boolean(dish.trackStock);
+    const isConfigured = live
+      ? typeof live.stock === "number" && live.stock !== null
+      : typeof dish.stock === "number" && dish.stock !== null;
     const curStock = live ? (live.stock ?? 0) : (dish.stock ?? 0);
     const isAvailable = live ? live.isAvailable : dish.isAvailable;
 
-    if (isTracked && (curStock <= 0 || !isAvailable)) {
+    if (!isConfigured) {
+      alert(`⚠️ El producto "${dish.name}" no tiene el stock configurado en el sistema y no puede ser ordenado.`);
+      return;
+    }
+
+    if (curStock <= 0 || !isAvailable) {
       alert(`¡Lo sentimos! "${dish.name}" se encuentra agotado.`);
       return;
     }
@@ -951,7 +974,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     setCart((prevCart) => {
       const existing = prevCart.find((item) => item.dish.id === dish.id);
       if (existing) {
-        if (isTracked && existing.quantity >= curStock) {
+        if (existing.quantity >= curStock) {
           reachedStockLimit = true;
           return prevCart;
         }
@@ -960,7 +983,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             ? {
                 ...item,
                 quantity: item.quantity + 1,
-                dish: { ...item.dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: isTracked },
+                dish: { ...item.dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: true },
               }
             : item
         );
@@ -968,7 +991,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return [
         ...prevCart,
         {
-          dish: { ...dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: isTracked },
+          dish: { ...dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: true },
           quantity: 1,
         },
       ];
@@ -1123,6 +1146,32 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       alert(`⛔ No se puede procesar el pedido.\n\nPara el rango "${selectedKmRate.label}", el mínimo de compra requerido es de $${selectedKmRate.minOrder.toFixed(2)}.\nTu subtotal actual es de $${subtotal.toFixed(2)} (te faltan $${(selectedKmRate.minOrder - subtotal).toFixed(2)} en consumo).`);
       setIsSubmittingOrder(false);
       return;
+    }
+
+    // Validar existencias de stock de forma estricta en el cliente antes de proceder
+    for (const item of cart) {
+      const live = liveStockMap[item.dish.id];
+      const isConfigured = live
+        ? typeof live.stock === "number" && live.stock !== null
+        : typeof item.dish.stock === "number" && item.dish.stock !== null;
+      const curStock = live ? (live.stock ?? 0) : (item.dish.stock ?? 0);
+      const isAvail = live ? live.isAvailable : item.dish.isAvailable;
+
+      if (!isConfigured) {
+        alert(`⛔ No se puede procesar el pedido.\n\nEl producto "${item.dish.name}" no tiene el stock configurado en el sistema.`);
+        setIsSubmittingOrder(false);
+        return;
+      }
+      if (!isAvail || curStock <= 0) {
+        alert(`⛔ No se puede procesar el pedido.\n\nEl producto "${item.dish.name}" se encuentra agotado.`);
+        setIsSubmittingOrder(false);
+        return;
+      }
+      if (item.quantity > curStock) {
+        alert(`⛔ No se puede procesar el pedido.\n\nSolo quedan ${curStock} unidad(es) de "${item.dish.name}". Por favor ajusta la cantidad en tu carrito.`);
+        setIsSubmittingOrder(false);
+        return;
+      }
     }
 
     // Pre-validar existencias de stock en el servidor en tiempo real
@@ -1313,13 +1362,15 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     // Si es pedido en mesa, sincronizar con el KDS de cocina / mesero en PostgreSQL
     if (isTableOrder) {
       try {
-        await fetch("/api/pedidos", {
+        const kdsRes = await fetch("/api/pedidos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             negocio_id: restaurant.id,
             mesa: selectedTable,
             items: cart.map((i) => ({
+              dishId: i.dish.id,
+              id: i.dish.id,
               nombre: i.dish.name,
               cantidad: i.quantity,
               precio: i.dish.price,
@@ -1329,6 +1380,12 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
             cliente_telefono: customerPhone.trim() || null,
           }),
         });
+        const kdsData = await kdsRes.json();
+        if (kdsRes.ok && kdsData.ok && kdsData.pedido) {
+          setLiveTableOrder(kdsData.pedido);
+        } else if (!kdsRes.ok || !kdsData.ok) {
+          console.warn("Aviso KDS /api/pedidos:", kdsData?.error);
+        }
       } catch (kdsErr) {
         console.warn("Error enviando a KDS /api/pedidos:", kdsErr);
       }
@@ -2650,7 +2707,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 </span>
                               )}
                             </div>
-                            {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
+                            {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
                               <button
                                 onClick={() => addToCart(dish)}
                                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 active:scale-95 transition-all duration-200"
@@ -2660,7 +2717,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                               </button>
                             ) : (
                               <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2.5 py-1 rounded-full">
-                                Agotado
+                                {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
                               </span>
                             )}
                           </div>
@@ -2796,7 +2853,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 </span>
                               )}
                             </div>
-                            {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
+                            {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
                               <button
                                 onClick={() => addToCart(dish)}
                                 className="p-1.5 rounded-xl text-white shadow-lg transition transform active:scale-90 duration-200"
@@ -2805,7 +2862,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 <Plus className="h-3.5 w-3.5" />
                               </button>
                             ) : (
-                              <span className="text-[9px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2 py-1 rounded-full">Agotado</span>
+                              <span className="text-[9px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2 py-1 rounded-full">
+                                {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                              </span>
                             )}
                           </div>
                         </div>
@@ -2846,7 +2905,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           <div 
                             key={dish.id}
                             className={`relative group overflow-hidden bg-gradient-to-br from-slate-900/80 to-slate-950/85 backdrop-blur-md rounded-[2rem] p-5 flex gap-5 transition-all duration-300 border ${
-                              dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0)
+                              dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0
                                 ? "border-amber-500/20 hover:border-amber-500/40 hover:shadow-[0_0_20px_rgba(245,158,11,0.08)]" 
                                 : "opacity-50 border-slate-900"
                             }`}
@@ -2919,7 +2978,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                   )}
                                 </div>
                                 <div>
-                                  {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
+                                  {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
                                     <button
                                       onClick={() => addToCart(dish)}
                                       className="inline-flex items-center gap-1 text-[11px] font-black px-4 py-2 rounded-xl text-white shadow-lg transition transform active:scale-95 duration-200"
@@ -2928,7 +2987,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                       <Plus className="h-3.5 w-3.5" /> Agregar Combo
                                     </button>
                                   ) : (
-                                    <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">Agotado</span>
+                                    <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">
+                                      {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                                    </span>
                                   )}
                                 </div>
                               </div>
@@ -2943,7 +3004,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           <div 
                             key={dish.id}
                             className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 hover:border-slate-800 rounded-3xl p-3 flex flex-col justify-between transition-all duration-300 relative group overflow-hidden ${
-                              dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? "" : "opacity-50"
+                              dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? "" : "opacity-50"
                             }`}
                           >
                             <div className="w-full aspect-[9/16] rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
@@ -3020,7 +3081,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                   )}
                                 </div>
                                 <div>
-                                  {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
+                                  {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
                                     <button
                                       onClick={() => addToCart(dish)}
                                       className="p-1.5 sm:p-2 rounded-xl text-white shadow-lg transition transform active:scale-90 duration-200"
@@ -3031,7 +3092,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                     </button>
                                   ) : (
                                     <span className="text-[9px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-2 py-0.5 rounded-full">
-                                      Agotado
+                                      {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
                                     </span>
                                   )}
                                 </div>
@@ -3046,7 +3107,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         <div 
                           key={dish.id}
                           className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-3xl p-4 flex gap-4 transition-all duration-300 relative group overflow-hidden ${
-                            dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? "hover:border-slate-800" : "opacity-50"
+                            dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? "hover:border-slate-800" : "opacity-50"
                           }`}
                         >
                           <div className="h-24 w-24 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
@@ -3119,7 +3180,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 )}
                               </div>
                               <div className="flex justify-end pt-2">
-                                {dish.isAvailable && (!dish.trackStock || (dish.stock ?? 0) > 0) ? (
+                                {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
                                   <button
                                     onClick={() => addToCart(dish)}
                                     className="inline-flex items-center gap-1 text-[11px] font-bold px-3 py-1.5 rounded-full text-white shadow-lg transition-transform active:scale-95 duration-200"
@@ -3128,7 +3189,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                     <Plus className="h-3 w-3" /> Agregar
                                   </button>
                                 ) : (
-                                  <span className="text-[10px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">Agotado</span>
+                                  <span className="text-[10px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">
+                                    {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                                  </span>
                                 )}
                               </div>
                             </div>

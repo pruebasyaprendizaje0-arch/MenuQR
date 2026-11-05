@@ -75,18 +75,31 @@ export async function deductStockUniversal(
         matchedDish = dishByName.get(item.name.toLowerCase().trim());
       }
 
-      if (matchedDish) {
-        const curStock = typeof matchedDish.stock === "number" ? matchedDish.stock : 0;
-        const isAvail = matchedDish.isAvailable !== false;
+      if (!matchedDish) {
+        throw new Error(
+          `El producto "${item.name || item.dishId}" no se encuentra disponible en el catálogo de este negocio.`
+        );
+      }
 
-        // Si el producto no está disponible o no tiene stock suficiente
-        if (!isAvail || curStock < qty) {
-          throw new Error(
-            curStock <= 0
-              ? `El producto "${matchedDish.name}" se encuentra agotado en bodega.`
-              : `Stock insuficiente para "${matchedDish.name}". Disponible: ${curStock}, solicitado: ${qty}.`
-          );
-        }
+      // Validación estricta: Si no está configurado el stock o es nulo, no se puede pedir
+      if (matchedDish.stock === null || matchedDish.stock === undefined) {
+        throw new Error(
+          `El producto "${matchedDish.name}" no tiene el stock configurado en el sistema y no puede ser ordenado.`
+        );
+      }
+
+      const curStock = typeof matchedDish.stock === "number" ? matchedDish.stock : 0;
+      const isAvail = matchedDish.isAvailable !== false;
+
+      // Si el producto no está disponible o no tiene stock suficiente
+      if (!isAvail || curStock <= 0) {
+        throw new Error(`El producto "${matchedDish.name}" se encuentra agotado en bodega.`);
+      }
+
+      if (curStock < qty) {
+        throw new Error(
+          `Stock insuficiente para "${matchedDish.name}". Disponible: ${curStock}, solicitado: ${qty}.`
+        );
       }
     }
 
