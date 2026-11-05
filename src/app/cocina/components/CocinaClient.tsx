@@ -91,15 +91,23 @@ export function CocinaClient({
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Estado de bloqueo por PIN de seguridad de Cocina KDS
-  const [isKitchenUnlocked, setIsKitchenUnlocked] = useState<boolean>(() => {
-    if (!kitchenPinRequired) return true;
-    try {
-      return sessionStorage.getItem(`menuqr_cocina_unlocked_${initialSlug}`) === "true";
-    } catch {
-      return false;
+  // Estado de bloqueo por PIN de seguridad de Cocina KDS y montaje inicial para SSR/Hydration
+  const [isMounted, setIsMounted] = useState(false);
+  const [isKitchenUnlocked, setIsKitchenUnlocked] = useState(!kitchenPinRequired);
+  const [baseUrl, setBaseUrl] = useState("");
+
+  useEffect(() => {
+    setIsMounted(true);
+    setBaseUrl(typeof window !== "undefined" ? window.location.origin : "");
+    if (kitchenPinRequired) {
+      try {
+        const saved = sessionStorage.getItem(`menuqr_cocina_unlocked_${initialSlug}`) === "true";
+        setIsKitchenUnlocked(saved);
+      } catch {
+        setIsKitchenUnlocked(false);
+      }
     }
-  });
+  }, [kitchenPinRequired, initialSlug]);
 
   const handleLockKitchen = () => {
     try {
@@ -690,6 +698,18 @@ export function CocinaClient({
   );
 
   const isConnected = isLiveConnected || socketConnected;
+
+  // Si se requiere PIN de seguridad y la app aún no ha completado el montaje del cliente (SSR / Hydration safe)
+  if (kitchenPinRequired && !isMounted) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-slate-400 font-medium">Verificando acceso a cocina...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Si se requiere PIN de seguridad y la pantalla no ha sido desbloqueada en esta sesión
   if (kitchenPinRequired && !isKitchenUnlocked) {
@@ -1428,21 +1448,22 @@ export function CocinaClient({
 
             <div className="p-4 bg-white rounded-2xl inline-block shadow-inner mx-auto">
               <QRCodeSVG
-                value={typeof window !== "undefined" ? `${window.location.origin}/${initialSlug}/mesas` : `https://menuqr.ubicame.cc/${initialSlug}/mesas`}
+                value={baseUrl ? `${baseUrl}/${initialSlug}/mesas` : `https://menuqr.ubicame.cc/${initialSlug}/mesas`}
                 size={200}
                 level="M"
               />
             </div>
 
             <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs font-mono text-emerald-400 truncate select-all">
-              {typeof window !== "undefined" ? `${window.location.origin}/${initialSlug}/mesas` : `/${initialSlug}/mesas`}
+              {baseUrl ? `${baseUrl}/${initialSlug}/mesas` : `/${initialSlug}/mesas`}
             </div>
 
             <div className="flex gap-2">
               <button
                 onClick={() => {
+                  const urlToCopy = baseUrl ? `${baseUrl}/${initialSlug}/mesas` : `${window.location.origin}/${initialSlug}/mesas`;
                   if (typeof navigator !== "undefined") {
-                    navigator.clipboard.writeText(`${window.location.origin}/${initialSlug}/mesas`);
+                    navigator.clipboard.writeText(urlToCopy);
                     setCopiedLink(true);
                     setTimeout(() => setCopiedLink(false), 2000);
                   }
