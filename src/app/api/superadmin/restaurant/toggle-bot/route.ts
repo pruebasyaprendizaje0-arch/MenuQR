@@ -8,8 +8,14 @@ export const runtime = "nodejs";
 
 export async function PATCH(req: NextRequest) {
   try {
-    // 1. Verificación de Seguridad de Super Admin (Opcional según entorno, pero recomendada)
+    // 1. Verificación obligatoria de rol SuperAdmin
     const isSuperAdmin = await getSuperAdminSession();
+    if (!isSuperAdmin) {
+      return NextResponse.json(
+        { error: "Acceso no autorizado. Se requieren permisos de Super Administrador." },
+        { status: 403 }
+      );
+    }
     
     // 2. Extracción y validación del Payload
     const body = await req.json().catch(() => null);

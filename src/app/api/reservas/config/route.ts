@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
+import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +102,35 @@ export async function POST(req: NextRequest) {
 
     if (!negocio_id) {
       return NextResponse.json({ ok: false, error: "negocio_id es requerido" }, { status: 400 });
+    }
+
+    // Control de Acceso: Solo SuperAdmin o Propietario del restaurante
+    const isSuperAdmin = await getSuperAdminSession();
+    const session = await getUserSession();
+
+    if (!isSuperAdmin) {
+      if (!session || !session.userId) {
+        return NextResponse.json(
+          { ok: false, error: "No autorizado. Inicie sesión para guardar la configuración." },
+          { status: 401 }
+        );
+      }
+
+      const isOwnerSession = session.restaurantId === negocio_id;
+      let userRestaurant = null;
+      if (!isOwnerSession) {
+        userRestaurant = await prisma.restaurant.findFirst({
+          where: { id: negocio_id, userId: session.userId },
+          select: { id: true },
+        });
+      }
+
+      if (!isOwnerSession && !userRestaurant) {
+        return NextResponse.json(
+          { ok: false, error: "Acceso denegado: no tienes permisos para configurar este negocio." },
+          { status: 403 }
+        );
+      }
     }
 
     const { rows } = await pool.query(

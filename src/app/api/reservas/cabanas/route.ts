@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { revalidatePath } from "next/cache";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
+
+const CabanaPatchSchema = z.object({
+  dish_id: z.string().min(1, "dish_id es requerido"),
+  beds: z.string().max(100).optional(),
+  maxGuests: z.number().int().min(1).max(50).optional(),
+  price: z.number().positive("El precio debe ser un número positivo mayor a 0").max(100000).optional(),
+  name: z.string().trim().min(1).max(200).optional(),
+  description: z.string().max(2000).optional(),
+  isAvailable: z.boolean().optional(),
+});
 
 // GET /api/reservas/cabanas?negocio_id=...
 export async function GET(req: NextRequest) {
@@ -69,14 +82,36 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     await ensureDbTables();
-    const body = await req.json();
-    const { dish_id, beds, maxGuests, price, name, description, isAvailable } = body;
 
-    if (!dish_id) {
-      return NextResponse.json({ ok: false, error: "dish_id es requerido" }, { status: 400 });
+    // 1. Autenticación obligatoria
+    const isSuperAdmin = await getSuperAdminSession();
+    const session = await getUserSession();
+
+    if (!isSuperAdmin && (!session || !session.userId)) {
+      return NextResponse.json(
+        { ok: false, error: "No autorizado. Inicie sesión para modificar este recurso." },
+        { status: 401 }
+      );
     }
 
-    // Obtener plato actual y sus variantes
+    const rawBody = await req.json().catch(() => null);
+    if (!rawBody) {
+      return NextResponse.json({ ok: false, error: "Cuerpo de solicitud inválido." }, { status: 400 });
+    }
+
+    // 2. Validación estricta con esquema Zod (incluyendo precio positivo y límites)
+    const validation = CabanaPatchSchema.safeParse(rawBody);
+    if (!validation.success) {
+      const firstIssue = (validation.error as any).issues?.[0]?.message || validation.error.message || "Datos de entrada inválidos";
+      return NextResponse.json(
+        { ok: false, error: firstIssue },
+        { status: 400 }
+      );
+    }
+
+    const { dish_id, beds, maxGuests, price, name, description, isAvailable } = validation.data;
+
+    // 3. Obtener plato actual y sus variantes
     const { rows } = await pool.query(
       `SELECT id, "restaurantId", variants, price, name, description, "isAvailable"
        FROM "Dish" WHERE id = $1 LIMIT 1`,
@@ -88,6 +123,29 @@ export async function PATCH(req: NextRequest) {
     }
 
     const currentDish = rows[0];
+
+    // 4. Verificación de propiedad multi-tenant (el usuario debe ser dueño del restaurante al que pertenece el plato)
+    if (!isSuperAdmin) {
+      const isOwnerSession = session?.restaurantId === currentDish.restaurantId;
+      let userRestaurant = null;
+      if (!isOwnerSession && session?.userId) {
+        userRestaurant = await prisma.restaurant.findFirst({
+          where: {
+            id: currentDish.restaurantId,
+            userId: session.userId,
+          },
+          select: { id: true },
+        });
+      }
+
+      if (!isOwnerSession && !userRestaurant) {
+        return NextResponse.json(
+          { ok: false, error: "Acceso denegado: este alojamiento pertenece a otro restaurante." },
+          { status: 403 }
+        );
+      }
+    }
+
     let variantsObj: any = {};
     if (currentDish.variants) {
       try {

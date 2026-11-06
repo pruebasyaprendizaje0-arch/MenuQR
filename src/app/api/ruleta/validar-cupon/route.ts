@@ -19,6 +19,37 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { codigo_cupon, restaurantId } = body || {};
 
+    if (!restaurantId || typeof restaurantId !== "string") {
+      return NextResponse.json(
+        { success: false, error: "El restaurantId es obligatorio para validar el cupón." },
+        { status: 400 }
+      );
+    }
+
+    // Aislamiento Multi-Tenant Estricto:
+    // Verificar que el restaurantId provisto coincida exactamente con la sesión del usuario/negocio autenticado
+    if (!superAdmin) {
+      let isOwner = session?.restaurantId === restaurantId;
+
+      if (!isOwner && session?.userId) {
+        const userRestaurant = await prisma.restaurant.findFirst({
+          where: {
+            id: restaurantId,
+            userId: session.userId,
+          },
+          select: { id: true },
+        });
+        isOwner = Boolean(userRestaurant);
+      }
+
+      if (!isOwner) {
+        return NextResponse.json(
+          { success: false, error: "Acceso denegado: el negocio autenticado no coincide con el restaurante del cupón." },
+          { status: 403 }
+        );
+      }
+    }
+
     const cleanCode = (codigo_cupon || "").toString().trim().toUpperCase();
 
     if (!cleanCode) {
@@ -28,10 +59,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const whereClause: any = { codigoCupon: cleanCode };
-    if (restaurantId) {
-      whereClause.restaurantId = restaurantId;
-    }
+    const whereClause: any = {
+      codigoCupon: cleanCode,
+      restaurantId: restaurantId,
+    };
 
     const giro = await (prisma as any).ruletaGiro.findFirst({
       where: whereClause,

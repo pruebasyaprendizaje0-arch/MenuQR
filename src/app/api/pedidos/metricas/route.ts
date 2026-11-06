@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,36 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         { ok: false, error: "negocio_id es obligatorio" },
         { status: 400 }
+      );
+    }
+
+    // Control de Acceso Estricto: SuperAdmin, Propietario del negocio o Terminal autorizada
+    const isSuperAdmin = await getSuperAdminSession();
+    const session = await getUserSession();
+    const cookieStore = await cookies();
+    const activeRestCookie = cookieStore.get("active_restaurant_id")?.value;
+
+    let authorized = false;
+    if (isSuperAdmin) {
+      authorized = true;
+    } else if (session?.userId) {
+      if (session.restaurantId === negocioId) {
+        authorized = true;
+      } else {
+        const rest = await prisma.restaurant.findFirst({
+          where: { id: negocioId, userId: session.userId },
+          select: { id: true },
+        });
+        if (rest) authorized = true;
+      }
+    } else if (activeRestCookie && activeRestCookie === negocioId) {
+      authorized = true;
+    }
+
+    if (!authorized) {
+      return NextResponse.json(
+        { ok: false, error: "No autorizado para consultar métricas financieras de este negocio." },
+        { status: 403 }
       );
     }
 

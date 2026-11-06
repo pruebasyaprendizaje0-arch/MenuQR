@@ -5,6 +5,7 @@ import path from "path";
 const globalForPg = globalThis as unknown as {
   pgPool?: Pool;
   tablesInitialized?: boolean;
+  initializationPromise?: Promise<void> | null;
 };
 
 function getConnectionString(): string {
@@ -30,13 +31,25 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export async function ensureDbTables(): Promise<void> {
-  try {
-    const initSqlPath = path.join(process.cwd(), "init.sql");
-    if (fs.existsSync(initSqlPath)) {
-      const sqlContent = fs.readFileSync(initSqlPath, "utf-8");
-      await pool.query(sqlContent);
-    } else {
-      await pool.query(`
+  // 1. Si ya se inicializó exitosamente en memoria, retornar inmediatamente sin tocar PostgreSQL
+  if (globalForPg.tablesInitialized) {
+    return Promise.resolve();
+  }
+
+  // 2. Si ya hay una inicialización concurrente en curso, esperar esa misma promesa (patrón Singleton)
+  if (globalForPg.initializationPromise) {
+    return globalForPg.initializationPromise;
+  }
+
+  // 3. Crear promesa compartida para resolver de forma atómica y neutralizar contención de locks DDL
+  globalForPg.initializationPromise = (async () => {
+    try {
+      const initSqlPath = path.join(process.cwd(), "init.sql");
+      if (fs.existsSync(initSqlPath)) {
+        const sqlContent = fs.readFileSync(initSqlPath, "utf-8");
+        await pool.query(sqlContent);
+      } else {
+        await pool.query(`
         CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
         CREATE TABLE IF NOT EXISTS negocios (
@@ -163,6 +176,10 @@ export async function ensureDbTables(): Promise<void> {
     globalForPg.tablesInitialized = true;
     console.log("[db-pool] Tablas de Cocina y Mesero verificadas con éxito en PostgreSQL.");
   } catch (err) {
+    globalForPg.initializationPromise = null;
     console.error("[db-pool] Error asegurando tablas de base de datos:", err);
   }
+  })();
+
+  return globalForPg.initializationPromise;
 }
