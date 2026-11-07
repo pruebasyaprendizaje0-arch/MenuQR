@@ -333,10 +333,17 @@ export function syncTableOrderToPass(data: TableOrderSyncData): void {
         logoUrl: restaurant.logoUrl,
         coverUrl: restaurant.coverUrl,
         vertical: restaurant.vertical || "menuqr",
-        category: restaurant.specialty || "Restaurante",
+        category: restaurant.specialty || (restaurant.vertical === "ctalo" ? "Catálogo Retail" : "Restaurante"),
         city: restaurant.city || "Ecuador",
       };
       localStorage.setItem(STORAGE_KEY_PLACES, JSON.stringify([newPlace, ...currentPlaces].slice(0, 50)));
+    } else if (restaurant.vertical) {
+      const updatedPlaces = currentPlaces.map((p) =>
+        p.slug === restaurant.slug || p.id === restaurant.id
+          ? { ...p, vertical: restaurant.vertical || p.vertical }
+          : p
+      );
+      localStorage.setItem(STORAGE_KEY_PLACES, JSON.stringify(updatedPlaces));
     }
 
     // 3. Sincronizar CADA plato acumulado a "Mis Platos & Productos Habituales"
@@ -411,6 +418,7 @@ export function syncTableOrderToPass(data: TableOrderSyncData): void {
     if (existingHistIdx >= 0) {
       updatedHistory[existingHistIdx] = {
         ...updatedHistory[existingHistIdx],
+        vertical: restaurant.vertical || updatedHistory[existingHistIdx].vertical || "menuqr",
         total: calcTotal || updatedHistory[existingHistIdx].total,
         details: detailsSummary || updatedHistory[existingHistIdx].details,
         time: nowTime,

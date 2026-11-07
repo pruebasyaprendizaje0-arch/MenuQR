@@ -133,6 +133,49 @@ export function UbicamePassClient({ initialNetworkPlaces, initialPopularItems }:
   }, [initialPopularItems]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Sincronización remota opcional de pedidos del cliente (incluyendo catálogos) hacia Ubícame Pass
+  useEffect(() => {
+    if (!profile.phone || profile.phone.length < 7) return;
+    const fetchRemoteOrders = async () => {
+      try {
+        const cleanPhone = profile.phone.replace(/\D/g, "");
+        const res = await fetch(`/api/pedidos?cliente_telefono=${encodeURIComponent(cleanPhone)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.pedidos) && data.pedidos.length > 0) {
+            setHistory((prev) => {
+              const prevIds = new Set(prev.map((p) => p.id));
+              const newRecords: PassHistoryRecord[] = [];
+              for (const p of data.pedidos) {
+                if (!prevIds.has(p.id)) {
+                  newRecords.push({
+                    id: p.id,
+                    type: "pedido",
+                    businessName: p.negocio_nombre || "Comercio",
+                    businessSlug: p.negocio_slug || "comercio",
+                    vertical: p.vertical === "ctalo" || p.vertical === "catalogo" ? "ctalo" : "menuqr",
+                    date: new Date(p.created_at || Date.now()).toLocaleDateString("es-EC"),
+                    total: Number(p.total) || 0,
+                    status: p.estado || "En proceso",
+                    details: Array.isArray(p.items)
+                      ? p.items.map((it: any) => `${it.cantidad}x ${it.nombre}`).join(", ")
+                      : undefined,
+                  });
+                }
+              }
+              if (newRecords.length > 0) {
+                const combined = [...newRecords, ...prev];
+                return combined.slice(0, 100);
+              }
+              return prev;
+            });
+          }
+        }
+      } catch {}
+    };
+    fetchRemoteOrders();
+  }, [profile.phone]);
+
   // Filtro activo de vertical
   const [activeVertical, setActiveVertical] = useState<UbicameVertical | "all">("all");
 
@@ -427,10 +470,21 @@ export function UbicamePassClient({ initialNetworkPlaces, initialPopularItems }:
                 {VERTICAL_TABS.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeVertical === tab.id;
-                  const count =
+                  const ordersForVertical = history.filter((h) =>
+                    tab.id === "all"
+                      ? true
+                      : h.vertical === tab.id || (tab.id === "ctalo" && ((h.vertical as string) === "ctalo" || (h.vertical as string) === "catalogo"))
+                  ).length;
+                  const placesForVertical =
                     tab.id === "all"
                       ? favoritePlaces.length
                       : favoritePlaces.filter((p) => p.vertical === tab.id).length;
+
+                  // Sumar pedidos registrados y lugares de la vertical para métrica real
+                  const count =
+                    tab.id === "all"
+                      ? favoritePlaces.length
+                      : (placesForVertical + ordersForVertical);
 
                   return (
                     <button
@@ -476,6 +530,20 @@ export function UbicamePassClient({ initialNetworkPlaces, initialPopularItems }:
                 {VERTICAL_TABS.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeVertical === tab.id;
+                  const ordersForVertical = history.filter((h) =>
+                    tab.id === "all"
+                      ? true
+                      : h.vertical === tab.id || (tab.id === "ctalo" && ((h.vertical as string) === "ctalo" || (h.vertical as string) === "catalogo"))
+                  ).length;
+                  const placesForVertical =
+                    tab.id === "all"
+                      ? favoritePlaces.length
+                      : favoritePlaces.filter((p) => p.vertical === tab.id).length;
+                  const count =
+                    tab.id === "all"
+                      ? favoritePlaces.length
+                      : (placesForVertical + ordersForVertical);
+
                   return (
                     <button
                       key={tab.id}
@@ -488,6 +556,13 @@ export function UbicamePassClient({ initialNetworkPlaces, initialPopularItems }:
                     >
                       <Icon className={`w-3.5 h-3.5 ${isActive ? "text-slate-950" : "text-emerald-400"}`} />
                       <span>{tab.label}</span>
+                      <span
+                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+                          isActive ? "bg-slate-950/20 text-slate-950 font-black" : "bg-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {count}
+                      </span>
                     </button>
                   );
                 })}

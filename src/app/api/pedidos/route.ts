@@ -51,6 +51,50 @@ export async function GET(req: NextRequest) {
     const soloActivos = searchParams.get("activos") !== "false";
     const mesa = searchParams.get("mesa");
     const vertical = searchParams.get("vertical");
+    const clienteTelefono = searchParams.get("cliente_telefono") || searchParams.get("telefono");
+
+    // Consulta de pedidos por número de cliente (para Ubícame Pass)
+    if (clienteTelefono) {
+      const cleanPhone = clienteTelefono.replace(/\D/g, "");
+      if (cleanPhone.length >= 7) {
+        const { rows: clientOrders } = await pool.query(
+          `SELECT 
+             p.id,
+             p.negocio_id,
+             p.mesa,
+             p.estado,
+             p.total::float as total,
+             p.created_at,
+             p.cliente_nombre,
+             p.cliente_telefono,
+             p.vertical,
+             p.metadata,
+             n.nombre as negocio_nombre,
+             n.slug as negocio_slug,
+             COALESCE(
+               json_agg(
+                 json_build_object(
+                   'id', pi.id,
+                   'nombre', pi.nombre,
+                   'cantidad', pi.cantidad,
+                   'precio', pi.precio::float,
+                   'notas', pi.notas
+                 )
+               ) FILTER (WHERE pi.id IS NOT NULL),
+               '[]'
+             ) as items
+           FROM pedidos p
+           LEFT JOIN negocios n ON p.negocio_id = n.id
+           LEFT JOIN pedido_items pi ON pi.pedido_id = p.id
+           WHERE REPLACE(REPLACE(REPLACE(p.cliente_telefono, ' ', ''), '-', ''), '+', '') LIKE $1
+           GROUP BY p.id, n.nombre, n.slug
+           ORDER BY p.created_at DESC
+           LIMIT 50`,
+          [`%${cleanPhone.slice(-8)}%`]
+        );
+        return NextResponse.json({ ok: true, pedidos: clientOrders });
+      }
+    }
 
     const isUuid = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
     const validNegocioIds = new Set<string>();
@@ -225,21 +269,23 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const {
-      vertical = "menuqr", // "menuqr" | "catalogo" | "servicios" | "citas" | "reservas"
+      vertical = "menuqr", // "menuqr" | "catalogo" | "ctalo" | "servicios" | "citas" | "reservas"
       negocio_id,
+      restaurantId, // Soporte unificado de ID de restaurante
       slug,
       skip_stock_deduction = false, // Evita deducción doble cuando ya se ejecutó createOrderAction en el cliente
       cliente_nombre,
       cliente_telefono,
       cliente_direccion,
-      // Vertical menuqr
+      // Vertical menuqr / catalogo
       mesa,
       camarero_id,
       items = [],
-      // Vertical catalogo
+      tipo_entrega, // 'RETIRO' | 'DOMICILIO'
       metodo_entrega = "domicilio",
       costo_envio = 0,
       notas_entrega,
+      total,
       // Vertical servicios (cotizador express)
       servicio_solicitado,
       descripcion_problema,
@@ -276,18 +322,24 @@ export async function POST(req: NextRequest) {
     } = body;
 
     // 1. Resolver negocio tanto en "Restaurant" (Prisma) como en "negocios" (PostgreSQL FK)
+    const effectiveRestId = restaurantId || negocio_id;
+    const isCatalogOrder =
+      vertical === "catalogo" ||
+      vertical === "ctalo" ||
+      String(mesa || "").toUpperCase().trim() === "CATALOGO";
+
     let businessSlug = slug ? String(slug).toLowerCase().trim() : null;
     let businessName = "Comercio";
     let businessPhone = "";
     let businessAddress = "";
-    let restaurantPrismaId = negocio_id ? String(negocio_id) : null;
+    let restaurantPrismaId = effectiveRestId ? String(effectiveRestId) : null;
     let negocioDbId: string | null = null;
 
     // Consultar en "Restaurant"
     try {
       const { rows: restRows } = await pool.query(
         `SELECT id, name, slug, whatsapp, address FROM "Restaurant" WHERE id::text = $1 OR slug = $2 LIMIT 1`,
-        [negocio_id || "", businessSlug || ""]
+        [effectiveRestId || "", businessSlug || ""]
       );
       if (restRows[0]) {
         restaurantPrismaId = restRows[0].id;
@@ -298,10 +350,32 @@ export async function POST(req: NextRequest) {
       }
     } catch {}
 
+    // Fallback con Prisma Client directo si el pool no lo encontró
+    if (!restaurantPrismaId && (effectiveRestId || businessSlug)) {
+      try {
+        const pRest = await prisma.restaurant.findFirst({
+          where: {
+            OR: [
+              ...(effectiveRestId ? [{ id: String(effectiveRestId) }] : []),
+              ...(businessSlug ? [{ slug: String(businessSlug) }] : []),
+            ],
+          },
+          select: { id: true, name: true, slug: true, whatsapp: true, address: true },
+        });
+        if (pRest) {
+          restaurantPrismaId = pRest.id;
+          businessName = pRest.name || businessName;
+          if (pRest.slug) businessSlug = pRest.slug;
+          if (pRest.whatsapp) businessPhone = pRest.whatsapp;
+          if (pRest.address) businessAddress = pRest.address;
+        }
+      } catch {}
+    }
+
     // Consultar en "negocios"
     const { rows: negRows } = await pool.query(
       `SELECT id, nombre, slug FROM negocios WHERE id::text = $1 OR slug = $2 LIMIT 1`,
-      [negocio_id || "", businessSlug || ""]
+      [effectiveRestId || "", businessSlug || ""]
     );
     if (negRows[0]) {
       negocioDbId = negRows[0].id;
@@ -347,7 +421,7 @@ export async function POST(req: NextRequest) {
       // =========================================================================
       // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
       // =========================================================================
-      if (vertical === "menuqr") {
+      if (vertical === "menuqr" && !isCatalogOrder) {
         const rawMesa = mesa ? String(mesa).trim() : "Delivery";
         const cleanMesa = rawMesa === "Delivery" ? "Delivery" : rawMesa.replace(/^(mesa\s*#?|#)/i, "").trim();
         const mesaStr = rawMesa === "Delivery" ? "Delivery" : cleanMesa;
@@ -586,7 +660,7 @@ export async function POST(req: NextRequest) {
       // =========================================================================
       // CASO B: VERTICAL CTALO (Tiendas de Ropa, Calzado, Joyería, Retail)
       // =========================================================================
-      else if (vertical === "catalogo" || vertical === "ctalo") {
+      else if (isCatalogOrder) {
         if (!Array.isArray(items) || items.length === 0) {
           await client.query("ROLLBACK");
           return NextResponse.json(
@@ -596,9 +670,10 @@ export async function POST(req: NextRequest) {
         }
 
         // Deducción y validación atómica universal de stock en Prisma
-        if (resolvedNegocioId) {
+        const deductTarget = restaurantPrismaId || resolvedNegocioId;
+        if (deductTarget) {
           const deductRes = await deductStockUniversal(
-            resolvedNegocioId,
+            deductTarget,
             items.map((it: { dishId?: string; productId?: string; id?: string; nombre?: string; cantidad: string | number }) => ({
               dishId: it.dishId || it.productId || it.id,
               name: it.nombre,
@@ -627,11 +702,15 @@ export async function POST(req: NextRequest) {
         const zonaEnvio = body.zona_envio || null;
         const metodoPago = body.metodo_pago || "Efectivo / Local";
         const codigoCupon = body.codigo_cupon || null;
+        const effectiveDelivery = tipo_entrega
+          ? (String(tipo_entrega).toUpperCase() === "RETIRO" ? "retiro" : "domicilio")
+          : (metodo_entrega === "retiro" ? "retiro" : "domicilio");
 
-        orderTotal = Math.max(0, subtotal - descuento) + envio + propina;
+        orderTotal = typeof total === "number" && total > 0 ? total : Math.max(0, subtotal - descuento) + envio + propina;
 
         const metadataCatalogo = {
-          metodo_entrega,
+          metodo_entrega: effectiveDelivery,
+          tipo_entrega: effectiveDelivery.toUpperCase(),
           cliente_direccion: cliente_direccion || "",
           costo_envio: envio,
           subtotal,
@@ -678,9 +757,98 @@ export async function POST(req: NextRequest) {
 
         await client.query("COMMIT");
 
+        // --- PERSISTENCIA EN PRISMA ORDER (Para /admin Monitor de Pedidos y Métricas) ---
+        let prismaOrderId: string | null = null;
+        try {
+          const targetPrismaRestId = restaurantPrismaId || (await prisma.restaurant.findFirst({
+            where: {
+              OR: [
+                ...(resolvedNegocioId ? [{ id: resolvedNegocioId }] : []),
+                ...(businessSlug ? [{ slug: businessSlug }] : []),
+              ],
+            },
+            select: { id: true },
+          }))?.id;
+
+          if (targetPrismaRestId) {
+            const newPrismaOrder = await prisma.order.create({
+              data: {
+                restaurantId: targetPrismaRestId,
+                tableName: "CATALOGO",
+                customerName: cliente_nombre ? String(cliente_nombre).trim().slice(0, 200) : "Cliente Catálogo",
+                customerPhone: cliente_telefono ? String(cliente_telefono).trim().slice(0, 50) : null,
+                customerAddress: cliente_direccion ? String(cliente_direccion).slice(0, 500) : null,
+                status: "PENDING",
+                subtotal: subtotal,
+                iva: 0,
+                serviceCharge: 0,
+                tip: propina,
+                deliveryCost: envio,
+                discountAmount: descuento,
+                total: orderTotal,
+                paymentMethod: metodoPago,
+                isTest: false,
+                items: {
+                  create: items.map((it: any) => {
+                    const variantDesc = [
+                      it.talla ? `Talla: ${it.talla}` : null,
+                      it.color ? `Color: ${it.color}` : null,
+                      it.notas ? it.notas : null,
+                    ].filter(Boolean).join(" | ");
+                    return {
+                      dishName: it.nombre + (variantDesc ? ` (${variantDesc})` : ""),
+                      price: parseFloat(it.precio) || 0,
+                      quantity: parseInt(it.cantidad) || 1,
+                    };
+                  }),
+                },
+              },
+            });
+            prismaOrderId = newPrismaOrder.id;
+
+            // Actualizar o registrar cliente en CRM de clientes
+            if (cliente_telefono) {
+              const cleanPhone = String(cliente_telefono).trim();
+              const existingCust = await prisma.customer.findFirst({
+                where: { restaurantId: targetPrismaRestId, phone: cleanPhone },
+              });
+              if (existingCust) {
+                await prisma.customer.update({
+                  where: { id: existingCust.id },
+                  data: {
+                    name: cliente_nombre ? String(cliente_nombre).trim() : existingCust.name,
+                    totalOrders: { increment: 1 },
+                    totalSpent: { increment: orderTotal },
+                    lastOrderAt: new Date(),
+                  },
+                });
+              } else {
+                await prisma.customer.create({
+                  data: {
+                    restaurantId: targetPrismaRestId,
+                    name: cliente_nombre ? String(cliente_nombre).trim() : "Cliente Catálogo",
+                    phone: cleanPhone,
+                    address: cliente_direccion ? String(cliente_direccion).slice(0, 500) : null,
+                    totalOrders: 1,
+                    totalSpent: orderTotal,
+                    lastOrderAt: new Date(),
+                  },
+                });
+              }
+            }
+
+            // Revalidar caché de /admin para refresco inmediato
+            try {
+              revalidatePath("/admin");
+            } catch {}
+          }
+        } catch (errPrisma) {
+          console.error("[POST /api/pedidos] Error al guardar en Prisma Order:", errPrisma);
+        }
+
         // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
         void sendTelegramAlert({
-          mensaje: `🛍️ Nuevo pedido de catálogo (${businessName}) por $${orderTotal.toFixed(2)} [${metodo_entrega === "domicilio" ? "Domicilio 🛵" : "Retiro en Tienda 🏬"}]: ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
+          mensaje: `🛍️ Nuevo pedido de catálogo (${businessName}) por $${orderTotal.toFixed(2)} [${effectiveDelivery === "domicilio" ? "Domicilio 🛵" : "Retiro en Tienda 🏬"}]: ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
           cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente Tienda",
           negocio: businessName,
         });
@@ -689,9 +857,9 @@ export async function POST(req: NextRequest) {
           `👤 *Datos del Cliente:*\n` +
           `• *Nombre:* ${cliente_nombre ? String(cliente_nombre).trim() : "Cliente"}\n` +
           `• *Teléfono:* ${cliente_telefono ? String(cliente_telefono).trim() : "No especificado"}\n` +
-          `• *Modalidad:* ${metodo_entrega === "domicilio" ? `Envío a Domicilio 🛵 ${zonaEnvio ? `(${zonaEnvio})` : ""}` : "Retiro en Tienda 🏬"}\n` +
-          (metodo_entrega === "domicilio" && cliente_direccion ? `• *Dirección:* ${cliente_direccion}\n` : "") +
-          (metodo_entrega === "retiro" ? `• *Punto de Retiro:* ${businessAddress || "Local Comercial principal"}\n` : "") +
+          `• *Modalidad:* ${effectiveDelivery === "domicilio" ? `Envío a Domicilio 🛵 ${zonaEnvio ? `(${zonaEnvio})` : ""}` : "Retiro en Tienda 🏬"}\n` +
+          (effectiveDelivery === "domicilio" && cliente_direccion ? `• *Dirección:* ${cliente_direccion}\n` : "") +
+          (effectiveDelivery === "retiro" ? `• *Punto de Retiro:* ${businessAddress || "Local Comercial principal"}\n` : "") +
           (notas_entrega ? `• *Notas:* ${notas_entrega}\n` : "") +
           `\n📦 *Productos Solicitados:*\n` +
           insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ${it.notas ? `[${it.notas}]` : ""} -> $${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)}`).join("\n") +
@@ -709,7 +877,9 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({
           ok: true,
-          id: createdOrderId,
+          id: prismaOrderId || createdOrderId,
+          pedidoId: createdOrderId,
+          prismaOrderId,
           pedido: { ...orderRows[0], items: insertedItems },
           whatsapp_url: waUrl,
           vertical: "ctalo",

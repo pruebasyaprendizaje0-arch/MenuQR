@@ -38,6 +38,7 @@ import { SmartExitButton } from "@/components/public/SmartExitButton";
 import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
 import { validateCouponAction } from "@/lib/actions";
 import { parseDishImages, getPrimaryDishImage } from "@/lib/dish-images";
+import { syncTableOrderToPass } from "@/lib/ubicame-pass";
 
 interface Product {
   id: string;
@@ -655,13 +656,16 @@ export function CtaloClient({ store }: { store: StoreData }) {
         : customerAddress.trim();
 
       const payload = {
-        vertical: "catalogo",
+        vertical: "ctalo",
+        restaurantId: store.id,
         negocio_id: store.id,
         slug: store.slug,
-        cliente_nombre: customerName,
-        cliente_telefono: customerPhone,
-        cliente_direccion: deliveryMethod === "domicilio" ? fullAddress : `Retiro en tienda física: ${store.address || "Local Comercial"}`,
+        mesa: "CATALOGO",
+        tipo_entrega: deliveryMethod === "domicilio" ? "DOMICILIO" : "RETIRO",
         metodo_entrega: deliveryMethod,
+        cliente_nombre: customerName.trim(),
+        cliente_telefono: customerPhone.trim(),
+        cliente_direccion: deliveryMethod === "domicilio" ? fullAddress : `Retiro en tienda física: ${store.address || "Local Comercial"}`,
         costo_envio: effectiveDeliveryCost,
         zona_envio: deliveryMethod === "domicilio" ? selectedKmRate?.label : undefined,
         metodo_pago:
@@ -698,6 +702,35 @@ export function CtaloClient({ store }: { store: StoreData }) {
       const data = await res.json();
 
       if (res.ok && data.ok) {
+        // Sincronizar pedido y comercio hacia Ubícame Pass (métricas, favoritos e historial)
+        try {
+          syncTableOrderToPass({
+            restaurant: {
+              id: store.id,
+              slug: store.slug,
+              name: store.name,
+              logoUrl: store.logoUrl,
+              coverUrl: store.coverUrl,
+              specialty: store.specialty || store.description || "Catálogo Retail",
+              city: store.address || "Ecuador",
+              vertical: "ctalo",
+            },
+            items: cart.map((it) => ({
+              id: it.productId,
+              nombre: it.name,
+              cantidad: it.cantidad,
+              precio: it.price,
+              imageUrl: it.imageUrl,
+            })),
+            total: grandTotal,
+            orderStatus: "En Catálogo",
+            customerName: customerName.trim(),
+            customerPhone: customerPhone.trim(),
+          });
+        } catch (errPass) {
+          console.warn("Error al sincronizar orden con Ubícame Pass:", errPass);
+        }
+
         let waUrl = data.whatsapp_url;
 
         // Fallback defensivo si el backend no pudo generar el link completo
