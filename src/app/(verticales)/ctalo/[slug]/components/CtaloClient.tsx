@@ -558,8 +558,14 @@ export function CtaloClient({ store }: { store: StoreData }) {
     let variantLabel: string | null = null;
     if (activeProduct.hasVariants) {
       const parts: string[] = [];
-      if (selectedOption1) parts.push(selectedOption1);
-      if (selectedOption2) parts.push(selectedOption2);
+      if (selectedOption1) {
+        const name1 = activeProduct.attribute1Name || (activeProduct.tallas && activeProduct.tallas.length > 0 ? "Talla" : "Opción");
+        parts.push(`${name1}: ${selectedOption1}`);
+      }
+      if (selectedOption2) {
+        const name2 = activeProduct.attribute2Name || (activeProduct.colores && activeProduct.colores.length > 0 ? "Color" : "Variante");
+        parts.push(`${name2}: ${selectedOption2}`);
+      }
       variantLabel = parts.join(" · ");
     }
 
@@ -654,7 +660,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
         slug: store.slug,
         cliente_nombre: customerName,
         cliente_telefono: customerPhone,
-        cliente_direccion: fullAddress,
+        cliente_direccion: deliveryMethod === "domicilio" ? fullAddress : `Retiro en tienda física: ${store.address || "Local Comercial"}`,
         metodo_entrega: deliveryMethod,
         costo_envio: effectiveDeliveryCost,
         zona_envio: deliveryMethod === "domicilio" ? selectedKmRate?.label : undefined,
@@ -691,10 +697,49 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
       const data = await res.json();
 
-      if (res.ok && data.ok && data.whatsapp_url) {
+      if (res.ok && data.ok) {
+        let waUrl = data.whatsapp_url;
+
+        // Fallback defensivo si el backend no pudo generar el link completo
+        if (!waUrl && (store.whatsapp || store.whatsappNumber)) {
+          const rawTarget = store.whatsapp || store.whatsappNumber || "";
+          let cleanPhone = rawTarget.replace(/\D/g, "");
+          if (cleanPhone.startsWith("09") && cleanPhone.length === 10) {
+            cleanPhone = "593" + cleanPhone.slice(1);
+          }
+          const fallbackMsg =
+            `🛍️ *NUEVO PEDIDO - CATÁLOGO ${store.name.toUpperCase()}*\n\n` +
+            `👤 *Datos del Cliente:*\n` +
+            `• *Nombre:* ${customerName}\n` +
+            `• *Teléfono:* ${customerPhone}\n` +
+            `• *Modalidad:* ${deliveryMethod === "domicilio" ? `Envío a Domicilio 🛵 ${selectedKmRate?.label ? `(${selectedKmRate.label})` : ""}` : "Retiro en Tienda 🏬"}\n` +
+            (deliveryMethod === "domicilio" && fullAddress ? `• *Dirección:* ${fullAddress}\n` : "") +
+            (deliveryMethod === "retiro" ? `• *Punto de Retiro:* ${store.address || "Local Comercial principal"}\n` : "") +
+            (customerNotes ? `• *Notas:* ${customerNotes}\n` : "") +
+            `\n📦 *Productos Solicitados:*\n` +
+            cart
+              .map(
+                (it) =>
+                  `• ${it.cantidad}x ${it.name} ${it.variantLabel ? `[${it.variantLabel}]` : ""} -> $${(it.price * it.cantidad).toFixed(2)}`
+              )
+              .join("\n") +
+            `\n\n💰 *Resumen Financiero:*\n` +
+            `• *Subtotal:* $${subtotal.toFixed(2)}\n` +
+            (effectiveDeliveryCost > 0 ? `• *Costo de Envío:* $${effectiveDeliveryCost.toFixed(2)}\n` : "") +
+            (discountAmount > 0 ? `• *Descuento Cupón (${appliedCoupon?.code || "PROMO"}):* -$${discountAmount.toFixed(2)}\n` : "") +
+            (tipAmount > 0 ? `• *Propina:* $${tipAmount.toFixed(2)}\n` : "") +
+            `• *TOTAL: $${grandTotal.toFixed(2)}*\n\n` +
+            `💳 *Método de Pago:* ${paymentMethod === "deuna" ? "Deuna (Banco Pichincha)" : paymentMethod === "payphone" ? "Payphone" : paymentMethod === "transferencia" ? "Transferencia Bancaria" : "Efectivo"}` +
+            (paymentMethod !== "efectivo" ? "\n📸 *Adjunto comprobante de pago.*" : "");
+
+          waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(fallbackMsg)}`;
+        }
+
         setOrderSuccess(true);
         setCart([]);
-        window.open(data.whatsapp_url, "_blank");
+        if (waUrl) {
+          window.open(waUrl, "_blank");
+        }
       } else {
         // El servidor rechazó el pedido (por ejemplo, existencias insuficientes)
         const errMsg = data?.error || "No se pudo procesar el pedido.";
@@ -1435,8 +1480,9 @@ export function CtaloClient({ store }: { store: StoreData }) {
                         <div className="flex-1 min-w-0">
                           <h4 className="text-xs font-bold text-white truncate">{item.name}</h4>
                           {item.variantLabel ? (
-                            <div className="text-[11px] text-amber-400 font-semibold mt-0.5 truncate">
-                              {item.variantLabel}
+                            <div className="inline-flex items-center gap-1 text-[10.5px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md font-semibold mt-1 max-w-full">
+                              <Tag className="w-2.5 h-2.5 shrink-0 text-amber-400" />
+                              <span className="truncate">{item.variantLabel}</span>
                             </div>
                           ) : null}
                           <div className="text-xs font-black text-amber-400 mt-1">
@@ -1909,6 +1955,22 @@ export function CtaloClient({ store }: { store: StoreData }) {
                             className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500"
                           />
                         </div>
+                      </div>
+                    )}
+
+                    {/* Dirección física de retiro en tienda */}
+                    {deliveryMethod === "retiro" && (
+                      <div className="space-y-2 bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl animate-fadeIn">
+                        <div className="flex items-center gap-2 text-xs font-black text-amber-400 uppercase tracking-wider">
+                          <Store className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>Punto de Retiro en Tienda Física</span>
+                        </div>
+                        <p className="text-xs text-white font-bold">
+                          📍 {store.address || "Local comercial principal"}
+                        </p>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Tu pedido estará preparado para retiro en nuestro local. Podrás acercarte presentando tu nombre y comprobante de compra.
+                        </p>
                       </div>
                     )}
 

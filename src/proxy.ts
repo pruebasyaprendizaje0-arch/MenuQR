@@ -74,8 +74,8 @@ export function proxy(request: NextRequest) {
     request.headers.get("host") ||
     "";
   
-  // Limpiar puerto del host (ej: localhost:3000 -> localhost)
-  const host = hostHeader.split(":")[0].toLowerCase();
+  // Limpiar proxies encadenados y puerto del host (ej: "ctalo.ubicame.cc, proxy.internal" -> "ctalo.ubicame.cc")
+  const host = hostHeader.split(",")[0].trim().split(":")[0].toLowerCase();
 
   // Soporte de anulación para desarrollo y pruebas (ej: ?subdomain=menuqr o ?vertical=citas o header x-subdomain)
   const queryOverride =
@@ -178,3 +178,5 @@ export const config = {
     "/((?!_next/static|_next/image|uploads|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|txt|xml|woff|woff2)$).*)",
   ],
 };
+
+export default proxy;

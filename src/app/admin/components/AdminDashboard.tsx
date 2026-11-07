@@ -2559,8 +2559,8 @@ export function AdminDashboard({
               </button>
             )}
 
-            {/* Equipo & Accesos (PIN Meseros & Cocina) - Restaurantes / Cafeterías / Gastro */}
-            {(bLabels.isGastro || selectedPreset === "RESTAURANT" || enableTableOrdering) && (
+            {/* Equipo & Accesos (PIN Meseros & Cocina) - Exclusivo Restaurantes / Cafeterías / Gastro */}
+            {bLabels.isGastro && (
               <button
                 onClick={() => setActiveTab("staff")}
                 className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -3897,36 +3897,38 @@ export function AdminDashboard({
                       </div>
                     </div>
 
-                    {/* Modality 3: En Mesa */}
-                    <div className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
-                      enableTableOrdering 
-                        ? "bg-amber-500/10 border-amber-500/40 text-white" 
-                        : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
-                    }`}>
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
-                            <span>🍽️</span> Atención en Mesa
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTableOrdering(!enableTableOrdering)}
-                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                              enableTableOrdering ? "bg-amber-500" : "bg-slate-800"
-                            }`}
-                          >
-                            <span
-                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                enableTableOrdering ? "translate-x-4" : "translate-x-0"
+                    {/* Modality 3: En Mesa (Exclusivo Restaurantes / Gastro) */}
+                    {bLabels.isGastro && (
+                      <div className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                        enableTableOrdering 
+                          ? "bg-amber-500/10 border-amber-500/40 text-white" 
+                          : "bg-slate-950/60 border-slate-850 text-slate-400 opacity-60"
+                      }`}>
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span className="font-extrabold text-xs text-white flex items-center gap-1.5">
+                              <span>🍽️</span> Atención en Mesa
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleTableOrdering(!enableTableOrdering)}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                enableTableOrdering ? "bg-amber-500" : "bg-slate-800"
                               }`}
-                            />
-                          </button>
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  enableTableOrdering ? "translate-x-4" : "translate-x-0"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-snug">
+                            {enableTableOrdering ? "✓ Habilitado con QR de mesa." : "✕ Oculto en el checkout y menú."}
+                          </p>
                         </div>
-                        <p className="text-[11px] text-slate-400 leading-snug">
-                          {enableTableOrdering ? "✓ Habilitado con QR de mesa." : "✕ Oculto en el checkout y menú."}
-                        </p>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
 
@@ -9106,13 +9108,13 @@ export function AdminDashboard({
           </div>
         )}
 
-        {/* Dividir Cuenta Tab */}
-        {activeTab === "split-bill" && (
+        {/* Dividir Cuenta Tab (Exclusivo Restaurantes / Salón) */}
+        {activeTab === "split-bill" && bLabels.showSplitBill && (
           <TableSplitMonitor restaurantId={restaurant.id} tablesConfig={restaurant.tablesConfig} />
         )}
 
-        {/* Equipo y Accesos (PIN Meseros & Cocina) Tab */}
-        {activeTab === "staff" && (
+        {/* Equipo y Accesos (PIN Meseros & Cocina) Tab (Exclusivo Restaurantes / Salón) */}
+        {activeTab === "staff" && bLabels.isGastro && (
           <StaffAdminTab restaurant={restaurant} />
         )}
 
@@ -11287,8 +11289,8 @@ export function AdminDashboard({
           <span className="text-[9px] font-bold uppercase tracking-wider">Historial</span>
         </button>
 
-        {/* Staff & Kitchen PIN (Mobile) */}
-        {(bLabels.isGastro || selectedPreset === "RESTAURANT" || enableTableOrdering) && (
+        {/* Staff & Kitchen PIN (Mobile - Exclusivo Restaurantes / Salón) */}
+        {bLabels.isGastro && (
           <button
             onClick={() => setActiveTab("staff")}
             className="flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition duration-200"

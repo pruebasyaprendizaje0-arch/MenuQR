@@ -279,13 +279,14 @@ export async function POST(req: NextRequest) {
     let businessSlug = slug ? String(slug).toLowerCase().trim() : null;
     let businessName = "Comercio";
     let businessPhone = "";
+    let businessAddress = "";
     let restaurantPrismaId = negocio_id ? String(negocio_id) : null;
     let negocioDbId: string | null = null;
 
     // Consultar en "Restaurant"
     try {
       const { rows: restRows } = await pool.query(
-        `SELECT id, name, slug, whatsapp FROM "Restaurant" WHERE id::text = $1 OR slug = $2 LIMIT 1`,
+        `SELECT id, name, slug, whatsapp, address FROM "Restaurant" WHERE id::text = $1 OR slug = $2 LIMIT 1`,
         [negocio_id || "", businessSlug || ""]
       );
       if (restRows[0]) {
@@ -293,6 +294,7 @@ export async function POST(req: NextRequest) {
         businessName = restRows[0].name || businessName;
         if (restRows[0].slug) businessSlug = restRows[0].slug;
         if (restRows[0].whatsapp) businessPhone = restRows[0].whatsapp;
+        if (restRows[0].address) businessAddress = restRows[0].address;
       }
     } catch {}
 
@@ -683,22 +685,24 @@ export async function POST(req: NextRequest) {
           negocio: businessName,
         });
 
-        whatsappMessageText = `*🛍️ Nuevo Pedido de Tienda / Catálogo*\n` +
-          `*Tienda:* ${businessName}\n` +
-          `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
-          `*Teléfono:* ${cliente_telefono || "No especificado"}\n` +
-          `*Modalidad:* ${metodo_entrega === "domicilio" ? `Envío a Domicilio 🛵 ${zonaEnvio ? `(${zonaEnvio})` : ""}` : "Retiro en Tienda 🏬"}\n` +
-          (cliente_direccion ? `*Dirección:* ${cliente_direccion}\n` : "") +
-          `*Método de Pago:* ${metodoPago}\n` +
-          (notas_entrega ? `*Notas:* ${notas_entrega}\n` : "") +
-          `\n*Artículos seleccionados:*\n` +
-          insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ${it.notas ? `(${it.notas})` : ""} - $${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)}`).join("\n") +
-          `\n\n*Subtotal Base:* $${subtotal.toFixed(2)}\n` +
-          (descuento > 0 ? `*Descuento (${codigoCupon || "Cupón"}):* -$${descuento.toFixed(2)}\n` : "") +
-          (envio > 0 ? `*Envío ${zonaEnvio ? `(${zonaEnvio})` : ""}:* $${envio.toFixed(2)}\n` : "") +
-          (propina > 0 ? `*Propina:* $${propina.toFixed(2)}\n` : "") +
-          `*TOTAL A PAGAR: $${orderTotal.toFixed(2)}*` +
-          (metodoPago.toLowerCase().includes("transferencia") || metodoPago.toLowerCase().includes("qr") || metodoPago.toLowerCase().includes("deuna") || metodoPago.toLowerCase().includes("payphone") ? `\n\n📸 *Adjunto comprobante de pago.*` : "");
+        whatsappMessageText = `🛍️ *NUEVO PEDIDO - CATÁLOGO ${businessName.toUpperCase()}*\n\n` +
+          `👤 *Datos del Cliente:*\n` +
+          `• *Nombre:* ${cliente_nombre ? String(cliente_nombre).trim() : "Cliente"}\n` +
+          `• *Teléfono:* ${cliente_telefono ? String(cliente_telefono).trim() : "No especificado"}\n` +
+          `• *Modalidad:* ${metodo_entrega === "domicilio" ? `Envío a Domicilio 🛵 ${zonaEnvio ? `(${zonaEnvio})` : ""}` : "Retiro en Tienda 🏬"}\n` +
+          (metodo_entrega === "domicilio" && cliente_direccion ? `• *Dirección:* ${cliente_direccion}\n` : "") +
+          (metodo_entrega === "retiro" ? `• *Punto de Retiro:* ${businessAddress || "Local Comercial principal"}\n` : "") +
+          (notas_entrega ? `• *Notas:* ${notas_entrega}\n` : "") +
+          `\n📦 *Productos Solicitados:*\n` +
+          insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ${it.notas ? `[${it.notas}]` : ""} -> $${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)}`).join("\n") +
+          `\n\n💰 *Resumen Financiero:*\n` +
+          `• *Subtotal:* $${subtotal.toFixed(2)}\n` +
+          (envio > 0 ? `• *Costo de Envío:* $${envio.toFixed(2)}\n` : "") +
+          (descuento > 0 ? `• *Descuento (${codigoCupon || "Cupón"}):* -$${descuento.toFixed(2)}\n` : "") +
+          (propina > 0 ? `• *Propina:* $${propina.toFixed(2)}\n` : "") +
+          `• *TOTAL: $${orderTotal.toFixed(2)}*\n\n` +
+          `💳 *Método de Pago:* ${metodoPago}` +
+          (metodoPago.toLowerCase().includes("transferencia") || metodoPago.toLowerCase().includes("qr") || metodoPago.toLowerCase().includes("deuna") || metodoPago.toLowerCase().includes("payphone") ? `\n📸 *Adjunto comprobante de pago.*` : "");
 
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
