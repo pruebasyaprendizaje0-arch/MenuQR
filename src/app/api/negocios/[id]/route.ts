@@ -31,7 +31,31 @@ export async function GET(
 
     // Obtener platos/productos desde Prisma
     let productos: any[] = [];
+    let defaultAspect: "1:1" | "9:16" = "1:1";
+    let themeColor = "#059669";
     try {
+      const prismaRest = await prisma.restaurant.findFirst({
+        where: {
+          OR: [{ id }, { slug: negocio.slug }],
+        },
+        select: {
+          customLabels: true,
+          themeColor: true,
+        },
+      });
+
+      if (prismaRest) {
+        if (prismaRest.themeColor) themeColor = prismaRest.themeColor;
+        if (prismaRest.customLabels) {
+          try {
+            const parsed = typeof prismaRest.customLabels === "string" ? JSON.parse(prismaRest.customLabels) : prismaRest.customLabels;
+            if (parsed?.imageAspectRatio === "9:16" || parsed?.imageAspectRatio === "1:1") {
+              defaultAspect = parsed.imageAspectRatio;
+            }
+          } catch {}
+        }
+      }
+
       productos = await prisma.dish.findMany({
         where: {
           OR: [
@@ -42,6 +66,7 @@ export async function GET(
         select: {
           id: true,
           name: true,
+          description: true,
           price: true,
           imageUrl: true,
           isAvailable: true,
@@ -49,7 +74,7 @@ export async function GET(
           minStock: true,
           trackStock: true,
           category: {
-            select: { name: true },
+            select: { name: true, imageAspectRatio: true },
           },
         },
         orderBy: [{ category: { order: "asc" } }, { name: "asc" }],
@@ -71,7 +96,11 @@ export async function GET(
 
     return NextResponse.json({
       ok: true,
-      negocio,
+      negocio: {
+        ...negocio,
+        themeColor,
+        imageAspectRatio: defaultAspect,
+      },
       camareros,
       productos,
     });

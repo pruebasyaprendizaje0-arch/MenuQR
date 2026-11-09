@@ -19,6 +19,7 @@ const SYSTEM_PREFIXES = [
   "/admin",
   "/super-admin",
   "/caja",
+  "/bodega",
   "/login",
   "/registro",
   "/cocina",
@@ -62,9 +63,10 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 3. Rutas globales del sistema: permitir acceso directo sin reescritura de vertical
+  // 3. Rutas globales del sistema y submódulos operacionales (mesas, cocina, repartidor, rastreo)
   const isSystemRoute = SYSTEM_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-  if (isSystemRoute) {
+  const isOperationalSubmodule = /^\/[^/]+\/(mesas|cocina|repartidor|rastreo|menu)(\/.*)?$/.test(pathname);
+  if (isSystemRoute || isOperationalSubmodule) {
     return NextResponse.next();
   }
 

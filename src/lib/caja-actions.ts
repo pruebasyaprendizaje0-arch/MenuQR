@@ -1,9 +1,10 @@
 "use server";
 
 import { prisma } from "@/lib/db";
+import { pool, ensureDbTables } from "@/lib/db-pool";
 import { getUserSession, getSuperAdminSession, refreshUserSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
-import { emitStockActualizado, emitProductoActualizado } from "@/lib/socket-server";
+import { emitStockActualizado, emitProductoActualizado, emitPedidoActualizado } from "@/lib/socket-server";
 
 async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; error?: string }> {
   const isSuperAdmin = await getSuperAdminSession();
@@ -302,8 +303,9 @@ export async function processCajaSaleAction(
   restaurantId: string,
   data: {
     items: Array<{ dishId: string; quantity: number; price: number; name: string }>;
-    paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA";
+    paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA" | "TRANSFERENCIA";
     customerName?: string;
+    splitDetails?: SplitPaymentDetail[];
   }
 ) {
   try {
@@ -344,10 +346,23 @@ export async function processCajaSaleAction(
         }
       }
 
+      // Buscar turno de caja activo para vincular la venta automáticamente
+      const activeShift = await tx.cashShift.findFirst({
+        where: { restaurantId, status: "OPEN" },
+        select: { id: true },
+      });
+
+      const rest = await tx.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { id: true, name: true, testMode: true },
+      });
+      const isTestSale = Boolean(rest?.testMode);
+
       // 2. Crear Pedido / Ticket de Venta oficial
       const order = await tx.order.create({
         data: {
           restaurantId,
+          cashShiftId: activeShift?.id || null,
           tableName: `Caja POS (${data.paymentMethod})`,
           customerName: data.customerName?.trim() || `Venta Directa (${data.paymentMethod})`,
           status: "COMPLETED",
@@ -357,6 +372,7 @@ export async function processCajaSaleAction(
           tip: 0.0,
           total: subtotal,
           paymentMethod: data.paymentMethod,
+          isTest: isTestSale,
           items: {
             create: data.items.map((it) => ({
               dishName: it.name,
@@ -366,6 +382,41 @@ export async function processCajaSaleAction(
           },
         },
       });
+
+      // Si hay turno de caja activo, actualizar contadores en el arqueo Z
+      if (activeShift) {
+        let cashSum = 0;
+        let deunaSum = 0;
+        let transferSum = 0;
+        let cardSum = 0;
+
+        if (data.splitDetails && data.splitDetails.length > 0) {
+          data.splitDetails.forEach((d) => {
+            const amt = Number(d.amount) || 0;
+            if (d.paymentMethod === "EFECTIVO") cashSum += amt;
+            else if (d.paymentMethod === "DEUNA") deunaSum += amt;
+            else if (d.paymentMethod === "TRANSFERENCIA") transferSum += amt;
+            else cardSum += amt;
+          });
+        } else {
+          if (data.paymentMethod === "EFECTIVO") cashSum = subtotal;
+          else if (data.paymentMethod === "DEUNA") deunaSum = subtotal;
+          else if (data.paymentMethod === "TRANSFERENCIA") transferSum = subtotal;
+          else cardSum = subtotal;
+        }
+
+        await tx.cashShift.update({
+          where: { id: activeShift.id },
+          data: {
+            totalSales: { increment: subtotal },
+            totalCash: { increment: cashSum },
+            expectedCash: { increment: cashSum },
+            totalDeuna: { increment: deunaSum },
+            totalTransfer: { increment: transferSum },
+            totalCard: { increment: cardSum },
+          },
+        });
+      }
 
       // 3. Descontar Stock y marcar agotado si llega a 0
       const updatedDishes: any[] = [];
@@ -399,8 +450,34 @@ export async function processCajaSaleAction(
         }
       }
 
-      return { orderNumber: order.orderNumber, total: subtotal, updatedDishes };
+      return { orderId: order.id, orderNumber: order.orderNumber, total: subtotal, updatedDishes, isTestSale };
     });
+
+    // Sincronizar venta de Caja POS a la tabla de PostgreSQL pedidos para visibilidad inmediata en módulo mesero
+    try {
+      await ensureDbTables();
+      await pool.query(
+        `INSERT INTO pedidos (id, negocio_id, mesa, estado, total, es_prueba, vertical, metadata)
+         VALUES ($1, $2, 'Caja POS', 'pagado', $3, $4, 'menuqr', $5)
+         ON CONFLICT (id) DO UPDATE SET estado = 'pagado', total = $3`,
+        [
+          result.orderId,
+          restaurantId,
+          result.total,
+          result.isTestSale,
+          JSON.stringify({ tipo_pedido: "caja_pos", paymentMethod: data.paymentMethod }),
+        ]
+      );
+      for (const it of data.items) {
+        await pool.query(
+          `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, es_añadido, estado_item)
+           VALUES ($1, $2, $3, $4, false, 'pagado')`,
+          [result.orderId, it.name, it.quantity, it.price]
+        );
+      }
+    } catch (pgErr) {
+      console.error("Error sincronizando venta Caja POS a PG pedidos:", pgErr);
+    }
 
     const restaurant = await prisma.restaurant.findUnique({
       where: { id: restaurantId },
@@ -430,5 +507,637 @@ export async function processCajaSaleAction(
   } catch (error: any) {
     console.error("Error processing caja sale:", error);
     return { error: error.message || "Error al procesar el cobro de la venta." };
+  }
+}
+
+export interface SplitPaymentDetail {
+  payerName?: string;
+  amount: number;
+  paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA" | "TRANSFERENCIA";
+}
+
+/**
+ * Cobro y liquidación de una mesa, pedido para llevar o domicilio desde la Caja POS.
+ * Actualiza el estado a 'pagado', libera la mesa y registra la venta en el turno de caja activo.
+ * Soporta cobro único o cobro dividido / pagos mixtos (Split Pay).
+ */
+export async function settleOrderInCashShiftAction(
+  restaurantId: string,
+  data: {
+    orderId: string;
+    mesa?: string | null;
+    total: number;
+    paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA" | "TRANSFERENCIA";
+    customerName?: string | null;
+    splitDetails?: SplitPaymentDetail[];
+  }
+) {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { error: auth.error };
+
+    const totalToSettle = Math.max(0, Number(data.total) || 0);
+
+    await ensureDbTables();
+
+    // 1. Marcar como pagado en la tabla relacional de pedidos
+    if (data.orderId) {
+      await pool.query(
+        `UPDATE pedidos 
+         SET estado = 'pagado',
+             solicita_mesero = false
+         WHERE id = $1 AND negocio_id = $2`,
+        [data.orderId, restaurantId]
+      );
+    }
+
+    // 2. Si es una mesa de salón, liberar todas las comandas activas huérfanas de esa mesa
+    if (data.mesa && data.mesa !== "Delivery" && data.mesa !== "LLEVAR" && data.mesa !== "CATALOGO") {
+      await pool.query(
+        `UPDATE pedidos 
+         SET estado = 'pagado',
+             solicita_mesero = false
+         WHERE negocio_id = $1 
+           AND LOWER(TRIM(mesa)) = LOWER(TRIM($2))
+           AND estado NOT IN ('pagado', 'cancelado')`,
+        [restaurantId, data.mesa]
+      );
+    }
+
+    // 3. Si existe en el modelo Order de Prisma, actualizarlo también
+    try {
+      await prisma.order.updateMany({
+        where: { id: data.orderId },
+        data: {
+          status: "COMPLETED",
+          paymentMethod: data.paymentMethod,
+        },
+      });
+    } catch {}
+
+    // 4. Vincular y registrar la venta en el Turno de Caja (CashShift) activo
+    const activeShift = await prisma.cashShift.findFirst({
+      where: { restaurantId, status: "OPEN" },
+    });
+
+    if (activeShift) {
+      const deltaTotal = totalToSettle;
+
+      // Desglose de pagos si proviene de cobro dividido (Split Pay)
+      let cashSum = 0;
+      let deunaSum = 0;
+      let transferSum = 0;
+      let cardSum = 0;
+
+      if (data.splitDetails && data.splitDetails.length > 0) {
+        data.splitDetails.forEach((d) => {
+          const amt = Number(d.amount) || 0;
+          if (d.paymentMethod === "EFECTIVO") cashSum += amt;
+          else if (d.paymentMethod === "DEUNA") deunaSum += amt;
+          else if (d.paymentMethod === "TRANSFERENCIA") transferSum += amt;
+          else cardSum += amt;
+        });
+      } else {
+        if (data.paymentMethod === "EFECTIVO") cashSum = deltaTotal;
+        else if (data.paymentMethod === "DEUNA") deunaSum = deltaTotal;
+        else if (data.paymentMethod === "TRANSFERENCIA") transferSum = deltaTotal;
+        else cardSum = deltaTotal;
+      }
+
+      await prisma.cashShift.update({
+        where: { id: activeShift.id },
+        data: {
+          totalSales: { increment: deltaTotal },
+          totalCash: { increment: cashSum },
+          expectedCash: { increment: cashSum },
+          totalDeuna: { increment: deunaSum },
+          totalTransfer: { increment: transferSum },
+          totalCard: { increment: cardSum },
+        },
+      });
+    }
+
+    // 5. Si existe sesión de mesa en TableSession, cerrar y registrar pagos de split
+    if (data.mesa) {
+      try {
+        const tableSess = await prisma.tableSession.findFirst({
+          where: { restaurantId, tableName: data.mesa, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+        });
+
+        if (tableSess) {
+          if (data.splitDetails && data.splitDetails.length > 0) {
+            for (const d of data.splitDetails) {
+              await prisma.tableSplitPayment.create({
+                data: {
+                  tableSessionId: tableSess.id,
+                  payerName: d.payerName || "Pago en Caja",
+                  amount: d.amount,
+                  paymentMethod: d.paymentMethod.toLowerCase(),
+                  status: "COMPLETED",
+                  confirmedAt: new Date(),
+                },
+              });
+            }
+          }
+          await prisma.tableSession.update({
+            where: { id: tableSess.id },
+            data: { status: "CLOSED", paidAmount: tableSess.totalAmount },
+          });
+        }
+      } catch {}
+    }
+
+    // 6. Notificar a través de Socket.IO para actualizar pantallas de meseros y cocina
+    try {
+      emitPedidoActualizado(restaurantId, {
+        id: data.orderId,
+        mesa: data.mesa || "Mesa",
+        estado: "pagado",
+        solicita_mesero: false,
+      });
+    } catch {}
+
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { slug: true },
+    });
+
+    revalidatePath("/caja");
+    revalidatePath("/admin");
+    if (restaurant?.slug) {
+      revalidatePath(`/${restaurant.slug}/mesas`);
+      revalidatePath(`/${restaurant.slug}/cocina`);
+      revalidatePath(`/${restaurant.slug}/repartidor`);
+    }
+
+    return {
+      success: true,
+      message: `Cobro de $${totalToSettle.toFixed(2)} registrado exitosamente. Mesa liberada.`,
+      total: totalToSettle,
+    };
+  } catch (error: any) {
+    console.error("Error in settleOrderInCashShiftAction:", error);
+    return { error: error.message || "Error al liquidar el cobro en caja." };
+  }
+}
+
+/**
+ * ==========================================
+ * ACCIONES DE SESIÓN DE CAJA (CASH SHIFT / ARQUEO)
+ * ==========================================
+ */
+
+export interface SerializedCashMovement {
+  id: string;
+  shiftId: string;
+  type: "CASH_IN" | "CASH_OUT";
+  amount: number;
+  reason: string;
+  performedBy: string;
+  createdAt: string;
+}
+
+export interface SerializedCashShift {
+  id: string;
+  restaurantId: string;
+  openedById: string;
+  openedByName: string;
+  openedAt: string;
+  closedById?: string | null;
+  closedByName?: string | null;
+  closedAt?: string | null;
+  initialCash: number;
+  expectedCash: number;
+  actualCash?: number | null;
+  difference?: number | null;
+  totalCash: number;
+  totalCard: number;
+  totalTransfer: number;
+  totalDeuna: number;
+  totalSales: number;
+  status: "OPEN" | "CLOSED";
+  notes?: string | null;
+  movements: SerializedCashMovement[];
+}
+
+function serializeShift(
+  shift: any,
+  overrides?: {
+    totalCash?: number;
+    totalCard?: number;
+    totalTransfer?: number;
+    totalDeuna?: number;
+    totalSales?: number;
+    expectedCash?: number;
+  }
+): SerializedCashShift {
+  return {
+    id: shift.id,
+    restaurantId: shift.restaurantId,
+    openedById: shift.openedById,
+    openedByName: shift.openedByName,
+    openedAt: shift.openedAt ? shift.openedAt.toISOString() : new Date().toISOString(),
+    closedById: shift.closedById || null,
+    closedByName: shift.closedByName || null,
+    closedAt: shift.closedAt ? shift.closedAt.toISOString() : null,
+    initialCash: Number(shift.initialCash) || 0,
+    expectedCash: overrides?.expectedCash !== undefined ? overrides.expectedCash : (Number(shift.expectedCash) || 0),
+    actualCash: shift.actualCash !== null && shift.actualCash !== undefined ? Number(shift.actualCash) : null,
+    difference: shift.difference !== null && shift.difference !== undefined ? Number(shift.difference) : null,
+    totalCash: overrides?.totalCash !== undefined ? overrides.totalCash : (Number(shift.totalCash) || 0),
+    totalCard: overrides?.totalCard !== undefined ? overrides.totalCard : (Number(shift.totalCard) || 0),
+    totalTransfer: overrides?.totalTransfer !== undefined ? overrides.totalTransfer : (Number(shift.totalTransfer) || 0),
+    totalDeuna: overrides?.totalDeuna !== undefined ? overrides.totalDeuna : (Number(shift.totalDeuna) || 0),
+    totalSales: overrides?.totalSales !== undefined ? overrides.totalSales : (Number(shift.totalSales) || 0),
+    status: shift.status,
+    notes: shift.notes || null,
+    movements: (shift.movements || []).map((m: any) => ({
+      id: m.id,
+      shiftId: m.shiftId,
+      type: m.type,
+      amount: Number(m.amount) || 0,
+      reason: m.reason,
+      performedBy: m.performedBy,
+      createdAt: m.createdAt ? m.createdAt.toISOString() : new Date().toISOString(),
+    })),
+  };
+}
+
+/**
+ * Obtiene el turno de caja abierto para un negocio determinado con cálculos en vivo.
+ */
+export async function getActiveCashShift(
+  restaurantId: string
+): Promise<{ success: boolean; shift?: SerializedCashShift | null; error?: string }> {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { success: false, error: auth.error };
+
+    const shift = await prisma.cashShift.findFirst({
+      where: {
+        restaurantId,
+        status: "OPEN",
+      },
+      include: {
+        movements: {
+          orderBy: { createdAt: "asc" },
+        },
+        orders: {
+          select: {
+            id: true,
+            total: true,
+            paymentMethod: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: { openedAt: "desc" },
+    });
+
+    if (!shift) {
+      return { success: true, shift: null };
+    }
+
+    // Calcular ventas y fondos en caliente para exactitud total
+    let liveCashSales = 0;
+    let liveCardSales = 0;
+    let liveTransferSales = 0;
+    let liveDeunaSales = 0;
+    let liveTotalSales = 0;
+
+    for (const order of (shift.orders || [])) {
+      if (order.status === "CANCELLED") continue;
+      const orderTotal = Number(order.total) || 0;
+      liveTotalSales += orderTotal;
+      const pm = (order.paymentMethod || "").toUpperCase();
+      if (pm.includes("EFECTIVO") || pm === "CASH") liveCashSales += orderTotal;
+      else if (pm.includes("TARJETA") || pm.includes("CARD") || pm.includes("PAYPHONE")) liveCardSales += orderTotal;
+      else if (pm.includes("TRANSFERENCIA") || pm.includes("TRANSFER")) liveTransferSales += orderTotal;
+      else if (pm.includes("DEUNA")) liveDeunaSales += orderTotal;
+      else liveCashSales += orderTotal;
+    }
+
+    let cashInTotal = 0;
+    let cashOutTotal = 0;
+    for (const m of (shift.movements || [])) {
+      const amt = Number(m.amount) || 0;
+      if (m.type === "CASH_IN") cashInTotal += amt;
+      if (m.type === "CASH_OUT") cashOutTotal += amt;
+    }
+
+    const initialCash = Number(shift.initialCash) || 0;
+    const computedExpectedCash = Math.round((initialCash + liveCashSales + cashInTotal - cashOutTotal) * 100) / 100;
+
+    return {
+      success: true,
+      shift: serializeShift(shift, {
+        totalCash: Math.round(liveCashSales * 100) / 100,
+        totalCard: Math.round(liveCardSales * 100) / 100,
+        totalTransfer: Math.round(liveTransferSales * 100) / 100,
+        totalDeuna: Math.round(liveDeunaSales * 100) / 100,
+        totalSales: Math.round(liveTotalSales * 100) / 100,
+        expectedCash: computedExpectedCash,
+      }),
+    };
+  } catch (error: any) {
+    console.error("Error getting active cash shift:", error);
+    return { success: false, error: "Error al consultar turno de caja activo." };
+  }
+}
+
+/**
+ * Apertura de un nuevo turno de caja.
+ */
+export async function openCashShift(params: {
+  restaurantId: string;
+  openedById: string;
+  openedByName: string;
+  initialCash: number;
+}): Promise<{ success: boolean; shift?: SerializedCashShift; error?: string }> {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(params.restaurantId);
+    if (!auth.authorized) return { success: false, error: auth.error };
+
+    // Verificar si ya existe un turno abierto
+    const existing = await prisma.cashShift.findFirst({
+      where: {
+        restaurantId: params.restaurantId,
+        status: "OPEN",
+      },
+    });
+
+    if (existing) {
+      return {
+        success: false,
+        error: "Ya existe un turno de caja abierto para este negocio. Debe cerrarlo antes de iniciar otro.",
+      };
+    }
+
+    const initialAmount = Math.max(0, Math.round((Number(params.initialCash) || 0) * 100) / 100);
+
+    const shift = await prisma.cashShift.create({
+      data: {
+        restaurantId: params.restaurantId,
+        openedById: params.openedById || "anon",
+        openedByName: params.openedByName || "Cajero",
+        initialCash: initialAmount,
+        expectedCash: initialAmount,
+        status: "OPEN",
+      },
+      include: {
+        movements: true,
+      },
+    });
+
+    revalidatePath("/caja");
+    revalidatePath("/admin");
+
+    return { success: true, shift: serializeShift(shift) };
+  } catch (error: any) {
+    console.error("Error opening cash shift:", error);
+    return { success: false, error: error.message || "Error al abrir el turno de caja." };
+  }
+}
+
+/**
+ * Registra un movimiento de entrada o salida de efectivo en caja chica.
+ */
+export async function addCashMovement(params: {
+  shiftId: string;
+  type: "CASH_IN" | "CASH_OUT";
+  amount: number;
+  reason: string;
+  performedBy: string;
+}): Promise<{ success: boolean; movement?: SerializedCashMovement; error?: string }> {
+  try {
+    await refreshUserSession();
+
+    const shift = await prisma.cashShift.findUnique({
+      where: { id: params.shiftId },
+      select: { id: true, restaurantId: true, status: true, expectedCash: true },
+    });
+
+    if (!shift) {
+      return { success: false, error: "Turno de caja no encontrado." };
+    }
+
+    if (shift.status !== "OPEN") {
+      return { success: false, error: "El turno de caja se encuentra cerrado." };
+    }
+
+    const auth = await verifyRestaurantOwnership(shift.restaurantId);
+    if (!auth.authorized) return { success: false, error: auth.error };
+
+    const cleanAmount = Math.max(0.01, Math.round((Number(params.amount) || 0) * 100) / 100);
+    const cleanReason = (params.reason || "").trim();
+    if (!cleanReason) {
+      return { success: false, error: "Debe especificar el motivo del movimiento." };
+    }
+
+    const delta = params.type === "CASH_IN" ? cleanAmount : -cleanAmount;
+    const currentExpected = Number(shift.expectedCash) || 0;
+    const newExpected = Math.max(0, Math.round((currentExpected + delta) * 100) / 100);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const mov = await tx.cashMovement.create({
+        data: {
+          shiftId: params.shiftId,
+          type: params.type,
+          amount: cleanAmount,
+          reason: cleanReason,
+          performedBy: params.performedBy || "Cajero",
+        },
+      });
+
+      await tx.cashShift.update({
+        where: { id: params.shiftId },
+        data: { expectedCash: newExpected },
+      });
+
+      return mov;
+    });
+
+    revalidatePath("/caja");
+
+    return {
+      success: true,
+      movement: {
+        id: result.id,
+        shiftId: result.shiftId,
+        type: result.type,
+        amount: Number(result.amount),
+        reason: result.reason,
+        performedBy: result.performedBy,
+        createdAt: result.createdAt.toISOString(),
+      },
+    };
+  } catch (error: any) {
+    console.error("Error adding cash movement:", error);
+    return { success: false, error: error.message || "Error al registrar movimiento de efectivo." };
+  }
+}
+
+/**
+ * Cierre y arqueo ciego de turno de caja (Generación de Reporte Z).
+ */
+export async function closeCashShift(params: {
+  shiftId: string;
+  closedById: string;
+  closedByName: string;
+  actualCash: number;
+  notes?: string;
+}): Promise<{
+  success: boolean;
+  shift?: SerializedCashShift;
+  report?: {
+    shiftId: string;
+    openedByName: string;
+    closedByName: string;
+    openedAt: string;
+    closedAt: string;
+    initialCash: number;
+    totalCashSales: number;
+    totalCardSales: number;
+    totalTransferSales: number;
+    totalDeunaSales: number;
+    totalSales: number;
+    cashInTotal: number;
+    cashOutTotal: number;
+    expectedCash: number;
+    actualCash: number;
+    difference: number;
+    notes?: string;
+  };
+  error?: string;
+}> {
+  try {
+    await refreshUserSession();
+
+    const shift = await prisma.cashShift.findUnique({
+      where: { id: params.shiftId },
+      include: {
+        movements: true,
+        orders: {
+          select: {
+            id: true,
+            total: true,
+            paymentMethod: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!shift) {
+      return { success: false, error: "Turno de caja no encontrado." };
+    }
+
+    if (shift.status !== "OPEN") {
+      return { success: false, error: "Este turno de caja ya fue cerrado previamente." };
+    }
+
+    const auth = await verifyRestaurantOwnership(shift.restaurantId);
+    if (!auth.authorized) return { success: false, error: auth.error };
+
+    // 1. Totales de ventas asociadas a este turno
+    let totalCashSales = 0;
+    let totalCardSales = 0;
+    let totalTransferSales = 0;
+    let totalDeunaSales = 0;
+    let totalSales = 0;
+
+    for (const order of shift.orders) {
+      // Solo sumamos órdenes no canceladas
+      if (order.status === "CANCELLED") continue;
+
+      const orderTotal = Number(order.total) || 0;
+      totalSales += orderTotal;
+
+      const pm = (order.paymentMethod || "").toUpperCase();
+      if (pm.includes("EFECTIVO") || pm === "CASH") {
+        totalCashSales += orderTotal;
+      } else if (pm.includes("TARJETA") || pm.includes("CARD") || pm.includes("PAYPHONE")) {
+        totalCardSales += orderTotal;
+      } else if (pm.includes("TRANSFERENCIA") || pm.includes("TRANSFER")) {
+        totalTransferSales += orderTotal;
+      } else if (pm.includes("DEUNA")) {
+        totalDeunaSales += orderTotal;
+      } else {
+        totalCashSales += orderTotal; // Default fallback
+      }
+    }
+
+    // 2. Totales de movimientos de caja chica
+    let cashInTotal = 0;
+    let cashOutTotal = 0;
+    for (const m of shift.movements) {
+      const amt = Number(m.amount) || 0;
+      if (m.type === "CASH_IN") cashInTotal += amt;
+      if (m.type === "CASH_OUT") cashOutTotal += amt;
+    }
+
+    const initialCash = Number(shift.initialCash) || 0;
+    const expectedCash = Math.round((initialCash + totalCashSales + cashInTotal - cashOutTotal) * 100) / 100;
+    const actualCash = Math.round((Number(params.actualCash) || 0) * 100) / 100;
+    const difference = Math.round((actualCash - expectedCash) * 100) / 100;
+
+    const now = new Date();
+
+    const updatedShift = await prisma.cashShift.update({
+      where: { id: params.shiftId },
+      data: {
+        status: "CLOSED",
+        closedById: params.closedById || "anon",
+        closedByName: params.closedByName || "Cajero",
+        closedAt: now,
+        expectedCash,
+        actualCash,
+        difference,
+        totalCash: Math.round(totalCashSales * 100) / 100,
+        totalCard: Math.round(totalCardSales * 100) / 100,
+        totalTransfer: Math.round(totalTransferSales * 100) / 100,
+        totalDeuna: Math.round(totalDeunaSales * 100) / 100,
+        totalSales: Math.round(totalSales * 100) / 100,
+        notes: params.notes?.trim() || null,
+      },
+      include: {
+        movements: true,
+      },
+    });
+
+    revalidatePath("/caja");
+    revalidatePath("/admin");
+
+    const serialized = serializeShift(updatedShift);
+
+    return {
+      success: true,
+      shift: serialized,
+      report: {
+        shiftId: updatedShift.id,
+        openedByName: updatedShift.openedByName,
+        closedByName: updatedShift.closedByName || "Cajero",
+        openedAt: updatedShift.openedAt.toISOString(),
+        closedAt: now.toISOString(),
+        initialCash,
+        totalCashSales: Math.round(totalCashSales * 100) / 100,
+        totalCardSales: Math.round(totalCardSales * 100) / 100,
+        totalTransferSales: Math.round(totalTransferSales * 100) / 100,
+        totalDeunaSales: Math.round(totalDeunaSales * 100) / 100,
+        totalSales: Math.round(totalSales * 100) / 100,
+        cashInTotal: Math.round(cashInTotal * 100) / 100,
+        cashOutTotal: Math.round(cashOutTotal * 100) / 100,
+        expectedCash,
+        actualCash,
+        difference,
+        notes: params.notes?.trim(),
+      },
+    };
+  } catch (error: any) {
+    console.error("Error closing cash shift:", error);
+    return { success: false, error: error.message || "Error al cerrar el turno de caja." };
   }
 }

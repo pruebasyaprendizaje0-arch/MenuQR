@@ -5,6 +5,19 @@ import { pool, ensureDbTables } from "@/lib/db-pool";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 
+export type StaffRole = "MESERO" | "CAJERO" | "REPARTIDOR";
+
+export interface StaffMemberData {
+  id: string;
+  negocio_id: string;
+  nombre: string;
+  pin: string;
+  rol: StaffRole;
+  telefono: string | null;
+  activo: boolean;
+  created_at?: string;
+}
+
 interface SecurityCustomLabels {
   kitchenPin?: string;
   kitchenPinRequired?: boolean;
@@ -66,9 +79,9 @@ export async function getStaffDataAction(restaurantId: string) {
       [auth.restaurant.id, auth.restaurant.name, auth.restaurant.slug]
     );
 
-    // Consultar todos los meseros registrados (activos e inactivos)
+    // Consultar todo el personal registrado (meseros, cajeros, repartidores)
     const { rows: camareros } = await pool.query(
-      `SELECT id, negocio_id, nombre, pin, activo, created_at
+      `SELECT id, negocio_id, nombre, pin, COALESCE(rol, 'MESERO') as rol, telefono, activo, created_at
        FROM camareros
        WHERE negocio_id = $1
        ORDER BY created_at ASC`,
@@ -96,6 +109,8 @@ export async function getStaffDataAction(restaurantId: string) {
         negocio_id: c.negocio_id,
         nombre: c.nombre,
         pin: c.pin || "1234",
+        rol: (c.rol as StaffRole) || "MESERO",
+        telefono: c.telefono || null,
         activo: c.activo ?? true,
         created_at: c.created_at,
       })),
@@ -113,9 +128,15 @@ export async function getStaffDataAction(restaurantId: string) {
 }
 
 /**
- * Crear un nuevo mesero
+ * Crear un nuevo integrante del equipo (Mesero, Cajero o Repartidor)
  */
-export async function createWaiterAction(restaurantId: string, nombre: string, pin: string) {
+export async function createWaiterAction(
+  restaurantId: string,
+  nombre: string,
+  pin: string,
+  rol: StaffRole = "MESERO",
+  telefono?: string | null
+) {
   try {
     const auth = await verifyRestaurantAccess(restaurantId);
     if (!auth.authorized || !auth.restaurant) {
@@ -124,13 +145,16 @@ export async function createWaiterAction(restaurantId: string, nombre: string, p
 
     const cleanNombre = nombre?.trim();
     if (!cleanNombre) {
-      return { success: false, error: "El nombre del mesero es obligatorio." };
+      return { success: false, error: "El nombre del integrante es obligatorio." };
     }
 
     const cleanPin = pin?.trim() || "1234";
     if (cleanPin.length < 4 || cleanPin.length > 8 || !/^\d+$/.test(cleanPin)) {
       return { success: false, error: "El PIN debe ser numérico de 4 a 8 dígitos (ej. 1234)." };
     }
+
+    const cleanRol: StaffRole = rol === "CAJERO" || rol === "REPARTIDOR" ? rol : "MESERO";
+    const cleanPhone = telefono?.trim() || null;
 
     await ensureDbTables();
 
@@ -142,26 +166,30 @@ export async function createWaiterAction(restaurantId: string, nombre: string, p
       [auth.restaurant.id, auth.restaurant.name, auth.restaurant.slug]
     );
 
-    // Verificar si ya existe un mesero con el mismo nombre en este negocio
+    // Verificar si ya existe alguien con el mismo nombre en este negocio
     const { rows: existing } = await pool.query(
       `SELECT id FROM camareros WHERE negocio_id = $1 AND LOWER(nombre) = LOWER($2)`,
       [auth.restaurant.id, cleanNombre]
     );
 
     if (existing.length > 0) {
-      return { success: false, error: `Ya existe un mesero registrado con el nombre "${cleanNombre}".` };
+      return { success: false, error: `Ya existe un integrante registrado con el nombre "${cleanNombre}".` };
     }
 
-    // Insertar mesero
+    // Insertar miembro de equipo con rol y teléfono
     const { rows } = await pool.query(
-      `INSERT INTO camareros (negocio_id, nombre, pin, activo)
-       VALUES ($1, $2, $3, true)
-       RETURNING id, negocio_id, nombre, pin, activo, created_at`,
-      [auth.restaurant.id, cleanNombre, cleanPin]
+      `INSERT INTO camareros (negocio_id, nombre, pin, rol, telefono, activo)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING id, negocio_id, nombre, pin, rol, telefono, activo, created_at`,
+      [auth.restaurant.id, cleanNombre, cleanPin, cleanRol, cleanPhone]
     );
 
     revalidatePath("/admin");
     revalidatePath(`/${auth.restaurant.slug}/mesas`);
+    revalidatePath(`/caja`);
+    revalidatePath(`/${auth.restaurant.slug}/repartidor`);
+
+    const rolLabel = cleanRol === "CAJERO" ? "Cajero" : cleanRol === "REPARTIDOR" ? "Repartidor" : "Mesero";
 
     return {
       success: true,
@@ -170,25 +198,27 @@ export async function createWaiterAction(restaurantId: string, nombre: string, p
         negocio_id: rows[0].negocio_id,
         nombre: rows[0].nombre,
         pin: rows[0].pin || "1234",
+        rol: (rows[0].rol as StaffRole) || cleanRol,
+        telefono: rows[0].telefono || null,
         activo: rows[0].activo ?? true,
         created_at: rows[0].created_at,
       },
-      message: `Mesero "${cleanNombre}" agregado exitosamente con PIN ${cleanPin}.`,
+      message: `${rolLabel} "${cleanNombre}" agregado exitosamente con PIN ${cleanPin}.`,
     };
   } catch (err: unknown) {
     console.error("[createWaiterAction] Error:", err);
-    const errorMsg = err instanceof Error ? err.message : "Error al crear mesero.";
+    const errorMsg = err instanceof Error ? err.message : "Error al crear integrante.";
     return { success: false, error: errorMsg };
   }
 }
 
 /**
- * Editar datos de un mesero (nombre, PIN, estado activo)
+ * Editar datos de un integrante del equipo (nombre, PIN, rol, teléfono, estado activo)
  */
 export async function updateWaiterAction(
   restaurantId: string,
   waiterId: string,
-  data: { nombre: string; pin?: string; activo?: boolean }
+  data: { nombre: string; pin?: string; rol?: StaffRole; telefono?: string | null; activo?: boolean }
 ) {
   try {
     const auth = await verifyRestaurantAccess(restaurantId);
@@ -198,7 +228,7 @@ export async function updateWaiterAction(
 
     const cleanNombre = data.nombre?.trim();
     if (!cleanNombre) {
-      return { success: false, error: "El nombre del mesero no puede estar vacío." };
+      return { success: false, error: "El nombre no puede estar vacío." };
     }
 
     let cleanPin: string | null = null;
@@ -210,6 +240,12 @@ export async function updateWaiterAction(
       cleanPin = p;
     }
 
+    const cleanRol: StaffRole | null =
+      data.rol === "CAJERO" || data.rol === "REPARTIDOR" || data.rol === "MESERO" ? data.rol : null;
+
+    const shouldUpdatePhone = data.telefono !== undefined;
+    const cleanPhone = data.telefono ? data.telefono.trim() : null;
+
     await ensureDbTables();
 
     const { rows } = await pool.query(
@@ -217,18 +253,31 @@ export async function updateWaiterAction(
        SET
          nombre = $1,
          pin = CASE WHEN $2::text IS NOT NULL THEN $2::text ELSE pin END,
-         activo = COALESCE($3, activo)
-       WHERE id = $4 AND negocio_id = $5
-       RETURNING id, negocio_id, nombre, pin, activo, created_at`,
-      [cleanNombre, cleanPin, data.activo !== undefined ? data.activo : null, waiterId, auth.restaurant.id]
+         rol = CASE WHEN $3::text IS NOT NULL THEN $3::text ELSE rol END,
+         telefono = CASE WHEN $4::boolean = true THEN $5::text ELSE telefono END,
+         activo = COALESCE($6, activo)
+       WHERE id = $7 AND negocio_id = $8
+       RETURNING id, negocio_id, nombre, pin, rol, telefono, activo, created_at`,
+      [
+        cleanNombre,
+        cleanPin,
+        cleanRol,
+        shouldUpdatePhone,
+        cleanPhone,
+        data.activo !== undefined ? data.activo : null,
+        waiterId,
+        auth.restaurant.id,
+      ]
     );
 
     if (rows.length === 0) {
-      return { success: false, error: "Mesero no encontrado o no pertenece a este negocio." };
+      return { success: false, error: "Integrante no encontrado o no pertenece a este negocio." };
     }
 
     revalidatePath("/admin");
     revalidatePath(`/${auth.restaurant.slug}/mesas`);
+    revalidatePath(`/caja`);
+    revalidatePath(`/${auth.restaurant.slug}/repartidor`);
 
     return {
       success: true,
@@ -237,14 +286,16 @@ export async function updateWaiterAction(
         negocio_id: rows[0].negocio_id,
         nombre: rows[0].nombre,
         pin: rows[0].pin || "1234",
+        rol: (rows[0].rol as StaffRole) || "MESERO",
+        telefono: rows[0].telefono || null,
         activo: rows[0].activo ?? true,
         created_at: rows[0].created_at,
       },
-      message: "Mesero actualizado correctamente.",
+      message: "Datos del personal actualizados correctamente.",
     };
   } catch (err: unknown) {
     console.error("[updateWaiterAction] Error:", err);
-    const errorMsg = err instanceof Error ? err.message : "Error al actualizar mesero.";
+    const errorMsg = err instanceof Error ? err.message : "Error al actualizar integrante.";
     return { success: false, error: errorMsg };
   }
 }

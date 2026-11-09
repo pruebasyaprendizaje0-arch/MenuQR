@@ -1010,6 +1010,9 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   const minStock = minStockRaw !== null && minStockRaw !== undefined && minStockRaw.trim() !== "" ? parseInt(minStockRaw, 10) : 0;
   const trackStock = formData.get("trackStock") === "true";
   const isService = formData.get("isService") === "true";
+  const vatRateRaw = formData.get("vatRate") as string;
+  const vatRate = vatRateRaw === "ZERO" || vatRateRaw === "EXEMPT" ? (vatRateRaw as "ZERO" | "EXEMPT") : "STANDARD";
+  const hasIce = formData.get("hasIce") === "true";
   const variants = (formData.get("variants") as string)?.trim() || null;
 
   // Si trackStock está activo y el stock indicado es 0 o menor, se marca no disponible de inicio
@@ -1029,6 +1032,8 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     minStock: isNaN(minStock as number) ? 0 : minStock,
     trackStock,
     isService,
+    vatRate,
+    hasIce,
     variants,
     categoryId,
     restaurantId: category.restaurantId,
@@ -1453,6 +1458,10 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   const minStock = minStockRaw !== null && minStockRaw !== undefined && minStockRaw.trim() !== "" ? parseInt(minStockRaw, 10) : 0;
   const trackStock = formData.get("trackStock") === "true";
   const isService = formData.get("isService") === "true";
+  const vatRateRaw = formData.get("vatRate") as string;
+  const vatRate = vatRateRaw === "ZERO" || vatRateRaw === "EXEMPT" ? (vatRateRaw as "ZERO" | "EXEMPT") : (vatRateRaw === "STANDARD" ? "STANDARD" : undefined);
+  const hasIceRaw = formData.get("hasIce");
+  const hasIce = hasIceRaw !== null ? hasIceRaw === "true" : undefined;
   const variants = (formData.get("variants") as string)?.trim() || null;
 
   // Si trackStock está activo y el stock indicado es 0 o menor, se marca agotado
@@ -1472,6 +1481,8 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     minStock?: number | null;
     trackStock?: boolean;
     isService?: boolean;
+    vatRate?: any;
+    hasIce?: boolean;
     variants?: string | null;
     categoryId?: string;
   } = {
@@ -1489,6 +1500,13 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     isService,
     variants,
   };
+
+  if (vatRate !== undefined) {
+    updateData.vatRate = vatRate;
+  }
+  if (hasIce !== undefined) {
+    updateData.hasIce = hasIce;
+  }
 
   if (supplierId !== undefined) {
     updateData.supplierId = supplierId;

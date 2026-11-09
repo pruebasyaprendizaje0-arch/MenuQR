@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { AdminDashboard } from "./components/AdminDashboard";
+import { syncPedidosToPrismaOrders } from "@/lib/order-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,20 @@ export default async function AdminPage() {
 
   let restaurant: any = null;
   try {
+    const targetRestId = activeRestaurantId || (await prisma.restaurant.findFirst({
+      where: isSuperAdmin ? {} : { userId: session.userId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    }))?.id;
+
+    if (targetRestId) {
+      try {
+        await syncPedidosToPrismaOrders(targetRestId);
+      } catch (syncErr) {
+        console.error("Error auto-syncing pedidos to Prisma Orders:", syncErr);
+      }
+    }
+
     if (activeRestaurantId) {
       restaurant = await prisma.restaurant.findFirst({
         where: isSuperAdmin

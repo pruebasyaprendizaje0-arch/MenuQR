@@ -65,6 +65,8 @@ export async function ensureDbTables(): Promise<void> {
           negocio_id UUID REFERENCES negocios(id) ON DELETE CASCADE,
           nombre VARCHAR(100) NOT NULL,
           pin VARCHAR(10),
+          rol VARCHAR(20) DEFAULT 'MESERO',
+          telefono VARCHAR(50),
           activo BOOLEAN DEFAULT true,
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
@@ -116,6 +118,11 @@ export async function ensureDbTables(): Promise<void> {
       ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
       CREATE INDEX IF NOT EXISTS idx_pedidos_es_prueba ON pedidos(negocio_id, es_prueba);
       CREATE INDEX IF NOT EXISTS idx_pedidos_vertical ON pedidos(vertical);
+
+      -- Soporte multi-rol para equipo: Meseros, Cajeros y Repartidores
+      ALTER TABLE camareros ADD COLUMN IF NOT EXISTS rol VARCHAR(20) DEFAULT 'MESERO';
+      ALTER TABLE camareros ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);
+      CREATE INDEX IF NOT EXISTS idx_camareros_rol ON camareros(negocio_id, rol);
     `);
 
     // Sincronizar negocios a partir de la tabla Restaurant de Prisma si existe

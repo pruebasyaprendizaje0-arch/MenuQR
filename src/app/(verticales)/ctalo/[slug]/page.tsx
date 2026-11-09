@@ -4,7 +4,8 @@ import { findRestaurantBySlugOrHistory, sanitizeSlug } from "@/lib/slugs";
 import type { Metadata } from "next";
 import { CtaloClient } from "./components/CtaloClient";
 import { redirect } from "next/navigation";
-import { getBusinessLabels } from "@/lib/business-labels";
+import { headers } from "next/headers";
+import { getBusinessLabels, resolveBusinessVertical } from "@/lib/business-labels";
 import Link from "next/link";
 import { ShoppingBag, ArrowLeft, Store } from "lucide-react";
 
@@ -301,6 +302,33 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
           </div>
         </div>
       );
+    }
+
+    // Enrutamiento polimórfico inverso:
+    // Si el negocio consultado es un restaurante gastronómico (MenuQR), hotel de reservas o servicios técnicos,
+    // redirigir inmediatamente a su experiencia nativa en lugar de renderizar la plantilla de catálogo e-commerce.
+    const businessVertical = resolveBusinessVertical(store);
+    if (businessVertical !== "retail" && store.businessType !== "RETAIL" && store.businessType !== "GENERAL_CATALOG") {
+      const headerList = await headers();
+      const host = headerList.get("x-forwarded-host") || headerList.get("host") || "";
+      const proto = headerList.get("x-forwarded-proto") || "http";
+
+      const targetPath = businessVertical === "reservas"
+        ? `/reservas/${store.slug}`
+        : businessVertical === "servicios"
+        ? `/servicios/${store.slug}`
+        : businessVertical === "citas"
+        ? `/citas/${store.slug}`
+        : `/${store.slug}`;
+
+      if (host.toLowerCase().startsWith("ctalo.") || host.toLowerCase().startsWith("catalogo.")) {
+        const cleanHost = host.toLowerCase().includes("localhost")
+          ? host.replace(/^(ctalo|catalogo)\./i, "")
+          : host.replace(/^(ctalo|catalogo)\./i, "menuqr.");
+        redirect(`${proto}://${cleanHost}${targetPath}`);
+      } else {
+        redirect(targetPath);
+      }
     }
 
     let rawCategoryAspectRatios: Array<{ id: string; imageAspectRatio: string | null }> = [];

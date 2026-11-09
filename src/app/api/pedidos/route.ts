@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { deductStockUniversal } from "@/lib/stock-service";
 import { sendTelegramAlert } from "@/lib/telegram-alert";
 import { notificarSuperAdmin } from "@/lib/telegramAdmin";
+import { syncSinglePedidoToPrisma } from "@/lib/order-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -528,6 +529,7 @@ export async function POST(req: NextRequest) {
           // Notificar vía Socket.IO en tiempo real a cocina/camareros
           emitItemsAñadidos(resolvedNegocioId, mesaStr, insertedItems);
           emitPedidoActualizado(resolvedNegocioId, responseOrder);
+          void syncSinglePedidoToPrisma(createdOrderId, resolvedNegocioId);
 
           // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
           void sendTelegramAlert({
@@ -626,6 +628,7 @@ export async function POST(req: NextRequest) {
 
           // Notificar vía Socket.IO en tiempo real
           emitNuevoPedido(resolvedNegocioId, responseOrder);
+          void syncSinglePedidoToPrisma(createdOrderId, resolvedNegocioId);
 
           // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
           void sendTelegramAlert({
@@ -771,9 +774,15 @@ export async function POST(req: NextRequest) {
           }))?.id;
 
           if (targetPrismaRestId) {
+            const activeShift = await prisma.cashShift.findFirst({
+              where: { restaurantId: targetPrismaRestId, status: "OPEN" },
+              select: { id: true },
+            });
+
             const newPrismaOrder = await prisma.order.create({
               data: {
                 restaurantId: targetPrismaRestId,
+                cashShiftId: activeShift?.id || null,
                 tableName: "CATALOGO",
                 customerName: cliente_nombre ? String(cliente_nombre).trim().slice(0, 200) : "Cliente Catálogo",
                 customerPhone: cliente_telefono ? String(cliente_telefono).trim().slice(0, 50) : null,

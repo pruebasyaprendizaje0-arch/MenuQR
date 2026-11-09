@@ -89,7 +89,16 @@ console.log("=== INICIANDO PRUEBAS DE PROXY DE SUBDOMINIOS (NEXT.JS 16) ===");
   console.log("✅ [PASS] 8: ubicame.cc opera de forma 100% transparente sin alteraciones");
 }
 
+// 9. Submódulo operacional /:slug/mesas en subdominio ctalo pasa directo sin reescritura
+{
+  const req = createMockRequest("http://ctalo.localhost:3000/las-empanadas-de-mauro/mesas", "ctalo.localhost:3000");
+  const res = proxy(req);
+  const rewriteUrl = res.headers.get("x-middleware-rewrite");
+  assert.strictEqual(rewriteUrl, null, "Rutas operacionales /:slug/mesas no deben reescribirse a la vertical");
+  console.log("✅ [PASS] 9: ctalo.localhost '/las-empanadas-de-mauro/mesas' pasa directo a src/app/[slug]/mesas");
+}
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE PROXY PASARON (8/8)");
+console.log("🎉 TODAS LAS PRUEBAS DE PROXY PASARON (9/9)");
 console.log("==================================================");
 

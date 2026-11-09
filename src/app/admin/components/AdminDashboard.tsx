@@ -120,6 +120,7 @@ import {
   Wrench,
   Layers,
   Image as ImageIcon,
+  SlidersHorizontal,
   X
 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -128,8 +129,10 @@ import CampaignsAdminTab from "./CampaignsAdminTab";
 import InventoryAdminTab from "./InventoryAdminTab";
 import CitasAdminTab from "./CitasAdminTab";
 import ReservasAdminTab from "./ReservasAdminTab";
+import { ModifiersAdminTab } from "./ModifiersAdminTab";
 import OrderTicketModal from "./OrderTicketModal";
 import StaffAdminTab from "./StaffAdminTab";
+import SalesAnalyticsDashboard from "./SalesAnalyticsDashboard";
 import { DailyMenuBoard } from "./DailyMenuBoard";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
@@ -619,7 +622,7 @@ export function AdminDashboard({
     setIsMounted(true);
   }, []);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "staff" | "crm" | "citas" | "reservas" | "subscription">("metrics");
+  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "modifiers" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "staff" | "crm" | "citas" | "reservas" | "subscription">("metrics");
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));
@@ -1016,6 +1019,29 @@ export function AdminDashboard({
   const [isLodgingState, setIsLodgingState] = useState<boolean>(initialPreset === "RESERVAS");
   const isLodging = isLodgingState;
   const isServiciosTecnicos = selectedPreset === "SERVICIOS";
+
+  const resolveTargetMenuHref = () => {
+    const base = isLodging
+      ? `/reservas/${restaurant.slug}`
+      : isServiciosTecnicos
+      ? `/servicios/${restaurant.slug}`
+      : (restaurant as any).businessType === "SERVICES"
+      ? `/citas/${restaurant.slug}`
+      : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
+      ? `/ctalo/${restaurant.slug}`
+      : `/${restaurant.slug}`;
+
+    if (typeof window !== "undefined") {
+      const host = window.location.host.toLowerCase();
+      if ((host.startsWith("ctalo.") || host.startsWith("catalogo.")) && !base.startsWith("/ctalo")) {
+        const cleanHost = host.includes("localhost")
+          ? host.replace(/^(ctalo|catalogo)\./i, "")
+          : host.replace(/^(ctalo|catalogo)\./i, "menuqr.");
+        return `${window.location.protocol}//${cleanHost}${base}`;
+      }
+    }
+    return base;
+  };
 
   const [selectedBusinessType, setSelectedBusinessType] = useState<string>(
     initialPreset === "RESTAURANT" ? "RESTAURANT" : initialPreset === "RETAIL" ? "RETAIL" : "SERVICES"
@@ -2101,6 +2127,8 @@ export function AdminDashboard({
   const [dishAttr1Options, setDishAttr1Options] = useState("");
   const [dishAttr2Name, setDishAttr2Name] = useState("");
   const [dishAttr2Options, setDishAttr2Options] = useState("");
+  const [dishVatRate, setDishVatRate] = useState<"STANDARD" | "ZERO" | "EXEMPT">("STANDARD");
+  const [dishHasIce, setDishHasIce] = useState(false);
   const [dishStockFilter, setDishStockFilter] = useState<"ALL" | "TRACKED" | "LOW_STOCK" | "OUT_OF_STOCK">("ALL");
 
   const allDishesList = useMemo(() => categoriesList.flatMap((c) => c.dishes), [categoriesList]);
@@ -2354,17 +2382,7 @@ export function AdminDashboard({
             {/* Mobile compact header actions */}
             <div className="flex items-center gap-2 md:hidden">
               <a
-                href={
-                  isLodging
-                    ? `/reservas/${restaurant.slug}`
-                    : isServiciosTecnicos
-                    ? `/servicios/${restaurant.slug}`
-                    : (restaurant as any).businessType === "SERVICES"
-                    ? `/citas/${restaurant.slug}`
-                    : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
-                    ? `/ctalo/${restaurant.slug}`
-                    : `/${restaurant.slug}`
-                }
+                href={resolveTargetMenuHref()}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-white transition-all"
@@ -2440,6 +2458,19 @@ export function AdminDashboard({
               <Soup className="h-4 w-4" />
               <span>{bLabels.isGastro ? bLabels.items : `${bLabels.items} & Stock`}</span>
             </button>
+            {bLabels.isGastro && (
+              <button
+                onClick={() => setActiveTab("modifiers")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "modifiers"
+                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <SlidersHorizontal className="h-4 w-4 text-amber-400" />
+                <span>Modificadores (Extras)</span>
+              </button>
+            )}
             {bLabels.showInventory && (
               <button
                 onClick={() => setActiveTab("inventory")}
@@ -2545,19 +2576,6 @@ export function AdminDashboard({
               <ShoppingBag className="h-4 w-4" />
               Historial de Pedidos
             </button>
-            {bLabels.showSplitBill && (
-              <button
-                onClick={() => setActiveTab("split-bill")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "split-bill" 
-                    ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <Utensils className="h-4 w-4 text-amber-400" />
-                <span>Dividir Cuenta en Mesa</span>
-              </button>
-            )}
 
             {/* Equipo & Accesos (PIN Meseros & Cocina) - Exclusivo Restaurantes / Cafeterías / Gastro */}
             {bLabels.isGastro && (
@@ -2660,17 +2678,7 @@ export function AdminDashboard({
         {/* Footer actions */}
         <div className="hidden md:block p-4 border-t border-slate-800">
           <a
-            href={
-              isLodging
-                ? `/reservas/${restaurant.slug}`
-                : isServiciosTecnicos
-                ? `/servicios/${restaurant.slug}`
-                : (restaurant as any).businessType === "SERVICES"
-                ? `/citas/${restaurant.slug}`
-                : (restaurant as any).businessType === "RETAIL" || (restaurant as any).businessType === "GENERAL_CATALOG"
-                ? `/ctalo/${restaurant.slug}`
-                : `/${restaurant.slug}`
-            }
+            href={resolveTargetMenuHref()}
             target="_blank"
             rel="noopener noreferrer"
             className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 mb-3 rounded-xl text-xs font-bold border transition-all shadow-md ${
@@ -2712,6 +2720,29 @@ export function AdminDashboard({
       <div className="flex-1 min-w-0 overflow-y-auto pb-28 md:pb-0">
         {/* Main Content Area */}
         <main className="w-full max-w-7xl mx-auto p-6 pb-28 md:p-10 space-y-6">
+        {/* Banner de subdominio: si un restaurante está abierto bajo ctalo. */}
+        {isMounted && typeof window !== "undefined" && (window.location.host.toLowerCase().startsWith("ctalo.") || window.location.host.toLowerCase().startsWith("catalogo.")) && bLabels.isGastro && (
+          <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-slate-900 border border-amber-500/40 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-300 shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl shrink-0 font-bold text-base">
+                🍽️
+              </div>
+              <div>
+                <p className="font-extrabold text-white text-sm">Estás en el subdominio de catálogo ({window.location.host})</p>
+                <p className="text-amber-300/80 mt-0.5">
+                  <strong>{restaurant.name}</strong> es un restaurante / menú gastronómico (MenuQR). Para gestionar y visualizar tu menú en su dominio oficial sin formato de tienda, cámbiate con un clic:
+                </p>
+              </div>
+            </div>
+            <a
+              href={`${window.location.protocol}//${window.location.host.includes("localhost") ? window.location.host.replace(/^(ctalo|catalogo)\./i, "") : window.location.host.replace(/^(ctalo|catalogo)\./i, "menuqr.")}/admin`}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black tracking-wide text-xs transition-all shadow-md shrink-0 flex items-center justify-center gap-2"
+            >
+              Cambiar a Dominio Menú Gastronómico
+            </a>
+          </div>
+        )}
+
         {/* Subscription / Plan Banner */}
         {(() => {
           const trialEnds = currentTrialEndsAt;
@@ -3036,6 +3067,16 @@ export function AdminDashboard({
                   <span className="text-[10px] text-slate-500 block mt-1">Últimos 30 días</span>
                 </div>
               </div>
+
+              {/* Dashboard Analítico de Ventas e Histórico entre Fechas (Opción 1) */}
+              <SalesAnalyticsDashboard
+                orders={allOrders}
+                metricViewMode={metricViewMode}
+                restaurantName={restaurant.name}
+                restaurantSlug={restaurant.slug}
+                currencySymbol="$"
+                stockUnitPlural={bLabels.stockUnitPlural}
+              />
 
               {/* Contador de Visitas al Negocio */}
               <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-xl relative overflow-hidden">
@@ -6323,6 +6364,8 @@ export function AdminDashboard({
                     setDishTrackStock(!bLabels.isGastro);
                     setDishStock("10");
                     setDishMinStock("3");
+                    setDishVatRate("STANDARD");
+                    setDishHasIce(false);
                     setDishCatId(categoriesList[0]?.id || "");
                     setIsDishModalOpen(true);
                   }}
@@ -6714,6 +6757,8 @@ export function AdminDashboard({
                                       setDishTrackStock(Boolean(dish.trackStock));
                                       setDishStock((dish.stock ?? 10).toString());
                                       setDishMinStock((dish.minStock ?? 3).toString());
+                                      setDishVatRate(((dish as any).vatRate as any) || "STANDARD");
+                                      setDishHasIce(Boolean((dish as any).hasIce));
                                       setDishCatId(dish.categoryId);
                                       setIsDishModalOpen(true);
                                     }}
@@ -6819,6 +6864,8 @@ export function AdminDashboard({
 
                       const finalVariants = Object.keys(variantsObj).length > 0 ? JSON.stringify(variantsObj) : "";
                       formData.append("variants", finalVariants);
+                      formData.append("vatRate", dishVatRate);
+                      formData.append("hasIce", dishHasIce ? "true" : "false");
                       
                       if (editingDish) {
                         const res = await updateDishAction(editingDish.id, formData);
@@ -6887,6 +6934,38 @@ export function AdminDashboard({
                           />
                         </div>
                       </div>
+
+                      {/* Tarifa de IVA (0%, 15%, Exento) */}
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                          Tarifa de Impuesto (IVA)
+                        </label>
+                        <select
+                          name="vatRate"
+                          value={dishVatRate}
+                          onChange={(e) => setDishVatRate(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-850 block px-4 py-2.5 rounded-xl text-white focus:border-red-500 focus:outline-none text-xs sm:text-sm"
+                        >
+                          <option value="STANDARD">15% Tarifa General (IVA 15%)</option>
+                          <option value="ZERO">0% Tarifa Reducida (IVA 0%)</option>
+                          <option value="EXEMPT">Exento / No Objeto de IVA</option>
+                        </select>
+                      </div>
+
+                      {bLabels.isGastro && (
+                        <div className="col-span-2 pt-1">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+                            <input
+                              type="checkbox"
+                              name="hasIce"
+                              checked={dishHasIce}
+                              onChange={(e) => setDishHasIce(e.target.checked)}
+                              className="w-4 h-4 rounded text-red-600 bg-slate-950 border-slate-800"
+                            />
+                            <span>Aplica Impuesto a Consumos Especiales (ICE)</span>
+                          </label>
+                        </div>
+                      )}
 
                       {/* Elementos clave de Producto/Stock (Opción 2) */}
                       <div>
@@ -9108,9 +9187,23 @@ export function AdminDashboard({
           </div>
         )}
 
-        {/* Dividir Cuenta Tab (Exclusivo Restaurantes / Salón) */}
-        {activeTab === "split-bill" && bLabels.showSplitBill && (
-          <TableSplitMonitor restaurantId={restaurant.id} tablesConfig={restaurant.tablesConfig} />
+        {/* Dividir Cuenta Tab (Redirección amigable a Caja POS) */}
+        {activeTab === "split-bill" && (
+          <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-4 max-w-lg mx-auto my-12 animate-fade-in shadow-2xl">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
+              <Utensils className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-white">Dividir Cuenta se gestiona en Caja POS</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              El cobro, división de cuentas en partes iguales, abonos mixtos (Efectivo, DeUna QR, Transferencia y Tarjeta) y la liberación de mesas ahora están 100% centralizados en el módulo de Caja POS.
+            </p>
+            <Link
+              href="/caja"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition shadow-lg shadow-amber-500/20 active:scale-95"
+            >
+              <span>Abrir Caja POS</span>
+            </Link>
+          </div>
         )}
 
         {/* Equipo y Accesos (PIN Meseros & Cocina) Tab (Exclusivo Restaurantes / Salón) */}
@@ -10666,6 +10759,11 @@ export function AdminDashboard({
               </div>
             )}
           </div>
+        )}
+
+        {/* Modificadores Gastronómicos (Exclusivo MenuQR / Gastro) */}
+        {activeTab === "modifiers" && bLabels.isGastro && (
+          <ModifiersAdminTab restaurant={restaurant as any} />
         )}
 
         {/* Citas & Agenda CRM Tab */}

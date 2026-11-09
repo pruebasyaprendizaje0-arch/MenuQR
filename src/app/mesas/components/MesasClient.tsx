@@ -70,6 +70,8 @@ interface Negocio {
   nombre: string;
   slug: string;
   numero_mesas: number;
+  themeColor?: string;
+  imageAspectRatio?: "1:1" | "9:16";
 }
 
 interface Camarero {
@@ -81,10 +83,11 @@ interface Camarero {
 interface Producto {
   id: string;
   name: string;
+  description?: string | null;
   price: number;
   imageUrl?: string | null;
   isAvailable: boolean;
-  category?: { name: string };
+  category?: { name: string; imageAspectRatio?: string | null };
 }
 
 interface MetricaCamarero {
@@ -120,6 +123,34 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   const [showcaseCategory, setShowcaseCategory] = useState<string>("TODAS");
   const [showcaseIndex, setShowcaseIndex] = useState(0);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [showcaseAspect, setShowcaseAspect] = useState<"9:16" | "4:5" | "1:1" | "4:3">("9:16");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("menuqr_showcase_aspect");
+      if (saved === "9:16" || saved === "4:5" || saved === "1:1" || saved === "4:3") {
+        setShowcaseAspect(saved);
+        return;
+      }
+    } catch {}
+    if (negocioInfo?.imageAspectRatio === "9:16") {
+      setShowcaseAspect("9:16");
+    }
+  }, [negocioInfo]);
+
+  const getAspectContainerClass = (aspect: "9:16" | "4:5" | "1:1" | "4:3") => {
+    switch (aspect) {
+      case "9:16":
+        return "aspect-[9/16] max-h-[48vh] sm:max-h-[52vh]";
+      case "4:5":
+        return "aspect-[4/5] max-h-[44vh] sm:max-h-[48vh]";
+      case "1:1":
+        return "aspect-square max-h-[40vh] sm:max-h-[44vh]";
+      case "4:3":
+      default:
+        return "aspect-[4/3] max-h-[38vh] sm:max-h-[42vh]";
+    }
+  };
 
   const showcaseCategories = React.useMemo(() => {
     const cats = new Set<string>();
@@ -1544,6 +1575,30 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
               <span className="px-3.5 py-1 rounded-full bg-emerald-600 text-white font-black text-sm shadow">
                 🪑 Mesa #{activeMesaNumber}
               </span>
+              
+              {/* Selector Rápido de Formato de Imagen (9:16, 4:5, 1:1, 4:3) */}
+              <div className="flex items-center gap-0.5 sm:gap-1 bg-white border border-slate-300 p-0.5 rounded-xl shadow-sm text-[10px] font-bold">
+                <span className="text-slate-400 px-1 hidden md:inline">📸 Formato:</span>
+                {(["9:16", "4:5", "1:1", "4:3"] as const).map((asp) => (
+                  <button
+                    key={asp}
+                    type="button"
+                    onClick={() => {
+                      setShowcaseAspect(asp);
+                      try {
+                        localStorage.setItem("menuqr_showcase_aspect", asp);
+                      } catch {}
+                    }}
+                    className={`px-1.5 sm:px-2 py-0.5 rounded-lg transition ${
+                      showcaseAspect === asp
+                        ? "bg-slate-900 text-white shadow-sm font-black"
+                        : "text-slate-600 hover:text-slate-950"
+                    }`}
+                  >
+                    {asp}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="flex items-center gap-1">
@@ -1575,7 +1630,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
           {/* CONTENEDOR PRINCIPAL: SLIDER TIPO HISTORIAS DE INSTAGRAM */}
           <div
-            className="flex-1 flex flex-col items-center justify-center p-4 relative overflow-hidden bg-gradient-to-b from-white to-slate-50"
+            className="flex-1 flex flex-col items-center justify-start sm:justify-center p-3 sm:p-4 relative overflow-y-auto no-scrollbar bg-gradient-to-b from-white to-slate-50"
             onTouchStart={(e) => setTouchStartX(e.touches[0].clientX)}
             onTouchEnd={(e) => {
               if (touchStartX === null) return;
@@ -1612,33 +1667,58 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
             {currentShowcaseDish ? (
               <div className="w-full max-w-sm flex flex-col items-center space-y-4">
-                {/* Foto Amplificada */}
-                <div className="w-full aspect-[4/3] rounded-3xl overflow-hidden shadow-2xl bg-slate-100 border-2 border-slate-200 relative">
+                {/* Foto Amplificada con relación de aspecto adaptable */}
+                <div
+                  className={`w-full ${getAspectContainerClass(
+                    showcaseAspect
+                  )} rounded-3xl overflow-hidden shadow-2xl bg-slate-900 border-2 border-slate-200 relative flex items-center justify-center transition-all duration-300`}
+                >
+                  {/* Backdrop inteligente desenfocado para fotos horizontales en modo 9:16 */}
                   <img
-                    src={getPrimaryDishImage(currentShowcaseDish.imageUrl) || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80"}
+                    src={
+                      getPrimaryDishImage(currentShowcaseDish.imageUrl) ||
+                      "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80"
+                    }
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 w-full h-full object-cover blur-xl scale-125 opacity-40 pointer-events-none"
+                  />
+                  <img
+                    src={
+                      getPrimaryDishImage(currentShowcaseDish.imageUrl) ||
+                      "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80"
+                    }
                     alt={currentShowcaseDish.name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-cover relative z-0 transition-transform duration-300"
                     onError={(e) => {
                       (e.target as HTMLImageElement).src =
                         "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80";
                     }}
                   />
                   {currentShowcaseDish.category?.name && (
-                    <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-slate-900/80 text-white font-extrabold text-[11px] backdrop-blur-md uppercase tracking-wider">
+                    <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-slate-900/80 text-white font-extrabold text-[11px] backdrop-blur-md uppercase tracking-wider z-10 shadow">
                       {currentShowcaseDish.category.name}
                     </span>
                   )}
-                  <span className="absolute bottom-3 right-3 px-2.5 py-0.5 rounded-full bg-white/95 text-slate-900 font-bold text-[10px] shadow">
+                  <span className="absolute bottom-3 right-3 px-2.5 py-0.5 rounded-full bg-white/95 text-slate-900 font-bold text-[10px] shadow z-10">
                     {showcaseIndex + 1} de {showcaseDishes.length}
                   </span>
                 </div>
 
-                {/* Nombre y Precio 2x */}
-                <div className="text-center space-y-1 px-2">
+                {/* Nombre, Descripción y Precio */}
+                <div className="text-center space-y-1.5 px-3 max-w-sm">
                   <h2 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight leading-tight line-clamp-2">
                     {currentShowcaseDish.name}
                   </h2>
-                  <div className="text-3xl sm:text-4xl font-black font-mono text-emerald-600">
+                  
+                  {/* Descripción del plato */}
+                  {currentShowcaseDish.description ? (
+                    <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed line-clamp-3">
+                      {currentShowcaseDish.description}
+                    </p>
+                  ) : null}
+
+                  <div className="text-3xl sm:text-4xl font-black font-mono text-emerald-600 pt-0.5">
                     ${Number(currentShowcaseDish.price).toFixed(2)}
                   </div>
                 </div>

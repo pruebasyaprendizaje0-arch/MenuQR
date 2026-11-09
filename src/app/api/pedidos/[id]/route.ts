@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { emitPedidoActualizado, emitPedidoCancelado } from "@/lib/socket-server";
+import { syncSinglePedidoToPrisma } from "@/lib/order-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +135,8 @@ export async function PUT(
         cancelado_por: pedido.cancelado_por || "sistema",
       });
     }
+
+    void syncSinglePedidoToPrisma(id, pedido.negocio_id);
 
     return NextResponse.json({
       ok: true,

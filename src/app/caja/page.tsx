@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { CajaClient } from "./CajaClient";
+import { getActiveCashShift } from "@/lib/caja-actions";
 import Link from "next/link";
 import { Store, ArrowLeft, Barcode } from "lucide-react";
 
@@ -32,6 +33,13 @@ export default async function CajaPage() {
       slug: true;
       themeColor: true;
       customLabels: true;
+      qrCobroUrl: true;
+      bankName: true;
+      bankAccountType: true;
+      bankAccountNumber: true;
+      bankAccountName: true;
+      tablesConfig: true;
+      businessType: true;
     };
   }>>>>;
 
@@ -49,6 +57,13 @@ export default async function CajaPage() {
           slug: true,
           themeColor: true,
           customLabels: true,
+          qrCobroUrl: true,
+          bankName: true,
+          bankAccountType: true,
+          bankAccountNumber: true,
+          bankAccountName: true,
+          tablesConfig: true,
+          businessType: true,
         },
       });
     }
@@ -63,6 +78,13 @@ export default async function CajaPage() {
           slug: true,
           themeColor: true,
           customLabels: true,
+          qrCobroUrl: true,
+          bankName: true,
+          bankAccountType: true,
+          bankAccountNumber: true,
+          bankAccountName: true,
+          tablesConfig: true,
+          businessType: true,
         },
       });
     }
@@ -76,6 +98,13 @@ export default async function CajaPage() {
           slug: true,
           themeColor: true,
           customLabels: true,
+          qrCobroUrl: true,
+          bankName: true,
+          bankAccountType: true,
+          bankAccountNumber: true,
+          bankAccountName: true,
+          tablesConfig: true,
+          businessType: true,
         },
       });
     }
@@ -151,6 +180,62 @@ export default async function CajaPage() {
     console.error("Error querying categories for Caja:", catErr);
   }
 
+  // Fetch active cash shift (Arqueo y Sesión)
+  let initialShift = null;
+  try {
+    const shiftRes = await getActiveCashShift(restaurant.id);
+    if (shiftRes.success && shiftRes.shift) {
+      initialShift = shiftRes.shift;
+    }
+  } catch (shiftErr) {
+    console.error("Error querying active cash shift for Caja:", shiftErr);
+  }
+
+  // Fetch available dishes for quick touch POS grid
+  let dishes: Array<{
+    id: string;
+    name: string;
+    price: number;
+    imageUrl: string | null;
+    barcode: string | null;
+    sku: string | null;
+    stock: number | null;
+    trackStock: boolean;
+    categoryId: string | null;
+    category?: { id: string; name: string } | null;
+  }> = [];
+  try {
+    dishes = await prisma.dish.findMany({
+      where: { restaurantId: restaurant.id, isAvailable: true },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        imageUrl: true,
+        barcode: true,
+        sku: true,
+        stock: true,
+        trackStock: true,
+        categoryId: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+  } catch (dishErr) {
+    console.error("Error querying dishes for Caja touch grid:", dishErr);
+  }
+
+  const currentUser = {
+    id: session?.userId || "admin",
+    name: session?.email?.split("@")[0] || "Administrador",
+    email: session?.email || "admin@ubicame.cc",
+  };
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <CajaClient
@@ -159,8 +244,18 @@ export default async function CajaPage() {
           name: restaurant.name,
           slug: restaurant.slug,
           themeColor: restaurant.themeColor || "#059669",
+          qrCobroUrl: restaurant.qrCobroUrl || null,
+          bankName: restaurant.bankName || null,
+          bankAccountType: restaurant.bankAccountType || null,
+          bankAccountNumber: restaurant.bankAccountNumber || null,
+          bankAccountName: restaurant.bankAccountName || null,
+          tablesConfig: restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10",
+          businessType: restaurant.businessType || "RESTAURANT",
         }}
         categories={categories}
+        initialShift={initialShift}
+        currentUser={currentUser}
+        dishes={dishes}
       />
     </main>
   );

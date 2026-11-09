@@ -54,6 +54,22 @@ enum NotificationPriority {
   URGENT
 }
 
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum MovementType {
+  CASH_IN
+  CASH_OUT
+}
+
+enum VatRate {
+  ZERO
+  STANDARD
+  EXEMPT
+}
+
 model User {
   id               String       @id @default(uuid())
   email            String       @unique
@@ -176,6 +192,7 @@ model Restaurant {
   campaigns         BusinessCampaign[]
   inAppNotifications     InAppNotification[]
   inAppNotificationReads InAppNotificationRead[]
+  cashShifts             CashShift[]
   createdAt         DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -218,6 +235,8 @@ model Dish {
   minStock     Int?       @default(0)
   trackStock   Boolean    @default(false)
   isService    Boolean    @default(false)
+  vatRate      VatRate    @default(STANDARD)
+  hasIce       Boolean    @default(false)
   variants     String?    @db.Text
   isSuggested  Boolean    @default(false)
   supplierId   String?
@@ -225,6 +244,7 @@ model Dish {
   recipeItems  DishRecipeItem[]
   purchaseOrderItems PurchaseOrderItem[]
   campaignDishes CampaignDish[]
+  modifierGroups DishModifierGroup[]
 
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -293,6 +313,8 @@ model Order {
   paymentMethod    String
   paymentDetails   String?
   isTest           Boolean     @default(false)
+  cashShiftId      String?
+  cashShift        CashShift?  @relation(fields: [cashShiftId], references: [id], onDelete: SetNull)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   items            OrderItem[]
@@ -301,6 +323,7 @@ model Order {
   @@index([restaurantId, createdAt])
   @@index([restaurantId, status])
   @@index([restaurantId, isTest])
+  @@index([cashShiftId])
   @@index([status])
 }
 
@@ -802,6 +825,80 @@ model InAppNotificationRead {
 
   @@unique([notificationId, restaurantId])
   @@index([restaurantId, isDismissed])
+}
+
+// ==========================================
+// MÓDULO GASTRONÓMICO: MODIFICADORES DE PLATO (MENUQR)
+// ==========================================
+model DishModifierGroup {
+  id        String               @id @default(cuid())
+  dishId    String
+  dish      Dish                 @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  name      String
+  minSelect Int                  @default(0)
+  maxSelect Int                  @default(1)
+  options   DishModifierOption[]
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@index([dishId])
+}
+
+model DishModifierOption {
+  id         String            @id @default(cuid())
+  groupId    String
+  group      DishModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name       String
+  extraPrice Decimal           @default(0.0) @db.Decimal(10, 2)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([groupId])
+}
+
+// ==========================================
+// MÓDULO TRANSVERSAL: SESIONES DE CAJA Y ARQUEO (MENUQR & CTALO)
+// ==========================================
+model CashShift {
+  id            String         @id @default(cuid())
+  restaurantId  String
+  restaurant    Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  openedById    String
+  openedByName  String
+  openedAt      DateTime       @default(now())
+  closedById    String?
+  closedByName  String?
+  closedAt      DateTime?
+  initialCash   Decimal        @default(0.0) @db.Decimal(10, 2)
+  expectedCash  Decimal        @default(0.0) @db.Decimal(10, 2)
+  actualCash    Decimal?       @db.Decimal(10, 2)
+  difference    Decimal?       @db.Decimal(10, 2)
+  totalCash     Decimal        @default(0.0) @db.Decimal(10, 2)
+  totalCard     Decimal        @default(0.0) @db.Decimal(10, 2)
+  totalTransfer Decimal        @default(0.0) @db.Decimal(10, 2)
+  totalDeuna    Decimal        @default(0.0) @db.Decimal(10, 2)
+  totalSales    Decimal        @default(0.0) @db.Decimal(10, 2)
+  status        ShiftStatus    @default(OPEN)
+  notes         String?
+  movements     CashMovement[]
+  orders        Order[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([restaurantId, status])
+}
+
+model CashMovement {
+  id          String       @id @default(cuid())
+  shiftId     String
+  shift       CashShift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  type        MovementType
+  amount      Decimal      @db.Decimal(10, 2)
+  reason      String
+  performedBy String
+  createdAt   DateTime     @default(now())
+
+  @@index([shiftId])
 }
 
 

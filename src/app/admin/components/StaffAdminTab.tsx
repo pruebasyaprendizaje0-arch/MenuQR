@@ -19,6 +19,10 @@ import {
   Search,
   Check,
   X,
+  CreditCard,
+  Bike,
+  Phone,
+  Store,
 } from "lucide-react";
 import {
   getStaffDataAction,
@@ -26,6 +30,7 @@ import {
   updateWaiterAction,
   deleteWaiterAction,
   saveKitchenSecurityAction,
+  StaffRole,
 } from "@/lib/staff-actions";
 
 interface Camarero {
@@ -33,6 +38,8 @@ interface Camarero {
   negocio_id: string;
   nombre: string;
   pin: string;
+  rol: StaffRole;
+  telefono?: string | null;
   activo: boolean;
   created_at?: string;
 }
@@ -52,6 +59,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showPins, setShowPins] = useState(false);
+  const [roleFilter, setRoleFilter] = useState<"ALL" | "MESERO" | "CAJERO" | "REPARTIDOR">("ALL");
 
   // Estados de seguridad de Cocina
   const [kitchenPin, setKitchenPin] = useState("");
@@ -61,11 +69,13 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
   const [savingKitchen, setSavingKitchen] = useState(false);
   const [kitchenMessage, setKitchenMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Modal para Crear / Editar Mesero
+  // Modal para Crear / Editar Integrante de Equipo
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWaiter, setEditingWaiter] = useState<Camarero | null>(null);
   const [formNombre, setFormNombre] = useState("");
   const [formPin, setFormPin] = useState("");
+  const [formRol, setFormRol] = useState<StaffRole>("MESERO");
+  const [formTelefono, setFormTelefono] = useState("");
   const [formActivo, setFormActivo] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
   const [submittingWaiter, setSubmittingWaiter] = useState(false);
@@ -152,11 +162,14 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
     }
   };
 
-  // Abrir modal para nuevo mesero
-  const handleOpenCreateModal = () => {
+  // Abrir modal para nuevo integrante
+  const handleOpenCreateModal = (presetRole?: StaffRole) => {
     setEditingWaiter(null);
     setFormNombre("");
-    // Sugerir PIN automático fácil de 4 dígitos basado en el número de meseros
+    const targetRole = presetRole || (roleFilter !== "ALL" ? roleFilter : "MESERO");
+    setFormRol(targetRole);
+    setFormTelefono("");
+    // Sugerir PIN automático fácil de 4 dígitos basado en el número de miembros
     const nextPinNum = (camareros.length + 1) * 1111;
     setFormPin(nextPinNum <= 9999 ? String(nextPinNum) : "1234");
     setFormActivo(true);
@@ -164,21 +177,23 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
     setIsModalOpen(true);
   };
 
-  // Abrir modal para editar mesero
+  // Abrir modal para editar integrante
   const handleOpenEditModal = (waiter: Camarero) => {
     setEditingWaiter(waiter);
     setFormNombre(waiter.nombre);
     setFormPin(waiter.pin || "1234");
+    setFormRol(waiter.rol || "MESERO");
+    setFormTelefono(waiter.telefono || "");
     setFormActivo(waiter.activo);
     setFormError(null);
     setIsModalOpen(true);
   };
 
-  // Guardar mesero (crear o editar)
+  // Guardar integrante (crear o editar)
   const handleSaveWaiter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formNombre.trim()) {
-      setFormError("Ingresa el nombre del mesero.");
+      setFormError("Ingresa el nombre del integrante del equipo.");
       return;
     }
     const cleanPin = formPin.trim();
@@ -196,6 +211,8 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
         const res = await updateWaiterAction(restaurant.id, editingWaiter.id, {
           nombre: formNombre.trim(),
           pin: cleanPin,
+          rol: formRol,
+          telefono: formTelefono.trim() || null,
           activo: formActivo,
         });
 
@@ -205,20 +222,26 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
           );
           setIsModalOpen(false);
         } else {
-          setFormError(res.error || "Error al actualizar mesero.");
+          setFormError(res.error || "Error al actualizar integrante.");
         }
       } else {
         // Crear nuevo
-        const res = await createWaiterAction(restaurant.id, formNombre.trim(), cleanPin);
+        const res = await createWaiterAction(
+          restaurant.id,
+          formNombre.trim(),
+          cleanPin,
+          formRol,
+          formTelefono.trim() || null
+        );
         if (res.success && res.camarero) {
           setCamareros((prev) => [...prev, res.camarero]);
           setIsModalOpen(false);
         } else {
-          setFormError(res.error || "Error al crear mesero.");
+          setFormError(res.error || "Error al registrar integrante.");
         }
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Error al procesar mesero.";
+      const msg = err instanceof Error ? err.message : "Error al procesar integrante.";
       setFormError(msg);
     } finally {
       setSubmittingWaiter(false);
@@ -272,11 +295,19 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
     }
   };
 
-  const filteredCamareros = camareros.filter((c) =>
-    c.nombre.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
   const activeCount = camareros.filter((c) => c.activo).length;
+  const meserosCount = camareros.filter((c) => (c.rol || "MESERO") === "MESERO").length;
+  const cajerosCount = camareros.filter((c) => c.rol === "CAJERO").length;
+  const repartidoresCount = camareros.filter((c) => c.rol === "REPARTIDOR").length;
+
+  const filteredCamareros = camareros.filter((c) => {
+    const matchesSearch =
+      c.nombre.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.telefono && c.telefono.includes(searchQuery));
+    const roleOfCam = c.rol || "MESERO";
+    const matchesRole = roleFilter === "ALL" || roleOfCam === roleFilter;
+    return matchesSearch && matchesRole;
+  });
 
   return (
     <div className="space-y-8 animate-fadeIn text-slate-100">
@@ -289,10 +320,10 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             </div>
             <div>
               <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                Equipo y Accesos (Meseros & Cocina)
+                Equipo y Accesos (Meseros, Cajeros & Repartidores)
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Administra los meseros del salón, claves de acceso numéricas (PIN) y la seguridad de Pantalla de Cocina KDS.
+                Administra los meseros del salón, cajeros de mostrador, repartidores y la seguridad de Pantalla de Cocina KDS.
               </p>
             </div>
           </div>
@@ -318,6 +349,26 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
           >
             <Users className="h-4 w-4" />
             <span>Módulo Mesero</span>
+            <ExternalLink className="h-3 w-3 opacity-60" />
+          </a>
+          <a
+            href="/caja"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 transition shadow-sm"
+          >
+            <CreditCard className="h-4 w-4" />
+            <span>Terminal Caja POS</span>
+            <ExternalLink className="h-3 w-3 opacity-60" />
+          </a>
+          <a
+            href={`/${restaurant.slug}/repartidor`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition shadow-sm"
+          >
+            <Bike className="h-4 w-4" />
+            <span>Panel Repartidor</span>
             <ExternalLink className="h-3 w-3 opacity-60" />
           </a>
         </div>
@@ -467,11 +518,11 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
         </form>
       </div>
 
-      {/* SECCIÓN 2: GESTIÓN DE MESEROS Y CAMAREROS */}
+      {/* SECCIÓN 2: GESTIÓN DE PERSONAL (MESEROS, CAJEROS, REPARTIDORES) */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-xl relative overflow-hidden backdrop-blur-md space-y-6">
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-cyan-500 to-amber-500" />
 
-        {/* CABECERA DE MESEROS */}
+        {/* CABECERA DE PERSONAL */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="h-12 w-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
@@ -479,13 +530,13 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-black text-white">Meseros y Personal de Salón</h3>
+                <h3 className="text-lg font-black text-white">Personal del Negocio</h3>
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   {activeCount} activo{activeCount !== 1 ? "s" : ""} de {camareros.length}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Registra a cada mesero con su propio PIN para identificar quién atendió cada comanda en mesa.
+                Registra a meseros, cajeros y repartidores con su propio PIN para identificar turnos, cobros y entregas.
               </p>
             </div>
           </div>
@@ -503,13 +554,79 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
 
             <button
               type="button"
-              onClick={handleOpenCreateModal}
+              onClick={() => handleOpenCreateModal()}
               className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 active:scale-95"
             >
               <Plus className="w-4 h-4" />
-              <span>+ Nuevo Mesero</span>
+              <span>+ Nuevo Integrante</span>
             </button>
           </div>
+        </div>
+
+        {/* FILTROS POR ROL (TODOS / MESEROS / CAJEROS / REPARTIDORES) */}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+          <button
+            type="button"
+            onClick={() => setRoleFilter("ALL")}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+              roleFilter === "ALL"
+                ? "bg-white text-slate-950 shadow-md font-black"
+                : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+            }`}
+          >
+            <span>Todos</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300">
+              {camareros.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRoleFilter("MESERO")}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+              roleFilter === "MESERO"
+                ? "bg-emerald-500 text-slate-950 shadow-md font-black"
+                : "bg-slate-950 text-emerald-400/80 hover:text-emerald-300 border border-slate-800"
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Meseros de Salón</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+              {meserosCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRoleFilter("CAJERO")}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+              roleFilter === "CAJERO"
+                ? "bg-cyan-500 text-slate-950 shadow-md font-black"
+                : "bg-slate-950 text-cyan-400/80 hover:text-cyan-300 border border-slate-800"
+            }`}
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            <span>Cajeros (POS)</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/40">
+              {cajerosCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRoleFilter("REPARTIDOR")}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+              roleFilter === "REPARTIDOR"
+                ? "bg-amber-500 text-slate-950 shadow-md font-black"
+                : "bg-slate-950 text-amber-400/80 hover:text-amber-300 border border-slate-800"
+            }`}
+          >
+            <Bike className="w-3.5 h-3.5" />
+            <span>Repartidores (Delivery)</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-950 text-amber-300 border border-amber-800/40">
+              {repartidoresCount}
+            </span>
+          </button>
         </div>
 
         {/* BARRA DE BÚSQUEDA Y FILTRO */}
@@ -518,7 +635,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               type="text"
-              placeholder="Buscar mesero por nombre..."
+              placeholder="Buscar por nombre o teléfono..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none"
@@ -533,17 +650,17 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             }}
             disabled={loading}
             className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750 border border-slate-700 transition"
-            title="Recargar meseros"
+            title="Recargar equipo"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
 
-        {/* LISTADO DE MESEROS */}
+        {/* LISTADO DE INTEGRANTES */}
         {loading ? (
           <div className="py-12 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
             <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
-            <span>Cargando meseros del negocio...</span>
+            <span>Cargando equipo del negocio...</span>
           </div>
         ) : filteredCamareros.length === 0 ? (
           <div className="py-12 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-950/50 p-6 space-y-3">
@@ -551,124 +668,193 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
               <Users className="w-6 h-6" />
             </div>
             <h4 className="text-sm font-bold text-white">
-              {searchQuery ? "No se encontraron meseros con esa búsqueda" : "No hay meseros registrados aún"}
+              {searchQuery
+                ? "No se encontraron integrantes con esa búsqueda"
+                : roleFilter !== "ALL"
+                ? `No hay ${roleFilter === "CAJERO" ? "cajeros" : roleFilter === "REPARTIDOR" ? "repartidores" : "meseros"} registrados aún`
+                : "No hay personal registrado aún"}
             </h4>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
               {searchQuery
                 ? "Prueba buscando con otro término o limpia el buscador."
-                : "Agrega a tu primer mesero para que pueda abrir turno con su PIN en el salón."}
+                : "Registra cajeros, meseros o repartidores con su PIN numérico para delegar funciones con total seguridad."}
             </p>
             {!searchQuery && (
               <button
                 type="button"
-                onClick={handleOpenCreateModal}
+                onClick={() => handleOpenCreateModal()}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition shadow-md mt-2"
               >
                 <Plus className="w-4 h-4" />
-                <span>Agregar Primer Mesero</span>
+                <span>Agregar Primer Integrante</span>
               </button>
             )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {filteredCamareros.map((cam) => (
-              <div
-                key={cam.id}
-                className={`p-4 rounded-2xl bg-slate-950 border transition-all ${
-                  cam.activo
-                    ? "border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900/60"
-                    : "border-slate-850 opacity-60 bg-slate-950/40"
-                } flex flex-col justify-between gap-3 shadow-md group`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className={`w-11 h-11 rounded-xl flex items-center justify-center font-black text-sm shrink-0 transition ${
-                        cam.activo
-                          ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 group-hover:scale-105"
-                          : "bg-slate-800 text-slate-500 border border-slate-700"
-                      }`}
-                    >
-                      {cam.nombre.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="font-bold text-sm text-white truncate leading-tight">
-                        {cam.nombre}
-                      </h4>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
-                          <Lock className="w-3 h-3 text-amber-400" />
-                          <span>PIN:</span>
-                          <strong className="text-amber-300 font-bold">
-                            {showPins ? cam.pin : "••••"}
-                          </strong>
-                        </span>
+            {filteredCamareros.map((cam) => {
+              const camRole: StaffRole = cam.rol || "MESERO";
+              const isCajero = camRole === "CAJERO";
+              const isRepartidor = camRole === "REPARTIDOR";
+
+              const badgeColor = isCajero
+                ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+                : isRepartidor
+                ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                : "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+
+              const iconContainerColor = isCajero
+                ? "bg-cyan-500/15 text-cyan-400 border-cyan-500/30"
+                : isRepartidor
+                ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+
+              return (
+                <div
+                  key={cam.id}
+                  className={`p-4 rounded-2xl bg-slate-950 border transition-all ${
+                    cam.activo
+                      ? isCajero
+                        ? "border-slate-800 hover:border-cyan-500/50 hover:bg-slate-900/60"
+                        : isRepartidor
+                        ? "border-slate-800 hover:border-amber-500/50 hover:bg-slate-900/60"
+                        : "border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900/60"
+                      : "border-slate-850 opacity-60 bg-slate-950/40"
+                  } flex flex-col justify-between gap-3 shadow-md group`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`w-11 h-11 rounded-xl flex items-center justify-center font-black text-sm shrink-0 transition border ${
+                          cam.activo ? iconContainerColor : "bg-slate-800 text-slate-500 border-slate-700"
+                        }`}
+                      >
+                        {isCajero ? (
+                          <CreditCard className="w-5 h-5" />
+                        ) : isRepartidor ? (
+                          <Bike className="w-5 h-5" />
+                        ) : (
+                          <Users className="w-5 h-5" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="font-bold text-sm text-white truncate leading-tight">
+                            {cam.nombre}
+                          </h4>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-black border uppercase tracking-wider ${badgeColor}`}>
+                            {isCajero ? "Cajero POS" : isRepartidor ? "Repartidor" : "Mesero"}
+                          </span>
+                          <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
+                            <Lock className="w-3 h-3 text-amber-400" />
+                            <strong className="text-amber-300 font-bold">
+                              {showPins ? cam.pin : "••••"}
+                            </strong>
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* BADGE ACTIVO / INACTIVO */}
-                  <button
-                    type="button"
-                    onClick={() => handleToggleActive(cam)}
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider transition ${
-                      cam.activo
-                        ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30"
-                        : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
-                    }`}
-                    title={cam.activo ? "Clic para desactivar mesero de turno" : "Clic para activar mesero de turno"}
-                  >
-                    {cam.activo ? "Activo" : "Inactivo"}
-                  </button>
-                </div>
-
-                {/* ACCIONES DEL MESERO */}
-                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                  <span className="text-[10px] text-slate-500">
-                    {cam.activo ? "Disponible en salón" : "Fuera de turno"}
-                  </span>
-
-                  <div className="flex items-center gap-1.5">
+                    {/* BADGE ACTIVO / INACTIVO */}
                     <button
                       type="button"
-                      onClick={() => handleOpenEditModal(cam)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                      title="Editar nombre y PIN"
+                      onClick={() => handleToggleActive(cam)}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider transition ${
+                        cam.activo
+                          ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30"
+                          : "bg-slate-800 text-slate-500 hover:bg-slate-700 border border-slate-700"
+                      }`}
+                      title={cam.activo ? "Clic para desactivar integrante de turno" : "Clic para activar integrante de turno"}
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteWaiter(cam)}
-                      className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition"
-                      title="Eliminar mesero"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      {cam.activo ? "Activo" : "Inactivo"}
                     </button>
                   </div>
+
+                  {/* TELÉFONO / WHATSAPP DEL REPARTIDOR O MESERO */}
+                  {cam.telefono && (
+                    <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800/80 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400 flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-emerald-400" />
+                        <span>{cam.telefono}</span>
+                      </span>
+                      <a
+                        href={`https://wa.me/${cam.telefono.replace(/\D/g, "")}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-0.5"
+                      >
+                        <span>WhatsApp</span>
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    </div>
+                  )}
+
+                  {/* ACCIONES DEL INTEGRANTE */}
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                    <span className="text-[10px] text-slate-500">
+                      {isCajero
+                        ? "Terminal /caja"
+                        : isRepartidor
+                        ? "Panel /repartidor"
+                        : "Atención /mesas"}
+                    </span>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(cam)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                        title="Editar datos y PIN"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWaiter(cam)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition"
+                        title="Eliminar del equipo"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* MODAL CREAR / EDITAR MESERO */}
+      {/* MODAL CREAR / EDITAR INTEGRANTE */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
           <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl relative space-y-5">
             {/* CABECERA DEL MODAL */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                  <Users className="w-5 h-5" />
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                  formRol === "CAJERO"
+                    ? "bg-cyan-500/20 text-cyan-400"
+                    : formRol === "REPARTIDOR"
+                    ? "bg-amber-500/20 text-amber-400"
+                    : "bg-emerald-500/20 text-emerald-400"
+                }`}>
+                  {formRol === "CAJERO" ? (
+                    <CreditCard className="w-5 h-5" />
+                  ) : formRol === "REPARTIDOR" ? (
+                    <Bike className="w-5 h-5" />
+                  ) : (
+                    <Users className="w-5 h-5" />
+                  )}
                 </div>
                 <div>
                   <h3 className="font-black text-white text-base">
-                    {editingWaiter ? "Editar Mesero" : "Nuevo Mesero"}
+                    {editingWaiter ? "Editar Integrante" : "Nuevo Integrante"}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    {editingWaiter ? "Modifica el nombre y su clave PIN" : "Asigna nombre y PIN de acceso de 4 dígitos"}
+                    {editingWaiter ? "Modifica el rol, nombre, teléfono y clave PIN" : "Asigna rol, nombre y clave PIN de 4 dígitos"}
                   </p>
                 </div>
               </div>
@@ -683,25 +869,98 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
 
             {/* FORMULARIO */}
             <form onSubmit={handleSaveWaiter} className="space-y-4">
+              {/* SELECTOR DE ROL */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 block">
+                  Rol en el Negocio *
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormRol("MESERO")}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center gap-1 ${
+                      formRol === "MESERO"
+                        ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 font-black shadow-md"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span className="text-[11px]">Mesero</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormRol("CAJERO")}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center gap-1 ${
+                      formRol === "CAJERO"
+                        ? "bg-cyan-500/20 border-cyan-500 text-cyan-300 font-black shadow-md"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4" />
+                    <span className="text-[11px]">Cajero</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormRol("REPARTIDOR")}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center gap-1 ${
+                      formRol === "REPARTIDOR"
+                        ? "bg-amber-500/20 border-amber-500 text-amber-300 font-black shadow-md"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <Bike className="w-4 h-4" />
+                    <span className="text-[11px]">Repartidor</span>
+                  </button>
+                </div>
+              </div>
+
               {/* NOMBRE */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-300 block">
-                  Nombre Completo del Mesero *
+                  Nombre Completo *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej: Carlos Gómez"
+                  placeholder={
+                    formRol === "CAJERO"
+                      ? "Ej: Sofía Cajera"
+                      : formRol === "REPARTIDOR"
+                      ? "Ej: Juan Repartidor"
+                      : "Ej: Carlos Mesero"
+                  }
                   value={formNombre}
                   onChange={(e) => setFormNombre(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 px-3.5 py-2.5 rounded-xl text-white text-xs focus:outline-none placeholder:text-slate-600"
                 />
               </div>
 
+              {/* TELÉFONO / WHATSAPP */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                  <span>Teléfono / WhatsApp</span>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    {formRol === "REPARTIDOR" ? "Recomendado para avisar entregas" : "Opcional"}
+                  </span>
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="tel"
+                    placeholder="Ej: 0991234567"
+                    value={formTelefono}
+                    onChange={(e) => setFormTelefono(e.target.value)}
+                    className="w-full pl-10 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl text-white text-xs focus:outline-none placeholder:text-slate-600 font-mono"
+                  />
+                </div>
+              </div>
+
               {/* PIN NUMÉRICO */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                  <span>PIN de Acceso de Turno (4 a 8 dígitos) *</span>
+                  <span>Clave / PIN de Acceso (4 a 8 dígitos) *</span>
                   <span className="text-[10px] text-amber-400 font-mono">Solo números</span>
                 </label>
                 <input
@@ -714,15 +973,27 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
                   className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 px-3.5 py-2.5 rounded-xl text-white font-mono text-sm tracking-widest focus:outline-none placeholder:text-slate-600"
                 />
                 <p className="text-[10px] text-slate-500">
-                  Este es el PIN que tecleará en la tablet o teléfono en <span className="font-mono text-slate-400">/{restaurant.slug}/mesas</span> para abrir su turno.
+                  {formRol === "CAJERO" ? (
+                    <>
+                      Este es el PIN que tecleará en <span className="font-mono text-cyan-400">/caja</span> para abrir turno de cobro y firmar el arqueo Z.
+                    </>
+                  ) : formRol === "REPARTIDOR" ? (
+                    <>
+                      Este es el PIN que tecleará en <span className="font-mono text-amber-400">/{restaurant.slug}/repartidor</span> para identificarse en sus despachos.
+                    </>
+                  ) : (
+                    <>
+                      Este es el PIN que tecleará en <span className="font-mono text-emerald-400">/{restaurant.slug}/mesas</span> para abrir su turno en el salón.
+                    </>
+                  )}
                 </p>
               </div>
 
               {/* SWITCH ACTIVO */}
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-white block">Mesero en servicio activo</span>
-                  <span className="text-[10px] text-slate-400">Disponible para tomar pedidos en mesas hoy</span>
+                  <span className="text-xs font-bold text-white block">Integrante en servicio activo</span>
+                  <span className="text-[10px] text-slate-400">Disponible para turnos y operaciones en el sistema</span>
                 </div>
                 <button
                   type="button"
@@ -769,7 +1040,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
                   ) : (
                     <>
                       <Check className="w-3.5 h-3.5" />
-                      <span>{editingWaiter ? "Guardar Cambios" : "Crear Mesero"}</span>
+                      <span>{editingWaiter ? "Guardar Cambios" : "Crear Integrante"}</span>
                     </>
                   )}
                 </button>

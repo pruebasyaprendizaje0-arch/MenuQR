@@ -34,10 +34,24 @@ import {
   ShoppingBag,
   RefreshCw,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Camera,
+  Check,
+  Zap,
+  RotateCcw,
+  Volume2,
+  VolumeX,
+  Smartphone,
+  QrCode,
+  ExternalLink,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
 import { getBusinessLabels, ResolvedBusinessLabels } from "@/lib/business-labels";
+import {
+  searchDishByBarcodeAction,
+  createQuickDishFromBarcodeAction,
+} from "@/lib/caja-actions";
 import {
   getInventoryDataAction,
   createSupplierAction,
@@ -111,6 +125,253 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
   // Modales de carga masiva y edición rápida
   const [isBatchInventoryModalOpen, setIsBatchInventoryModalOpen] = useState(false);
   const [quickEditDish, setQuickEditDish] = useState<any | null>(null);
+
+  // Dock de Escáner de Bodega (Opción 2)
+  const [isBarcodeDockOpen, setIsBarcodeDockOpen] = useState(false);
+  const [dockInputMode, setDockInputMode] = useState<"LASER" | "CAMERA" | "MANUAL">("LASER");
+  const [autoAddOneOnScan, setAutoAddOneOnScan] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [dockManualCode, setDockManualCode] = useState("");
+  const [highlightedDishId, setHighlightedDishId] = useState<string | null>(null);
+  const [scannedResult, setScannedResult] = useState<{
+    dish: any;
+    isBox: boolean;
+    unitsPerBox: number;
+    barcode: string;
+  } | null>(null);
+  const [unrecognizedCode, setUnrecognizedCode] = useState<string | null>(null);
+  const [quickAddAmount, setQuickAddAmount] = useState<string>("1");
+  const [isAdjustingStock, setIsAdjustingStock] = useState(false);
+  const [recentEntriesCount, setRecentEntriesCount] = useState(0);
+  const [lastEntryNotice, setLastEntryNotice] = useState<string | null>(null);
+  const [isMobileQrModalOpen, setIsMobileQrModalOpen] = useState(false);
+  const [copiedMobileUrl, setCopiedMobileUrl] = useState(false);
+  const cameraScannerRef = React.useRef<any>(null);
+  const cameraCooldownRef = React.useRef<boolean>(false);
+
+  // Audio Beep
+  const playBeep = () => {
+    if (!soundEnabled) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.09);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.09);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate([50]);
+      }
+    } catch {}
+  };
+
+  // Procesar código de barras escaneado en bodega
+  const handleProcessInventoryBarcode = async (rawCode: string) => {
+    const code = rawCode.trim();
+    if (!code) return;
+
+    playBeep();
+    setUnrecognizedCode(null);
+
+    // 1. Buscar coincidencia en estado local de platos
+    let matchedDish = dishes.find((d) => d.barcode === code);
+    let isBox = false;
+    let unitsPerBox = 1;
+
+    if (!matchedDish) {
+      for (const d of dishes) {
+        if (d.variants) {
+          try {
+            const p = typeof d.variants === "string" ? JSON.parse(d.variants) : d.variants;
+            if (p && p.boxBarcode === code) {
+              matchedDish = d;
+              isBox = true;
+              unitsPerBox = Number(p.unitsPerBox) || 12;
+              break;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 2. Si no se encontró en local, buscar en servidor
+    if (!matchedDish) {
+      const res = await searchDishByBarcodeAction(restaurant.id, code);
+      if (res.found && res.dish) {
+        matchedDish = dishes.find((d) => d.id === res.dish.id) || res.dish;
+        isBox = Boolean(res.isBox);
+        unitsPerBox = res.unitsPerBox || 1;
+      }
+    }
+
+    if (!matchedDish) {
+      setUnrecognizedCode(code);
+      setScannedResult(null);
+      return;
+    }
+
+    setScannedResult({
+      dish: matchedDish,
+      isBox,
+      unitsPerBox,
+      barcode: code,
+    });
+
+    // Resaltar fila en la tabla
+    setHighlightedDishId(matchedDish.id);
+    setTimeout(() => {
+      const el = document.getElementById(`dish-row-${matchedDish.id}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 100);
+
+    // Auto-sumar si el switch continuo está encendido
+    if (autoAddOneOnScan) {
+      const delta = isBox ? unitsPerBox : 1;
+      await handleExecuteAddStock(matchedDish.id, delta, matchedDish.name);
+    }
+  };
+
+  const handleExecuteAddStock = async (dishId: string, delta: number, dishName?: string) => {
+    setIsAdjustingStock(true);
+    try {
+      const res = await adjustInventoryStockAction({
+        itemType: "DISH",
+        itemId: dishId,
+        delta,
+        reason: "Ingreso con escáner de bodega",
+      });
+
+      if (res.success) {
+        setDishes((prev) =>
+          prev.map((d) => {
+            if (d.id !== dishId) return d;
+            const newStock = Math.max(0, (typeof d.stock === "number" ? d.stock : 0) + delta);
+            return {
+              ...d,
+              stock: newStock,
+              trackStock: true,
+              isAvailable: newStock > 0,
+            };
+          })
+        );
+        setRecentEntriesCount((prev) => prev + 1);
+        const name = dishName || scannedResult?.dish?.name || "Producto";
+        setLastEntryNotice(`✓ +${delta} ${bLabels.stockUnitPlural} ingresadas a "${name}"`);
+        setTimeout(() => setLastEntryNotice(null), 4000);
+      } else {
+        alert(res.error || "No se pudo actualizar el stock.");
+      }
+    } catch {
+      alert("Error de conexión al ingresar stock.");
+    } finally {
+      setIsAdjustingStock(false);
+    }
+  };
+
+  // Listener global de pistola lectora de código de barras USB/Bluetooth
+  useEffect(() => {
+    if (activeSubTab !== "stock") return;
+
+    let buffer = "";
+    let lastKeyTime = Date.now();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA") &&
+        target.id !== "barcode-laser-listener"
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+      const diff = now - lastKeyTime;
+      lastKeyTime = now;
+
+      if (e.key === "Enter") {
+        if (buffer.length >= 3) {
+          e.preventDefault();
+          if (!isBarcodeDockOpen) {
+            setIsBarcodeDockOpen(true);
+          }
+          handleProcessInventoryBarcode(buffer.trim());
+          buffer = "";
+        }
+        return;
+      }
+
+      if (e.key.length === 1) {
+        if (diff > 120 && buffer.length > 0) {
+          buffer = "";
+        }
+        buffer += e.key;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeSubTab, dishes, autoAddOneOnScan, isBarcodeDockOpen]);
+
+  // Cámara HTML5 para el Dock de Inventario
+  useEffect(() => {
+    if (!isBarcodeDockOpen || dockInputMode !== "CAMERA" || activeSubTab !== "stock") {
+      if (cameraScannerRef.current) {
+        cameraScannerRef.current.stop().catch(() => {}).finally(() => {
+          cameraScannerRef.current?.clear();
+          cameraScannerRef.current = null;
+        });
+      }
+      return;
+    }
+
+    let active = true;
+    import("html5-qrcode").then(({ Html5Qrcode }) => {
+      if (!active) return;
+      const el = document.getElementById("inventory-dock-camera");
+      if (!el) return;
+
+      const scanner = new Html5Qrcode("inventory-dock-camera");
+      cameraScannerRef.current = scanner;
+
+      scanner
+        .start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 220, height: 140 } },
+          (decoded) => {
+            if (cameraCooldownRef.current) return;
+            cameraCooldownRef.current = true;
+            handleProcessInventoryBarcode(decoded);
+            setTimeout(() => {
+              cameraCooldownRef.current = false;
+            }, 1800);
+          },
+          () => {}
+        )
+        .catch((err) => {
+          console.warn("[Inventory Camera] Error:", err);
+        });
+    });
+
+    return () => {
+      active = false;
+      if (cameraScannerRef.current) {
+        cameraScannerRef.current.stop().catch(() => {}).finally(() => {
+          cameraScannerRef.current?.clear();
+          cameraScannerRef.current = null;
+        });
+      }
+    };
+  }, [isBarcodeDockOpen, dockInputMode, activeSubTab]);
 
   // Exportar todo el documento de inventario a Excel
   const handleExportInventoryExcel = () => {
@@ -680,8 +941,10 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </div>
           </div>
 
-          {/* Tabla de Existencias de Productos / Platos de la Carta */}
-          <div className="bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+          {/* LAYOUT SPLIT (OPCIÓN 2): TABLA DE EXISTENCIAS + DOCK LATERAL DE ESCÁNER */}
+          <div className={`grid grid-cols-1 ${isBarcodeDockOpen ? "lg:grid-cols-12" : ""} gap-4 items-start`}>
+            {/* Tabla de Existencias de Productos / Platos de la Carta */}
+            <div className={`${isBarcodeDockOpen ? "lg:col-span-8" : "w-full"} bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden shadow-lg transition-all`}>
             <div className="px-5 py-3 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80">
               <div className="flex items-center gap-2">
                 <Package className="h-4 w-4 text-amber-400" />
@@ -721,6 +984,37 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                   <Barcode className="h-3.5 w-3.5 text-emerald-400" />
                   <span>📱 Abrir Caja POS</span>
                 </Link>
+
+                {/* BOTÓN DOCK ESCÁNER DE BODEGA (OPCIÓN 2) */}
+                <button
+                  type="button"
+                  onClick={() => setIsBarcodeDockOpen((prev) => !prev)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-sm cursor-pointer ${
+                    isBarcodeDockOpen
+                      ? "bg-amber-500 text-slate-950 border-amber-400 font-black shadow-amber-500/20"
+                      : "bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40"
+                  }`}
+                  title="Abrir terminal de escáner de bodega para ingresar existencias"
+                >
+                  <Barcode className="h-3.5 w-3.5" />
+                  <span>{isBarcodeDockOpen ? "Cerrar Escáner" : "📷 Escáner de Bodega"}</span>
+                  {recentEntriesCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-500 text-white text-[9px] font-black">
+                      +{recentEntriesCount}
+                    </span>
+                  )}
+                </button>
+
+                {/* BOTÓN ABRIR EN EL CELULAR CON CÓDIGO QR */}
+                <button
+                  type="button"
+                  onClick={() => setIsMobileQrModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
+                  title="Abrir escáner de bodega en tu celular mediante código QR"
+                >
+                  <Smartphone className="h-3.5 w-3.5 text-indigo-400" />
+                  <span>📱 En mi Celular</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleExportInventoryExcel}
@@ -773,7 +1067,15 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                       const isOut = stock <= 0;
 
                       return (
-                        <tr key={dish.id} className="hover:bg-slate-800/30 transition">
+                        <tr
+                          key={dish.id}
+                          id={`dish-row-${dish.id}`}
+                          className={`transition-all duration-300 ${
+                            highlightedDishId === dish.id
+                              ? "bg-emerald-500/25 ring-2 ring-emerald-400 font-bold"
+                              : "hover:bg-slate-800/30"
+                          }`}
+                        >
                           <td className="px-4 py-3">
                             <div className="font-bold text-white text-sm">{dish.name}</div>
                             <div className="flex items-center gap-2 text-[11px] text-slate-400 font-mono mt-0.5">
@@ -917,8 +1219,257 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
               </table>
             </div>
           </div>
+
+          {/* DOCK LATERAL DE ESCÁNER DE BODEGA (OPCIÓN 2) */}
+          {isBarcodeDockOpen && (
+            <div className="lg:col-span-4 bg-slate-900/90 border-2 border-amber-500/40 rounded-2xl p-4 shadow-2xl backdrop-blur-md space-y-4 lg:sticky lg:top-20 animate-fade-in">
+              {/* Cabecera del Dock */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    <Barcode className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-white text-xs">Escáner de Bodega</h4>
+                    <span className="text-[10px] text-slate-400">Ingreso rápido a existencias</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSoundEnabled((prev) => !prev)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white bg-slate-800/80 transition"
+                    title={soundEnabled ? "Silenciar beep" : "Activar beep"}
+                  >
+                    {soundEnabled ? <Volume2 className="w-3.5 h-3.5 text-amber-400" /> : <VolumeX className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsBarcodeDockOpen(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Notificación de ingreso reciente */}
+              {lastEntryNotice && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                  <Check className="w-4 h-4 text-emerald-400 shrink-0 stroke-[3]" />
+                  <span>{lastEntryNotice}</span>
+                </div>
+              )}
+
+              {/* Selector de Entrada: Pistola Láser vs Cámara Móvil vs Manual */}
+              <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[10px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setDockInputMode("LASER")}
+                  className={`py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${
+                    dockInputMode === "LASER"
+                      ? "bg-amber-500 text-slate-950 font-black shadow"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Zap className="w-3 h-3" />
+                  <span>Pistola USB</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDockInputMode("CAMERA")}
+                  className={`py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${
+                    dockInputMode === "CAMERA"
+                      ? "bg-amber-500 text-slate-950 font-black shadow"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Camera className="w-3 h-3" />
+                  <span>Cámara</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDockInputMode("MANUAL")}
+                  className={`py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${
+                    dockInputMode === "MANUAL"
+                      ? "bg-amber-500 text-slate-950 font-black shadow"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Edit3 className="w-3 h-3" />
+                  <span>Digitar</span>
+                </button>
+              </div>
+
+              {/* VISOR DE CÁMARA */}
+              {dockInputMode === "CAMERA" && (
+                <div className="space-y-2">
+                  <div className="w-full aspect-[4/3] rounded-xl overflow-hidden bg-black border-2 border-amber-500/50 relative shadow-inner flex flex-col items-center justify-center">
+                    <div id="inventory-dock-camera" className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                      <div className="w-40 h-24 border-2 border-dashed border-amber-400 rounded-xl relative animate-pulse flex items-center justify-center">
+                        <div className="w-full h-0.5 bg-amber-400 absolute shadow-[0_0_8px_rgba(251,191,36,0.9)]" />
+                      </div>
+                      <span className="text-[10px] font-bold text-white mt-2 bg-black/70 px-2 py-0.5 rounded-full">
+                        Apunta al código
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ENTRADA MANUAL O PISTOLA */}
+              {(dockInputMode === "MANUAL" || dockInputMode === "LASER") && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (dockManualCode.trim()) {
+                      handleProcessInventoryBarcode(dockManualCode.trim());
+                      setDockManualCode("");
+                    }
+                  }}
+                  className="space-y-1.5"
+                >
+                  <div className="relative">
+                    <input
+                      id="barcode-laser-listener"
+                      type="text"
+                      value={dockManualCode}
+                      onChange={(e) => setDockManualCode(e.target.value)}
+                      placeholder={
+                        dockInputMode === "LASER"
+                          ? "Listo para disparar con pistola láser..."
+                          : "Escribe código y pulsa Enter..."
+                      }
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl font-mono text-xs text-white focus:outline-none focus:border-amber-400"
+                    />
+                    <button
+                      type="submit"
+                      className="absolute right-1.5 top-1.5 px-2 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-bold text-[10px] hover:bg-amber-500/30"
+                    >
+                      Buscar
+                    </button>
+                  </div>
+                  {dockInputMode === "LASER" && (
+                    <p className="text-[10px] text-slate-500">
+                      ⚡ Modo Pistola: Cualquier lectura USB/Bluetooth será capturada automáticamente.
+                    </p>
+                  )}
+                </form>
+              )}
+
+              {/* Switch de Auto-Sumar (+1 por Beep) */}
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+                <div>
+                  <span className="font-bold text-white block text-[11px]">Auto-Sumar (+1 por Beep)</span>
+                  <span className="text-[10px] text-slate-400">Ingreso automático continuo al escanear</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAutoAddOneOnScan((prev) => !prev)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                    autoAddOneOnScan ? "bg-amber-500" : "bg-slate-800"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      autoAddOneOnScan ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* TARJETA DEL PRODUCTO IDENTIFICADO */}
+              {scannedResult && (
+                <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-3 animate-fadeIn">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-black text-white text-xs line-clamp-1">{scannedResult.dish.name}</div>
+                      <span className="text-[10px] font-mono text-slate-400 block">
+                        Código: {scannedResult.barcode}
+                      </span>
+                      {scannedResult.isBox && (
+                        <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[9px] font-bold">
+                          📦 Código de Caja ({scannedResult.unitsPerBox} un.)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-[9px] text-slate-500 uppercase block font-bold">Stock Actual</span>
+                      <span className="font-mono font-black text-emerald-400 text-sm">
+                        {scannedResult.dish.stock ?? 0} {bLabels.stockUnitPlural}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Botones de incremento rápido */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-850">
+                    <span className="text-[10px] text-slate-400 font-bold block uppercase">
+                      Sumar Existencias a Bodega:
+                    </span>
+                    <div className="grid grid-cols-4 gap-1">
+                      {[1, 6, 12, 24].map((amt) => (
+                        <button
+                          key={`dock-quick-${amt}`}
+                          type="button"
+                          disabled={isAdjustingStock}
+                          onClick={() => handleExecuteAddStock(scannedResult.dish.id, amt)}
+                          className="py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold text-xs transition active:scale-95 disabled:opacity-50"
+                        >
+                          +{amt}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Input libre */}
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="Otra cant."
+                        value={quickAddAmount}
+                        onChange={(e) => setQuickAddAmount(e.target.value)}
+                        className="w-24 px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg font-mono text-xs text-white text-center focus:outline-none focus:border-amber-400"
+                      />
+                      <button
+                        type="button"
+                        disabled={isAdjustingStock || !quickAddAmount || parseInt(quickAddAmount) <= 0}
+                        onClick={() => {
+                          const val = parseInt(quickAddAmount);
+                          if (val > 0) {
+                            handleExecuteAddStock(scannedResult.dish.id, val);
+                          }
+                        }}
+                        className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ Ingresar</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* AVISO DE CÓDIGO NO ENCONTRADO */}
+              {unrecognizedCode && (
+                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2 text-xs">
+                  <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Código no registrado:</span>
+                  </div>
+                  <p className="font-mono text-white text-[11px] bg-slate-950 p-1.5 rounded-lg border border-slate-800 break-all">
+                    {unrecognizedCode}
+                  </p>
+                  <p className="text-[10px] text-slate-400">
+                    Asigna este código a un producto existente o agrégalo con el botón de edición rápida.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
+    )}
 
       {/* SUB-PESTAÑA 2: PROVEEDORES */}
       {activeSubTab === "suppliers" && (
@@ -1562,6 +2113,65 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         existingSuppliers={suppliers}
         bLabels={bLabels}
       />
+
+      {/* MODAL CÓDIGO QR PARA ESCÁNER MÓVIL DE BODEGA EN EL CELULAR */}
+      {isMobileQrModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fadeIn">
+          <div className="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 text-center">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-black text-white text-base flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-indigo-400" />
+                <span>Escáner Móvil de Bodega</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsMobileQrModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Apunta la cámara de tu teléfono móvil a este código para abrir el escáner de bodega en tu celular.
+            </p>
+
+            <div className="p-4 bg-white rounded-2xl shadow-inner flex flex-col items-center justify-center mx-auto w-fit">
+              <QRCodeSVG
+                value={`${typeof window !== "undefined" ? window.location.origin : ""}/bodega`}
+                size={200}
+                level="M"
+              />
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const url = `${window.location.origin}/bodega`;
+                  navigator.clipboard.writeText(url);
+                  setCopiedMobileUrl(true);
+                  setTimeout(() => setCopiedMobileUrl(false), 2500);
+                }}
+                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 border border-slate-750 transition"
+              >
+                {copiedMobileUrl ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                <span>{copiedMobileUrl ? "¡Enlace Copiado al Portapapeles!" : "Copiar Enlace Directo"}</span>
+              </button>
+
+              <a
+                href="/bodega"
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs flex items-center justify-center gap-2 transition shadow-md shadow-indigo-600/30"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>Abrir en Nueva Pestaña</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
