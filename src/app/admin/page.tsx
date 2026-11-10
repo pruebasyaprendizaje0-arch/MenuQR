@@ -18,7 +18,12 @@ function toIso(val: any): string {
   }
 }
 
-export default async function AdminPage() {
+export default async function AdminPage(props: {
+  searchParams?: Promise<{ tab?: string; [key: string]: string | string[] | undefined }> | { tab?: string; [key: string]: string | string[] | undefined };
+}) {
+  const resolvedSearchParams = props?.searchParams ? await props.searchParams : {};
+  const initialTab = typeof resolvedSearchParams?.tab === "string" ? resolvedSearchParams.tab : undefined;
+
   let session: any = null;
   try {
     session = await getUserSession();
@@ -398,6 +403,7 @@ export default async function AdminPage() {
   return (
     <AdminDashboard
       restaurant={serializedRestaurant as unknown as Parameters<typeof AdminDashboard>[0]["restaurant"]}
+      initialTab={initialTab}
       subscriptionPaymentDetails={subscriptionPaymentDetails}
       visitStats={defaultVisitStats}
       visitStatsReal={visitStatsReal}

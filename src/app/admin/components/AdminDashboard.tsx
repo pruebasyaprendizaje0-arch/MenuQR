@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, Fragment } from "react";
+import React, { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import Link from "next/link";
 import { getBusinessLabels } from "@/lib/business-labels";
 import { 
@@ -596,8 +596,33 @@ export type VisitStats = {
   month: number;
 };
 
+export const VALID_ADMIN_TABS = [
+  "metrics",
+  "restaurant",
+  "categories",
+  "dishes",
+  "modifiers",
+  "inventory",
+  "seasons",
+  "coupons",
+  "ruleta",
+  "campaigns",
+  "qr",
+  "whatsapp",
+  "orders",
+  "split-bill",
+  "staff",
+  "crm",
+  "citas",
+  "reservas",
+  "subscription",
+] as const;
+
+export type AdminTab = (typeof VALID_ADMIN_TABS)[number];
+
 export function AdminDashboard({ 
   restaurant, 
+  initialTab,
   subscriptionPaymentDetails,
   visitStats,
   visitStatsReal,
@@ -605,6 +630,7 @@ export function AdminDashboard({
   globalAnnouncement,
 }: { 
   restaurant: Restaurant; 
+  initialTab?: string;
   subscriptionPaymentDetails?: SubscriptionPaymentDetails;
   visitStats?: VisitStats;
   visitStatsReal?: VisitStats;
@@ -618,11 +644,97 @@ export function AdminDashboard({
 }) {
   const [isMounted, setIsMounted] = useState(false);
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(false);
+
+  const resolveInitialTab = (): AdminTab => {
+    if (initialTab && VALID_ADMIN_TABS.includes(initialTab as AdminTab)) {
+      return initialTab as AdminTab;
+    }
+    if (typeof window !== "undefined") {
+      try {
+        const queryTab = new URLSearchParams(window.location.search).get("tab");
+        if (queryTab && VALID_ADMIN_TABS.includes(queryTab as AdminTab)) {
+          return queryTab as AdminTab;
+        }
+        const hashTab = window.location.hash.replace("#", "");
+        if (hashTab && VALID_ADMIN_TABS.includes(hashTab as AdminTab)) {
+          return hashTab as AdminTab;
+        }
+        const storedTab = localStorage.getItem("admin_active_tab_" + restaurant.id);
+        if (storedTab && VALID_ADMIN_TABS.includes(storedTab as AdminTab)) {
+          return storedTab as AdminTab;
+        }
+      } catch {}
+    }
+    return "metrics";
+  };
+
+  const [activeTab, setActiveTabRaw] = useState<AdminTab>(resolveInitialTab);
+
+  // Sincronizar cambios de pestaña a la URL y a localStorage para persistencia absoluta
+  const setActiveTab = useCallback((tab: AdminTab) => {
+    setActiveTabRaw(tab);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("admin_active_tab_" + restaurant.id, tab);
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", tab);
+        window.history.replaceState(null, "", url.toString());
+      } catch (e) {
+        console.error("Error saving active tab:", e);
+      }
+    }
+  }, [restaurant.id]);
+
   useEffect(() => {
     setIsMounted(true);
-  }, []);
+    if (typeof window !== "undefined") {
+      try {
+        const queryTab = new URLSearchParams(window.location.search).get("tab");
+        if (queryTab && VALID_ADMIN_TABS.includes(queryTab as AdminTab)) {
+          if (queryTab !== activeTab) {
+            setActiveTabRaw(queryTab as AdminTab);
+          }
+          localStorage.setItem("admin_active_tab_" + restaurant.id, queryTab);
+          return;
+        }
+        const hashTab = window.location.hash.replace("#", "");
+        if (hashTab && VALID_ADMIN_TABS.includes(hashTab as AdminTab)) {
+          if (hashTab !== activeTab) {
+            setActiveTabRaw(hashTab as AdminTab);
+          }
+          localStorage.setItem("admin_active_tab_" + restaurant.id, hashTab);
+          const url = new URL(window.location.href);
+          url.searchParams.set("tab", hashTab);
+          window.history.replaceState(null, "", url.toString());
+          return;
+        }
+        const storedTab = localStorage.getItem("admin_active_tab_" + restaurant.id);
+        if (storedTab && VALID_ADMIN_TABS.includes(storedTab as AdminTab)) {
+          if (storedTab !== activeTab) {
+            setActiveTabRaw(storedTab as AdminTab);
+          }
+          const url = new URL(window.location.href);
+          url.searchParams.set("tab", storedTab);
+          window.history.replaceState(null, "", url.toString());
+        }
+      } catch (e) {
+        console.error("Error restoring tab on mount:", e);
+      }
+    }
+  }, [restaurant.id]);
 
-  const [activeTab, setActiveTab] = useState<"metrics" | "restaurant" | "categories" | "dishes" | "modifiers" | "inventory" | "seasons" | "coupons" | "ruleta" | "campaigns" | "qr" | "whatsapp" | "orders" | "split-bill" | "staff" | "crm" | "citas" | "reservas" | "subscription">("metrics");
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== "undefined") {
+        const queryTab = new URLSearchParams(window.location.search).get("tab");
+        if (queryTab && VALID_ADMIN_TABS.includes(queryTab as AdminTab)) {
+          setActiveTabRaw(queryTab as AdminTab);
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   // --- Módulo de Pruebas (Sandbox) y Respaldo Excel ---
   const [isTestMode, setIsTestMode] = useState<boolean>(Boolean(restaurant.testMode ?? false));

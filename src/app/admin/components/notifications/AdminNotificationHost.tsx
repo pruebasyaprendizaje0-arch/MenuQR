@@ -60,7 +60,17 @@ export function AdminNotificationProvider({
   const [metricsModalNotification, setMetricsModalNotification] = useState<CleanInAppNotification | null>(
     initialWeeklyReport
   );
-  const [showMetricsModal, setShowMetricsModal] = useState<boolean>(Boolean(initialWeeklyReport));
+  const [showMetricsModal, setShowMetricsModal] = useState<boolean>(() => {
+    if (!initialWeeklyReport) return false;
+    if (typeof window !== "undefined") {
+      try {
+        if (sessionStorage.getItem("weekly_metrics_dismissed_" + initialWeeklyReport.id) === "true") {
+          return false;
+        }
+      } catch {}
+    }
+    return true;
+  });
 
   // Notificación más prioritaria vigente para el banner
   const activeBanner = useMemo(() => {
@@ -88,13 +98,21 @@ export function AdminNotificationProvider({
         if (data?.success && Array.isArray(data.notifications)) {
           setNotifications(data.notifications);
 
-          // Si hay un reporte semanal nuevo y no leído, prepararlo para el modal
+          // Si hay un reporte semanal nuevo y no leído, prepararlo para el modal si no fue descartado en esta sesión
           const unreadMetric = data.notifications.find(
             (n: CleanInAppNotification) => n.type === "METRIC_SUMMARY" && !n.isRead
           );
           if (unreadMetric && !metricsModalNotification) {
-            setMetricsModalNotification(unreadMetric);
-            setShowMetricsModal(true);
+            let alreadyDismissed = false;
+            if (typeof window !== "undefined") {
+              try {
+                alreadyDismissed = sessionStorage.getItem("weekly_metrics_dismissed_" + unreadMetric.id) === "true";
+              } catch {}
+            }
+            if (!alreadyDismissed) {
+              setMetricsModalNotification(unreadMetric);
+              setShowMetricsModal(true);
+            }
           }
         }
       }
@@ -256,8 +274,20 @@ export function AdminNotificationProvider({
       {showMetricsModal && metricsModalNotification && (
         <AdminWeeklyMetricsModal
           notification={metricsModalNotification}
-          onClose={() => setShowMetricsModal(false)}
-          onMarkAsRead={markAsRead}
+          onClose={() => {
+            if (metricsModalNotification) {
+              try {
+                sessionStorage.setItem("weekly_metrics_dismissed_" + metricsModalNotification.id, "true");
+              } catch {}
+            }
+            setShowMetricsModal(false);
+          }}
+          onMarkAsRead={async (id) => {
+            try {
+              sessionStorage.setItem("weekly_metrics_dismissed_" + id, "true");
+            } catch {}
+            await markAsRead(id);
+          }}
         />
       )}
 
