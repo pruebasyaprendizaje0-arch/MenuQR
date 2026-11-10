@@ -63,6 +63,29 @@ import { BusinessCampaignData } from "@/lib/campaign-types";
 import { calculateItemPromoPrice } from "@/lib/campaign-utils";
 import { normalizeSlug } from "@/lib/seo";
 
+export interface DishModifierOptionItem {
+  id: string;
+  name: string;
+  extraPrice: number;
+}
+
+export interface DishModifierGroupItem {
+  id: string;
+  name: string;
+  minSelect: number;
+  maxSelect: number;
+  isRequired?: boolean;
+  options: DishModifierOptionItem[];
+}
+
+export interface SelectedModifier {
+  groupId: string;
+  groupName: string;
+  optionId: string;
+  optionName: string;
+  extraPrice: number;
+}
+
 type Dish = {
   id: string;
   name: string;
@@ -74,6 +97,7 @@ type Dish = {
   stock?: number | null;
   minStock?: number | null;
   trackStock?: boolean;
+  modifierGroups?: DishModifierGroupItem[];
 };
 
 type Category = {
@@ -150,8 +174,12 @@ type Restaurant = {
 };
 
 interface CartItem {
+  itemKey?: string;
   dish: Dish;
   quantity: number;
+  unitPrice?: number;
+  selectedModifiers?: SelectedModifier[];
+  modifiersNotes?: string;
 }
 
 function getMapIframeSrc(
@@ -316,6 +344,52 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [tipPercentage, setTipPercentage] = useState<number>(0);
   const [reservationDate, setReservationDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const categoryRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
+
+  // --- Modal de Personalización de Modificadores (Términos, Salsas y Extras) ---
+  const [customizingDish, setCustomizingDish] = useState<Dish | null>(null);
+  const [selectedModifiersState, setSelectedModifiersState] = useState<Record<string, string[]>>({});
+  const [customizingQty, setCustomizingQty] = useState<number>(1);
+
+  const openModifierModal = (dish: Dish) => {
+    const initialSelected: Record<string, string[]> = {};
+    for (const grp of dish.modifierGroups || []) {
+      if (grp.minSelect === 1 && grp.maxSelect === 1 && grp.options.length > 0) {
+        initialSelected[grp.id] = [grp.options[0].id];
+      }
+    }
+    setSelectedModifiersState(initialSelected);
+    setCustomizingQty(1);
+    setCustomizingDish(dish);
+  };
+
+  const handleToggleModifierOption = (group: DishModifierGroupItem, option: DishModifierOptionItem) => {
+    setSelectedModifiersState((prev) => {
+      const current = prev[group.id] || [];
+      if (group.maxSelect === 1) {
+        return { ...prev, [group.id]: [option.id] };
+      }
+      if (current.includes(option.id)) {
+        return { ...prev, [group.id]: current.filter((id) => id !== option.id) };
+      }
+      if (current.length >= group.maxSelect) {
+        return prev;
+      }
+      return { ...prev, [group.id]: [...current, option.id] };
+    });
+  };
+
+  const isCustomizationValid = useMemo(() => {
+    if (!customizingDish || !customizingDish.modifierGroups) return true;
+    for (const grp of customizingDish.modifierGroups) {
+      if (grp.minSelect > 0) {
+        const count = selectedModifiersState[grp.id]?.length || 0;
+        if (count < grp.minSelect) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }, [customizingDish, selectedModifiersState]);
 
   const [selectedTable, setSelectedTable] = useState<string>("");
   const [suggestedAspect, setSuggestedAspect] = useState<"1:1" | "9:16">(
@@ -969,7 +1043,19 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     }
   };
 
-  const addToCart = (dish: Dish) => {
+  const addToCart = (
+    dish: Dish,
+    overrides?: {
+      selectedModifiers?: SelectedModifier[];
+      quantity?: number;
+    }
+  ) => {
+    // Si el plato tiene grupos de modificadores y no vienen pre-seleccionados, abrir modal
+    if (dish.modifierGroups && dish.modifierGroups.length > 0 && !overrides) {
+      openModifierModal(dish);
+      return;
+    }
+
     const live = liveStockMap[dish.id];
     const isConfigured = live
       ? typeof live.stock === "number" && live.stock !== null
@@ -989,30 +1075,55 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
     let reachedStockLimit = false;
     const promo = dishPromoMap.get(dish.id);
-    const effectivePrice = promo ? promo.promoPrice : dish.price;
+    const effectiveBasePrice = promo ? promo.promoPrice : Number(dish.price) || 0;
+
+    const selectedMods = overrides?.selectedModifiers || [];
+    const extrasSum = selectedMods.reduce((acc, m) => acc + (Number(m.extraPrice) || 0), 0);
+    const unitPrice = effectiveBasePrice + extrasSum;
+    const sortedOptionIds = selectedMods.map((m) => m.optionId).sort().join("_");
+    const itemKey = sortedOptionIds ? `${dish.id}_${sortedOptionIds}` : dish.id;
+    const addQuantity = overrides?.quantity || 1;
+
+    const modDetails: string[] = [];
+    for (const m of selectedMods) {
+      const extraTag = m.extraPrice > 0 ? ` (+$${m.extraPrice.toFixed(2)})` : "";
+      modDetails.push(`${m.groupName}: ${m.optionName}${extraTag}`);
+    }
+    const modifiersNotes = modDetails.join(" · ");
 
     setCart((prevCart) => {
-      const existing = prevCart.find((item) => item.dish.id === dish.id);
+      const existing = prevCart.find((item) => (item.itemKey || item.dish.id) === itemKey);
       if (existing) {
-        if (existing.quantity >= curStock) {
+        if (existing.quantity + addQuantity > curStock) {
           reachedStockLimit = true;
           return prevCart;
         }
         return prevCart.map((item) =>
-          item.dish.id === dish.id
+          (item.itemKey || item.dish.id) === itemKey
             ? {
                 ...item,
-                quantity: item.quantity + 1,
-                dish: { ...item.dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: true },
+                quantity: item.quantity + addQuantity,
+                unitPrice,
+                selectedModifiers: selectedMods,
+                modifiersNotes,
+                dish: { ...item.dish, price: effectiveBasePrice, stock: curStock, isAvailable, trackStock: true },
               }
             : item
         );
       }
+      if (addQuantity > curStock) {
+        reachedStockLimit = true;
+        return prevCart;
+      }
       return [
         ...prevCart,
         {
-          dish: { ...dish, price: effectivePrice, stock: curStock, isAvailable, trackStock: true },
-          quantity: 1,
+          itemKey,
+          dish: { ...dish, price: effectiveBasePrice, stock: curStock, isAvailable, trackStock: true },
+          quantity: addQuantity,
+          unitPrice,
+          selectedModifiers: selectedMods,
+          modifiersNotes,
         },
       ];
     });
@@ -1031,24 +1142,73 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     }, 2200);
   };
 
-  const removeFromCart = (dishId: string) => {
+  const customizingUnitPrice = useMemo(() => {
+    if (!customizingDish) return 0;
+    const promo = dishPromoMap.get(customizingDish.id);
+    const base = promo ? promo.promoPrice : Number(customizingDish.price) || 0;
+    let extras = 0;
+    if (customizingDish.modifierGroups) {
+      for (const grp of customizingDish.modifierGroups) {
+        const chosenIds = selectedModifiersState[grp.id] || [];
+        for (const opt of grp.options) {
+          if (chosenIds.includes(opt.id)) {
+            extras += Number(opt.extraPrice) || 0;
+          }
+        }
+      }
+    }
+    return base + extras;
+  }, [customizingDish, selectedModifiersState, dishPromoMap]);
+
+  const handleConfirmCustomization = () => {
+    if (!customizingDish || !isCustomizationValid) return;
+    const compiledMods: SelectedModifier[] = [];
+    for (const grp of customizingDish.modifierGroups || []) {
+      const chosenIds = selectedModifiersState[grp.id] || [];
+      for (const opt of grp.options) {
+        if (chosenIds.includes(opt.id)) {
+          compiledMods.push({
+            groupId: grp.id,
+            groupName: grp.name,
+            optionId: opt.id,
+            optionName: opt.name,
+            extraPrice: Number(opt.extraPrice) || 0,
+          });
+        }
+      }
+    }
+
+    addToCart(customizingDish, {
+      selectedModifiers: compiledMods,
+      quantity: customizingQty,
+    });
+
+    setCustomizingDish(null);
+  };
+
+  const removeFromCart = (itemKeyOrDishId: string) => {
     setCart((prevCart) => {
-      const existing = prevCart.find((item) => item.dish.id === dishId);
+      const existing = prevCart.find((item) => (item.itemKey || item.dish.id) === itemKeyOrDishId);
       if (existing && existing.quantity > 1) {
         return prevCart.map((item) =>
-          item.dish.id === dishId ? { ...item, quantity: item.quantity - 1 } : item
+          (item.itemKey || item.dish.id) === itemKeyOrDishId
+            ? { ...item, quantity: item.quantity - 1 }
+            : item
         );
       }
-      return prevCart.filter((item) => item.dish.id !== dishId);
+      return prevCart.filter((item) => (item.itemKey || item.dish.id) !== itemKeyOrDishId);
     });
   };
 
-  const deleteFromCart = (dishId: string) => {
-    setCart((prevCart) => prevCart.filter((item) => item.dish.id !== dishId));
+  const deleteFromCart = (itemKeyOrDishId: string) => {
+    setCart((prevCart) => prevCart.filter((item) => (item.itemKey || item.dish.id) !== itemKeyOrDishId));
   };
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const cartTotal = cart.reduce((sum, item) => sum + (Number(item.dish.price) || 0) * item.quantity, 0);
+  const cartTotal = cart.reduce(
+    (sum, item) => sum + (Number(item.unitPrice ?? item.dish.price) || 0) * item.quantity,
+    0
+  );
 
   const handleGetLocation = async () => {
     if (typeof window === "undefined" || !navigator.geolocation) {
@@ -1223,8 +1383,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const itemsData = cart.map((item) => ({
       dishId: item.dish.id,
       dishName: item.dish.name,
-      price: item.dish.price,
+      price: item.unitPrice ?? item.dish.price,
       quantity: item.quantity,
+      modifiers: item.selectedModifiers,
+      notes: item.modifiersNotes || undefined,
     }));
 
     const fullCustomerAddress = isDeliveryOrder
@@ -1395,8 +1557,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               id: i.dish.id,
               nombre: i.dish.name,
               cantidad: i.quantity,
-              precio: i.dish.price,
-              notas: null,
+              precio: i.unitPrice ?? i.dish.price,
+              notas: i.modifiersNotes || null,
             })),
             cliente_nombre: customerName.trim(),
             cliente_telefono: customerPhone.trim() || null,
@@ -1443,7 +1605,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     message += `-----------------------------------\n`;
     
     cart.forEach((item) => {
-      message += `• *${item.quantity}x* ${item.dish.name} ($${formatPrice(item.dish.price)} c/u)\n`;
+      message += `• *${item.quantity}x* ${item.dish.name} ($${formatPrice(item.unitPrice ?? item.dish.price)} c/u)\n`;
+      if (item.modifiersNotes) {
+        message += `  └ 💬 _${item.modifiersNotes}_\n`;
+      }
     });
 
     message += `-----------------------------------\n`;
@@ -3352,6 +3517,166 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         </div>
       )}
 
+      {/* MODAL PERSONALIZA TU PLATO (TÉRMINOS, SALSAS Y EXTRAS) */}
+      {customizingDish && (
+        <div className="fixed inset-0 z-[130] flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-md p-0 sm:p-4 animate-fadeIn">
+          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-slide-in">
+            {/* Header con imagen o título */}
+            <div className="relative p-5 pb-4 border-b border-slate-800 bg-slate-900/90 flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  Personaliza tu Plato
+                </span>
+                <h3 className="font-black text-white text-lg leading-tight">
+                  {customizingDish.name}
+                </h3>
+                {customizingDish.description && (
+                  <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                    {customizingDish.description}
+                  </p>
+                )}
+                <p className="text-xs font-mono font-bold text-amber-400 pt-0.5">
+                  Base: ${formatPrice(dishPromoMap.get(customizingDish.id)?.promoPrice ?? customizingDish.price)}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCustomizingDish(null)}
+                className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition shrink-0 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Listado de Grupos de Modificadores */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-6">
+              {(customizingDish.modifierGroups || []).map((grp) => {
+                const chosen = selectedModifiersState[grp.id] || [];
+                const isRadio = grp.maxSelect === 1;
+                const isSatisfied = grp.minSelect === 0 || chosen.length >= grp.minSelect;
+
+                return (
+                  <div key={grp.id} className="space-y-2.5 bg-slate-950/60 border border-slate-800/80 p-4 rounded-2xl">
+                    <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-800/80">
+                      <div>
+                        <h4 className="font-black text-sm text-white">{grp.name}</h4>
+                        <p className="text-[10px] text-slate-400">
+                          {isRadio
+                            ? "Selecciona 1 opción"
+                            : `Selecciona entre ${grp.minSelect} y ${grp.maxSelect} opciones`}
+                        </p>
+                      </div>
+
+                      {grp.minSelect > 0 ? (
+                        <span
+                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                            isSatisfied
+                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                              : "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                          }`}
+                        >
+                          {isSatisfied ? "✓ Listo" : `Requerido (mín: ${grp.minSelect})`}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">
+                          Opcional
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 pt-0.5">
+                      {grp.options.map((opt) => {
+                        const isSelected = chosen.includes(opt.id);
+                        const extraAmt = Number(opt.extraPrice) || 0;
+
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => handleToggleModifierOption(grp, opt)}
+                            className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition cursor-pointer ${
+                              isSelected
+                                ? "bg-slate-800 border-emerald-500 text-white shadow-md shadow-emerald-500/10"
+                                : "bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className={`w-5 h-5 rounded-${isRadio ? "full" : "md"} border flex items-center justify-center transition ${
+                                  isSelected
+                                    ? "bg-emerald-500 border-emerald-400 text-slate-950"
+                                    : "border-slate-700 bg-slate-950"
+                                }`}
+                              >
+                                {isSelected && (
+                                  isRadio ? (
+                                    <div className="w-2 h-2 rounded-full bg-slate-950" />
+                                  ) : (
+                                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                  )
+                                )}
+                              </div>
+                              <span className="text-xs font-bold">{opt.name}</span>
+                            </div>
+
+                            <span
+                              className={`text-xs font-mono font-bold ${
+                                extraAmt > 0 ? "text-amber-400" : "text-slate-500"
+                              }`}
+                            >
+                              {extraAmt > 0 ? `+$${extraAmt.toFixed(2)}` : "Sin costo"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Sticky Action Footer */}
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center gap-3">
+              <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-2xl p-1 shrink-0">
+                <button
+                  type="button"
+                  disabled={customizingQty <= 1}
+                  onClick={() => setCustomizingQty((q) => Math.max(1, q - 1))}
+                  className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white font-black flex items-center justify-center transition cursor-pointer"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <span className="font-mono font-bold text-sm text-white w-6 text-center">
+                  {customizingQty}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCustomizingQty((q) => q + 1)}
+                  className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-black flex items-center justify-center transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                disabled={!isCustomizationValid}
+                onClick={handleConfirmCustomization}
+                className="flex-1 py-3.5 px-4 rounded-2xl font-black text-xs uppercase tracking-wider text-white shadow-xl transition active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                style={{ backgroundColor: restaurant.themeColor || "#059669" }}
+              >
+                <span>
+                  {isCustomizationValid
+                    ? `Agregar al Pedido • $${(customizingUnitPrice * customizingQty).toFixed(2)}`
+                    : "Selecciona las opciones obligatorias"}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Side Cart Drawer */}
       {isCartOpen && (
         <div className="fixed inset-0 z-[120] flex justify-end">
@@ -3386,7 +3711,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 </div>
               ) : (
                 cart.map((item) => (
-                  <div key={item.dish.id} className="flex gap-4 items-center bg-slate-950/40 border border-slate-850 p-3 rounded-2xl">
+                  <div key={item.itemKey || item.dish.id} className="flex gap-4 items-center bg-slate-950/40 border border-slate-850 p-3 rounded-2xl">
                     <div className="h-14 w-14 rounded-xl overflow-hidden bg-slate-950 shrink-0 border border-slate-900">
                       {(() => {
                         const cartThumb = getPrimaryDishImage(item.dish.imageUrl) || item.dish.imageUrl;
@@ -3397,27 +3722,35 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="font-bold text-white text-sm truncate">{item.dish.name}</h4>
-                      <p className="text-xs text-slate-400 mt-0.5">${formatPrice(item.dish.price)} c/u</p>
+                      {item.modifiersNotes && (
+                        <p className="text-[11px] text-amber-400 font-medium line-clamp-2 mt-0.5 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md inline-block">
+                          {item.modifiersNotes}
+                        </p>
+                      )}
+                      <p className="text-xs text-slate-400 mt-0.5">${formatPrice(item.unitPrice ?? item.dish.price)} c/u</p>
                     </div>
                     
                     {/* Controls */}
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => removeFromCart(item.dish.id)}
+                        onClick={() => removeFromCart(item.itemKey || item.dish.id)}
                         className="p-1 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+                        title="Disminuir"
                       >
                         <Minus className="h-3.5 w-3.5" />
                       </button>
                       <span className="text-sm font-bold text-white w-4 text-center">{item.quantity}</span>
                       <button
-                        onClick={() => addToCart(item.dish)}
+                        onClick={() => addToCart(item.dish, { selectedModifiers: item.selectedModifiers, quantity: 1 })}
                         className="p-1 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white transition"
+                        title="Aumentar"
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={() => deleteFromCart(item.dish.id)}
+                        onClick={() => deleteFromCart(item.itemKey || item.dish.id)}
                         className="p-1 ml-2 text-red-500 hover:bg-red-950/30 rounded-lg transition"
+                        title="Eliminar"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>

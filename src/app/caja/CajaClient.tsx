@@ -48,6 +48,7 @@ import {
   PieChart,
   ShoppingCart,
   RotateCcw,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   searchDishByBarcodeAction,
@@ -65,6 +66,22 @@ import {
 } from "@/lib/caja-actions";
 import { ReporteZTicketModal, ReporteZData } from "./components/ReporteZTicketModal";
 
+export interface TouchDishModifierOption {
+  id: string;
+  name: string;
+  extraPrice: number;
+  isDefault: boolean;
+}
+
+export interface TouchDishModifierGroup {
+  id: string;
+  name: string;
+  required: boolean;
+  minSelect: number;
+  maxSelect: number;
+  options: TouchDishModifierOption[];
+}
+
 export interface TouchDishItem {
   id: string;
   name: string;
@@ -76,6 +93,7 @@ export interface TouchDishItem {
   trackStock: boolean;
   categoryId: string | null;
   category?: { id: string; name: string } | null;
+  modifierGroups?: TouchDishModifierGroup[];
 }
 
 export interface ActiveOrder {
@@ -104,6 +122,7 @@ interface CategoryItem {
 
 interface CartSessionItem {
   dishId: string;
+  itemKey?: string;
   name: string;
   price: number;
   quantity: number;
@@ -112,6 +131,7 @@ interface CartSessionItem {
   isAvailable?: boolean;
   barcode?: string | null;
   isBox?: boolean;
+  modifiersNotes?: string;
 }
 
 interface DishItem {
@@ -198,6 +218,11 @@ export function CajaClient({
   // Filtros del grid táctil
   const [touchCategory, setTouchCategory] = useState<string>("TODAS");
   const [touchSearch, setTouchSearch] = useState<string>("");
+
+  // Modificadores de plato en Caja táctil
+  const [customizingDish, setCustomizingDish] = useState<TouchDishItem | null>(null);
+  const [customizingMods, setCustomizingMods] = useState<{ [groupId: string]: string[] }>({});
+  const [customizingQty, setCustomizingQty] = useState(1);
 
   // Camera & Scanner State
   const [scannerEnabled, setScannerEnabled] = useState(false);
@@ -369,6 +394,119 @@ export function CajaClient({
     setCashReceivedInput("");
   };
 
+  const openModifierModalForDish = (dish: TouchDishItem) => {
+    setCustomizingDish(dish);
+    setCustomizingQty(1);
+    const initialMods: { [groupId: string]: string[] } = {};
+    (dish.modifierGroups || []).forEach((grp) => {
+      const defaults = grp.options.filter((o) => o.isDefault).map((o) => o.id);
+      initialMods[grp.id] = defaults;
+    });
+    setCustomizingMods(initialMods);
+  };
+
+  const handleToggleCajaMod = (groupId: string, optionId: string, maxSelect: number) => {
+    setCustomizingMods((prev) => {
+      const currentList = prev[groupId] || [];
+      const isSelected = currentList.includes(optionId);
+      if (maxSelect === 1) {
+        return {
+          ...prev,
+          [groupId]: isSelected ? [] : [optionId],
+        };
+      }
+      if (isSelected) {
+        return {
+          ...prev,
+          [groupId]: currentList.filter((id) => id !== optionId),
+        };
+      }
+      if (maxSelect > 0 && currentList.length >= maxSelect) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [groupId]: [...currentList, optionId],
+      };
+    });
+  };
+
+  const isCajaCustomizationValid = useMemo(() => {
+    if (!customizingDish || !customizingDish.modifierGroups) return true;
+    for (const grp of customizingDish.modifierGroups) {
+      if (grp.minSelect > 0) {
+        const count = customizingMods[grp.id]?.length || 0;
+        if (count < grp.minSelect) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }, [customizingDish, customizingMods]);
+
+  const cajaCustomizingUnitPrice = useMemo(() => {
+    if (!customizingDish) return 0;
+    let total = Number(customizingDish.price) || 0;
+    for (const grp of customizingDish.modifierGroups || []) {
+      const chosen = customizingMods[grp.id] || [];
+      for (const opt of grp.options) {
+        if (chosen.includes(opt.id)) {
+          total += Number(opt.extraPrice) || 0;
+        }
+      }
+    }
+    return total;
+  }, [customizingDish, customizingMods]);
+
+  const handleConfirmCajaMods = () => {
+    if (!customizingDish || !isCajaCustomizationValid) return;
+
+    const allChosenIds: string[] = [];
+    const notesParts: string[] = [];
+    for (const grp of customizingDish.modifierGroups || []) {
+      const chosenIds = customizingMods[grp.id] || [];
+      const picked = grp.options.filter((o) => chosenIds.includes(o.id));
+      if (picked.length > 0) {
+        picked.forEach((p) => allChosenIds.push(p.id));
+        const txt = picked
+          .map((p) => `${p.name}${p.extraPrice > 0 ? ` (+$${p.extraPrice.toFixed(2)})` : ""}`)
+          .join(", ");
+        notesParts.push(`${grp.name}: ${txt}`);
+      }
+    }
+
+    const modifierNote = notesParts.join(" · ");
+    const sortedKey = allChosenIds.sort().join("_");
+    const itemKey = `${customizingDish.id}_${sortedKey}`;
+    const unitPrice = cajaCustomizingUnitPrice;
+    const finalName = modifierNote ? `${customizingDish.name} [${modifierNote}]` : customizingDish.name;
+
+    setSessionItems((prev) => {
+      const existing = prev.find((i) => (i.itemKey || i.dishId) === itemKey);
+      if (existing) {
+        return prev.map((i) =>
+          (i.itemKey || i.dishId) === itemKey ? { ...i, quantity: i.quantity + customizingQty } : i
+        );
+      }
+      return [
+        ...prev,
+        {
+          dishId: customizingDish.id,
+          itemKey,
+          name: finalName,
+          price: unitPrice,
+          quantity: customizingQty,
+          stock: customizingDish.stock,
+          trackStock: customizingDish.trackStock,
+          modifiersNotes: modifierNote || undefined,
+        },
+      ];
+    });
+
+    setCustomizingDish(null);
+    playBeep();
+  };
+
   // Añadir un plato táctil al ticket de cobro
   const handleAddTouchDish = (dish: TouchDishItem) => {
     if (selectedActiveOrder) {
@@ -379,11 +517,16 @@ export function CajaClient({
       setSessionItems([]);
     }
 
+    if (dish.modifierGroups && dish.modifierGroups.length > 0) {
+      openModifierModalForDish(dish);
+      return;
+    }
+
     setSessionItems((prev) => {
-      const existing = prev.find((i) => i.dishId === dish.id);
+      const existing = prev.find((i) => (i.itemKey || i.dishId) === dish.id);
       if (existing) {
         return prev.map((i) =>
-          i.dishId === dish.id ? { ...i, quantity: i.quantity + 1 } : i
+          (i.itemKey || i.dishId) === dish.id ? { ...i, quantity: i.quantity + 1 } : i
         );
       }
       return [
@@ -402,11 +545,11 @@ export function CajaClient({
   };
 
   // Cantidad controllers
-  const changeItemQty = (dishId: string, delta: number) => {
+  const changeItemQty = (keyOrDishId: string, delta: number) => {
     setSessionItems((prev) => {
       return prev
         .map((item) => {
-          if (item.dishId !== dishId) return item;
+          if ((item.itemKey || item.dishId) !== keyOrDishId) return item;
           const nextQty = item.quantity + delta;
           if (nextQty <= 0) return null;
           return { ...item, quantity: nextQty };
@@ -415,8 +558,8 @@ export function CajaClient({
     });
   };
 
-  const removeItem = (dishId: string) => {
-    setSessionItems((prev) => prev.filter((i) => i.dishId !== dishId));
+  const removeItem = (keyOrDishId: string) => {
+    setSessionItems((prev) => prev.filter((i) => (i.itemKey || i.dishId) !== keyOrDishId));
   };
 
   // Procesar lectura de código de barras (Cámara o Pistola Láser USB)
@@ -1514,55 +1657,63 @@ export function CajaClient({
                 <p className="text-[10px]">Selecciona una mesa o toca platos del catálogo</p>
               </div>
             ) : (
-              sessionItems.map((item) => (
-                <div
-                  key={item.dishId}
-                  className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between gap-2 text-xs"
-                >
-                  <div className="min-w-0 flex-1">
-                    <h5 className="font-bold text-white truncate leading-tight">{item.name}</h5>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      ${item.price.toFixed(2)} c/u
-                    </span>
-                  </div>
+              sessionItems.map((item) => {
+                const itemKey = item.itemKey || item.dishId;
+                return (
+                  <div
+                    key={itemKey}
+                    className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <h5 className="font-bold text-white truncate leading-tight">{item.name}</h5>
+                      {item.modifiersNotes && (
+                        <p className="text-[10px] text-amber-400 font-medium line-clamp-1 mt-0.5">
+                          {item.modifiersNotes}
+                        </p>
+                      )}
+                      <span className="text-[10px] font-mono text-slate-400">
+                        ${item.price.toFixed(2)} c/u
+                      </span>
+                    </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {!selectedActiveOrder && (
-                      <button
-                        type="button"
-                        onClick={() => changeItemQty(item.dishId, -1)}
-                        className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center font-bold"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                    )}
-                    <span className="w-6 text-center font-mono font-bold text-emerald-400">
-                      {item.quantity}
-                    </span>
-                    {!selectedActiveOrder && (
-                      <button
-                        type="button"
-                        onClick={() => changeItemQty(item.dishId, 1)}
-                        className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center font-bold"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
-                    )}
-                    <span className="w-14 text-right font-mono font-black text-white">
-                      ${(item.price * item.quantity).toFixed(2)}
-                    </span>
-                    {!selectedActiveOrder && (
-                      <button
-                        type="button"
-                        onClick={() => removeItem(item.dishId)}
-                        className="p-1 text-slate-500 hover:text-red-400"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!selectedActiveOrder && (
+                        <button
+                          type="button"
+                          onClick={() => changeItemQty(itemKey, -1)}
+                          className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center font-bold"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                      )}
+                      <span className="w-6 text-center font-mono font-bold text-emerald-400">
+                        {item.quantity}
+                      </span>
+                      {!selectedActiveOrder && (
+                        <button
+                          type="button"
+                          onClick={() => changeItemQty(itemKey, 1)}
+                          className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center font-bold"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      )}
+                      <span className="w-14 text-right font-mono font-black text-white">
+                        ${(item.price * item.quantity).toFixed(2)}
+                      </span>
+                      {!selectedActiveOrder && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(itemKey)}
+                          className="p-1 text-slate-500 hover:text-red-400"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -2370,6 +2521,119 @@ export function CajaClient({
           </div>
         );
       })()}
+
+      {/* MODAL MODIFICADORES & EXTRAS PARA CAJA POS */}
+      {customizingDish && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fadeIn overflow-y-auto">
+          <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <SlidersHorizontal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-base leading-tight">Personalizar Plato</h3>
+                  <p className="text-xs text-slate-400">{customizingDish.name} · Base ${customizingDish.price.toFixed(2)}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCustomizingDish(null)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Groups list */}
+            <div className="space-y-4 overflow-y-auto pr-1 flex-1 py-1">
+              {(customizingDish.modifierGroups || []).map((grp) => {
+                const chosen = customizingMods[grp.id] || [];
+                return (
+                  <div key={grp.id} className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                        {grp.name}
+                        {grp.required && <span className="text-rose-400 font-black text-xs">*</span>}
+                      </span>
+                      <span className="text-[10px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded-full border border-slate-800">
+                        {grp.maxSelect === 1 ? "Elige 1 opción" : `Hasta ${grp.maxSelect} opciones`}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {grp.options.map((opt) => {
+                        const isSelected = chosen.includes(opt.id);
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => handleToggleCajaMod(grp.id, opt.id, grp.maxSelect)}
+                            className={`p-2.5 rounded-xl text-left transition flex items-center justify-between border ${
+                              isSelected
+                                ? "bg-amber-500/20 border-amber-500 text-white font-bold shadow-sm"
+                                : "bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700"
+                            }`}
+                          >
+                            <span className="text-xs">{opt.name}</span>
+                            {opt.extraPrice > 0 ? (
+                              <span className="text-[11px] font-mono text-amber-400 font-bold ml-1.5">
+                                +${opt.extraPrice.toFixed(2)}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-500 ml-1.5">Gratis</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer with Qty & Confirm */}
+            <div className="pt-3 border-t border-slate-800 shrink-0 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">Cantidad:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCustomizingQty((q) => Math.max(1, q - 1))}
+                    disabled={customizingQty <= 1}
+                    className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white flex items-center justify-center font-black"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="w-8 text-center font-mono font-bold text-white text-sm">
+                    {customizingQty}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCustomizingQty((q) => q + 1)}
+                    className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-black"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={!isCajaCustomizationValid}
+                onClick={handleConfirmCajaMods}
+                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-sm uppercase tracking-wider transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95"
+              >
+                <Check className="w-4 h-4 stroke-[3]" />
+                <span>
+                  Añadir al Ticket (${(cajaCustomizingUnitPrice * customizingQty).toFixed(2)})
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 6: MOVIMIENTO DE EFECTIVO (+ / - CAJA) */}
       {isMovementModalOpen && (

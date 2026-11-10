@@ -189,6 +189,16 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
           include: {
             dishes: {
               orderBy: { createdAt: "desc" },
+              include: {
+                modifierGroups: {
+                  include: {
+                    options: {
+                      orderBy: { extraPrice: "asc" },
+                    },
+                  },
+                  orderBy: { createdAt: "asc" },
+                },
+              },
             },
           },
         },
@@ -361,8 +371,21 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
         updatedAt: toIso(cat.updatedAt),
         dishes: (cat.dishes || []).map((dish: any) => ({
           ...dish,
+          price: Number(dish.price) || 0,
           createdAt: toIso(dish.createdAt),
           updatedAt: toIso(dish.updatedAt),
+          modifierGroups: (dish.modifierGroups || []).map((grp: any) => ({
+            id: grp.id,
+            name: grp.name,
+            minSelect: grp.minSelect,
+            maxSelect: grp.maxSelect,
+            isRequired: grp.minSelect > 0,
+            options: (grp.options || []).map((opt: any) => ({
+              id: opt.id,
+              name: opt.name,
+              extraPrice: Number(opt.extraPrice) || 0,
+            })),
+          })),
         })),
       })),
       seasonRates: (restaurant.seasonRates || []).map((rate: any) => ({

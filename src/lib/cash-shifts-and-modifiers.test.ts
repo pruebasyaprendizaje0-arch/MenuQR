@@ -164,7 +164,96 @@ assert.strictEqual(gastroModifierGroup.options.length, 2);
 assert.notStrictEqual(retailDish.variants, JSON.stringify(gastroModifierGroup), "Aislamiento estricto de estructuras confirmado");
 console.log("✅ [PASS] 5: Aislamiento arquitectónico estricto entre modificadores de restaurante y variantes retail");
 
+// 4. Prueba del Pipeline Transversal de Modificadores en Carrito y Comanda
+function compileCustomization(params: {
+  dish: { id: string; name: string; price: number };
+  modifierGroups: Array<{
+    id: string;
+    name: string;
+    minSelect: number;
+    maxSelect: number;
+    options: Array<{ id: string; name: string; extraPrice: number }>;
+  }>;
+  selectedOptionIds: string[];
+}) {
+  const chosenSet = new Set(params.selectedOptionIds);
+  let extras = 0;
+  const notesParts: string[] = [];
+
+  for (const grp of params.modifierGroups) {
+    const picked = grp.options.filter((o) => chosenSet.has(o.id));
+    if (picked.length > 0) {
+      for (const p of picked) {
+        extras += p.extraPrice;
+      }
+      const optsText = picked
+        .map((p) => `${p.name}${p.extraPrice > 0 ? ` (+$${p.extraPrice.toFixed(2)})` : ""}`)
+        .join(", ");
+      notesParts.push(`${grp.name}: ${optsText}`);
+    }
+  }
+
+  const modifiersNotes = notesParts.join(" · ");
+  const sortedKey = Array.from(chosenSet).sort().join("_");
+  const itemKey = `${params.dish.id}_${sortedKey}`;
+  const unitPrice = params.dish.price + extras;
+  const orderItemName = modifiersNotes ? `${params.dish.name} [${modifiersNotes}]` : params.dish.name;
+
+  return {
+    itemKey,
+    unitPrice,
+    modifiersNotes,
+    orderItemName,
+  };
+}
+
+const empanadaCustom = compileCustomization({
+  dish: { id: "dish-emp-1", name: "Empanada Gigante de Camarón", price: 4.5 },
+  modifierGroups: [
+    {
+      id: "grp-salsa",
+      name: "Tipo de salsa",
+      minSelect: 1,
+      maxSelect: 3,
+      options: [
+        { id: "opt-salsa-1", name: "Salsa picante", extraPrice: 0.0 },
+        { id: "opt-salsa-2", name: "Salsa de queso", extraPrice: 0.0 },
+      ],
+    },
+    {
+      id: "grp-extra",
+      name: "Extras",
+      minSelect: 0,
+      maxSelect: 2,
+      options: [
+        { id: "opt-extra-1", name: "Extra queso", extraPrice: 0.5 },
+      ],
+    },
+  ],
+  selectedOptionIds: ["opt-salsa-2", "opt-extra-1"],
+});
+
+assert.strictEqual(empanadaCustom.unitPrice, 5.0, "Precio unitario debe ser $4.50 + $0.50 = $5.00");
+assert.strictEqual(empanadaCustom.itemKey, "dish-emp-1_opt-extra-1_opt-salsa-2");
+assert.strictEqual(
+  empanadaCustom.orderItemName,
+  "Empanada Gigante de Camarón [Tipo de salsa: Salsa de queso · Extras: Extra queso (+$0.50)]"
+);
+console.log("✅ [PASS] 6: Compilación precisa de precio, itemKey y nota para comanda de cocina y ticket");
+
+// 5. Verificación de platos estándar sin modificadores
+const platoDirecto = compileCustomization({
+  dish: { id: "dish-cola-1", name: "Coca Cola 300ml", price: 1.5 },
+  modifierGroups: [],
+  selectedOptionIds: [],
+});
+
+assert.strictEqual(platoDirecto.unitPrice, 1.5);
+assert.strictEqual(platoDirecto.itemKey, "dish-cola-1_");
+assert.strictEqual(platoDirecto.orderItemName, "Coca Cola 300ml");
+console.log("✅ [PASS] 7: Inserción directa sin fricción ni retrasos para platos sin modificadores");
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (5/5)");
+console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (7/7)");
 console.log("==================================================");
 

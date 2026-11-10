@@ -2456,7 +2456,20 @@ export async function createOrderAction(data: {
   total?: number;
   paymentMethod: string;
   paymentDetails?: string;
-  items: { dishId: string; dishName?: string; price?: number; quantity: number }[];
+  items: { 
+    dishId: string; 
+    dishName?: string; 
+    price?: number; 
+    quantity: number;
+    modifiers?: Array<{
+      groupId?: string;
+      groupName?: string;
+      optionId?: string;
+      optionName: string;
+      extraPrice?: number;
+    }>;
+    notes?: string;
+  }[];
 }) {
   try {
     if (!data.restaurantId || typeof data.restaurantId !== "string") {
@@ -2545,11 +2558,31 @@ export async function createOrderAction(data: {
         };
       }
 
-      const serverPrice = dbDish.price;
+      let serverPrice = Number(dbDish.price) || 0;
+      const modifierDetails: string[] = [];
+
+      if (Array.isArray(item.modifiers) && item.modifiers.length > 0) {
+        for (const mod of item.modifiers) {
+          const extra = Math.max(0, Number(mod.extraPrice) || 0);
+          serverPrice += extra;
+          const groupPrefix = mod.groupName ? `${mod.groupName}: ` : "";
+          const priceSuffix = extra > 0 ? ` (+$${extra.toFixed(2)})` : "";
+          modifierDetails.push(`${groupPrefix}${mod.optionName}${priceSuffix}`);
+        }
+      }
+
+      if (item.notes && item.notes.trim()) {
+        modifierDetails.push(`Nota: ${item.notes.trim()}`);
+      }
+
       calculatedSubtotal += serverPrice * item.quantity;
 
+      const fullDishName = modifierDetails.length > 0
+        ? `${dbDish.name} [${modifierDetails.join(" · ")}]`
+        : dbDish.name;
+
       verifiedOrderItems.push({
-        dishName: dbDish.name,
+        dishName: fullDishName,
         price: serverPrice,
         quantity: item.quantity,
       });

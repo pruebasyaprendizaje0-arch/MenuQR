@@ -192,18 +192,7 @@ export default async function CajaPage() {
   }
 
   // Fetch available dishes for quick touch POS grid
-  let dishes: Array<{
-    id: string;
-    name: string;
-    price: number;
-    imageUrl: string | null;
-    barcode: string | null;
-    sku: string | null;
-    stock: number | null;
-    trackStock: boolean;
-    categoryId: string | null;
-    category?: { id: string; name: string } | null;
-  }> = [];
+  let dishes: any[] = [];
   try {
     dishes = await prisma.dish.findMany({
       where: { restaurantId: restaurant.id, isAvailable: true },
@@ -223,12 +212,46 @@ export default async function CajaPage() {
             name: true,
           },
         },
+        modifierGroups: {
+          include: {
+            options: {
+              orderBy: { extraPrice: "asc" },
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
       },
       orderBy: { name: "asc" },
     });
   } catch (dishErr) {
     console.error("Error querying dishes for Caja touch grid:", dishErr);
   }
+
+  const serializedDishes = dishes.map((d: any) => ({
+    id: d.id,
+    name: d.name,
+    price: Number(d.price) || 0,
+    imageUrl: d.imageUrl || null,
+    barcode: d.barcode || null,
+    sku: d.sku || null,
+    stock: d.stock !== null ? Number(d.stock) : null,
+    trackStock: Boolean(d.trackStock),
+    categoryId: d.categoryId || null,
+    category: d.category ? { id: d.category.id, name: d.category.name } : null,
+    modifierGroups: (d.modifierGroups || []).map((mg: any) => ({
+      id: mg.id,
+      name: mg.name,
+      required: Boolean(mg.required),
+      minSelect: Number(mg.minSelect) || 0,
+      maxSelect: Number(mg.maxSelect) || 1,
+      options: (mg.options || []).map((opt: any) => ({
+        id: opt.id,
+        name: opt.name,
+        extraPrice: Number(opt.extraPrice) || 0,
+        isDefault: Boolean(opt.isDefault),
+      })),
+    })),
+  }));
 
   const currentUser = {
     id: session?.userId || "admin",
@@ -255,7 +278,7 @@ export default async function CajaPage() {
         categories={categories}
         initialShift={initialShift}
         currentUser={currentUser}
-        dishes={dishes}
+        dishes={serializedDishes}
       />
     </main>
   );

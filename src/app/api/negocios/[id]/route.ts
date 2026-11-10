@@ -76,6 +76,14 @@ export async function GET(
           category: {
             select: { name: true, imageAspectRatio: true },
           },
+          modifierGroups: {
+            include: {
+              options: {
+                orderBy: { extraPrice: "asc" },
+              },
+            },
+            orderBy: { createdAt: "asc" },
+          },
         },
         orderBy: [{ category: { order: "asc" } }, { name: "asc" }],
       });

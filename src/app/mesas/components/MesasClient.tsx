@@ -80,6 +80,22 @@ interface Camarero {
   pin?: string;
 }
 
+export interface ProductoModifierOption {
+  id: string;
+  name: string;
+  extraPrice: number;
+  isDefault: boolean;
+}
+
+export interface ProductoModifierGroup {
+  id: string;
+  name: string;
+  required: boolean;
+  minSelect: number;
+  maxSelect: number;
+  options: ProductoModifierOption[];
+}
+
 interface Producto {
   id: string;
   name: string;
@@ -88,6 +104,7 @@ interface Producto {
   imageUrl?: string | null;
   isAvailable: boolean;
   category?: { name: string; imageAspectRatio?: string | null };
+  modifierGroups?: ProductoModifierGroup[];
 }
 
 interface MetricaCamarero {
@@ -115,7 +132,13 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   const [catalogSearch, setCatalogSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("TODAS");
   const [cartToAdd, setCartToAdd] = useState<{
-    [productId: string]: { producto: Producto; cantidad: number; notas: string };
+    [productId: string]: {
+      producto: Producto;
+      cantidad: number;
+      notas: string;
+      selectedOptions?: string[];
+      extraPrice?: number;
+    };
   }>({});
 
   // Modo Mesa: Carta Digital Gigante para el cliente en el móvil del mesero
@@ -632,12 +655,99 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
         delete copy[producto.id];
         return copy;
       }
+
+      let initialSelected: string[] = prev[producto.id]?.selectedOptions || [];
+      let calculatedExtra = prev[producto.id]?.extraPrice || 0;
+      let initialNotes = prev[producto.id]?.notas || "";
+
+      if (current === 0 && producto.modifierGroups && producto.modifierGroups.length > 0) {
+        const defaultOptions: string[] = [];
+        let defExtra = 0;
+        const notesParts: string[] = [];
+        producto.modifierGroups.forEach((g) => {
+          const defs = g.options.filter((o) => o.isDefault);
+          if (defs.length > 0) {
+            defs.forEach((d) => {
+              defaultOptions.push(d.id);
+              defExtra += Number(d.extraPrice) || 0;
+            });
+            notesParts.push(`${g.name}: ${defs.map((d) => d.name).join(", ")}`);
+          }
+        });
+        if (defaultOptions.length > 0) {
+          initialSelected = defaultOptions;
+          calculatedExtra = defExtra;
+          initialNotes = notesParts.join(" · ");
+        }
+      }
+
       return {
         ...prev,
         [producto.id]: {
           producto,
           cantidad: nextQty,
-          notas: prev[producto.id]?.notas || "",
+          notas: initialNotes,
+          selectedOptions: initialSelected,
+          extraPrice: calculatedExtra,
+        },
+      };
+    });
+  };
+
+  const toggleModifierOptionForCartItem = (
+    productoId: string,
+    group: ProductoModifierGroup,
+    option: ProductoModifierOption
+  ) => {
+    setCartToAdd((prev) => {
+      const current = prev[productoId];
+      if (!current) return prev;
+      const currentSelected = current.selectedOptions || [];
+      const isSelected = currentSelected.includes(option.id);
+      let nextSelected: string[];
+
+      if (group.maxSelect === 1) {
+        const groupOptionIds = new Set(group.options.map((o) => o.id));
+        const filtered = currentSelected.filter((id) => !groupOptionIds.has(id));
+        nextSelected = isSelected ? filtered : [...filtered, option.id];
+      } else {
+        if (isSelected) {
+          nextSelected = currentSelected.filter((id) => id !== option.id);
+        } else {
+          const currentInGroup = currentSelected.filter((id) =>
+            group.options.some((o) => o.id === id)
+          ).length;
+          if (group.maxSelect > 0 && currentInGroup >= group.maxSelect) {
+            return prev;
+          }
+          nextSelected = [...currentSelected, option.id];
+        }
+      }
+
+      const selectedIdSet = new Set(nextSelected);
+      let calculatedExtra = 0;
+      const notesParts: string[] = [];
+
+      (current.producto.modifierGroups || []).forEach((g) => {
+        const picked = g.options.filter((o) => selectedIdSet.has(o.id));
+        if (picked.length > 0) {
+          picked.forEach((p) => {
+            calculatedExtra += Number(p.extraPrice) || 0;
+          });
+          const optsText = picked
+            .map((p) => `${p.name}${p.extraPrice > 0 ? ` (+$${p.extraPrice.toFixed(2)})` : ""}`)
+            .join(", ");
+          notesParts.push(`${g.name}: ${optsText}`);
+        }
+      });
+
+      return {
+        ...prev,
+        [productoId]: {
+          ...current,
+          selectedOptions: nextSelected,
+          extraPrice: calculatedExtra,
+          notas: notesParts.join(" · "),
         },
       };
     });
@@ -664,7 +774,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       id: item.producto.id,
       nombre: item.producto.name,
       cantidad: item.cantidad,
-      precio: item.producto.price,
+      precio: (Number(item.producto.price) || 0) + (Number(item.extraPrice) || 0),
       notas: item.notas || null,
     }));
 
@@ -1441,7 +1551,14 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                                     </span>
                                   )}
                                 </div>
-                                <span className="text-emerald-400 font-mono font-semibold">${prod.price.toFixed(2)}</span>
+                                <span className="text-emerald-400 font-mono font-semibold">
+                                  ${((prod.price) + (inCart?.extraPrice || 0)).toFixed(2)}
+                                </span>
+                                {inCart?.extraPrice ? (
+                                  <span className="text-[10px] text-amber-400 font-medium ml-1">
+                                    (incl. extras +${inCart.extraPrice.toFixed(2)})
+                                  </span>
+                                ) : null}
                               </div>
 
                               <div className="flex items-center space-x-2">
@@ -1464,13 +1581,60 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                             </div>
 
                             {qty > 0 && (
-                              <input
-                                type="text"
-                                placeholder="Nota especial (ej. sin cebolla, término medio)..."
-                                value={inCart.notas}
-                                onChange={(e) => updateCartNotas(prod.id, e.target.value)}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-[11px] text-amber-200 outline-none focus:border-amber-500"
-                              />
+                              <div className="space-y-2 mt-1 bg-slate-950/70 p-2 rounded-lg border border-slate-800">
+                                {prod.modifierGroups && prod.modifierGroups.length > 0 && (
+                                  <div className="space-y-2 pb-1 border-b border-slate-800/80">
+                                    {prod.modifierGroups.map((group) => (
+                                      <div key={group.id} className="space-y-1">
+                                        <div className="flex items-center justify-between text-[11px]">
+                                          <span className="font-bold text-amber-400">
+                                            {group.name}
+                                            {group.required && <span className="text-rose-400 ml-0.5">*</span>}
+                                          </span>
+                                          <span className="text-[10px] text-slate-400">
+                                            {group.maxSelect === 1 ? "Elige 1" : `Máx ${group.maxSelect}`}
+                                          </span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1">
+                                          {group.options.map((opt) => {
+                                            const isSelected = (inCart.selectedOptions || []).includes(opt.id);
+                                            return (
+                                              <button
+                                                key={opt.id}
+                                                type="button"
+                                                onClick={() => toggleModifierOptionForCartItem(prod.id, group, opt)}
+                                                className={`px-2 py-1 rounded-md text-[11px] transition flex items-center gap-1 border ${
+                                                  isSelected
+                                                    ? "bg-amber-500 text-slate-950 font-bold border-amber-400 shadow-sm"
+                                                    : "bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700"
+                                                }`}
+                                              >
+                                                <span>{opt.name}</span>
+                                                {opt.extraPrice > 0 && (
+                                                  <span
+                                                    className={`text-[10px] ${
+                                                      isSelected ? "text-slate-950/80 font-bold" : "text-amber-400"
+                                                    }`}
+                                                  >
+                                                    +${opt.extraPrice.toFixed(2)}
+                                                  </span>
+                                                )}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <input
+                                  type="text"
+                                  placeholder="Nota especial (ej. sin cebolla, término medio)..."
+                                  value={inCart.notas}
+                                  onChange={(e) => updateCartNotas(prod.id, e.target.value)}
+                                  className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[11px] text-amber-200 outline-none focus:border-amber-500"
+                                />
+                              </div>
                             )}
                           </div>
                         );
