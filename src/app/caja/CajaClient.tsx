@@ -691,29 +691,37 @@ export function CajaClient({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [mode, restaurant.id]);
 
-  // Lector de Cámara con html5-qrcode para el canal SCANNER
+  // Lector de Cámara con html5-qrcode para el canal SCANNER con parada y transición segura
   useEffect(() => {
     if (activeChannel !== "SCANNER") {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current?.clear();
-          scannerRef.current = null;
-        });
-      }
       return;
     }
 
-    let active = true;
-    import("html5-qrcode").then(({ Html5Qrcode }) => {
-      if (!active) return;
-      const el = document.getElementById("caja-lector");
-      if (!el) return;
+    let isCancelled = false;
 
-      const scanner = new Html5Qrcode("caja-lector");
-      scannerRef.current = scanner;
+    const initScanner = async () => {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        if (isCancelled) return;
 
-      scanner
-        .start(
+        const el = document.getElementById("caja-lector");
+        if (!el) return;
+
+        // Limpiar cualquier scanner previo si aún existía
+        if (scannerRef.current) {
+          try {
+            if (scannerRef.current.isScanning) {
+              await scannerRef.current.stop().catch(() => {});
+            }
+            scannerRef.current.clear();
+          } catch {}
+          scannerRef.current = null;
+        }
+
+        const scanner = new Html5Qrcode("caja-lector");
+        scannerRef.current = scanner;
+
+        await scanner.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 250, height: 160 } },
           (decoded) => {
@@ -724,20 +732,47 @@ export function CajaClient({
               scanCooldownRef.current = false;
             }, 1800);
           },
-          () => {}
-        )
-        .catch((err) => {
-          console.warn("[Caja Camera] Error:", err);
-        });
-    });
+          () => {} // Ignorar frames sin código
+        );
+
+        // Si el usuario cambió de pestaña mientras el start() estaba resolviendo
+        if (isCancelled) {
+          try {
+            if (scanner.isScanning) {
+              await scanner.stop().catch(() => {});
+            }
+          } catch {}
+          try {
+            scanner.clear();
+          } catch {}
+          if (scannerRef.current === scanner) {
+            scannerRef.current = null;
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Caja Camera] Inicialización detenida o cámara no disponible:", err?.message || err);
+      }
+    };
+
+    initScanner();
 
     return () => {
-      active = false;
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current?.clear();
-          scannerRef.current = null;
-        });
+      isCancelled = true;
+      const scanner = scannerRef.current;
+      scannerRef.current = null;
+
+      if (scanner) {
+        // Detener la cámara de manera asíncrona segura sin bloquear el hilo de React
+        (async () => {
+          try {
+            if (scanner.isScanning) {
+              await scanner.stop().catch(() => {});
+            }
+          } catch {}
+          try {
+            scanner.clear();
+          } catch {}
+        })();
       }
     };
   }, [activeChannel, mode, restaurant.id]);
@@ -1803,33 +1838,31 @@ export function CajaClient({
               </div>
             )}
 
-            {/* CANAL: ESCÁNER DE CÓDIGO DE BARRAS */}
-            {activeChannel === "SCANNER" && (
-              <div className="flex-1 flex flex-col items-center justify-center p-4 space-y-4">
-                <div className="w-full max-w-sm aspect-square rounded-3xl overflow-hidden bg-black border-2 border-rose-500/50 relative shadow-2xl flex flex-col items-center justify-center">
-                  <div id="caja-lector" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                    <div className="w-48 h-28 border-2 border-dashed border-rose-400 rounded-2xl flex items-center justify-center shadow-lg relative animate-pulse">
-                      <div className="w-full h-0.5 bg-red-500 absolute shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
-                    </div>
-                    <p className="text-[11px] font-bold text-white mt-3 bg-black/70 px-3 py-1 rounded-full backdrop-blur-md">
-                      Apunta al código de barras
-                    </p>
+            {/* CANAL: ESCÁNER DE CÓDIGO DE BARRAS (Persistente en DOM para evitar fallas de transición) */}
+            <div className={activeChannel === "SCANNER" ? "flex-1 flex flex-col items-center justify-center p-4 space-y-4" : "hidden"}>
+              <div className="w-full max-w-sm aspect-square rounded-3xl overflow-hidden bg-black border-2 border-rose-500/50 relative shadow-2xl flex flex-col items-center justify-center">
+                <div id="caja-lector" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                  <div className="w-48 h-28 border-2 border-dashed border-rose-400 rounded-2xl flex items-center justify-center shadow-lg relative animate-pulse">
+                    <div className="w-full h-0.5 bg-red-500 absolute shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsManualModalOpen(true)}
-                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold flex items-center gap-1.5"
-                  >
-                    <Keyboard className="w-4 h-4" />
-                    <span>Digitar Código Manual</span>
-                  </button>
+                  <p className="text-[11px] font-bold text-white mt-3 bg-black/70 px-3 py-1 rounded-full backdrop-blur-md">
+                    Apunta al código de barras
+                  </p>
                 </div>
               </div>
-            )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsManualModalOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold flex items-center gap-1.5"
+                >
+                  <Keyboard className="w-4 h-4" />
+                  <span>Digitar Código Manual</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
