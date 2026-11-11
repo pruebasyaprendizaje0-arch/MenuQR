@@ -365,10 +365,18 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
     return () => {
       active = false;
       if (cameraScannerRef.current) {
-        cameraScannerRef.current.stop().catch(() => {}).finally(() => {
-          cameraScannerRef.current?.clear();
-          cameraScannerRef.current = null;
-        });
+        const inst = cameraScannerRef.current;
+        cameraScannerRef.current = null;
+        try {
+          const state = typeof inst.getState === "function" ? inst.getState() : null;
+          if (state === 2 || state === 3 || (inst as any).isScanning) {
+            const p = inst.stop();
+            if (p && typeof p.then === "function") p.catch(() => {});
+          }
+        } catch {}
+        try {
+          inst.clear();
+        } catch {}
       }
     };
   }, [isBarcodeDockOpen, dockInputMode, activeSubTab]);

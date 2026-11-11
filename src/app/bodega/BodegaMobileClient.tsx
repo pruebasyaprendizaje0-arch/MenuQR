@@ -437,10 +437,18 @@ export function BodegaMobileClient({
     return () => {
       isMounted = false;
       if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {}).finally(() => {
-          scannerRef.current?.clear();
-          scannerRef.current = null;
-        });
+        const inst = scannerRef.current;
+        scannerRef.current = null;
+        try {
+          const state = typeof inst.getState === "function" ? inst.getState() : null;
+          if (state === 2 || state === 3 || (inst as any).isScanning) {
+            const p = inst.stop();
+            if (p && typeof p.then === "function") p.catch(() => {});
+          }
+        } catch {}
+        try {
+          inst.clear();
+        } catch {}
       }
     };
   }, [isCameraActive, scanMode]);

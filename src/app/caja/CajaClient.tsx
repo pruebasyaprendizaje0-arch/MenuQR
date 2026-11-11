@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useTransition, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { Html5Qrcode, Html5QrcodeSupportedFormats, Html5QrcodeScannerState } from "html5-qrcode";
 import {
   ArrowLeft,
   Barcode,
@@ -698,10 +698,50 @@ export function CajaClient({
     }
 
     let isCancelled = false;
+    let startPromise: Promise<any> | null = null;
+    let localScanner: Html5Qrcode | null = null;
+    let isStopping = false;
+
+    const stopSafely = async (inst: Html5Qrcode | null) => {
+      if (!inst || isStopping) return;
+      isStopping = true;
+
+      try {
+        // Si startPromise está en curso, esperamos a que resuelva o rechace antes de llamar a stop()
+        if (startPromise) {
+          await startPromise.catch(() => {});
+        }
+
+        // Solo intentar stop si el escáner está en SCANNING o PAUSED
+        const state = typeof inst.getState === "function" ? inst.getState() : null;
+        const isRunning =
+          state !== null
+            ? state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED
+            : Boolean((inst as any).isScanning);
+
+        if (isRunning) {
+          try {
+            const stopP = inst.stop();
+            if (stopP && typeof stopP.then === "function") {
+              await stopP.catch(() => {});
+            }
+          } catch {
+            // Ignorar excepciones síncronas si ya estaba transicionando
+          }
+        }
+      } catch {
+        // Blindaje ante cualquier error de estado
+      }
+
+      try {
+        inst.clear();
+      } catch {
+        // Ignorar si el contenedor DOM ya se desvinculó
+      }
+    };
 
     const initScanner = async () => {
       try {
-        const { Html5Qrcode } = await import("html5-qrcode");
         if (isCancelled) return;
 
         const el = document.getElementById("caja-lector");
@@ -709,19 +749,18 @@ export function CajaClient({
 
         // Limpiar cualquier scanner previo si aún existía
         if (scannerRef.current) {
-          try {
-            if (scannerRef.current.isScanning) {
-              await scannerRef.current.stop().catch(() => {});
-            }
-            scannerRef.current.clear();
-          } catch {}
+          const prev = scannerRef.current;
           scannerRef.current = null;
+          await stopSafely(prev);
         }
 
+        if (isCancelled) return;
+
         const scanner = new Html5Qrcode("caja-lector");
+        localScanner = scanner;
         scannerRef.current = scanner;
 
-        await scanner.start(
+        startPromise = scanner.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 250, height: 160 } },
           (decoded) => {
@@ -735,22 +774,17 @@ export function CajaClient({
           () => {} // Ignorar frames sin código
         );
 
-        // Si el usuario cambió de pestaña mientras el start() estaba resolviendo
+        await startPromise;
+
+        // Si mientras la cámara iniciaba el usuario cambió de pestaña
         if (isCancelled) {
-          try {
-            if (scanner.isScanning) {
-              await scanner.stop().catch(() => {});
-            }
-          } catch {}
-          try {
-            scanner.clear();
-          } catch {}
+          await stopSafely(scanner);
           if (scannerRef.current === scanner) {
             scannerRef.current = null;
           }
         }
       } catch (err: any) {
-        console.warn("[Caja Camera] Inicialización detenida o cámara no disponible:", err?.message || err);
+        console.warn("[Caja Camera] Cámara no disponible o inicio cancelado:", err?.message || err);
       }
     };
 
@@ -758,21 +792,10 @@ export function CajaClient({
 
     return () => {
       isCancelled = true;
-      const scanner = scannerRef.current;
+      const scanner = localScanner || scannerRef.current;
       scannerRef.current = null;
-
       if (scanner) {
-        // Detener la cámara de manera asíncrona segura sin bloquear el hilo de React
-        (async () => {
-          try {
-            if (scanner.isScanning) {
-              await scanner.stop().catch(() => {});
-            }
-          } catch {}
-          try {
-            scanner.clear();
-          } catch {}
-        })();
+        stopSafely(scanner);
       }
     };
   }, [activeChannel, mode, restaurant.id]);
