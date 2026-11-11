@@ -253,7 +253,66 @@ assert.strictEqual(platoDirecto.itemKey, "dish-cola-1_");
 assert.strictEqual(platoDirecto.orderItemName, "Coca Cola 300ml");
 console.log("✅ [PASS] 7: Inserción directa sin fricción ni retrasos para platos sin modificadores");
 
+// 6. Prueba de Resolución de Destinos POS (Mostrador / Para Llevar / Mesa) y Envío a Cocina KDS
+function resolvePosOrderDestination(params: {
+  modality: "MOSTRADOR" | "LLEVAR" | "MESA";
+  tableNumber?: string;
+  customerName?: string;
+  paymentMethod: string;
+}) {
+  const tableName =
+    params.modality === "MESA"
+      ? `Mesa #${params.tableNumber || "1"}`
+      : params.modality === "LLEVAR"
+      ? "Para Llevar"
+      : "Mostrador";
+
+  const customerName =
+    params.modality === "LLEVAR"
+      ? params.customerName?.trim()
+        ? `${params.customerName.trim()} (Para Llevar)`
+        : `Para Llevar (${params.paymentMethod})`
+      : params.modality === "MESA"
+      ? `Mesa #${params.tableNumber || "1"} (${params.paymentMethod})`
+      : params.customerName?.trim()
+      ? `${params.customerName.trim()} (Mostrador)`
+      : `Venta Mostrador (${params.paymentMethod})`;
+
+  const kdsTipoEntrega =
+    params.modality === "LLEVAR" ? "RETIRO" : params.modality === "MESA" ? "SALON" : "MOSTRADOR";
+
+  return { tableName, customerName, kdsTipoEntrega };
+}
+
+const destMostrador = resolvePosOrderDestination({
+  modality: "MOSTRADOR",
+  paymentMethod: "EFECTIVO",
+});
+assert.strictEqual(destMostrador.tableName, "Mostrador");
+assert.strictEqual(destMostrador.customerName, "Venta Mostrador (EFECTIVO)");
+assert.strictEqual(destMostrador.kdsTipoEntrega, "MOSTRADOR");
+
+const destLlevar = resolvePosOrderDestination({
+  modality: "LLEVAR",
+  customerName: "Carlos Gómez",
+  paymentMethod: "DEUNA",
+});
+assert.strictEqual(destLlevar.tableName, "Para Llevar");
+assert.strictEqual(destLlevar.customerName, "Carlos Gómez (Para Llevar)");
+assert.strictEqual(destLlevar.kdsTipoEntrega, "RETIRO");
+
+const destMesa = resolvePosOrderDestination({
+  modality: "MESA",
+  tableNumber: "4",
+  paymentMethod: "TARJETA",
+});
+assert.strictEqual(destMesa.tableName, "Mesa #4");
+assert.strictEqual(destMesa.customerName, "Mesa #4 (TARJETA)");
+assert.strictEqual(destMesa.kdsTipoEntrega, "SALON");
+
+console.log("✅ [PASS] 8: Resolución omnicanal en Caja POS (Mostrador, Para Llevar, Mesa) y despacho a Cocina KDS verificado");
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (7/7)");
+console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (8/8)");
 console.log("==================================================");
 

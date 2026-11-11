@@ -305,6 +305,7 @@ export async function processCajaSaleAction(
     items: Array<{ dishId: string; quantity: number; price: number; name: string }>;
     paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA" | "TRANSFERENCIA";
     customerName?: string;
+    tableName?: string;
     splitDetails?: SplitPaymentDetail[];
   }
 ) {
@@ -363,7 +364,7 @@ export async function processCajaSaleAction(
         data: {
           restaurantId,
           cashShiftId: activeShift?.id || null,
-          tableName: `Caja POS (${data.paymentMethod})`,
+          tableName: data.tableName?.trim() || `Caja POS (${data.paymentMethod})`,
           customerName: data.customerName?.trim() || `Venta Directa (${data.paymentMethod})`,
           status: "COMPLETED",
           subtotal,

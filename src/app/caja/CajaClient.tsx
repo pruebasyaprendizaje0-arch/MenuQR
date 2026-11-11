@@ -49,6 +49,7 @@ import {
   ShoppingCart,
   RotateCcw,
   SlidersHorizontal,
+  UtensilsCrossed,
 } from "lucide-react";
 import {
   searchDishByBarcodeAction,
@@ -223,6 +224,21 @@ export function CajaClient({
   const [customizingDish, setCustomizingDish] = useState<TouchDishItem | null>(null);
   const [customizingMods, setCustomizingMods] = useState<{ [groupId: string]: string[] }>({});
   const [customizingQty, setCustomizingQty] = useState(1);
+
+  // Modalidad de destino del pedido en caja (Mostrador / Para Llevar / Mesa)
+  const [saleModality, setSaleModality] = useState<"MOSTRADOR" | "LLEVAR" | "MESA">("MOSTRADOR");
+  const [saleTableNumber, setSaleTableNumber] = useState<string>("1");
+  const [saleCustomerName, setSaleCustomerName] = useState<string>("");
+  const [sendToKitchen, setSendToKitchen] = useState<boolean>(true);
+
+  const configuredTables = useMemo(() => {
+    if (!restaurant.tablesConfig) return ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+    const splitted = restaurant.tablesConfig
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    return splitted.length > 0 ? splitted : ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+  }, [restaurant.tablesConfig]);
 
   // Camera & Scanner State
   const [scannerEnabled, setScannerEnabled] = useState(false);
@@ -785,6 +801,87 @@ export function CajaClient({
     setSplitPayments((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const sendOrderToKitchenKDS = async (options: {
+    mesaNumber?: string | null;
+    tipoEntrega: "MOSTRADOR" | "RETIRO" | "SALON";
+    clienteNombre: string;
+    skipStockDeduction?: boolean;
+  }) => {
+    try {
+      const itemsPayload = sessionItems.map((it) => ({
+        dishId: it.dishId,
+        id: it.dishId,
+        nombre: it.name,
+        cantidad: it.quantity,
+        precio: it.price,
+        notas: it.modifiersNotes || null,
+      }));
+
+      const res = await fetch("/api/pedidos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          negocio_id: restaurant.id,
+          slug: restaurant.slug,
+          mesa: options.mesaNumber || null,
+          tipo_entrega: options.tipoEntrega,
+          cliente_nombre: options.clienteNombre,
+          skip_stock_deduction: options.skipStockDeduction ?? true,
+          items: itemsPayload,
+          total: totalAmount,
+        }),
+      });
+      const data = await res.json();
+      return data;
+    } catch (kdsErr) {
+      console.warn("[Caja POS] Error al enviar a cocina:", kdsErr);
+      return null;
+    }
+  };
+
+  const handleSendToKitchenOpenTable = async () => {
+    if (sessionItems.length === 0) {
+      alert("Agrega al menos un producto al ticket antes de enviar a cocina.");
+      return;
+    }
+    if (saleModality === "MESA" && !saleTableNumber) {
+      alert("Selecciona el número de mesa.");
+      return;
+    }
+
+    startTransition(async () => {
+      const targetMesa = saleModality === "MESA" ? saleTableNumber : null;
+      const tipoEntrega = saleModality === "LLEVAR" ? "RETIRO" : saleModality === "MESA" ? "SALON" : "MOSTRADOR";
+      const clienteNombre = saleModality === "LLEVAR"
+        ? (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : "Cliente (Para Llevar)")
+        : saleModality === "MESA"
+        ? `Mesa #${saleTableNumber}`
+        : (saleCustomerName.trim() || "Mostrador");
+
+      const kdsRes = await sendOrderToKitchenKDS({
+        mesaNumber: targetMesa,
+        tipoEntrega,
+        clienteNombre,
+        skipStockDeduction: false,
+      });
+
+      if (kdsRes && kdsRes.ok) {
+        playBeep();
+        setSuccessInfo({
+          title: "¡Comanda enviada a Cocina!",
+          message: `Comanda de ${clienteNombre} enviada exitosamente a la pantalla de Cocina (KDS). La mesa queda abierta para consumo.`,
+          badge: `👨‍🍳 Cocina: ${clienteNombre}`,
+        });
+        setSessionItems([]);
+        setSaleCustomerName("");
+        fetchActiveOrders();
+      } else {
+        playErrorSound();
+        alert(kdsRes?.error || "Error al enviar comanda a cocina.");
+      }
+    });
+  };
+
   const handleCheckoutSplitTicket = async () => {
     if (splitPayments.length === 0) {
       alert("No se ha registrado ningún abono.");
@@ -853,10 +950,23 @@ export function CajaClient({
         quantity: it.quantity,
       }));
 
+      const effectiveTableName = saleModality === "MESA"
+        ? `Mesa #${saleTableNumber}`
+        : saleModality === "LLEVAR"
+        ? "Para Llevar"
+        : "Mostrador";
+
+      const effectiveCustomerName = saleModality === "LLEVAR"
+        ? (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : `Para Llevar (Split)`)
+        : saleModality === "MESA"
+        ? `Mesa #${saleTableNumber} (Split)`
+        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Mostrador)` : `Venta POS Dividida (${splitPayments.length} pagos)`);
+
       const res = await processCajaSaleAction(restaurant.id, {
         items: itemsPayload,
         paymentMethod: dominantMethod,
-        customerName: `Venta POS Dividida (${splitPayments.length} pagos)`,
+        customerName: effectiveCustomerName,
+        tableName: effectiveTableName,
         splitDetails: splitDetailsPayload,
       });
 
@@ -865,14 +975,26 @@ export function CajaClient({
         alert(res.error);
       } else {
         playBeep();
+
+        if (sendToKitchen) {
+          await sendOrderToKitchenKDS({
+            mesaNumber: saleModality === "MESA" ? saleTableNumber : null,
+            tipoEntrega: saleModality === "LLEVAR" ? "RETIRO" : saleModality === "MESA" ? "SALON" : "MOSTRADOR",
+            clienteNombre: effectiveCustomerName,
+            skipStockDeduction: true,
+          });
+        }
+
         setIsSplitModalOpen(false);
         setSplitPayments([]);
         setSuccessInfo({
           title: "¡Venta Dividida Completada!",
-          message: `Ticket #${res.orderNumber} por $${res.total?.toFixed(2)} pagado con ${splitPayments.length} abonos (${summaryText}).`,
-          badge: `✂️ Split Pay POS · $${res.total?.toFixed(2)}`,
+          message: `Ticket #${res.orderNumber} por $${res.total?.toFixed(2)} (${effectiveTableName}) pagado con ${splitPayments.length} abonos (${summaryText}).`,
+          badge: `✂️ Split Pay: ${effectiveTableName} · $${res.total?.toFixed(2)}`,
         });
         setSessionItems([]);
+        setSaleCustomerName("");
+        fetchActiveOrders();
       }
     });
   };
@@ -1103,10 +1225,23 @@ export function CajaClient({
         quantity: it.quantity,
       }));
 
+      const effectiveTableName = saleModality === "MESA"
+        ? `Mesa #${saleTableNumber}`
+        : saleModality === "LLEVAR"
+        ? "Para Llevar"
+        : "Mostrador";
+
+      const effectiveCustomerName = saleModality === "LLEVAR"
+        ? (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : `Para Llevar (${paymentMethod})`)
+        : saleModality === "MESA"
+        ? `Mesa #${saleTableNumber} (${paymentMethod})`
+        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Mostrador)` : `Venta Mostrador (${paymentMethod})`);
+
       const res = await processCajaSaleAction(restaurant.id, {
         items: itemsPayload,
         paymentMethod: paymentMethod === "TRANSFERENCIA" ? "PAYPHONE" : paymentMethod,
-        customerName: `Venta POS (${paymentMethod})`,
+        customerName: effectiveCustomerName,
+        tableName: effectiveTableName,
       });
 
       if (res.error) {
@@ -1114,12 +1249,25 @@ export function CajaClient({
         alert(res.error);
       } else {
         playBeep();
+
+        if (sendToKitchen) {
+          await sendOrderToKitchenKDS({
+            mesaNumber: saleModality === "MESA" ? saleTableNumber : null,
+            tipoEntrega: saleModality === "LLEVAR" ? "RETIRO" : saleModality === "MESA" ? "SALON" : "MOSTRADOR",
+            clienteNombre: effectiveCustomerName,
+            skipStockDeduction: true,
+          });
+        }
+
+        const kitchenNotice = sendToKitchen ? " Comanda enviada a Cocina (KDS)." : "";
         setSuccessInfo({
           title: "¡Venta Completada!",
-          message: `Ticket #${res.orderNumber} por $${res.total?.toFixed(2)} pagado con ${paymentMethod}.`,
-          badge: `⚡ Cobrado: ${paymentMethod}`,
+          message: `Ticket #${res.orderNumber} por $${res.total?.toFixed(2)} (${effectiveTableName}) pagado con ${paymentMethod}.${kitchenNotice}`,
+          badge: `⚡ Cobrado: ${effectiveTableName} · ${paymentMethod}`,
         });
         setSessionItems([]);
+        setSaleCustomerName("");
+        fetchActiveOrders();
       }
     });
   };
@@ -1631,6 +1779,10 @@ export function CajaClient({
                   ? "Reingreso de existencias a bodega"
                   : selectedActiveOrder
                   ? "Cobro de comanda en salón"
+                  : saleModality === "MESA"
+                  ? `Consumo en Mesa #${saleTableNumber}`
+                  : saleModality === "LLEVAR"
+                  ? "Pedido para llevar (empaque)"
                   : "Venta rápida en mostrador"}
               </span>
             </div>
@@ -1647,6 +1799,116 @@ export function CajaClient({
               </button>
             )}
           </div>
+
+          {/* SELECTOR DE MODALIDAD: MOSTRADOR / PARA LLEVAR / MESA */}
+          {!selectedActiveOrder && mode === "VENTA" && (
+            <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-2.5 space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                <span className="uppercase tracking-wider">Destino del Pedido:</span>
+                <span className="text-emerald-400 font-mono text-[10px]">
+                  {saleModality === "MOSTRADOR"
+                    ? "🏪 Mostrador"
+                    : saleModality === "LLEVAR"
+                    ? "🛍️ Para Llevar"
+                    : `🪑 Mesa #${saleTableNumber}`}
+                </span>
+              </div>
+
+              {/* 3 Botones de Selección */}
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSaleModality("MOSTRADOR")}
+                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border ${
+                    saleModality === "MOSTRADOR"
+                      ? "bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30"
+                      : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                  }`}
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Mostrador</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSaleModality("LLEVAR")}
+                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border ${
+                    saleModality === "LLEVAR"
+                      ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 font-black"
+                      : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                  }`}
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>Para Llevar</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSaleModality("MESA")}
+                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border ${
+                    saleModality === "MESA"
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30"
+                      : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Mesa</span>
+                </button>
+              </div>
+
+              {/* Opciones según modalidad */}
+              {saleModality === "MESA" && (
+                <div className="space-y-1.5 pt-1.5 border-t border-slate-800/80">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                    <span>Selecciona la Mesa:</span>
+                    <span className="text-indigo-400 font-mono">Mesa #{saleTableNumber}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                    {configuredTables.map((tbl) => (
+                      <button
+                        key={tbl}
+                        type="button"
+                        onClick={() => setSaleTableNumber(tbl)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition shrink-0 border ${
+                          saleTableNumber === tbl
+                            ? "bg-indigo-600 text-white border-indigo-400 shadow-sm"
+                            : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                        }`}
+                      >
+                        #{tbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {saleModality === "LLEVAR" && (
+                <div className="pt-1.5 border-t border-slate-800/80">
+                  <input
+                    type="text"
+                    placeholder="Nombre del cliente para entrega (opcional)..."
+                    value={saleCustomerName}
+                    onChange={(e) => setSaleCustomerName(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+              )}
+
+              {/* Switch Enviar a Cocina (KDS) */}
+              <label className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 cursor-pointer select-none">
+                <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                  <UtensilsCrossed className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Enviar comanda a Cocina (KDS)</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={sendToKitchen}
+                  onChange={(e) => setSendToKitchen(e.target.checked)}
+                  className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-emerald-500 focus:ring-offset-slate-950 cursor-pointer"
+                />
+              </label>
+            </div>
+          )}
 
           {/* LISTA DE ITEMS DEL TICKET */}
           <div className="flex-1 space-y-2 min-h-[140px] max-h-[260px] overflow-y-auto pr-1">
@@ -1860,6 +2122,19 @@ export function CajaClient({
             </button>
           )}
 
+          {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA */}
+          {!selectedActiveOrder && mode === "VENTA" && saleModality === "MESA" && sessionItems.length > 0 && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={handleSendToKitchenOpenTable}
+              className="w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-500/50 flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+            >
+              <UtensilsCrossed className="w-4 h-4 text-indigo-400" />
+              <span>Enviar a Cocina (Dejar Mesa #{saleTableNumber} Abierta)</span>
+            </button>
+          )}
+
           {/* BOTÓN PRINCIPAL DE COBRO / DEVOLUCIÓN */}
           <button
             type="button"
@@ -1891,7 +2166,9 @@ export function CajaClient({
             ) : (
               <>
                 <Check className="w-5 h-5 stroke-[3]" />
-                <span>Cobrar Ticket (${totalAmount.toFixed(2)})</span>
+                <span>
+                  {sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Ticket"} (${totalAmount.toFixed(2)})
+                </span>
               </>
             )}
           </button>
