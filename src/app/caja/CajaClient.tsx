@@ -225,8 +225,8 @@ export function CajaClient({
   const [customizingMods, setCustomizingMods] = useState<{ [groupId: string]: string[] }>({});
   const [customizingQty, setCustomizingQty] = useState(1);
 
-  // Modalidad de destino del pedido en caja (Mostrador / Para Llevar / Mesa)
-  const [saleModality, setSaleModality] = useState<"MOSTRADOR" | "LLEVAR" | "MESA">("MOSTRADOR");
+  // Modalidad de destino del pedido en caja (Para Llevar / Mesa)
+  const [saleModality, setSaleModality] = useState<"LLEVAR" | "MESA">("LLEVAR");
   const [saleTableNumber, setSaleTableNumber] = useState<string>("1");
   const [saleCustomerName, setSaleCustomerName] = useState<string>("");
   const [sendToKitchen, setSendToKitchen] = useState<boolean>(true);
@@ -851,12 +851,10 @@ export function CajaClient({
 
     startTransition(async () => {
       const targetMesa = saleModality === "MESA" ? saleTableNumber : null;
-      const tipoEntrega = saleModality === "LLEVAR" ? "RETIRO" : saleModality === "MESA" ? "SALON" : "MOSTRADOR";
-      const clienteNombre = saleModality === "LLEVAR"
-        ? (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : "Cliente (Para Llevar)")
-        : saleModality === "MESA"
+      const tipoEntrega = saleModality === "MESA" ? "SALON" : "RETIRO";
+      const clienteNombre = saleModality === "MESA"
         ? `Mesa #${saleTableNumber}`
-        : (saleCustomerName.trim() || "Mostrador");
+        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : "Cliente (Para Llevar)");
 
       const kdsRes = await sendOrderToKitchenKDS({
         mesaNumber: targetMesa,
@@ -952,15 +950,11 @@ export function CajaClient({
 
       const effectiveTableName = saleModality === "MESA"
         ? `Mesa #${saleTableNumber}`
-        : saleModality === "LLEVAR"
-        ? "Para Llevar"
-        : "Mostrador";
+        : "Para Llevar";
 
-      const effectiveCustomerName = saleModality === "LLEVAR"
-        ? (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : `Para Llevar (Split)`)
-        : saleModality === "MESA"
+      const effectiveCustomerName = saleModality === "MESA"
         ? `Mesa #${saleTableNumber} (Split)`
-        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Mostrador)` : `Venta POS Dividida (${splitPayments.length} pagos)`);
+        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : `Para Llevar (Split)`);
 
       const res = await processCajaSaleAction(restaurant.id, {
         items: itemsPayload,
@@ -979,7 +973,7 @@ export function CajaClient({
         if (sendToKitchen) {
           await sendOrderToKitchenKDS({
             mesaNumber: saleModality === "MESA" ? saleTableNumber : null,
-            tipoEntrega: saleModality === "LLEVAR" ? "RETIRO" : saleModality === "MESA" ? "SALON" : "MOSTRADOR",
+            tipoEntrega: saleModality === "MESA" ? "SALON" : "RETIRO",
             clienteNombre: effectiveCustomerName,
             skipStockDeduction: true,
           });
@@ -1227,15 +1221,11 @@ export function CajaClient({
 
       const effectiveTableName = saleModality === "MESA"
         ? `Mesa #${saleTableNumber}`
-        : saleModality === "LLEVAR"
-        ? "Para Llevar"
-        : "Mostrador";
+        : "Para Llevar";
 
-      const effectiveCustomerName = saleModality === "LLEVAR"
-        ? (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : `Para Llevar (${paymentMethod})`)
-        : saleModality === "MESA"
+      const effectiveCustomerName = saleModality === "MESA"
         ? `Mesa #${saleTableNumber} (${paymentMethod})`
-        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Mostrador)` : `Venta Mostrador (${paymentMethod})`);
+        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : `Para Llevar (${paymentMethod})`);
 
       const res = await processCajaSaleAction(restaurant.id, {
         items: itemsPayload,
@@ -1253,7 +1243,7 @@ export function CajaClient({
         if (sendToKitchen) {
           await sendOrderToKitchenKDS({
             mesaNumber: saleModality === "MESA" ? saleTableNumber : null,
-            tipoEntrega: saleModality === "LLEVAR" ? "RETIRO" : saleModality === "MESA" ? "SALON" : "MOSTRADOR",
+            tipoEntrega: saleModality === "MESA" ? "SALON" : "RETIRO",
             clienteNombre: effectiveCustomerName,
             skipStockDeduction: true,
           });
@@ -1781,9 +1771,7 @@ export function CajaClient({
                   ? "Cobro de comanda en salón"
                   : saleModality === "MESA"
                   ? `Consumo en Mesa #${saleTableNumber}`
-                  : saleModality === "LLEVAR"
-                  ? "Pedido para llevar (empaque)"
-                  : "Venta rápida en mostrador"}
+                  : "Pedido para llevar (empaque)"}
               </span>
             </div>
 
@@ -1800,59 +1788,44 @@ export function CajaClient({
             )}
           </div>
 
-          {/* SELECTOR DE MODALIDAD: MOSTRADOR / PARA LLEVAR / MESA */}
+          {/* SELECTOR DE MODALIDAD: PARA LLEVAR / MESA */}
           {!selectedActiveOrder && mode === "VENTA" && (
             <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-2.5 space-y-2">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
                 <span className="uppercase tracking-wider">Destino del Pedido:</span>
                 <span className="text-emerald-400 font-mono text-[10px]">
-                  {saleModality === "MOSTRADOR"
-                    ? "🏪 Mostrador"
-                    : saleModality === "LLEVAR"
+                  {saleModality === "LLEVAR"
                     ? "🛍️ Para Llevar"
                     : `🪑 Mesa #${saleTableNumber}`}
                 </span>
               </div>
 
-              {/* 3 Botones de Selección */}
-              <div className="grid grid-cols-3 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setSaleModality("MOSTRADOR")}
-                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border ${
-                    saleModality === "MOSTRADOR"
-                      ? "bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30"
-                      : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
-                  }`}
-                >
-                  <Store className="w-3.5 h-3.5" />
-                  <span>Mostrador</span>
-                </button>
-
+              {/* 2 Botones de Selección */}
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setSaleModality("LLEVAR")}
-                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border ${
+                  className={`py-2 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 border ${
                     saleModality === "LLEVAR"
                       ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 font-black"
                       : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
                   }`}
                 >
-                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <ShoppingBag className="w-4 h-4" />
                   <span>Para Llevar</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSaleModality("MESA")}
-                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border ${
+                  className={`py-2 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 border ${
                     saleModality === "MESA"
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30"
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30 font-black"
                       : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
                   }`}
                 >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Mesa</span>
+                  <Users className="w-4 h-4" />
+                  <span>Mesa en Salón</span>
                 </button>
               </div>
 
