@@ -366,10 +366,15 @@ export function CajaClient({
 
     activeOrders.forEach((o) => {
       const mesaStr = (o.mesa || "").trim().toUpperCase();
+      const clienteNombre = ((o as any).cliente_nombre || "").trim().toUpperCase();
       let meta: any = {};
       try {
         meta = typeof (o as any).metadata === "string" ? JSON.parse((o as any).metadata) : ((o as any).metadata || {});
       } catch {}
+
+      const hasDeliveryAddress = Boolean(meta?.cliente_direccion && String(meta.cliente_direccion).trim().length > 0);
+      const hasDeliveryFee = typeof meta?.costo_envio === "number" && meta.costo_envio > 0;
+      const isExplicitDelivery = hasDeliveryAddress || hasDeliveryFee;
 
       const isLlevar =
         mesaStr === "LLEVAR" ||
@@ -377,7 +382,11 @@ export function CajaClient({
         mesaStr === "RETIRO" ||
         (o as any).tipo_entrega === "RETIRO" ||
         meta?.tipo_entrega === "RETIRO" ||
-        meta?.tipo_pedido === "llevar";
+        meta?.tipo_pedido === "llevar" ||
+        clienteNombre.includes("PARA LLEVAR") ||
+        clienteNombre.includes("LLEVAR") ||
+        clienteNombre.includes("RETIRO") ||
+        (!isExplicitDelivery && (mesaStr === "DELIVERY" || mesaStr === "") && !hasDeliveryAddress);
 
       const isDelivery =
         !isLlevar && (
@@ -386,7 +395,8 @@ export function CajaClient({
           (o as any).tipo_entrega === "DOMICILIO" ||
           meta?.tipo_entrega === "DOMICILIO" ||
           meta?.tipo_pedido === "delivery" ||
-          (o as any).vertical === "ctalo"
+          (o as any).vertical === "ctalo" ||
+          isExplicitDelivery
         );
 
       if (isDelivery) {
@@ -855,8 +865,9 @@ export function CajaClient({
         body: JSON.stringify({
           negocio_id: restaurant.id,
           slug: restaurant.slug,
-          mesa: options.mesaNumber || null,
-          tipo_entrega: options.tipoEntrega,
+          mesa: options.mesaNumber ? options.mesaNumber : (options.tipoEntrega === "SALON" ? "1" : "LLEVAR"),
+          tipo_entrega: options.tipoEntrega === "SALON" ? "SALON" : "RETIRO",
+          metodo_entrega: options.tipoEntrega === "SALON" ? "salon" : "retiro",
           cliente_nombre: options.clienteNombre,
           skip_stock_deduction: options.skipStockDeduction ?? true,
           items: itemsPayload,
@@ -1226,12 +1237,24 @@ export function CajaClient({
           alert(res.error);
         } else {
           playBeep();
-          const targetTitle = selectedActiveOrder.mesa
+          const isDom = selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO";
+          const isLlev = selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO";
+          const targetTitle = isDom
+            ? "¡Domicilio Cobrado y Despachado!"
+            : isLlev
+            ? "¡Pedido para Llevar Entregado!"
+            : selectedActiveOrder.mesa
             ? `¡Mesa #${selectedActiveOrder.mesa} Cobrada!`
             : "¡Pedido Cobrado!";
+          const targetMessage = isDom
+            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Pedido a domicilio despachado.`
+            : isLlev
+            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Pedido entregado al cliente en mostrador.`
+            : `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. La mesa ha quedado liberada.`;
+
           setSuccessInfo({
             title: targetTitle,
-            message: `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. La mesa ha quedado liberada.`,
+            message: targetMessage,
             badge: `✅ ${paymentMethod} · $${totalAmount.toFixed(2)}`,
           });
           setSelectedActiveOrder(null);
@@ -1442,7 +1465,9 @@ export function CajaClient({
             >
               <ShoppingBag className="w-4 h-4" />
               <span>Para Llevar</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-black">
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                llevarOrders.length > 0 ? "bg-cyan-300 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+              }`}>
                 {llevarOrders.length}
               </span>
             </button>
@@ -1458,7 +1483,9 @@ export function CajaClient({
             >
               <Bike className="w-4 h-4" />
               <span>Domicilios</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-black">
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                domicilioOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+              }`}>
                 {domicilioOrders.length}
               </span>
             </button>
@@ -1816,10 +1843,12 @@ export function CajaClient({
                 <h3 className="font-black text-white text-base">
                   {mode === "ENTRADA"
                     ? "Ticket de Devolución"
-                    : selectedActiveOrder?.mesa
-                    ? `Mesa #${selectedActiveOrder.mesa}`
-                    : selectedActiveOrder?.cliente_nombre
-                    ? `Pedido: ${selectedActiveOrder.cliente_nombre}`
+                    : selectedActiveOrder
+                    ? selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
+                      ? "🛵 Pedido a Domicilio"
+                      : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
+                      ? "🥡 Pedido Para Llevar"
+                      : `Mesa #${selectedActiveOrder.mesa}`
                     : "Ticket de Venta Directa"}
                 </h3>
               </div>
@@ -1827,7 +1856,11 @@ export function CajaClient({
                 {mode === "ENTRADA"
                   ? "Reingreso de existencias a bodega"
                   : selectedActiveOrder
-                  ? "Cobro de comanda en salón"
+                  ? selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
+                    ? "Cobro y despacho a repartidor"
+                    : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
+                    ? "Cobro y entrega en mostrador"
+                    : "Cobro de comanda en salón"
                   : saleModality === "MESA"
                   ? `Consumo en Mesa #${saleTableNumber}`
                   : "Pedido para llevar (empaque)"}
@@ -2199,7 +2232,13 @@ export function CajaClient({
             ) : selectedActiveOrder ? (
               <>
                 <Check className="w-5 h-5 stroke-[3]" />
-                <span>Cobrar y Liberar Mesa (${totalAmount.toFixed(2)})</span>
+                <span>
+                  {selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
+                    ? `Cobrar y Despachar Domicilio ($${totalAmount.toFixed(2)})`
+                    : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
+                    ? `Cobrar y Entregar Pedido ($${totalAmount.toFixed(2)})`
+                    : `Cobrar y Liberar Mesa (${totalAmount.toFixed(2)})`}
+                </span>
               </>
             ) : (
               <>
