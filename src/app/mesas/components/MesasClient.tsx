@@ -191,7 +191,10 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   const currentShowcaseDish = showcaseDishes[showcaseIndex] || showcaseDishes[0] || null;
   const currentShowcaseQty = currentShowcaseDish ? cartToAdd[currentShowcaseDish.id]?.cantidad || 0 : 0;
   const totalShowcasePlatos = Object.values(cartToAdd).reduce((acc, it) => acc + it.cantidad, 0);
-  const totalShowcaseMonto = Object.values(cartToAdd).reduce((acc, it) => acc + it.cantidad * it.producto.price, 0);
+  const totalShowcaseMonto = Object.values(cartToAdd).reduce(
+    (acc, it) => acc + it.cantidad * ((Number(it.producto.price) || 0) + (Number(it.extraPrice) || 0)),
+    0
+  );
 
   // Gestión / Edición de meseros
   const [showWaitersModal, setShowWaitersModal] = useState(false);
@@ -697,11 +700,21 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   const toggleModifierOptionForCartItem = (
     productoId: string,
     group: ProductoModifierGroup,
-    option: ProductoModifierOption
+    option: ProductoModifierOption,
+    fallbackProducto?: Producto
   ) => {
     setCartToAdd((prev) => {
-      const current = prev[productoId];
-      if (!current) return prev;
+      let current = prev[productoId];
+      if (!current) {
+        if (!fallbackProducto) return prev;
+        current = {
+          producto: fallbackProducto,
+          cantidad: 1,
+          notas: "",
+          selectedOptions: [],
+          extraPrice: 0,
+        };
+      }
       const currentSelected = current.selectedOptions || [];
       const isSelected = currentSelected.includes(option.id);
       let nextSelected: string[];
@@ -1882,10 +1895,114 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                     </p>
                   ) : null}
 
-                  <div className="text-3xl sm:text-4xl font-black font-mono text-emerald-600 pt-0.5">
-                    ${Number(currentShowcaseDish.price).toFixed(2)}
-                  </div>
+                  {(() => {
+                    const inCartShowcase = cartToAdd[currentShowcaseDish.id];
+                    const extras = inCartShowcase?.extraPrice || 0;
+                    const base = Number(currentShowcaseDish.price) || 0;
+                    const unitFinal = base + extras;
+                    return (
+                      <div className="flex flex-col items-center">
+                        <div className="text-3xl sm:text-4xl font-black font-mono text-emerald-600 pt-0.5">
+                          ${unitFinal.toFixed(2)}
+                        </div>
+                        {extras > 0 && (
+                          <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full mt-1 border border-amber-300">
+                            Base ${base.toFixed(2)} + ${extras.toFixed(2)} en extras
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
+
+                {/* MODIFICADORES, OPCIONES Y EXTRAS PARA EL CLIENTE */}
+                {currentShowcaseDish.modifierGroups && currentShowcaseDish.modifierGroups.length > 0 && (
+                  <div className="w-full bg-slate-50 border border-slate-200/90 rounded-2xl p-3 sm:p-4 text-left space-y-3 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                      <span className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <span>✨ Opciones & Términos</span>
+                      </span>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                        Personaliza tu plato
+                      </span>
+                    </div>
+
+                    {currentShowcaseDish.modifierGroups.map((group) => {
+                      const inCartShowcase = cartToAdd[currentShowcaseDish.id];
+                      const selectedInGroup = inCartShowcase?.selectedOptions || [];
+                      return (
+                        <div key={group.id} className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-slate-900">
+                              {group.name} {group.required && <span className="text-rose-500 font-black">*</span>}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-500">
+                              {group.maxSelect === 1 ? "Elige 1" : `Máx ${group.maxSelect}`}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5">
+                            {group.options.map((opt) => {
+                              const isSelected = selectedInGroup.includes(opt.id);
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => {
+                                    toggleModifierOptionForCartItem(
+                                      currentShowcaseDish.id,
+                                      group,
+                                      opt,
+                                      currentShowcaseDish
+                                    );
+                                  }}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm border ${
+                                    isSelected
+                                      ? "bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400/40 shadow-emerald-500/20"
+                                      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100 hover:border-slate-400"
+                                  }`}
+                                >
+                                  <span>{opt.name}</span>
+                                  {opt.extraPrice > 0 ? (
+                                    <span
+                                      className={`text-[10px] font-mono ${
+                                        isSelected ? "text-emerald-100 font-black" : "text-emerald-700 font-extrabold"
+                                      }`}
+                                    >
+                                      +${opt.extraPrice.toFixed(2)}
+                                    </span>
+                                  ) : (
+                                    <span className={`text-[10px] ${isSelected ? "text-emerald-100" : "text-slate-400"}`}>
+                                      Gratis
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Resumen de notas activas o campo libre */}
+                    {currentShowcaseQty > 0 && (
+                      <div className="pt-2 border-t border-slate-200 space-y-1">
+                        {cartToAdd[currentShowcaseDish.id]?.notas && (
+                          <p className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                            📝 {cartToAdd[currentShowcaseDish.id].notas}
+                          </p>
+                        )}
+                        <input
+                          type="text"
+                          placeholder="Nota extra para cocina (ej. bien caliente, salsa aparte)..."
+                          value={cartToAdd[currentShowcaseDish.id]?.notas || ""}
+                          onChange={(e) => updateCartNotas(currentShowcaseDish.id, e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Botón de Agregar Táctil */}
                 <div className="w-full pt-1">
