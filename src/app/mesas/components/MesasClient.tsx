@@ -1122,16 +1122,20 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between text-xs gap-3">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-1.5">
-              <span className="w-3.5 h-3.5 rounded bg-slate-800 border border-slate-700 inline-block" />
+              <span className="w-3.5 h-3.5 rounded-md bg-slate-800 border border-slate-700 inline-block" />
               <span className="text-slate-400">Libre (Gris)</span>
             </div>
             <div className="flex items-center space-x-1.5">
-              <span className="w-3.5 h-3.5 rounded bg-emerald-600 border border-emerald-500 inline-block" />
+              <span className="w-3.5 h-3.5 rounded-md bg-emerald-600 border border-emerald-500 inline-block" />
               <span className="text-emerald-300 font-semibold">Ocupada (Verde)</span>
             </div>
             <div className="flex items-center space-x-1.5">
-              <span className="w-3.5 h-3.5 rounded bg-amber-500 border border-amber-400 inline-block" />
+              <span className="w-3.5 h-3.5 rounded-md bg-amber-500 border border-amber-400 inline-block" />
               <span className="text-amber-300 font-semibold">Por pagar (Amarillo)</span>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <span className="w-3.5 h-3.5 rounded-md bg-red-500 border border-red-400 inline-block animate-pulse" />
+              <span className="text-red-300 font-semibold">Llama mesero (Rojo)</span>
             </div>
           </div>
           <div className="text-slate-400 text-[11px]">
@@ -1140,9 +1144,9 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
         </div>
       </div>
 
-      {/* GRID DE MESAS */}
+      {/* GRID DE MESAS REALISTAS CON SILLAS (OPCIÓN 1) */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-5">
           {listaMesas.map((num) => {
             const pedido = getPedidoForMesa(num);
             const isOcupada = Boolean(pedido && pedido.estado !== "por_pagar");
@@ -1154,6 +1158,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
             return (
               <button
                 key={num}
+                type="button"
                 onClick={() => {
                   setActiveMesaNumber(num);
                   setCartToAdd({});
@@ -1161,91 +1166,176 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                   setCatalogSearch("");
                   setSelectedCategory("TODAS");
                 }}
-                className={`relative rounded-2xl p-4 text-left border-2 transition-all duration-200 transform hover:-translate-y-1 hover:shadow-xl active:scale-95 flex flex-col justify-between min-h-[140px] ${
-                  isLlamaMesero
-                    ? "bg-red-950/70 border-red-500 text-red-200 shadow-lg shadow-red-950/60 ring-2 ring-red-500/50 animate-pulse"
-                    : isLibre
-                    ? "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-600 hover:text-slate-200"
-                    : isPorPagar
-                    ? "bg-amber-950/60 border-amber-500 text-amber-200 shadow-amber-950/40"
-                    : "bg-emerald-950/60 border-emerald-500 text-emerald-200 shadow-emerald-950/40"
-                }`}
+                className="group relative pt-3 pb-3 px-2 sm:px-2.5 text-left transition-all duration-200 transform hover:-translate-y-1.5 active:scale-95 focus:outline-none w-full"
               >
-                <div className="flex items-start justify-between w-full">
-                  <span className="text-2xl font-black tracking-tight text-white">Mesa {num}</span>
-                  <div className="flex flex-col items-end gap-1">
-                    {isLlamaMesero && (
-                      <span className="bg-red-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider animate-bounce flex items-center gap-1 shadow-md">
-                        <Bell className="w-3 h-3 text-white animate-spin" />
-                        ¡LLAMA!
-                      </span>
-                    )}
-                    {isListoEnCocina && (
-                      <span className="bg-amber-500 text-slate-950 font-black text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider animate-bounce flex items-center gap-1 shadow-md">
-                        <Bell className="w-3 h-3 text-slate-950" />
-                        ¡LISTO!
-                      </span>
-                    )}
-                  </div>
-                </div>
+                {/* Silla Superior (Top Chair) */}
+                <div
+                  className={`absolute top-0.5 left-1/2 -translate-x-1/2 w-12 sm:w-16 h-2 sm:h-2.5 rounded-t-lg transition-all duration-300 shadow-sm ${
+                    isLlamaMesero
+                      ? "bg-red-500 shadow-red-500/60 animate-pulse ring-1 ring-red-400"
+                      : isPorPagar
+                      ? "bg-amber-500 shadow-amber-500/40 ring-1 ring-amber-400"
+                      : isOcupada
+                      ? "bg-emerald-500 shadow-emerald-500/40 ring-1 ring-emerald-400"
+                      : "bg-slate-800 border-t border-x border-slate-700/70 group-hover:bg-slate-750"
+                  }`}
+                />
 
-                <div className="my-2">
-                  {isLibre && (
-                    <span className="inline-block px-2.5 py-1 rounded-md bg-slate-800/80 text-slate-400 text-xs font-semibold">
-                      Disponible
-                    </span>
-                  )}
-                  {pedido && isOcupada && (
-                    <div className="space-y-0.5">
-                      {pedido.cliente_nombre && (
-                        <span className="text-[11px] font-bold text-slate-200 truncate block">
-                          👤 {pedido.cliente_nombre}
-                        </span>
-                      )}
-                      <span className="text-xs uppercase font-bold tracking-wider text-emerald-400 block">
-                        {pedido.estado === "nuevo"
-                          ? "Nuevo"
-                          : pedido.estado === "en_cocina"
-                          ? "En Cocina"
-                          : "Listo"}
-                      </span>
-                      <span className="text-xs text-slate-400 block">
-                        {pedido.items.length} items • {calcularMinutosTranscurridos(pedido.created_at)}
-                      </span>
-                    </div>
-                  )}
-                  {pedido && isPorPagar && (
-                    <div className="space-y-0.5">
-                      {pedido.cliente_nombre && (
-                        <span className="text-[11px] font-bold text-amber-300 truncate block">
-                          👤 {pedido.cliente_nombre}
-                        </span>
-                      )}
-                      <span className="text-xs uppercase font-extrabold tracking-wider text-amber-300 block">
-                        Por Pagar
-                      </span>
-                      <span className="text-xs text-amber-200/80 block">
-                        {pedido.items.length} items consumidos
-                      </span>
-                    </div>
-                  )}
-                </div>
+                {/* Silla Inferior (Bottom Chair) */}
+                <div
+                  className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-12 sm:w-16 h-2 sm:h-2.5 rounded-b-lg transition-all duration-300 shadow-sm ${
+                    isLlamaMesero
+                      ? "bg-red-500 shadow-red-500/60 animate-pulse ring-1 ring-red-400"
+                      : isPorPagar
+                      ? "bg-amber-500 shadow-amber-500/40 ring-1 ring-amber-400"
+                      : isOcupada
+                      ? "bg-emerald-500 shadow-emerald-500/40 ring-1 ring-emerald-400"
+                      : "bg-slate-800 border-b border-x border-slate-700/70 group-hover:bg-slate-750"
+                  }`}
+                />
 
-                <div className="w-full pt-2 border-t border-slate-800/60 flex items-center justify-between">
-                  {pedido ? (
-                    <>
-                      <span className="text-[11px] text-slate-400">Total:</span>
-                      <span
-                        className={`text-lg font-black font-mono ${
-                          isPorPagar ? "text-amber-400" : "text-emerald-400"
+                {/* Silla Izquierda (Left Chair) */}
+                <div
+                  className={`absolute left-0 top-1/2 -translate-y-1/2 h-10 sm:h-12 w-2 sm:w-2.5 rounded-l-lg transition-all duration-300 shadow-sm ${
+                    isLlamaMesero
+                      ? "bg-red-500 shadow-red-500/60 animate-pulse ring-1 ring-red-400"
+                      : isPorPagar
+                      ? "bg-amber-500 shadow-amber-500/40 ring-1 ring-amber-400"
+                      : isOcupada
+                      ? "bg-emerald-500 shadow-emerald-500/40 ring-1 ring-emerald-400"
+                      : "bg-slate-800 border-l border-y border-slate-700/70 group-hover:bg-slate-750"
+                  }`}
+                />
+
+                {/* Silla Derecha (Right Chair) */}
+                <div
+                  className={`absolute right-0 top-1/2 -translate-y-1/2 h-10 sm:h-12 w-2 sm:w-2.5 rounded-r-lg transition-all duration-300 shadow-sm ${
+                    isLlamaMesero
+                      ? "bg-red-500 shadow-red-500/60 animate-pulse ring-1 ring-red-400"
+                      : isPorPagar
+                      ? "bg-amber-500 shadow-amber-500/40 ring-1 ring-amber-400"
+                      : isOcupada
+                      ? "bg-emerald-500 shadow-emerald-500/40 ring-1 ring-emerald-400"
+                      : "bg-slate-800 border-r border-y border-slate-700/70 group-hover:bg-slate-750"
+                  }`}
+                />
+
+                {/* TABLERO CENTRAL DE LA MESA */}
+                <div
+                  className={`relative w-full rounded-[22px] sm:rounded-3xl p-3 sm:p-3.5 border-2 transition-all duration-300 flex flex-col justify-between min-h-[146px] sm:min-h-[156px] shadow-xl ${
+                    isLlamaMesero
+                      ? "bg-gradient-to-b from-red-950/90 via-slate-900 to-red-950/90 border-red-500 text-red-200 shadow-red-950/70 ring-2 ring-red-500/50 animate-pulse"
+                      : isLibre
+                      ? "bg-gradient-to-b from-slate-900/90 via-slate-900/60 to-slate-950 border-slate-800 text-slate-400 group-hover:border-slate-600 group-hover:text-slate-200 group-hover:shadow-slate-800/40"
+                      : isPorPagar
+                      ? "bg-gradient-to-b from-amber-950/70 via-slate-900 to-amber-950/80 border-amber-500 text-amber-200 shadow-amber-950/40"
+                      : "bg-gradient-to-b from-emerald-950/70 via-slate-900 to-emerald-950/80 border-emerald-500 text-emerald-200 shadow-emerald-950/40"
+                  }`}
+                >
+                  {/* Encabezado: Placa Central con número de Mesa + Alertas */}
+                  <div className="flex items-start justify-between w-full">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <div
+                        className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center font-black text-xs shadow-inner border ${
+                          isLlamaMesero
+                            ? "bg-red-500/20 text-red-300 border-red-500/50 shadow-red-500/20"
+                            : isPorPagar
+                            ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-amber-500/20"
+                            : isOcupada
+                            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-emerald-500/20"
+                            : "bg-slate-800 text-slate-300 border-slate-700"
                         }`}
                       >
-                        ${pedido.total.toFixed(2)}
+                        {num}
+                      </div>
+                      <span className="text-base sm:text-lg font-black tracking-tight text-white">
+                        Mesa {num}
                       </span>
-                    </>
-                  ) : (
-                    <span className="text-xs text-slate-500 italic">Toca para abrir</span>
-                  )}
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1">
+                      {isLlamaMesero && (
+                        <span className="bg-red-500 text-white font-black text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider animate-bounce flex items-center gap-1 shadow-md">
+                          <Bell className="w-2.5 h-2.5 text-white animate-spin" />
+                          ¡LLAMA!
+                        </span>
+                      )}
+                      {isListoEnCocina && (
+                        <span className="bg-amber-500 text-slate-950 font-black text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider animate-bounce flex items-center gap-1 shadow-md">
+                          <Bell className="w-2.5 h-2.5 text-slate-950" />
+                          ¡LISTO!
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Superficie Central: Estado / Cliente / Ítems */}
+                  <div className="my-1.5">
+                    {isLibre && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/80 border border-slate-700/50 text-slate-400 text-[11px] font-semibold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                        Disponible
+                      </span>
+                    )}
+                    {pedido && isOcupada && (
+                      <div className="space-y-0.5">
+                        {pedido.cliente_nombre && (
+                          <span className="text-[11px] font-bold text-slate-200 truncate block">
+                            👤 {pedido.cliente_nombre}
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          <span className="text-xs uppercase font-extrabold tracking-wider text-emerald-400">
+                            {pedido.estado === "nuevo"
+                              ? "Nuevo"
+                              : pedido.estado === "en_cocina"
+                              ? "En Cocina"
+                              : "Listo"}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-slate-400 block font-medium">
+                          {pedido.items.length} {pedido.items.length === 1 ? "ítem" : "ítems"} • {calcularMinutosTranscurridos(pedido.created_at)}
+                        </span>
+                      </div>
+                    )}
+                    {pedido && isPorPagar && (
+                      <div className="space-y-0.5">
+                        {pedido.cliente_nombre && (
+                          <span className="text-[11px] font-bold text-amber-300 truncate block">
+                            👤 {pedido.cliente_nombre}
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                          <span className="text-xs uppercase font-black tracking-wider text-amber-300">
+                            Por Pagar
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-amber-200/80 block font-medium">
+                          {pedido.items.length} {pedido.items.length === 1 ? "ítem consumido" : "ítems consumidos"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Base del Tablero: Total o Acción Táctil */}
+                  <div className="w-full pt-1.5 border-t border-slate-800/60 flex items-center justify-between">
+                    {pedido ? (
+                      <>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total:</span>
+                        <span
+                          className={`text-base sm:text-lg font-black font-mono tracking-tight ${
+                            isPorPagar ? "text-amber-400" : "text-emerald-400"
+                          }`}
+                        >
+                          ${pedido.total.toFixed(2)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-slate-500 italic w-full text-center">Toca para abrir</span>
+                    )}
+                  </div>
                 </div>
               </button>
             );
