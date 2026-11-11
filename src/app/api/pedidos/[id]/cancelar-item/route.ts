@@ -155,8 +155,12 @@ export async function POST(
     } catch {}
 
     const isTable = !String(item.mesa || "").toLowerCase().includes("delivery") && !String(item.mesa || "").toLowerCase().includes("llevar");
-    const ivaIncluded = isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout;
-    const serviceIncluded = isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout;
+    const ivaIncluded = restConfig.ivaOnTable === false
+      ? false
+      : (isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout);
+    const serviceIncluded = restConfig.serviceOnTable === false
+      ? false
+      : (isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout);
 
     let meta: any = {};
     try {

@@ -521,8 +521,14 @@ export async function POST(req: NextRequest) {
 
         const isTable = !isDeliveryReq && !isLlevarReq;
         const calcChargesForSubtotal = (subtotal: number, deliveryFee = 0) => {
-          const ivaIncluded = isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout;
-          const serviceIncluded = isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout;
+          // Si el negocio tiene ivaOnTable === false ("IVA Adicional"), rige en todos los canales (Mesa, Llevar, Delivery).
+          const ivaIncluded = restConfig.ivaOnTable === false
+            ? false
+            : (isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout);
+          const serviceIncluded = restConfig.serviceOnTable === false
+            ? false
+            : (isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout);
+
           const ivaAmount = (restConfig.ivaPercent > 0 && !ivaIncluded)
             ? Math.round(subtotal * (restConfig.ivaPercent / 100) * 100) / 100
             : 0;
@@ -683,7 +689,7 @@ export async function POST(req: NextRequest) {
           const charges = calcChargesForSubtotal(itemsTotal, parsedDeliveryCost);
 
           orderTotal = typeof total === "number" && total > 0
-            ? total
+            ? (Math.abs(total - charges.total) < 0.05 ? total : Math.max(total, charges.total))
             : charges.total;
 
           let finalCamareroId = camarero_id || null;

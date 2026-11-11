@@ -83,8 +83,12 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
       0
     );
     const isTableOrder = !pTable.toLowerCase().includes("delivery") && !pTable.toLowerCase().includes("llevar");
-    const ivaIncluded = isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true);
-    const serviceIncluded = isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false);
+    const ivaIncluded = rest.ivaOnTable === false
+      ? false
+      : (isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true));
+    const serviceIncluded = rest.serviceOnTable === false
+      ? false
+      : (isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false));
 
     const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
       ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100
@@ -234,8 +238,12 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
         0
       );
       const isTableOrder = !pTable.toLowerCase().includes("delivery") && !pTable.toLowerCase().includes("llevar");
-      const ivaIncluded = isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true);
-      const serviceIncluded = isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false);
+      const ivaIncluded = rest.ivaOnTable === false
+        ? false
+        : (isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true));
+      const serviceIncluded = rest.serviceOnTable === false
+        ? false
+        : (isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false));
 
       const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
         ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100

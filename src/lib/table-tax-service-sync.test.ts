@@ -100,6 +100,54 @@ assert.strictEqual(mesaCancelacion.service_charge, 2.5); // 10% de $25
 assert.strictEqual(mesaCancelacion.total, 31.25);
 console.log("✅ [PASS] 5: Cancelación de plato recalcula atómicamente IVA y servicio ($31.25)");
 
+// 6. Caso real del usuario: Lasagna di Carne ($14.90) en Para Llevar / Caja POS con IVA y Servicio
+// Incluso si ivaOnTakeout era true en DB, la regla unificada de IVA Adicional rige para Para Llevar
+function calcUnifiedCharges(subtotal: number, config: {
+  ivaPercent: number;
+  servicePercent: number;
+  ivaOnTable: boolean;
+  serviceOnTable: boolean;
+  ivaOnTakeout: boolean;
+  serviceOnTakeout: boolean;
+}, channel: "mesa" | "llevar" | "delivery") {
+  const isTable = channel === "mesa";
+  const ivaIncluded = config.ivaOnTable === false
+    ? false
+    : (isTable ? config.ivaOnTable : config.ivaOnTakeout);
+  const serviceIncluded = config.serviceOnTable === false
+    ? false
+    : (isTable ? config.serviceOnTable : config.serviceOnTakeout);
+
+  const ivaAmount = (config.ivaPercent > 0 && !ivaIncluded)
+    ? Math.round(subtotal * (config.ivaPercent / 100) * 100) / 100
+    : 0;
+  const serviceAmount = (config.servicePercent > 0 && !serviceIncluded)
+    ? Math.round(subtotal * (config.servicePercent / 100) * 100) / 100
+    : 0;
+  return {
+    subtotal,
+    iva: ivaAmount,
+    service: serviceAmount,
+    total: Math.round((subtotal + ivaAmount + serviceAmount) * 100) / 100,
+  };
+}
+
+const configLegadaConIvaTakeoutTrue = {
+  ivaPercent: 15,
+  servicePercent: 10,
+  ivaOnTable: false, // El dueño configuró IVA adicional
+  serviceOnTable: false, // El dueño configuró servicio adicional
+  ivaOnTakeout: true, // Valor rezagado por default en DB
+  serviceOnTakeout: false,
+};
+
+const lasagnaLlevar = calcUnifiedCharges(14.90, configLegadaConIvaTakeoutTrue, "llevar");
+assert.strictEqual(lasagnaLlevar.subtotal, 14.90);
+assert.strictEqual(lasagnaLlevar.iva, 2.24); // 15% de $14.90 = $2.24
+assert.strictEqual(lasagnaLlevar.service, 1.49); // 10% de $14.90 = $1.49
+assert.strictEqual(lasagnaLlevar.total, 18.63); // $14.90 + $2.24 + $1.49 = $18.63
+console.log("✅ [PASS] 6: Lasagna en Para Llevar suma exactamente $18.63 ($14.90 + $2.24 IVA + $1.49 Servicio)");
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE IMPUESTOS Y SERVICIO PASARON EXITOSAMENTE (5/5)");
+console.log("🎉 TODAS LAS PRUEBAS DE IMPUESTOS Y SERVICIO PASARON EXITOSAMENTE (6/6)");
 console.log("==================================================");

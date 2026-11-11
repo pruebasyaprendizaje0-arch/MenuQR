@@ -829,8 +829,16 @@ export function CajaClient({
       ? !String(selectedActiveOrder.mesa || "").toLowerCase().includes("delivery") && !String(selectedActiveOrder.mesa || "").toLowerCase().includes("llevar")
       : saleModality === "MESA";
 
-    const ivaIncluded = isTable ? (restaurant.ivaOnTable ?? true) : (restaurant.ivaOnTakeout ?? true);
-    const serviceIncluded = isTable ? (restaurant.serviceOnTable ?? true) : (restaurant.serviceOnTakeout ?? false);
+    // Unificación global de IVA:
+    // Si el negocio tiene ivaOnTable === false ("IVA Adicional"), aplica como adicional en TODOS los canales (Mesa, Llevar, Delivery).
+    const ivaIncluded = restaurant.ivaOnTable === false
+      ? false
+      : (isTable ? (restaurant.ivaOnTable ?? true) : (restaurant.ivaOnTakeout ?? true));
+
+    // Unificación de Servicio:
+    const serviceIncluded = restaurant.serviceOnTable === false
+      ? false
+      : (isTable ? (restaurant.serviceOnTable ?? true) : (restaurant.serviceOnTakeout ?? false));
 
     const baseAmount = selectedActiveOrder
       ? (selectedActiveOrder.items || []).reduce((acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1), 0)
@@ -848,11 +856,11 @@ export function CajaClient({
     const ivaRate = restaurant.ivaPercent ?? 15;
     const serviceRate = restaurant.servicePercent ?? 10;
 
-    const iva = typeof meta?.iva === "number"
+    const iva = typeof meta?.iva === "number" && meta.iva > 0
       ? meta.iva
       : (!ivaIncluded && ivaRate > 0 ? Math.round(baseAmount * (ivaRate / 100) * 100) / 100 : 0);
 
-    const service = typeof meta?.service_charge === "number"
+    const service = typeof meta?.service_charge === "number" && meta.service_charge > 0
       ? meta.service_charge
       : (!serviceIncluded && serviceRate > 0 ? Math.round(baseAmount * (serviceRate / 100) * 100) / 100 : 0);
 
@@ -866,9 +874,15 @@ export function CajaClient({
     };
   }, [selectedActiveOrder, saleModality, restaurant, itemsSubtotal, selectedOrderDeliveryCost]);
 
+  const computedExpectedTotal = useMemo(() => {
+    return Math.round(
+      (chargesBreakdown.subtotal + chargesBreakdown.deliveryCost + chargesBreakdown.iva + chargesBreakdown.service) * 100
+    ) / 100;
+  }, [chargesBreakdown]);
+
   const totalAmount = selectedActiveOrder && selectedActiveOrder.total > 0
-    ? selectedActiveOrder.total
-    : Math.round((itemsSubtotal + selectedOrderDeliveryCost + chargesBreakdown.iva + chargesBreakdown.service) * 100) / 100;
+    ? (selectedActiveOrder.total >= computedExpectedTotal ? selectedActiveOrder.total : computedExpectedTotal)
+    : computedExpectedTotal;
 
   // Vuelto / Cambio en Efectivo
   const cashGivenNumber = parseFloat(cashReceivedInput) || 0;
@@ -1731,25 +1745,38 @@ export function CajaClient({
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 overflow-y-auto max-h-[560px]">
-                    {llevarOrders.map((order) => (
-                      <div
-                        key={order.id}
-                        onClick={() => handleSelectActiveOrder(order)}
-                        className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-cyan-500/60 cursor-pointer transition flex flex-col justify-between gap-3"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <span className="font-black text-base text-white">🥡 {order.cliente_nombre || "Cliente"}</span>
-                            <span className="text-xs text-slate-400 block">{order.cliente_telefono || "Sin teléfono"}</span>
+                    {llevarOrders.map((order) => {
+                      const orderItemsSum = (order.items || []).reduce(
+                        (acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1),
+                        0
+                      );
+                      const ivaRate = restaurant.ivaPercent ?? 15;
+                      const serviceRate = restaurant.servicePercent ?? 10;
+                      const addIva = restaurant.ivaOnTable === false ? orderItemsSum * (ivaRate / 100) : 0;
+                      const addService = restaurant.serviceOnTable === false ? orderItemsSum * (serviceRate / 100) : 0;
+                      const computedOrderCardTotal = Math.round((orderItemsSum + addIva + addService) * 100) / 100;
+                      const displayTotal = order.total > 0 && order.total >= computedOrderCardTotal ? order.total : computedOrderCardTotal;
+
+                      return (
+                        <div
+                          key={order.id}
+                          onClick={() => handleSelectActiveOrder(order)}
+                          className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-cyan-500/60 cursor-pointer transition flex flex-col justify-between gap-3"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <span className="font-black text-base text-white">🥡 {order.cliente_nombre || "Cliente"}</span>
+                              <span className="text-xs text-slate-400 block">{order.cliente_telefono || "Sin teléfono"}</span>
+                            </div>
+                            <span className="text-xl font-mono font-black text-cyan-400">${displayTotal.toFixed(2)}</span>
                           </div>
-                          <span className="text-xl font-mono font-black text-cyan-400">${order.total.toFixed(2)}</span>
+                          <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-cyan-400 font-bold">
+                            <span>{order.items.length} producto(s)</span>
+                            <span>Cobrar al entregar →</span>
+                          </div>
                         </div>
-                        <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-cyan-400 font-bold">
-                          <span>{order.items.length} producto(s)</span>
-                          <span>Cobrar al entregar →</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

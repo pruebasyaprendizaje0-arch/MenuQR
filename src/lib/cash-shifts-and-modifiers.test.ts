@@ -269,8 +269,8 @@ function resolvePosOrderDestination(params: {
     params.modality === "MESA"
       ? `Mesa #${params.tableNumber || "1"} (${params.paymentMethod})`
       : params.customerName?.trim()
-      ? `${params.customerName.trim()} (Para Llevar)`
-      : `Para Llevar (${params.paymentMethod})`;
+        ? `${params.customerName.trim()} (Para Llevar)`
+        : `Para Llevar (${params.paymentMethod})`;
 
   const kdsTipoEntrega = params.modality === "MESA" ? "SALON" : "RETIRO";
 
@@ -321,19 +321,19 @@ function compilePublicMenuOrderPayload(params: {
   const targetMesa = isDeliveryOrder
     ? "DELIVERY"
     : isTableOrder
-    ? params.selectedTable
-    : "LLEVAR";
+      ? params.selectedTable
+      : "LLEVAR";
 
   const targetTipoEntrega = isDeliveryOrder
     ? "DOMICILIO"
     : isTableOrder
-    ? "SALON"
-    : "RETIRO";
+      ? "SALON"
+      : "RETIRO";
 
   const fullCustomerAddress = isDeliveryOrder
     ? (params.deliveryReference?.trim()
-        ? `${(params.deliveryAddress || "").trim()}\nRef: ${params.deliveryReference.trim()}`
-        : (params.deliveryAddress || "").trim())
+      ? `${(params.deliveryAddress || "").trim()}\nRef: ${params.deliveryReference.trim()}`
+      : (params.deliveryAddress || "").trim())
     : undefined;
 
   return {
