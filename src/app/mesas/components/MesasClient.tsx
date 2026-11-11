@@ -72,6 +72,12 @@ interface Negocio {
   numero_mesas: number;
   themeColor?: string;
   imageAspectRatio?: "1:1" | "9:16";
+  ivaPercent?: number;
+  servicePercent?: number;
+  ivaOnTable?: boolean;
+  serviceOnTable?: boolean;
+  ivaOnTakeout?: boolean;
+  serviceOnTakeout?: boolean;
 }
 
 interface Camarero {
@@ -1511,12 +1517,50 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                     ))}
                   </div>
 
-                  <div className="pt-4 border-t border-slate-800 space-y-1">
-                    <div className="flex justify-between items-center text-lg font-black text-white">
-                      <span>Total de la Cuenta:</span>
-                      <span className="font-mono text-2xl text-emerald-400">${activePedido.total.toFixed(2)}</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const mesaSubtotal = (activePedido.items || [])
+                      .filter((it) => it.estado_item !== "cancelado")
+                      .reduce((acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1), 0);
+                    const ivaIncluded = negocioInfo?.ivaOnTable ?? true;
+                    const serviceIncluded = negocioInfo?.serviceOnTable ?? true;
+                    const ivaRate = negocioInfo?.ivaPercent ?? 15;
+                    const serviceRate = negocioInfo?.servicePercent ?? 10;
+                    const mesaIva = (!ivaIncluded && ivaRate > 0)
+                      ? Math.round(mesaSubtotal * (ivaRate / 100) * 100) / 100
+                      : 0;
+                    const mesaService = (!serviceIncluded && serviceRate > 0)
+                      ? Math.round(mesaSubtotal * (serviceRate / 100) * 100) / 100
+                      : 0;
+
+                    return (
+                      <div className="pt-4 border-t border-slate-800 space-y-1.5 text-xs">
+                        {(mesaIva > 0 || mesaService > 0) && (
+                          <div className="space-y-1 pb-2 border-b border-slate-850">
+                            <div className="flex justify-between text-slate-400">
+                              <span>Subtotal Platos:</span>
+                              <span className="font-mono text-slate-200">${mesaSubtotal.toFixed(2)}</span>
+                            </div>
+                            {mesaIva > 0 && (
+                              <div className="flex justify-between text-slate-400">
+                                <span>IVA ({ivaRate}%):</span>
+                                <span className="font-mono text-slate-200">+${mesaIva.toFixed(2)}</span>
+                              </div>
+                            )}
+                            {mesaService > 0 && (
+                              <div className="flex justify-between text-amber-400 font-semibold">
+                                <span>Servicio Mesa ({serviceRate}%):</span>
+                                <span className="font-mono">+${mesaService.toFixed(2)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center text-lg font-black text-white">
+                          <span>Total de la Cuenta:</span>
+                          <span className="font-mono text-2xl text-emerald-400">${activePedido.total.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               ) : (
                 <div className="py-12 text-center text-slate-400 space-y-3">

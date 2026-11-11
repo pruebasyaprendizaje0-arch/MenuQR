@@ -301,6 +301,13 @@ export default function OrderTicketModal({
               </div>
             )}
 
+            {(order.serviceCharge || 0) > 0 && (
+              <div className="flex justify-between text-amber-400 font-semibold">
+                <span>Servicio:</span>
+                <span className="font-mono">+${Number(order.serviceCharge).toFixed(2)}</span>
+              </div>
+            )}
+
             <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-sm font-black text-white">
               <span className="text-base">TOTAL A COBRAR:</span>
               <span className="font-mono text-xl text-emerald-400">

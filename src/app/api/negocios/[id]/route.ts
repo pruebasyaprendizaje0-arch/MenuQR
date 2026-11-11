@@ -33,6 +33,13 @@ export async function GET(
     let productos: any[] = [];
     let defaultAspect: "1:1" | "9:16" = "1:1";
     let themeColor = "#059669";
+    let ivaPercent = 15.0;
+    let servicePercent = 10.0;
+    let ivaOnTable = true;
+    let serviceOnTable = true;
+    let ivaOnTakeout = true;
+    let serviceOnTakeout = false;
+
     try {
       const prismaRest = await prisma.restaurant.findFirst({
         where: {
@@ -41,11 +48,24 @@ export async function GET(
         select: {
           customLabels: true,
           themeColor: true,
+          ivaPercent: true,
+          servicePercent: true,
+          ivaOnTable: true,
+          serviceOnTable: true,
+          ivaOnTakeout: true,
+          serviceOnTakeout: true,
         },
       });
 
       if (prismaRest) {
         if (prismaRest.themeColor) themeColor = prismaRest.themeColor;
+        if (typeof prismaRest.ivaPercent === "number") ivaPercent = prismaRest.ivaPercent;
+        if (typeof prismaRest.servicePercent === "number") servicePercent = prismaRest.servicePercent;
+        if (typeof prismaRest.ivaOnTable === "boolean") ivaOnTable = prismaRest.ivaOnTable;
+        if (typeof prismaRest.serviceOnTable === "boolean") serviceOnTable = prismaRest.serviceOnTable;
+        if (typeof prismaRest.ivaOnTakeout === "boolean") ivaOnTakeout = prismaRest.ivaOnTakeout;
+        if (typeof prismaRest.serviceOnTakeout === "boolean") serviceOnTakeout = prismaRest.serviceOnTakeout;
+
         if (prismaRest.customLabels) {
           try {
             const parsed = typeof prismaRest.customLabels === "string" ? JSON.parse(prismaRest.customLabels) : prismaRest.customLabels;
@@ -108,6 +128,12 @@ export async function GET(
         ...negocio,
         themeColor,
         imageAspectRatio: defaultAspect,
+        ivaPercent,
+        servicePercent,
+        ivaOnTable,
+        serviceOnTable,
+        ivaOnTakeout,
+        serviceOnTakeout,
       },
       camareros,
       productos,

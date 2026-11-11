@@ -45,7 +45,16 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
 
     const rest = await prisma.restaurant.findUnique({
       where: { id: targetRestId },
-      select: { id: true, testMode: true },
+      select: {
+        id: true,
+        testMode: true,
+        ivaPercent: true,
+        servicePercent: true,
+        ivaOnTable: true,
+        serviceOnTable: true,
+        ivaOnTakeout: true,
+        serviceOnTakeout: true,
+      },
     });
     if (!rest) return;
 
@@ -64,6 +73,31 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
     const itemsToSave = validItems.length > 0 ? validItems : rawItems;
 
+    let meta: any = {};
+    try {
+      meta = typeof p.metadata === "string" ? JSON.parse(p.metadata) : (p.metadata || {});
+    } catch {}
+
+    const itemsSubtotal = itemsToSave.reduce(
+      (acc: number, it: any) => acc + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
+      0
+    );
+    const isTableOrder = !pTable.toLowerCase().includes("delivery") && !pTable.toLowerCase().includes("llevar");
+    const ivaIncluded = isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true);
+    const serviceIncluded = isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false);
+
+    const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
+      ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100
+      : 0;
+    const calcService = (rest.servicePercent > 0 && !serviceIncluded)
+      ? Math.round(itemsSubtotal * (rest.servicePercent / 100) * 100) / 100
+      : 0;
+    const deliveryCost = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
+
+    const subtotalFinal = typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal;
+    const ivaFinal = typeof meta?.iva === "number" ? meta.iva : calcIva;
+    const serviceFinal = typeof meta?.service_charge === "number" ? meta.service_charge : calcService;
+
     const existing = await prisma.order.findUnique({
       where: { id: p.id },
       select: { id: true, status: true, total: true },
@@ -78,9 +112,10 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
           customerName: p.cliente_nombre?.trim() || null,
           customerPhone: p.cliente_telefono?.trim() || null,
           status: pStatus,
-          subtotal: pTotal,
-          iva: 0.0,
-          serviceCharge: 0.0,
+          subtotal: subtotalFinal,
+          iva: ivaFinal,
+          serviceCharge: serviceFinal,
+          deliveryCost: deliveryCost,
           tip: 0.0,
           total: pTotal,
           paymentMethod: p.metodo_pago || "efectivo",
@@ -100,6 +135,10 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
         where: { id: p.id },
         data: {
           status: pStatus,
+          subtotal: subtotalFinal,
+          iva: ivaFinal,
+          serviceCharge: serviceFinal,
+          deliveryCost: deliveryCost,
           total: pTotal,
           tableName: pTable,
           customerName: p.cliente_nombre?.trim() || null,
@@ -120,7 +159,16 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
   try {
     const rest = await prisma.restaurant.findUnique({
       where: { id: restaurantId },
-      select: { id: true, testMode: true },
+      select: {
+        id: true,
+        testMode: true,
+        ivaPercent: true,
+        servicePercent: true,
+        ivaOnTable: true,
+        serviceOnTable: true,
+        ivaOnTakeout: true,
+        serviceOnTakeout: true,
+      },
     });
     if (!rest) return 0;
 
@@ -172,11 +220,36 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
 
       const existing = existingMap.get(p.id);
 
-      if (!existing) {
-        const rawItems = Array.isArray(p.items) ? p.items : [];
-        const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
-        const itemsToSave = validItems.length > 0 ? validItems : rawItems;
+      let meta: any = {};
+      try {
+        meta = typeof p.metadata === "string" ? JSON.parse(p.metadata) : (p.metadata || {});
+      } catch {}
 
+      const rawItems = Array.isArray(p.items) ? p.items : [];
+      const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
+      const itemsToSave = validItems.length > 0 ? validItems : rawItems;
+
+      const itemsSubtotal = itemsToSave.reduce(
+        (acc: number, it: any) => acc + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
+        0
+      );
+      const isTableOrder = !pTable.toLowerCase().includes("delivery") && !pTable.toLowerCase().includes("llevar");
+      const ivaIncluded = isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true);
+      const serviceIncluded = isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false);
+
+      const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
+        ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100
+        : 0;
+      const calcService = (rest.servicePercent > 0 && !serviceIncluded)
+        ? Math.round(itemsSubtotal * (rest.servicePercent / 100) * 100) / 100
+        : 0;
+      const deliveryCost = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
+
+      const subtotalFinal = typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal;
+      const ivaFinal = typeof meta?.iva === "number" ? meta.iva : calcIva;
+      const serviceFinal = typeof meta?.service_charge === "number" ? meta.service_charge : calcService;
+
+      if (!existing) {
         await prisma.order.create({
           data: {
             id: p.id,
@@ -185,9 +258,10 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
             customerName: p.cliente_nombre?.trim() || null,
             customerPhone: p.cliente_telefono?.trim() || null,
             status: pStatus,
-            subtotal: pTotal,
-            iva: 0.0,
-            serviceCharge: 0.0,
+            subtotal: subtotalFinal,
+            iva: ivaFinal,
+            serviceCharge: serviceFinal,
+            deliveryCost: deliveryCost,
             tip: 0.0,
             total: pTotal,
             paymentMethod: p.metodo_pago || "efectivo",
@@ -209,6 +283,10 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
             where: { id: p.id },
             data: {
               status: pStatus,
+              subtotal: subtotalFinal,
+              iva: ivaFinal,
+              serviceCharge: serviceFinal,
+              deliveryCost: deliveryCost,
               total: pTotal,
             },
           });

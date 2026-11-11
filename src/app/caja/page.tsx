@@ -40,6 +40,12 @@ export default async function CajaPage() {
       bankAccountName: true;
       tablesConfig: true;
       businessType: true;
+      ivaPercent: true;
+      servicePercent: true;
+      ivaOnTable: true;
+      serviceOnTable: true;
+      ivaOnTakeout: true;
+      serviceOnTakeout: true;
     };
   }>>>>;
 
@@ -64,6 +70,12 @@ export default async function CajaPage() {
           bankAccountName: true,
           tablesConfig: true,
           businessType: true,
+          ivaPercent: true,
+          servicePercent: true,
+          ivaOnTable: true,
+          serviceOnTable: true,
+          ivaOnTakeout: true,
+          serviceOnTakeout: true,
         },
       });
     }
@@ -85,6 +97,12 @@ export default async function CajaPage() {
           bankAccountName: true,
           tablesConfig: true,
           businessType: true,
+          ivaPercent: true,
+          servicePercent: true,
+          ivaOnTable: true,
+          serviceOnTable: true,
+          ivaOnTakeout: true,
+          serviceOnTakeout: true,
         },
       });
     }
@@ -105,6 +123,12 @@ export default async function CajaPage() {
           bankAccountName: true,
           tablesConfig: true,
           businessType: true,
+          ivaPercent: true,
+          servicePercent: true,
+          ivaOnTable: true,
+          serviceOnTable: true,
+          ivaOnTakeout: true,
+          serviceOnTakeout: true,
         },
       });
     }

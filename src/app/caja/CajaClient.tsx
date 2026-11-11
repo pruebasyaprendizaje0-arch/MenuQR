@@ -158,6 +158,12 @@ interface CajaRestaurantProps {
   bankAccountName?: string | null;
   tablesConfig?: string | null;
   businessType?: string | null;
+  ivaPercent?: number;
+  servicePercent?: number;
+  ivaOnTable?: boolean;
+  serviceOnTable?: boolean;
+  ivaOnTakeout?: boolean;
+  serviceOnTakeout?: boolean;
 }
 
 interface CajaClientProps {
@@ -800,7 +806,7 @@ export function CajaClient({
     };
   }, [activeChannel, mode, restaurant.id]);
 
-  // Totales y Desglose de Envío
+  // Totales y Desglose de Envío e Impuestos
   const totalQuantity = sessionItems.reduce((acc, it) => acc + it.quantity, 0);
   const itemsSubtotal = sessionItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
 
@@ -818,9 +824,51 @@ export function CajaClient({
     return diff > 0.05 ? diff : 0;
   }, [selectedActiveOrder]);
 
+  const chargesBreakdown = useMemo(() => {
+    const isTable = selectedActiveOrder
+      ? !String(selectedActiveOrder.mesa || "").toLowerCase().includes("delivery") && !String(selectedActiveOrder.mesa || "").toLowerCase().includes("llevar")
+      : saleModality === "MESA";
+
+    const ivaIncluded = isTable ? (restaurant.ivaOnTable ?? true) : (restaurant.ivaOnTakeout ?? true);
+    const serviceIncluded = isTable ? (restaurant.serviceOnTable ?? true) : (restaurant.serviceOnTakeout ?? false);
+
+    const baseAmount = selectedActiveOrder
+      ? (selectedActiveOrder.items || []).reduce((acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1), 0)
+      : itemsSubtotal;
+
+    let meta: any = {};
+    if (selectedActiveOrder) {
+      try {
+        meta = typeof (selectedActiveOrder as any).metadata === "string"
+          ? JSON.parse((selectedActiveOrder as any).metadata)
+          : ((selectedActiveOrder as any).metadata || {});
+      } catch {}
+    }
+
+    const ivaRate = restaurant.ivaPercent ?? 15;
+    const serviceRate = restaurant.servicePercent ?? 10;
+
+    const iva = typeof meta?.iva === "number"
+      ? meta.iva
+      : (!ivaIncluded && ivaRate > 0 ? Math.round(baseAmount * (ivaRate / 100) * 100) / 100 : 0);
+
+    const service = typeof meta?.service_charge === "number"
+      ? meta.service_charge
+      : (!serviceIncluded && serviceRate > 0 ? Math.round(baseAmount * (serviceRate / 100) * 100) / 100 : 0);
+
+    return {
+      subtotal: baseAmount,
+      iva,
+      service,
+      deliveryCost: selectedOrderDeliveryCost,
+      ivaRate,
+      serviceRate,
+    };
+  }, [selectedActiveOrder, saleModality, restaurant, itemsSubtotal, selectedOrderDeliveryCost]);
+
   const totalAmount = selectedActiveOrder && selectedActiveOrder.total > 0
     ? selectedActiveOrder.total
-    : itemsSubtotal + selectedOrderDeliveryCost;
+    : Math.round((itemsSubtotal + selectedOrderDeliveryCost + chargesBreakdown.iva + chargesBreakdown.service) * 100) / 100;
 
   // Vuelto / Cambio en Efectivo
   const cashGivenNumber = parseFloat(cashReceivedInput) || 0;
@@ -2103,9 +2151,21 @@ export function CajaClient({
           {/* DESGLOSE TOTAL */}
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
             <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Productos ({totalQuantity}):</span>
-              <span className="font-mono text-white">${itemsSubtotal.toFixed(2)}</span>
+              <span>Subtotal Productos ({totalQuantity}):</span>
+              <span className="font-mono text-white">${chargesBreakdown.subtotal.toFixed(2)}</span>
             </div>
+            {chargesBreakdown.iva > 0 && (
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>IVA ({chargesBreakdown.ivaRate}%):</span>
+                <span className="font-mono text-slate-200">+${chargesBreakdown.iva.toFixed(2)}</span>
+              </div>
+            )}
+            {chargesBreakdown.service > 0 && (
+              <div className="flex items-center justify-between text-xs text-amber-300">
+                <span>Servicio ({chargesBreakdown.serviceRate}%):</span>
+                <span className="font-mono font-semibold">+${chargesBreakdown.service.toFixed(2)}</span>
+              </div>
+            )}
             {selectedOrderDeliveryCost > 0 && (
               <div className="flex items-center justify-between text-xs text-amber-300 bg-amber-950/20 px-2 py-1 rounded-lg border border-amber-800/40">
                 <span className="flex items-center gap-1 font-semibold">🛵 Recargo de Envío (Delivery):</span>

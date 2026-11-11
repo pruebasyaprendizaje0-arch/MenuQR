@@ -36,7 +36,7 @@ export async function POST(
     // 1. Verificar existencia del pedido y del item
     const { rows: itemRows } = await pool.query(
       `SELECT pi.id, pi.nombre, pi.cantidad, pi.precio::float, pi.estado_item,
-              p.id as pedido_id, p.negocio_id, p.mesa, p.estado as pedido_estado,
+              p.id as pedido_id, p.negocio_id, p.mesa, p.estado as pedido_estado, p.metadata,
               n.slug as negocio_slug
        FROM pedido_items pi
        JOIN pedidos p ON pi.pedido_id = p.id
@@ -105,17 +105,86 @@ export async function POST(
       [motivoFinal, canceladoPorFinal, itemId, pedidoId]
     );
 
-    // 4. Recalcular el total del pedido con los items activos restantes
+    // 4. Recalcular el total del pedido con los items activos restantes aplicando recargos fiscales y de servicio
+    const { rows: activeRemainingItems } = await pool.query(
+      `SELECT cantidad, precio::float
+       FROM pedido_items 
+       WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado')`,
+      [pedidoId]
+    );
+    const remainingSubtotal = activeRemainingItems.reduce(
+      (acc, it) => acc + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
+      0
+    );
+
+    let restConfig = {
+      ivaPercent: 15.0,
+      servicePercent: 10.0,
+      ivaOnTable: true,
+      serviceOnTable: true,
+      ivaOnTakeout: true,
+      serviceOnTakeout: false,
+    };
+    try {
+      const restDb = await prisma.restaurant.findFirst({
+        where: {
+          OR: [
+            { id: item.negocio_id },
+            ...(item.negocio_slug ? [{ slug: item.negocio_slug }] : []),
+          ],
+        },
+        select: {
+          ivaPercent: true,
+          servicePercent: true,
+          ivaOnTable: true,
+          serviceOnTable: true,
+          ivaOnTakeout: true,
+          serviceOnTakeout: true,
+        },
+      });
+      if (restDb) {
+        restConfig = {
+          ivaPercent: typeof restDb.ivaPercent === "number" ? restDb.ivaPercent : 15.0,
+          servicePercent: typeof restDb.servicePercent === "number" ? restDb.servicePercent : 10.0,
+          ivaOnTable: restDb.ivaOnTable ?? true,
+          serviceOnTable: restDb.serviceOnTable ?? true,
+          ivaOnTakeout: restDb.ivaOnTakeout ?? true,
+          serviceOnTakeout: restDb.serviceOnTakeout ?? false,
+        };
+      }
+    } catch {}
+
+    const isTable = !String(item.mesa || "").toLowerCase().includes("delivery") && !String(item.mesa || "").toLowerCase().includes("llevar");
+    const ivaIncluded = isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout;
+    const serviceIncluded = isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout;
+
+    let meta: any = {};
+    try {
+      meta = typeof item.metadata === "string" ? JSON.parse(item.metadata) : (item.metadata || {});
+    } catch {}
+    const deliveryCost = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
+
+    const calcIva = (restConfig.ivaPercent > 0 && !ivaIncluded)
+      ? Math.round(remainingSubtotal * (restConfig.ivaPercent / 100) * 100) / 100
+      : 0;
+    const calcService = (restConfig.servicePercent > 0 && !serviceIncluded)
+      ? Math.round(remainingSubtotal * (restConfig.servicePercent / 100) * 100) / 100
+      : 0;
+    const newTotal = activeRemainingItems.length > 0
+      ? Math.round((remainingSubtotal + calcIva + calcService + deliveryCost) * 100) / 100
+      : 0;
+
+    meta.subtotal = remainingSubtotal;
+    meta.iva = calcIva;
+    meta.service_charge = calcService;
+
     const { rows: updatedOrderRows } = await pool.query(
       `UPDATE pedidos 
-       SET total = GREATEST(0, (
-         SELECT COALESCE(SUM(cantidad * precio), 0)
-         FROM pedido_items 
-         WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado')
-       ))
-       WHERE id = $1
+       SET total = $1,
+           metadata = $2
+       WHERE id = $3
        RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, solicita_mesero, motivo_cancelacion, cancelado_por`,
-      [pedidoId]
+      [newTotal, JSON.stringify(meta), pedidoId]
     );
 
     // 5. Verificar si quedan items activos en la comanda

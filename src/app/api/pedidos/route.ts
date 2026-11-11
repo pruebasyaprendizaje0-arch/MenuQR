@@ -478,6 +478,67 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // Consultar configuración fiscal y de servicio del restaurante (IVA, Servicio, reglas de inclusión)
+        let restConfig = {
+          ivaPercent: 15.0,
+          servicePercent: 10.0,
+          ivaOnTable: true,
+          serviceOnTable: true,
+          ivaOnTakeout: true,
+          serviceOnTakeout: false,
+        };
+        try {
+          const restDb = await prisma.restaurant.findFirst({
+            where: {
+              OR: [
+                ...(restaurantPrismaId ? [{ id: restaurantPrismaId }] : []),
+                ...(businessSlug ? [{ slug: businessSlug }] : []),
+                ...(resolvedNegocioId ? [{ id: resolvedNegocioId }] : []),
+              ],
+            },
+            select: {
+              ivaPercent: true,
+              servicePercent: true,
+              ivaOnTable: true,
+              serviceOnTable: true,
+              ivaOnTakeout: true,
+              serviceOnTakeout: true,
+            },
+          });
+          if (restDb) {
+            restConfig = {
+              ivaPercent: typeof restDb.ivaPercent === "number" ? restDb.ivaPercent : 15.0,
+              servicePercent: typeof restDb.servicePercent === "number" ? restDb.servicePercent : 10.0,
+              ivaOnTable: restDb.ivaOnTable ?? true,
+              serviceOnTable: restDb.serviceOnTable ?? true,
+              ivaOnTakeout: restDb.ivaOnTakeout ?? true,
+              serviceOnTakeout: restDb.serviceOnTakeout ?? false,
+            };
+          }
+        } catch (confErr) {
+          console.warn("[POST /api/pedidos] Advertencia obteniendo restConfig:", confErr);
+        }
+
+        const isTable = !isDeliveryReq && !isLlevarReq;
+        const calcChargesForSubtotal = (subtotal: number, deliveryFee = 0) => {
+          const ivaIncluded = isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout;
+          const serviceIncluded = isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout;
+          const ivaAmount = (restConfig.ivaPercent > 0 && !ivaIncluded)
+            ? Math.round(subtotal * (restConfig.ivaPercent / 100) * 100) / 100
+            : 0;
+          const serviceAmount = (restConfig.servicePercent > 0 && !serviceIncluded)
+            ? Math.round(subtotal * (restConfig.servicePercent / 100) * 100) / 100
+            : 0;
+          const totalAmount = Math.round((subtotal + ivaAmount + serviceAmount + deliveryFee) * 100) / 100;
+          return {
+            subtotal: Math.round(subtotal * 100) / 100,
+            iva: ivaAmount,
+            service_charge: serviceAmount,
+            costo_envio: Math.round(deliveryFee * 100) / 100,
+            total: totalAmount,
+          };
+        };
+
         // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
         // Canales como Domicilio y Para Llevar SIEMPRE generan comandas independientes
         const isNonTableChannel = isDeliveryReq || isLlevarReq;
@@ -499,11 +560,9 @@ export async function POST(req: NextRequest) {
           const currentOrder = existingOrders[0];
           createdOrderId = currentOrder.id;
 
-          let itemsAddTotal = 0;
           for (const item of items) {
             const cantidad = parseInt(item.cantidad) || 1;
             const precio = parseFloat(item.precio) || 0;
-            itemsAddTotal += cantidad * precio;
 
             const { rows: itemRows } = await client.query(
               `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
@@ -514,15 +573,42 @@ export async function POST(req: NextRequest) {
             insertedItems.push(itemRows[0]);
           }
 
+          // Recalcular subtotal e impuestos de forma atómica con todos los platos activos de la mesa
+          const { rows: allActiveOrderItems } = await client.query(
+            `SELECT precio::float, cantidad FROM pedido_items 
+             WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado')`,
+            [createdOrderId]
+          );
+          const accumulatedItemsSubtotal = allActiveOrderItems.reduce(
+            (acc, it) => acc + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
+            0
+          );
+          const updatedCharges = calcChargesForSubtotal(accumulatedItemsSubtotal, 0);
+
+          let existingMeta: any = {};
+          try {
+            existingMeta = typeof currentOrder.metadata === "string" ? JSON.parse(currentOrder.metadata) : (currentOrder.metadata || {});
+          } catch {}
+
+          const updatedMeta = {
+            ...existingMeta,
+            subtotal: updatedCharges.subtotal,
+            iva: updatedCharges.iva,
+            service_charge: updatedCharges.service_charge,
+            costo_envio: 0,
+          };
+
           const { rows: updatedOrderRows } = await client.query(
             `UPDATE pedidos 
-             SET total = total + $1,
-                 cliente_nombre = COALESCE($2, cliente_nombre),
-                 cliente_telefono = COALESCE($3, cliente_telefono)
-             WHERE id = $4 
+             SET total = $1,
+                 metadata = $2,
+                 cliente_nombre = COALESCE($3, cliente_nombre),
+                 cliente_telefono = COALESCE($4, cliente_telefono)
+             WHERE id = $5 
              RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
             [
-              itemsAddTotal,
+              updatedCharges.total,
+              JSON.stringify(updatedMeta),
               cliente_nombre ? String(cliente_nombre).trim() : null,
               cliente_telefono ? String(cliente_telefono).trim() : null,
               createdOrderId,
@@ -594,9 +680,11 @@ export async function POST(req: NextRequest) {
           }
 
           const parsedDeliveryCost = parseFloat(String(costo_envio)) || 0;
+          const charges = calcChargesForSubtotal(itemsTotal, parsedDeliveryCost);
+
           orderTotal = typeof total === "number" && total > 0
             ? total
-            : itemsTotal + parsedDeliveryCost;
+            : charges.total;
 
           let finalCamareroId = camarero_id || null;
           if (!finalCamareroId) {
@@ -612,6 +700,9 @@ export async function POST(req: NextRequest) {
             tipo_entrega: isDeliveryReq ? "DOMICILIO" : isLlevarReq ? "RETIRO" : "SALON",
             cliente_direccion: cliente_direccion || null,
             costo_envio: parsedDeliveryCost,
+            subtotal: charges.subtotal,
+            iva: charges.iva,
+            service_charge: charges.service_charge,
             notas_entrega: notas_entrega || null,
           };
 
