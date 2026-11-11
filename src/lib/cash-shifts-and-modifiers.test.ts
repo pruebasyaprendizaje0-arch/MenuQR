@@ -394,7 +394,77 @@ assert.strictEqual(payloadMesa.isDeliveryOrder, false);
 
 console.log("✅ [PASS] 9: Despacho omnicanal garantizado para Domicilio, Para Llevar y Mesa hacia Cocina y Caja POS");
 
+// 8. Prueba de Clasificación Estricta en Caja POS y Desglose de Costo de Envío
+function classifyPosOrderAndCalculateTotal(order: {
+  mesa: string;
+  tipo_entrega?: string;
+  metadata?: any;
+  items: Array<{ precio: number; cantidad: number }>;
+  total: number;
+}) {
+  const mesaStr = (order.mesa || "").trim().toUpperCase();
+  const meta = order.metadata || {};
+
+  const isLlevar =
+    mesaStr === "LLEVAR" ||
+    mesaStr === "TAKEAWAY" ||
+    mesaStr === "RETIRO" ||
+    order.tipo_entrega === "RETIRO" ||
+    meta?.tipo_entrega === "RETIRO" ||
+    meta?.tipo_pedido === "llevar";
+
+  const isDelivery =
+    !isLlevar && (
+      mesaStr === "DELIVERY" ||
+      mesaStr === "DOMICILIO" ||
+      order.tipo_entrega === "DOMICILIO" ||
+      meta?.tipo_entrega === "DOMICILIO" ||
+      meta?.tipo_pedido === "delivery"
+    );
+
+  const isMesa = !isLlevar && !isDelivery;
+
+  const itemsSubtotal = (order.items || []).reduce((acc, it) => acc + it.precio * it.cantidad, 0);
+  const deliveryCost = meta?.costo_envio ?? (order.total - itemsSubtotal > 0.05 ? order.total - itemsSubtotal : 0);
+
+  return {
+    isLlevar,
+    isDelivery,
+    isMesa,
+    itemsSubtotal,
+    deliveryCost,
+    totalToCharge: order.total,
+  };
+}
+
+const checkLlevar = classifyPosOrderAndCalculateTotal({
+  mesa: "LLEVAR",
+  tipo_entrega: "RETIRO",
+  metadata: { tipo_pedido: "llevar", tipo_entrega: "RETIRO" },
+  items: [{ precio: 10.0, cantidad: 1 }],
+  total: 10.0,
+});
+assert.strictEqual(checkLlevar.isLlevar, true);
+assert.strictEqual(checkLlevar.isDelivery, false);
+assert.strictEqual(checkLlevar.deliveryCost, 0);
+assert.strictEqual(checkLlevar.totalToCharge, 10.0);
+
+const checkDelivery = classifyPosOrderAndCalculateTotal({
+  mesa: "DELIVERY",
+  tipo_entrega: "DOMICILIO",
+  metadata: { tipo_pedido: "delivery", tipo_entrega: "DOMICILIO", costo_envio: 2.0 },
+  items: [{ precio: 4.0, cantidad: 2 }], // 2 empanadas = $8.00
+  total: 10.0, // $8.00 + $2.00 envío = $10.00
+});
+assert.strictEqual(checkDelivery.isLlevar, false);
+assert.strictEqual(checkDelivery.isDelivery, true);
+assert.strictEqual(checkDelivery.itemsSubtotal, 8.0);
+assert.strictEqual(checkDelivery.deliveryCost, 2.0);
+assert.strictEqual(checkDelivery.totalToCharge, 10.0);
+
+console.log("✅ [PASS] 10: Separación estricta de Para Llevar vs Domicilio y desglose de costo de envío verificado");
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (9/9)");
+console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (10/10)");
 console.log("==================================================");
 

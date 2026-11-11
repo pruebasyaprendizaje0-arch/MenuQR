@@ -1562,6 +1562,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           slug: restaurant.slug,
           mesa: targetMesa,
           tipo_entrega: targetTipoEntrega,
+          metodo_entrega: isDeliveryOrder ? "domicilio" : isTableOrder ? "salon" : "retiro",
           skip_stock_deduction: true, // createOrderAction ya dedució atómicamente el stock
           items: cart.map((i) => ({
             dishId: i.dish.id,

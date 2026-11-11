@@ -282,8 +282,8 @@ export async function POST(req: NextRequest) {
       mesa,
       camarero_id,
       items = [],
-      tipo_entrega, // 'RETIRO' | 'DOMICILIO'
-      metodo_entrega = "domicilio",
+      tipo_entrega, // 'RETIRO' | 'DOMICILIO' | 'SALON'
+      metodo_entrega,
       costo_envio = 0,
       notas_entrega,
       total,
@@ -423,20 +423,30 @@ export async function POST(req: NextRequest) {
       // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
       // =========================================================================
       if (vertical === "menuqr" && !isCatalogOrder) {
-        const isDeliveryReq =
-          String(mesa || "").toUpperCase().trim() === "DELIVERY" ||
-          String(mesa || "").toUpperCase().trim() === "DOMICILIO" ||
-          String(tipo_entrega || "").toUpperCase().trim() === "DOMICILIO" ||
-          String(metodo_entrega || "").toUpperCase().trim() === "DOMICILIO";
+        const rawMesaUpper = String(mesa || "").toUpperCase().trim();
+        const tipoEntregaUpper = String(tipo_entrega || "").toUpperCase().trim();
+        const metodoEntregaUpper = String(metodo_entrega || "").toUpperCase().trim();
 
+        // 1. Detectar si es para llevar / retiro (prioridad absoluta cuando se solicita retiro)
         const isLlevarReq =
-          String(mesa || "").toUpperCase().trim() === "LLEVAR" ||
-          String(mesa || "").toUpperCase().trim() === "RETIRO" ||
-          String(mesa || "").toUpperCase().trim() === "TAKEAWAY" ||
-          String(mesa || "").toUpperCase().trim() === "MOSTRADOR" ||
-          String(tipo_entrega || "").toUpperCase().trim() === "RETIRO";
+          tipoEntregaUpper === "RETIRO" ||
+          rawMesaUpper === "LLEVAR" ||
+          rawMesaUpper === "RETIRO" ||
+          rawMesaUpper === "TAKEAWAY" ||
+          rawMesaUpper === "MOSTRADOR" ||
+          metodoEntregaUpper === "RETIRO" ||
+          metodoEntregaUpper === "LLEVAR";
 
-        const rawMesa = mesa ? String(mesa).trim() : (isDeliveryReq ? "DELIVERY" : "Delivery");
+        // 2. Detectar si es a domicilio (excluyendo órdenes explícitas de retiro)
+        const isDeliveryReq =
+          !isLlevarReq && (
+            tipoEntregaUpper === "DOMICILIO" ||
+            rawMesaUpper === "DELIVERY" ||
+            rawMesaUpper === "DOMICILIO" ||
+            metodoEntregaUpper === "DOMICILIO"
+          );
+
+        const rawMesa = mesa ? String(mesa).trim() : (isDeliveryReq ? "DELIVERY" : (isLlevarReq ? "LLEVAR" : "1"));
         const cleanMesa = rawMesa.replace(/^(mesa\s*#?|#)/i, "").trim();
         const mesaStr = isDeliveryReq ? "DELIVERY" : (isLlevarReq ? "LLEVAR" : (cleanMesa || "1"));
 

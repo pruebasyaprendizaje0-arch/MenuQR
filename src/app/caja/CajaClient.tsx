@@ -371,13 +371,6 @@ export function CajaClient({
         meta = typeof (o as any).metadata === "string" ? JSON.parse((o as any).metadata) : ((o as any).metadata || {});
       } catch {}
 
-      const isDelivery =
-        mesaStr === "DELIVERY" ||
-        mesaStr === "DOMICILIO" ||
-        (o as any).tipo_entrega === "DOMICILIO" ||
-        meta?.tipo_entrega === "DOMICILIO" ||
-        meta?.tipo_pedido === "delivery" ||
-        (o as any).vertical === "ctalo";
       const isLlevar =
         mesaStr === "LLEVAR" ||
         mesaStr === "TAKEAWAY" ||
@@ -385,6 +378,16 @@ export function CajaClient({
         (o as any).tipo_entrega === "RETIRO" ||
         meta?.tipo_entrega === "RETIRO" ||
         meta?.tipo_pedido === "llevar";
+
+      const isDelivery =
+        !isLlevar && (
+          mesaStr === "DELIVERY" ||
+          mesaStr === "DOMICILIO" ||
+          (o as any).tipo_entrega === "DOMICILIO" ||
+          meta?.tipo_entrega === "DOMICILIO" ||
+          meta?.tipo_pedido === "delivery" ||
+          (o as any).vertical === "ctalo"
+        );
 
       if (isDelivery) {
         domicilio.push(o);
@@ -729,9 +732,27 @@ export function CajaClient({
     };
   }, [activeChannel, mode, restaurant.id]);
 
-  // Totales
+  // Totales y Desglose de Envío
   const totalQuantity = sessionItems.reduce((acc, it) => acc + it.quantity, 0);
-  const totalAmount = sessionItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+  const itemsSubtotal = sessionItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+
+  const selectedOrderDeliveryCost = useMemo(() => {
+    if (!selectedActiveOrder) return 0;
+    let meta: any = {};
+    try {
+      meta = typeof (selectedActiveOrder as any).metadata === "string"
+        ? JSON.parse((selectedActiveOrder as any).metadata)
+        : ((selectedActiveOrder as any).metadata || {});
+    } catch {}
+    if (typeof meta?.costo_envio === "number") return meta.costo_envio;
+    const itemsSum = (selectedActiveOrder.items || []).reduce((acc, it) => acc + it.precio * it.cantidad, 0);
+    const diff = selectedActiveOrder.total - itemsSum;
+    return diff > 0.05 ? diff : 0;
+  }, [selectedActiveOrder]);
+
+  const totalAmount = selectedActiveOrder && selectedActiveOrder.total > 0
+    ? selectedActiveOrder.total
+    : itemsSubtotal + selectedOrderDeliveryCost;
 
   // Vuelto / Cambio en Efectivo
   const cashGivenNumber = parseFloat(cashReceivedInput) || 0;
@@ -1624,6 +1645,7 @@ export function CajaClient({
                         meta = typeof (order as any).metadata === "string" ? JSON.parse((order as any).metadata) : ((order as any).metadata || {});
                       } catch {}
                       const direccion = meta?.cliente_direccion || "";
+                      const costoEnvio = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
 
                       return (
                         <div
@@ -1639,6 +1661,13 @@ export function CajaClient({
                               <span className="text-xs text-slate-400 block mt-0.5 font-mono">
                                 📞 {order.cliente_telefono || "Sin teléfono"}
                               </span>
+                              {costoEnvio > 0 && (
+                                <div className="mt-1">
+                                  <span className="text-[11px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80 inline-flex items-center gap-1">
+                                    🛵 Envío: +${costoEnvio.toFixed(2)}
+                                  </span>
+                                </div>
+                              )}
                               {direccion && (
                                 <p className="text-[11px] text-amber-300/80 line-clamp-2 mt-1 bg-amber-950/20 p-1.5 rounded-lg border border-amber-900/30">
                                   📍 {direccion}
@@ -1986,8 +2015,14 @@ export function CajaClient({
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span>Productos ({totalQuantity}):</span>
-              <span className="font-mono text-white">${totalAmount.toFixed(2)}</span>
+              <span className="font-mono text-white">${itemsSubtotal.toFixed(2)}</span>
             </div>
+            {selectedOrderDeliveryCost > 0 && (
+              <div className="flex items-center justify-between text-xs text-amber-300 bg-amber-950/20 px-2 py-1 rounded-lg border border-amber-800/40">
+                <span className="flex items-center gap-1 font-semibold">🛵 Recargo de Envío (Delivery):</span>
+                <span className="font-mono font-bold">+${selectedOrderDeliveryCost.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between pt-1 border-t border-slate-850">
               <span className="font-bold text-sm text-white">TOTAL A COBRAR:</span>
               <span className="text-2xl font-mono font-black text-emerald-400">
