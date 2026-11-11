@@ -649,22 +649,6 @@ export function AdminDashboard({
     if (initialTab && VALID_ADMIN_TABS.includes(initialTab as AdminTab)) {
       return initialTab as AdminTab;
     }
-    if (typeof window !== "undefined") {
-      try {
-        const queryTab = new URLSearchParams(window.location.search).get("tab");
-        if (queryTab && VALID_ADMIN_TABS.includes(queryTab as AdminTab)) {
-          return queryTab as AdminTab;
-        }
-        const hashTab = window.location.hash.replace("#", "");
-        if (hashTab && VALID_ADMIN_TABS.includes(hashTab as AdminTab)) {
-          return hashTab as AdminTab;
-        }
-        const storedTab = localStorage.getItem("admin_active_tab_" + restaurant.id);
-        if (storedTab && VALID_ADMIN_TABS.includes(storedTab as AdminTab)) {
-          return storedTab as AdminTab;
-        }
-      } catch {}
-    }
     return "metrics";
   };
 
