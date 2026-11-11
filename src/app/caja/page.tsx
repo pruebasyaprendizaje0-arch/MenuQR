@@ -298,6 +298,12 @@ export default async function CajaPage() {
           bankAccountName: restaurant.bankAccountName || null,
           tablesConfig: restaurant.tablesConfig || "1,2,3,4,5,6,7,8,9,10",
           businessType: restaurant.businessType || "RESTAURANT",
+          ivaPercent: typeof restaurant.ivaPercent === "number" ? restaurant.ivaPercent : 15,
+          servicePercent: typeof restaurant.servicePercent === "number" ? restaurant.servicePercent : 10,
+          ivaOnTable: restaurant.ivaOnTable ?? true,
+          serviceOnTable: restaurant.serviceOnTable ?? true,
+          ivaOnTakeout: restaurant.ivaOnTakeout ?? true,
+          serviceOnTakeout: restaurant.serviceOnTakeout ?? false,
         }}
         categories={categories}
         initialShift={initialShift}
