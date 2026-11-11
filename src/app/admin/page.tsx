@@ -75,6 +75,7 @@ export default async function AdminPage(props: {
           },
           orders: {
             orderBy: { createdAt: "desc" },
+            take: 100,
             include: {
               items: true
             }
@@ -108,6 +109,7 @@ export default async function AdminPage(props: {
           },
           orders: {
             orderBy: { createdAt: "desc" },
+            take: 100,
             include: {
               items: true
             }
@@ -149,6 +151,7 @@ export default async function AdminPage(props: {
           },
           orders: {
             orderBy: { createdAt: "desc" },
+            take: 100,
             include: {
               items: true
             }
@@ -168,7 +171,7 @@ export default async function AdminPage(props: {
         where: { userId: session.userId },
         include: {
           categories: { orderBy: { order: "asc" }, include: { dishes: { orderBy: { createdAt: "desc" } } } },
-          orders: { orderBy: { createdAt: "desc" }, include: { items: true } },
+          orders: { orderBy: { createdAt: "desc" }, take: 100, include: { items: true } },
           seasonRates: { orderBy: { startDate: "asc" } },
           customers: { orderBy: { lastOrderAt: "desc" } }
         }

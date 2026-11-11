@@ -739,6 +739,7 @@ export function AdminDashboard({
   // --- Estados de Desglose de Pedidos y Ticket / Comanda ---
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [ticketModalOrder, setTicketModalOrder] = useState<Order | null>(null);
+  const [ordersDisplayLimit, setOrdersDisplayLimit] = useState<number>(25);
 
   const handlePrintThermalReceipt = (order: Order) => {
     const printWindow = window.open("", "_blank", "width=420,height=650");
@@ -8943,7 +8944,8 @@ export function AdminDashboard({
                         );
                       }
 
-                      return allOrders.map((order) => (
+                      const visibleOrders = allOrders.slice(0, ordersDisplayLimit);
+                      return visibleOrders.map((order) => (
                         <React.Fragment key={order.id}>
                           <tr className="text-slate-300 hover:bg-slate-800/20 transition-all">
                             <td className="py-3.5 pl-2 font-semibold align-top">
@@ -9255,6 +9257,18 @@ export function AdminDashboard({
                 </table>
               </div>
               
+              {((restaurant.orders || []).length > ordersDisplayLimit) && (
+                <div className="flex items-center justify-center pt-2 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setOrdersDisplayLimit((prev) => prev + 25)}
+                    className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-amber-400 font-bold text-xs border border-slate-700 transition flex items-center gap-2 active:scale-95 shadow-md hover:text-amber-300"
+                  >
+                    <span>Mostrar más pedidos ({((restaurant.orders || []).length - ordersDisplayLimit)} restantes)</span>
+                  </button>
+                </div>
+              )}
+
               <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-slate-400 text-xs flex items-start gap-2.5 leading-relaxed">
                 <span className="text-amber-500 font-extrabold text-sm leading-none">⚠️</span>
                 <div>

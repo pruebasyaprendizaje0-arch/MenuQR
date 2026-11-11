@@ -2,6 +2,20 @@ import { prisma } from "./db";
 import { pool } from "./db-pool";
 
 /**
+ * Mapea los estados de la tabla PostgreSQL `pedidos` hacia el enum de estados de Prisma `Order`.
+ */
+export function mapPedidoEstadoToPrismaStatus(estado: string | null | undefined): string {
+  if (!estado) return "PENDING";
+  const norm = estado.toLowerCase().trim();
+  if (norm === "pagado" || norm === "completed") return "COMPLETED";
+  if (norm === "cancelado" || norm === "cancelled") return "CANCELLED";
+  if (norm === "entregado" || norm === "delivered") return "DELIVERED";
+  if (norm === "en_camino" || norm === "in_transit") return "IN_TRANSIT";
+  if (norm === "preparando" || norm === "preparing" || norm === "listo") return "PREPARING";
+  return "PENDING";
+}
+
+/**
  * Sincroniza un pedido individual de la tabla PostgreSQL `pedidos` hacia el modelo Prisma `Order`
  */
 export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: string): Promise<void> {
@@ -36,12 +50,7 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     if (!rest) return;
 
     const pTotal = Number(p.total) || 0;
-    const pStatus =
-      p.estado === "pagado"
-        ? "COMPLETED"
-        : p.estado === "cancelado"
-        ? "CANCELLED"
-        : "DELIVERED";
+    const pStatus = mapPedidoEstadoToPrismaStatus(p.estado);
 
     const pTable = p.mesa
       ? p.mesa.toLowerCase().includes("mesa") || p.mesa.toLowerCase().includes("delivery")
@@ -104,8 +113,8 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
 }
 
 /**
- * Sincroniza todos los pedidos huérfanos o actualizados de PostgreSQL `pedidos`
- * hacia el modelo Prisma `Order` para un restaurante específico.
+ * Sincroniza pedidos recientes o activos de PostgreSQL `pedidos` hacia Prisma `Order`.
+ * Optimizado para alta velocidad: filtra por los últimos 3 días o pedidos activos y limita a 100 registros.
  */
 export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<number> {
   try {
@@ -129,14 +138,20 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
        FROM pedidos p
        LEFT JOIN pedido_items pi ON pi.pedido_id = p.id
        WHERE p.negocio_id = $1
-       GROUP BY p.id`,
+         AND (p.created_at >= NOW() - INTERVAL '3 days' OR p.estado NOT IN ('pagado', 'cancelado'))
+       GROUP BY p.id
+       ORDER BY p.created_at DESC
+       LIMIT 100`,
       [restaurantId]
     );
 
     if (!pedidos || pedidos.length === 0) return 0;
 
     const existingOrders = await prisma.order.findMany({
-      where: { restaurantId },
+      where: {
+        restaurantId,
+        createdAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
+      },
       select: { id: true, status: true, total: true, isTest: true },
     });
     const existingMap = new Map(existingOrders.map((o) => [o.id, o]));
@@ -145,12 +160,7 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
 
     for (const p of pedidos) {
       const pTotal = Number(p.total) || 0;
-      const pStatus =
-        p.estado === "pagado"
-          ? "COMPLETED"
-          : p.estado === "cancelado"
-          ? "CANCELLED"
-          : "DELIVERED";
+      const pStatus = mapPedidoEstadoToPrismaStatus(p.estado);
 
       const pTable = p.mesa
         ? p.mesa.toLowerCase().includes("mesa") || p.mesa.toLowerCase().includes("delivery")
