@@ -8,6 +8,8 @@ const INSECURE_DEFAULT_SECRETS = new Set([
   "menuqr-pro-dev-fallback-secret-key-local-only",
 ]);
 
+let hasWarnedInsecureSecret = false;
+
 function getJwtSecret(): string {
   const secret =
     process.env.JWT_SECRET?.trim() ||
@@ -30,7 +32,10 @@ function getJwtSecret(): string {
 
   if (secret) {
     if (INSECURE_DEFAULT_SECRETS.has(secret)) {
-      console.warn("[Auth Warning] JWT_SECRET utiliza un valor de ejemplo. Se recomienda rotarla antes de desplegar a producción.");
+      if (!hasWarnedInsecureSecret) {
+        console.warn("[Auth Warning] JWT_SECRET utiliza un valor de ejemplo. Se recomienda rotarla antes de desplegar a producción.");
+        hasWarnedInsecureSecret = true;
+      }
     }
     return secret;
   }
