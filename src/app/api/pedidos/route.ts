@@ -511,8 +511,8 @@ export async function POST(req: NextRequest) {
               servicePercent: typeof restDb.servicePercent === "number" ? restDb.servicePercent : 10.0,
               ivaOnTable: restDb.ivaOnTable ?? true,
               serviceOnTable: restDb.serviceOnTable ?? true,
-              ivaOnTakeout: restDb.ivaOnTakeout ?? true,
-              serviceOnTakeout: restDb.serviceOnTakeout ?? false,
+              ivaOnTakeout: restDb.ivaOnTakeout ?? restDb.ivaOnTable ?? true,
+              serviceOnTakeout: restDb.serviceOnTakeout ?? restDb.serviceOnTable ?? true,
             };
           }
         } catch (confErr) {
@@ -521,13 +521,20 @@ export async function POST(req: NextRequest) {
 
         const isTable = !isDeliveryReq && !isLlevarReq;
         const calcChargesForSubtotal = (subtotal: number, deliveryFee = 0) => {
-          // Si el negocio tiene ivaOnTable === false ("IVA Adicional"), rige en todos los canales (Mesa, Llevar, Delivery).
-          const ivaIncluded = restConfig.ivaOnTable === false
-            ? false
-            : (isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout);
-          const serviceIncluded = restConfig.serviceOnTable === false
-            ? false
-            : (isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout);
+          // Si el negocio tiene ivaOnTable === true ("IVA Incluido"), rige en todos los canales (Mesa, Llevar, Delivery).
+          // Si el negocio tiene ivaOnTable === false ("IVA Adicional"), aplica como adicional en todos los canales.
+          const ivaIncluded = restConfig.ivaOnTable === true
+            ? true
+            : (restConfig.ivaOnTable === false
+                ? false
+                : (isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout));
+          // Si el negocio tiene serviceOnTable === true ("Servicio Incluido"), rige como incluido en todos los canales.
+          // Si tiene serviceOnTable === false ("Servicio Adicional"), aplica como adicional.
+          const serviceIncluded = restConfig.serviceOnTable === true
+            ? true
+            : (restConfig.serviceOnTable === false
+                ? false
+                : (isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout));
 
           const ivaAmount = (restConfig.ivaPercent > 0 && !ivaIncluded)
             ? Math.round(subtotal * (restConfig.ivaPercent / 100) * 100) / 100

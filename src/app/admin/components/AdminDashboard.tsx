@@ -129,6 +129,7 @@ import CampaignsAdminTab from "./CampaignsAdminTab";
 import InventoryAdminTab from "./InventoryAdminTab";
 import CitasAdminTab from "./CitasAdminTab";
 import ReservasAdminTab from "./ReservasAdminTab";
+import { ReservasMesasAdminTab } from "./ReservasMesasAdminTab";
 import { ModifiersAdminTab } from "./ModifiersAdminTab";
 import OrderTicketModal from "./OrderTicketModal";
 import StaffAdminTab from "./StaffAdminTab";
@@ -615,6 +616,7 @@ export const VALID_ADMIN_TABS = [
   "crm",
   "citas",
   "reservas",
+  "reservas-mesas",
   "subscription",
 ] as const;
 
@@ -2731,6 +2733,26 @@ export function AdminDashboard({
                 </div>
                 <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   Check-In
+                </span>
+              </button>
+            )}
+
+            {/* Reservas de Mesas (para Restaurantes / Gastro) */}
+            {bLabels.isGastro && (
+              <button
+                onClick={() => setActiveTab("reservas-mesas")}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "reservas-mesas" 
+                    ? "bg-gradient-to-r from-purple-600/20 to-indigo-500/20 text-purple-300 border-l-4 border-purple-500 shadow-md shadow-purple-600/10" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <CalendarDays className="h-4 w-4 text-purple-400" />
+                  <span>Reservas de Mesas</span>
+                </div>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Agenda
                 </span>
               </button>
             )}
@@ -10897,6 +10919,13 @@ export function AdminDashboard({
               restaurant={restaurant} 
               onNavigateToDishes={() => setActiveTab("dishes")}
             />
+          </div>
+        )}
+
+        {/* Reservas de Mesas (Gastro) */}
+        {activeTab === "reservas-mesas" && bLabels.isGastro && (
+          <div className="space-y-6 animate-fade-in">
+            <ReservasMesasAdminTab restaurant={restaurant as any} />
           </div>
         )}
 

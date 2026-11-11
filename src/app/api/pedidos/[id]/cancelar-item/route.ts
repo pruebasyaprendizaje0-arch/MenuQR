@@ -148,19 +148,23 @@ export async function POST(
           servicePercent: typeof restDb.servicePercent === "number" ? restDb.servicePercent : 10.0,
           ivaOnTable: restDb.ivaOnTable ?? true,
           serviceOnTable: restDb.serviceOnTable ?? true,
-          ivaOnTakeout: restDb.ivaOnTakeout ?? true,
-          serviceOnTakeout: restDb.serviceOnTakeout ?? false,
+          ivaOnTakeout: restDb.ivaOnTakeout ?? restDb.ivaOnTable ?? true,
+          serviceOnTakeout: restDb.serviceOnTakeout ?? restDb.serviceOnTable ?? true,
         };
       }
     } catch {}
 
     const isTable = !String(item.mesa || "").toLowerCase().includes("delivery") && !String(item.mesa || "").toLowerCase().includes("llevar");
-    const ivaIncluded = restConfig.ivaOnTable === false
-      ? false
-      : (isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout);
-    const serviceIncluded = restConfig.serviceOnTable === false
-      ? false
-      : (isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout);
+    const ivaIncluded = restConfig.ivaOnTable === true
+      ? true
+      : (restConfig.ivaOnTable === false
+          ? false
+          : (isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout));
+    const serviceIncluded = restConfig.serviceOnTable === true
+      ? true
+      : (restConfig.serviceOnTable === false
+          ? false
+          : (isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout));
 
     let meta: any = {};
     try {

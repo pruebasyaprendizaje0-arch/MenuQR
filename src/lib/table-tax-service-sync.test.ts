@@ -111,12 +111,14 @@ function calcUnifiedCharges(subtotal: number, config: {
   serviceOnTakeout: boolean;
 }, channel: "mesa" | "llevar" | "delivery") {
   const isTable = channel === "mesa";
-  const ivaIncluded = config.ivaOnTable === false
-    ? false
-    : (isTable ? config.ivaOnTable : config.ivaOnTakeout);
-  const serviceIncluded = config.serviceOnTable === false
-    ? false
-    : (isTable ? config.serviceOnTable : config.serviceOnTakeout);
+  const ivaIncluded = config.ivaOnTable === true
+    ? true
+    : (config.ivaOnTable === false ? false : (isTable ? config.ivaOnTable : config.ivaOnTakeout));
+  const serviceIncluded = config.serviceOnTable === true
+    ? true
+    : (config.serviceOnTable === false
+        ? false
+        : (isTable ? config.serviceOnTable : config.serviceOnTakeout));
 
   const ivaAmount = (config.ivaPercent > 0 && !ivaIncluded)
     ? Math.round(subtotal * (config.ivaPercent / 100) * 100) / 100
@@ -148,6 +150,25 @@ assert.strictEqual(lasagnaLlevar.service, 1.49); // 10% de $14.90 = $1.49
 assert.strictEqual(lasagnaLlevar.total, 18.63); // $14.90 + $2.24 + $1.49 = $18.63
 console.log("✅ [PASS] 6: Lasagna en Para Llevar suma exactamente $18.63 ($14.90 + $2.24 IVA + $1.49 Servicio)");
 
+// 7. Caso del usuario: Almuerzo Ejecutivo ($3.50) en Para Llevar con IVA y Servicio INCLUIDOS
+// El restaurante tiene IVA Incluido (ivaOnTable = true) y Servicio Incluido (serviceOnTable = true).
+// Aún si serviceOnTakeout era false por default en la DB, el servicio debe ser $0.00 y el total $3.50.
+const configUsuarioCaptura = {
+  ivaPercent: 15,
+  servicePercent: 10,
+  ivaOnTable: true, // IVA Incluido en el precio
+  serviceOnTable: true, // Servicio Incluido en el precio
+  ivaOnTakeout: true,
+  serviceOnTakeout: false, // Default rezagado en DB
+};
+
+const almuerzoPolloLlevar = calcUnifiedCharges(3.50, configUsuarioCaptura, "llevar");
+assert.strictEqual(almuerzoPolloLlevar.subtotal, 3.50);
+assert.strictEqual(almuerzoPolloLlevar.iva, 0); // No suma IVA adicional
+assert.strictEqual(almuerzoPolloLlevar.service, 0); // No suma Servicio adicional
+assert.strictEqual(almuerzoPolloLlevar.total, 3.50); // Total debe ser exactamente $3.50
+console.log("✅ [PASS] 7: Almuerzo en Para Llevar con IVA/Servicio Incluido no suma recargos y cobra exactamente $3.50");
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE IMPUESTOS Y SERVICIO PASARON EXITOSAMENTE (6/6)");
+console.log("🎉 TODAS LAS PRUEBAS DE IMPUESTOS Y SERVICIO PASARON EXITOSAMENTE (7/7)");
 console.log("==================================================");

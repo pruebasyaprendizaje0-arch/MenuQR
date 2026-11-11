@@ -50,12 +50,29 @@ import {
   RotateCcw,
   SlidersHorizontal,
   UtensilsCrossed,
+  Phone,
+  MapPin,
+  FileText,
+  User,
+  CalendarDays,
+  Calendar,
+  BookmarkCheck,
+  LayoutGrid,
 } from "lucide-react";
+import {
+  getTableReservationsAction,
+  createTableReservationAction,
+  updateTableReservationStatusAction,
+  deleteTableReservationAction,
+  SerializedTableReservation,
+} from "@/lib/reservation-actions";
 import {
   searchDishByBarcodeAction,
   createQuickDishFromBarcodeAction,
   processCajaEntryAction,
   processCajaSaleAction,
+  searchCustomersForCajaAction,
+  CustomerSearchResult,
   settleOrderInCashShiftAction,
   getActiveCashShift,
   openCashShift,
@@ -164,6 +181,9 @@ interface CajaRestaurantProps {
   serviceOnTable?: boolean;
   ivaOnTakeout?: boolean;
   serviceOnTakeout?: boolean;
+  deliveryCost?: number;
+  deliveryEnabled?: boolean;
+  deliveryRates?: string | null;
 }
 
 interface CajaClientProps {
@@ -207,7 +227,28 @@ export function CajaClient({
   const [isCardVerified, setIsCardVerified] = useState(false);
 
   // Canales Operativos de POS (Opción 2 Split Screen)
-  const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "TACTIL" | "SCANNER">("MESAS");
+  const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "TACTIL" | "SCANNER">("MESAS");
+
+  // Vista activa en celular / móvil (Canales vs Ticket)
+  const [mobileActiveView, setMobileActiveView] = useState<"OPERATIONS" | "TICKET">("OPERATIONS");
+
+  // Estado de Reservas de Mesas
+  const [reservations, setReservations] = useState<SerializedTableReservation[]>([]);
+  const [selectedReservationForOrder, setSelectedReservationForOrder] = useState<SerializedTableReservation | null>(null);
+  const [reservationDateFilter, setReservationDateFilter] = useState<"TODAY" | "ALL">("TODAY");
+  const [isNewReservationModalOpen, setIsNewReservationModalOpen] = useState(false);
+  const [isSavingReservation, setIsSavingReservation] = useState(false);
+
+  // Campos para Nueva Reserva
+  const [newResName, setNewResName] = useState("");
+  const [newResPhone, setNewResPhone] = useState("");
+  const [newResPeople, setNewResPeople] = useState<number>(2);
+  const [newResDate, setNewResDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [newResTime, setNewResTime] = useState<string>("20:00");
+  const [newResTable, setNewResTable] = useState<string>("1");
+  const [newResDeposit, setNewResDeposit] = useState<string>("0.00");
+  const [newResDepositMethod, setNewResDepositMethod] = useState<"EFECTIVO" | "TRANSFERENCIA" | "DEUNA" | "TARJETA">("EFECTIVO");
+  const [newResNotes, setNewResNotes] = useState("");
 
   // Mode: "VENTA" (Cobro) vs "ENTRADA" (Recepción de inventario)
   const [mode, setMode] = useState<"ENTRADA" | "VENTA">("VENTA");
@@ -231,11 +272,86 @@ export function CajaClient({
   const [customizingMods, setCustomizingMods] = useState<{ [groupId: string]: string[] }>({});
   const [customizingQty, setCustomizingQty] = useState(1);
 
-  // Modalidad de destino del pedido en caja (Para Llevar / Mesa)
-  const [saleModality, setSaleModality] = useState<"LLEVAR" | "MESA">("LLEVAR");
+  // Modalidad de destino del pedido en caja (Para Llevar / Domicilio / Mesa)
+  const [saleModality, setSaleModality] = useState<"LLEVAR" | "DOMICILIO" | "MESA">("LLEVAR");
   const [saleTableNumber, setSaleTableNumber] = useState<string>("1");
   const [saleCustomerName, setSaleCustomerName] = useState<string>("");
+  const [saleCustomerPhone, setSaleCustomerPhone] = useState<string>("");
+  const [saleDeliveryAddress, setSaleDeliveryAddress] = useState<string>("");
+  const [saleInternalNotes, setSaleInternalNotes] = useState<string>("");
+  const [saleDeliveryCost, setSaleDeliveryCost] = useState<number>(0);
+  const [selectedRateId, setSelectedRateId] = useState<string>("none");
+  const [customDeliveryCostInput, setCustomDeliveryCostInput] = useState<string>("");
+  const [isCustomDelivery, setIsCustomDelivery] = useState<boolean>(false);
   const [sendToKitchen, setSendToKitchen] = useState<boolean>(true);
+
+  // CRM Search state (Búsqueda predictiva de clientes recurrentes)
+  const [customerSuggestions, setCustomerSuggestions] = useState<CustomerSearchResult[]>([]);
+  const [isSearchingCustomer, setIsSearchingCustomer] = useState<boolean>(false);
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState<boolean>(false);
+  const searchCustomerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Tarifas de envío por distancia / KM configuradas en el Admin
+  const kmRatesList: { id: string; label: string; price: number; minOrder?: number }[] = useMemo(() => {
+    const rawRates = restaurant?.deliveryRates || null;
+    if (rawRates) {
+      try {
+        const parsed = JSON.parse(rawRates);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((item: any, idx: number) => ({
+            id: item.id || `km-${idx}`,
+            label: item.label || "",
+            price: typeof item.price === "number" ? item.price : (parseFloat(item.price) || 0),
+            minOrder: typeof item.minOrder === "number" ? item.minOrder : (typeof item.minPurchase === "number" ? item.minPurchase : 0),
+          }));
+        }
+      } catch (e) {
+        console.error("Error parsing deliveryRates:", e);
+      }
+    }
+    const baseCost = restaurant?.deliveryCost ?? 1.50;
+    return [
+      { id: "km-1", label: "Hasta 2 KM", price: baseCost > 0 ? baseCost : 1.50, minOrder: 0 },
+      { id: "km-2", label: "De 2 a 5 KM", price: (baseCost > 0 ? baseCost : 1.50) + 1.00, minOrder: 0 },
+      { id: "km-3", label: "De 5 a 10 KM", price: (baseCost > 0 ? baseCost : 1.50) + 2.50, minOrder: 0 },
+      { id: "km-4", label: "Más de 10 KM", price: (baseCost > 0 ? baseCost : 1.50) + 4.50, minOrder: 0 },
+    ];
+  }, [restaurant?.deliveryRates, restaurant?.deliveryCost]);
+
+  // Manejo de búsqueda en CRM mientras el cajero digita el teléfono o nombre
+  const triggerCustomerSearch = useCallback((query: string) => {
+    if (searchCustomerTimeoutRef.current) clearTimeout(searchCustomerTimeoutRef.current);
+    const q = query.trim();
+    if (!q || q.length < 2) {
+      setCustomerSuggestions([]);
+      setShowCustomerDropdown(false);
+      return;
+    }
+    searchCustomerTimeoutRef.current = setTimeout(async () => {
+      setIsSearchingCustomer(true);
+      try {
+        const results = await searchCustomersForCajaAction(restaurant.id, q);
+        setCustomerSuggestions(results || []);
+        setShowCustomerDropdown((results || []).length > 0);
+      } catch (e) {
+        console.error("Error buscando clientes en CRM:", e);
+      } finally {
+        setIsSearchingCustomer(false);
+      }
+    }, 250);
+  }, [restaurant.id]);
+
+  const handleSelectCustomerSuggestion = (cust: CustomerSearchResult) => {
+    setSaleCustomerPhone(cust.phone || "");
+    setSaleCustomerName(cust.name || "");
+    if (cust.address) {
+      setSaleDeliveryAddress(cust.address);
+    }
+    if (cust.notes && !saleInternalNotes) {
+      setSaleInternalNotes(cust.notes);
+    }
+    setShowCustomerDropdown(false);
+  };
 
   const configuredTables = useMemo(() => {
     if (!restaurant.tablesConfig) return ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -364,6 +480,107 @@ export function CajaClient({
     return () => clearInterval(interval);
   }, [fetchActiveOrders]);
 
+  // Cargar reservas de mesas
+  const fetchReservations = useCallback(async () => {
+    try {
+      const todayStr = new Date().toISOString().split("T")[0];
+      const res = await getTableReservationsAction(restaurant.id, {
+        date: reservationDateFilter === "TODAY" ? todayStr : undefined,
+      });
+      if (res.success && res.reservations) {
+        setReservations(res.reservations);
+      }
+    } catch (err) {
+      console.warn("Error al cargar reservas en caja:", err);
+    }
+  }, [restaurant.id, reservationDateFilter]);
+
+  useEffect(() => {
+    fetchReservations();
+    const interval = setInterval(fetchReservations, 10000);
+    return () => clearInterval(interval);
+  }, [fetchReservations]);
+
+  const handleCreateReservation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newResName.trim()) {
+      alert("Por favor ingresa el nombre del cliente para la reserva.");
+      return;
+    }
+    setIsSavingReservation(true);
+    try {
+      const depVal = parseFloat(newResDeposit) || 0;
+      const res = await createTableReservationAction({
+        restaurantId: restaurant.id,
+        customerName: newResName.trim(),
+        customerPhone: newResPhone.trim() || undefined,
+        peopleCount: Number(newResPeople) || 2,
+        reservationDate: newResDate,
+        reservationTime: newResTime,
+        tableName: newResTable.trim() || "1",
+        depositAmount: depVal,
+        depositPaid: depVal > 0,
+        depositMethod: newResDepositMethod,
+        notes: newResNotes.trim() || undefined,
+      });
+
+      if (res.error) {
+        playErrorSound();
+        alert(res.error);
+      } else {
+        playBeep();
+        setIsNewReservationModalOpen(false);
+        setNewResName("");
+        setNewResPhone("");
+        setNewResPeople(2);
+        setNewResDeposit("0.00");
+        setNewResNotes("");
+        fetchReservations();
+        setSuccessInfo({
+          title: "¡Reserva Registrada!",
+          message: `Reserva para ${newResName} (${newResPeople} comensales) el ${newResDate} a las ${newResTime} en Mesa #${newResTable}.`,
+          badge: `📅 Mesa #${newResTable} · ${newResTime}`,
+        });
+      }
+    } catch (err: any) {
+      alert("Error al registrar reserva: " + (err?.message || "Desconocido"));
+    } finally {
+      setIsSavingReservation(false);
+    }
+  };
+
+  const handleSeatReservation = async (res: SerializedTableReservation) => {
+    setSelectedReservationForOrder(res);
+    setSaleModality("MESA");
+    setSaleTableNumber(res.tableName);
+    setSaleCustomerName(res.customerName);
+    if (res.customerPhone) {
+      setSaleCustomerPhone(res.customerPhone);
+    }
+    try {
+      await updateTableReservationStatusAction(res.id, "SEATED");
+      fetchReservations();
+    } catch (e) {
+      console.warn("Error updating reservation status to SEATED:", e);
+    }
+    setActiveChannel("TACTIL");
+    setMobileActiveView("OPERATIONS");
+    playBeep();
+  };
+
+  const handleCancelReservation = async (resId: string, name: string) => {
+    if (!confirm(`¿Deseas cancelar la reserva de ${name}?`)) return;
+    try {
+      await updateTableReservationStatusAction(resId, "CANCELLED");
+      fetchReservations();
+      if (selectedReservationForOrder?.id === resId) {
+        setSelectedReservationForOrder(null);
+      }
+    } catch (e) {
+      alert("Error al cancelar reserva");
+    }
+  };
+
   // Clasificación de pedidos por canal
   const { mesasOrders, llevarOrders, domicilioOrders } = useMemo(() => {
     const mesas: ActiveOrder[] = [];
@@ -430,6 +647,7 @@ export function CajaClient({
     }));
     setSessionItems(convertedItems);
     setCashReceivedInput("");
+    setMobileActiveView("TICKET");
     playBeep();
   };
 
@@ -437,6 +655,7 @@ export function CajaClient({
   const handleClearSelectedOrder = () => {
     setSelectedActiveOrder(null);
     setSessionItems([]);
+    setMobileActiveView("OPERATIONS");
     setCashReceivedInput("");
   };
 
@@ -830,15 +1049,22 @@ export function CajaClient({
       : saleModality === "MESA";
 
     // Unificación global de IVA:
+    // Si el negocio tiene ivaOnTable === true ("IVA Incluido en el precio"), rige como incluido en TODOS los canales.
     // Si el negocio tiene ivaOnTable === false ("IVA Adicional"), aplica como adicional en TODOS los canales (Mesa, Llevar, Delivery).
-    const ivaIncluded = restaurant.ivaOnTable === false
-      ? false
-      : (isTable ? (restaurant.ivaOnTable ?? true) : (restaurant.ivaOnTakeout ?? true));
+    const ivaIncluded = restaurant.ivaOnTable === true
+      ? true
+      : (restaurant.ivaOnTable === false
+          ? false
+          : (isTable ? (restaurant.ivaOnTable ?? true) : (restaurant.ivaOnTakeout ?? true)));
 
-    // Unificación de Servicio:
-    const serviceIncluded = restaurant.serviceOnTable === false
-      ? false
-      : (isTable ? (restaurant.serviceOnTable ?? true) : (restaurant.serviceOnTakeout ?? false));
+    // Unificación global de Servicio:
+    // Si el negocio tiene serviceOnTable === true ("Servicio Incluido en el precio"), rige como incluido en TODOS los canales (Mesa, Llevar, Delivery).
+    // Si el negocio tiene serviceOnTable === false ("Servicio Adicional"), se cobra adicional al subtotal.
+    const serviceIncluded = restaurant.serviceOnTable === true
+      ? true
+      : (restaurant.serviceOnTable === false
+          ? false
+          : (isTable ? (restaurant.serviceOnTable ?? true) : (restaurant.serviceOnTakeout ?? true)));
 
     const baseAmount = selectedActiveOrder
       ? (selectedActiveOrder.items || []).reduce((acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1), 0)
@@ -864,24 +1090,34 @@ export function CajaClient({
       ? meta.service_charge
       : (!serviceIncluded && serviceRate > 0 ? Math.round(baseAmount * (serviceRate / 100) * 100) / 100 : 0);
 
+    const effectiveDelivery = selectedActiveOrder
+      ? selectedOrderDeliveryCost
+      : (saleModality === "DOMICILIO" ? (Number(saleDeliveryCost) || 0) : 0);
+
     return {
       subtotal: baseAmount,
       iva,
       service,
-      deliveryCost: selectedOrderDeliveryCost,
+      deliveryCost: effectiveDelivery,
       ivaRate,
       serviceRate,
     };
-  }, [selectedActiveOrder, saleModality, restaurant, itemsSubtotal, selectedOrderDeliveryCost]);
+  }, [selectedActiveOrder, saleModality, restaurant, itemsSubtotal, selectedOrderDeliveryCost, saleDeliveryCost]);
+
+  const appliedDepositDiscount = useMemo(() => {
+    return selectedReservationForOrder ? Math.max(0, Number(selectedReservationForOrder.depositAmount) || 0) : 0;
+  }, [selectedReservationForOrder]);
 
   const computedExpectedTotal = useMemo(() => {
-    return Math.round(
-      (chargesBreakdown.subtotal + chargesBreakdown.deliveryCost + chargesBreakdown.iva + chargesBreakdown.service) * 100
-    ) / 100;
-  }, [chargesBreakdown]);
+    const gross = chargesBreakdown.subtotal + chargesBreakdown.deliveryCost + chargesBreakdown.iva + chargesBreakdown.service;
+    const net = Math.max(0, gross - appliedDepositDiscount);
+    return Math.round(net * 100) / 100;
+  }, [chargesBreakdown, appliedDepositDiscount]);
 
   const totalAmount = selectedActiveOrder && selectedActiveOrder.total > 0
-    ? (selectedActiveOrder.total >= computedExpectedTotal ? selectedActiveOrder.total : computedExpectedTotal)
+    ? (selectedReservationForOrder
+        ? Math.max(0, Math.round((selectedActiveOrder.total - appliedDepositDiscount) * 100) / 100)
+        : (selectedActiveOrder.total >= computedExpectedTotal ? selectedActiveOrder.total : computedExpectedTotal))
     : computedExpectedTotal;
 
   // Vuelto / Cambio en Efectivo
@@ -965,8 +1201,12 @@ export function CajaClient({
 
   const sendOrderToKitchenKDS = async (options: {
     mesaNumber?: string | null;
-    tipoEntrega: "MOSTRADOR" | "RETIRO" | "SALON";
+    tipoEntrega: "MOSTRADOR" | "RETIRO" | "SALON" | "DOMICILIO";
     clienteNombre: string;
+    clienteTelefono?: string | null;
+    clienteDireccion?: string | null;
+    notasEntrega?: string | null;
+    costoEnvio?: number;
     skipStockDeduction?: boolean;
   }) => {
     try {
@@ -979,19 +1219,35 @@ export function CajaClient({
         notas: it.modifiersNotes || null,
       }));
 
+      const isDelivery = options.tipoEntrega === "DOMICILIO";
+      const isLlevar = options.tipoEntrega === "RETIRO" || options.tipoEntrega === "MOSTRADOR";
+
       const res = await fetch("/api/pedidos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           negocio_id: restaurant.id,
           slug: restaurant.slug,
-          mesa: options.mesaNumber ? options.mesaNumber : (options.tipoEntrega === "SALON" ? "1" : "LLEVAR"),
-          tipo_entrega: options.tipoEntrega === "SALON" ? "SALON" : "RETIRO",
-          metodo_entrega: options.tipoEntrega === "SALON" ? "salon" : "retiro",
+          mesa: options.mesaNumber
+            ? options.mesaNumber
+            : isDelivery
+            ? "DELIVERY"
+            : isLlevar
+            ? "LLEVAR"
+            : "1",
+          tipo_entrega: isDelivery ? "DOMICILIO" : isLlevar ? "RETIRO" : "SALON",
+          metodo_entrega: isDelivery ? "domicilio" : isLlevar ? "retiro" : "salon",
           cliente_nombre: options.clienteNombre,
+          cliente_telefono: options.clienteTelefono || null,
+          cliente_direccion: options.clienteDireccion || null,
+          notas_entrega: options.notasEntrega || null,
+          costo_envio: options.costoEnvio || 0,
           skip_stock_deduction: options.skipStockDeduction ?? true,
           items: itemsPayload,
           total: totalAmount,
+          subtotal: chargesBreakdown.subtotal,
+          iva: chargesBreakdown.iva,
+          servicio: chargesBreakdown.service,
         }),
       });
       const data = await res.json();
@@ -1002,7 +1258,7 @@ export function CajaClient({
     }
   };
 
-  const handleSendToKitchenOpenTable = async () => {
+  const handleSendOrderToKitchenOpen = async () => {
     if (sessionItems.length === 0) {
       alert("Agrega al menos un producto al ticket antes de enviar a cocina.");
       return;
@@ -1011,31 +1267,72 @@ export function CajaClient({
       alert("Selecciona el número de mesa.");
       return;
     }
+    if (saleModality === "DOMICILIO" && !saleDeliveryAddress.trim()) {
+      alert("Por favor ingresa la dirección de entrega del cliente para el domicilio.");
+      return;
+    }
 
     startTransition(async () => {
-      const targetMesa = saleModality === "MESA" ? saleTableNumber : null;
-      const tipoEntrega = saleModality === "MESA" ? "SALON" : "RETIRO";
+      const targetMesa = saleModality === "MESA" ? saleTableNumber : (saleModality === "DOMICILIO" ? "DELIVERY" : "LLEVAR");
+      const tipoEntrega = saleModality === "MESA" ? "SALON" : (saleModality === "DOMICILIO" ? "DOMICILIO" : "RETIRO");
+      const cleanName = saleCustomerName.trim();
+      const cleanPhone = saleCustomerPhone.trim();
+
       const clienteNombre = saleModality === "MESA"
         ? `Mesa #${saleTableNumber}`
-        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : "Cliente (Para Llevar)");
+        : saleModality === "DOMICILIO"
+        ? (cleanName ? cleanName : (cleanPhone ? `Cliente ${cleanPhone}` : "Cliente Domicilio"))
+        : (cleanName ? `${cleanName} (Para Llevar)` : (cleanPhone ? `${cleanPhone} (Para Llevar)` : "Cliente (Para Llevar)"));
 
       const kdsRes = await sendOrderToKitchenKDS({
         mesaNumber: targetMesa,
         tipoEntrega,
         clienteNombre,
+        clienteTelefono: cleanPhone || null,
+        clienteDireccion: saleModality === "DOMICILIO" ? saleDeliveryAddress.trim() : null,
+        notasEntrega: saleInternalNotes.trim() || null,
+        costoEnvio: saleModality === "DOMICILIO" ? saleDeliveryCost : 0,
         skipStockDeduction: false,
       });
 
-      if (kdsRes && kdsRes.ok) {
+      if (kdsRes && (kdsRes.ok || kdsRes.success || kdsRes.order || kdsRes.pedido || kdsRes.id)) {
         playBeep();
+        const destTitle = saleModality === "DOMICILIO"
+          ? "¡Domicilio Registrado & Enviado a Cocina!"
+          : saleModality === "LLEVAR"
+          ? "¡Pedido Para Llevar Enviado a Cocina!"
+          : `¡Comanda Enviada a Cocina (Mesa #${saleTableNumber})!`;
+
+        const destMsg = saleModality === "DOMICILIO"
+          ? `Pedido de ${clienteNombre} por $${totalAmount.toFixed(2)} registrado en 'Domicilios' para despacho.`
+          : saleModality === "LLEVAR"
+          ? `Pedido de ${clienteNombre} por $${totalAmount.toFixed(2)} registrado en 'Para Llevar' para cobro al retirar.`
+          : `Mesa #${saleTableNumber} abierta por $${totalAmount.toFixed(2)}. Comanda enviada a pantalla KDS.`;
+
         setSuccessInfo({
-          title: "¡Comanda enviada a Cocina!",
-          message: `Comanda de ${clienteNombre} enviada exitosamente a la pantalla de Cocina (KDS). La mesa queda abierta para consumo.`,
-          badge: `👨‍🍳 Cocina: ${clienteNombre}`,
+          title: destTitle,
+          message: destMsg,
+          badge: saleModality === "DOMICILIO" ? `🛵 Domicilio: ${clienteNombre}` : saleModality === "LLEVAR" ? `🥡 Llevar: ${clienteNombre}` : `🪑 Mesa #${saleTableNumber}`,
         });
+
         setSessionItems([]);
+        setMobileActiveView("OPERATIONS");
         setSaleCustomerName("");
+        setSaleCustomerPhone("");
+        setSaleDeliveryAddress("");
+        setSaleInternalNotes("");
+        setSaleDeliveryCost(0);
+        setSelectedRateId("none");
+        setIsCustomDelivery(false);
+        setCustomDeliveryCostInput("");
         fetchActiveOrders();
+
+        // Cambiar pestaña activa automáticamente para conveniencia del cajero
+        if (saleModality === "DOMICILIO") {
+          setActiveChannel("DOMICILIO");
+        } else if (saleModality === "LLEVAR") {
+          setActiveChannel("LLEVAR");
+        }
       } else {
         playErrorSound();
         alert(kdsRes?.error || "Error al enviar comanda a cocina.");
@@ -1150,6 +1447,7 @@ export function CajaClient({
           badge: `✂️ Split Pay: ${effectiveTableName} · $${res.total?.toFixed(2)}`,
         });
         setSessionItems([]);
+        setMobileActiveView("OPERATIONS");
         setSaleCustomerName("");
         fetchActiveOrders();
       }
@@ -1350,6 +1648,8 @@ export function CajaClient({
           total: totalAmount,
           paymentMethod: paymentMethod === "TRANSFERENCIA" ? "TRANSFERENCIA" : paymentMethod,
           customerName: selectedActiveOrder.cliente_nombre,
+          depositDiscount: appliedDepositDiscount,
+          reservationId: selectedReservationForOrder?.id,
         });
 
         if (res.error) {
@@ -1378,14 +1678,21 @@ export function CajaClient({
             badge: `✅ ${paymentMethod} · $${totalAmount.toFixed(2)}`,
           });
           setSelectedActiveOrder(null);
+          setSelectedReservationForOrder(null);
           setSessionItems([]);
           fetchActiveOrders();
+          fetchReservations();
         }
       });
       return;
     }
 
     // 2. Si es una Venta Directa / Rápida
+    if (saleModality === "DOMICILIO" && !saleDeliveryAddress.trim()) {
+      alert("Por favor ingresa la dirección de entrega del cliente para el domicilio.");
+      return;
+    }
+
     startTransition(async () => {
       const itemsPayload = sessionItems.map((it) => ({
         dishId: it.dishId,
@@ -1394,19 +1701,35 @@ export function CajaClient({
         quantity: it.quantity,
       }));
 
+      const cleanName = saleCustomerName.trim();
+      const cleanPhone = saleCustomerPhone.trim();
+
       const effectiveTableName = saleModality === "MESA"
         ? `Mesa #${saleTableNumber}`
+        : saleModality === "DOMICILIO"
+        ? "Domicilio"
         : "Para Llevar";
 
       const effectiveCustomerName = saleModality === "MESA"
         ? `Mesa #${saleTableNumber} (${paymentMethod})`
-        : (saleCustomerName.trim() ? `${saleCustomerName.trim()} (Para Llevar)` : `Para Llevar (${paymentMethod})`);
+        : saleModality === "DOMICILIO"
+        ? (cleanName ? `${cleanName} (Domicilio)` : (cleanPhone ? `Cliente ${cleanPhone} (Domicilio)` : `Domicilio (${paymentMethod})`))
+        : (cleanName ? `${cleanName} (Para Llevar)` : (cleanPhone ? `Cliente ${cleanPhone} (Para Llevar)` : `Para Llevar (${paymentMethod})`));
 
       const res = await processCajaSaleAction(restaurant.id, {
         items: itemsPayload,
         paymentMethod: paymentMethod === "TRANSFERENCIA" ? "PAYPHONE" : paymentMethod,
         customerName: effectiveCustomerName,
+        customerPhone: cleanPhone || undefined,
+        customerAddress: saleModality === "DOMICILIO" ? saleDeliveryAddress.trim() : undefined,
+        deliveryCost: saleModality === "DOMICILIO" ? saleDeliveryCost : 0,
+        depositDiscount: appliedDepositDiscount,
+        reservationId: selectedReservationForOrder?.id,
+        iva: chargesBreakdown.iva,
+        serviceCharge: chargesBreakdown.service,
+        total: totalAmount,
         tableName: effectiveTableName,
+        splitDetails: splitPayments.length > 0 ? splitPayments : undefined,
       });
 
       if (res.error) {
@@ -1417,9 +1740,13 @@ export function CajaClient({
 
         if (sendToKitchen) {
           await sendOrderToKitchenKDS({
-            mesaNumber: saleModality === "MESA" ? saleTableNumber : null,
-            tipoEntrega: saleModality === "MESA" ? "SALON" : "RETIRO",
+            mesaNumber: saleModality === "MESA" ? saleTableNumber : (saleModality === "DOMICILIO" ? "DELIVERY" : "LLEVAR"),
+            tipoEntrega: saleModality === "MESA" ? "SALON" : (saleModality === "DOMICILIO" ? "DOMICILIO" : "RETIRO"),
             clienteNombre: effectiveCustomerName,
+            clienteTelefono: cleanPhone || null,
+            clienteDireccion: saleModality === "DOMICILIO" ? saleDeliveryAddress.trim() : null,
+            notasEntrega: saleInternalNotes.trim() || null,
+            costoEnvio: saleModality === "DOMICILIO" ? saleDeliveryCost : 0,
             skipStockDeduction: true,
           });
         }
@@ -1427,12 +1754,21 @@ export function CajaClient({
         const kitchenNotice = sendToKitchen ? " Comanda enviada a Cocina (KDS)." : "";
         setSuccessInfo({
           title: "¡Venta Completada!",
-          message: `Ticket #${res.orderNumber} por $${res.total?.toFixed(2)} (${effectiveTableName}) pagado con ${paymentMethod}.${kitchenNotice}`,
+          message: `Ticket #${res.orderNumber} por $${totalAmount.toFixed(2)} (${effectiveTableName}) cobrado con ${paymentMethod}.${kitchenNotice}`,
           badge: `⚡ Cobrado: ${effectiveTableName} · ${paymentMethod}`,
         });
         setSessionItems([]);
+        setSelectedReservationForOrder(null);
         setSaleCustomerName("");
+        setSaleCustomerPhone("");
+        setSaleDeliveryAddress("");
+        setSaleInternalNotes("");
+        setSaleDeliveryCost(0);
+        setSelectedRateId("none");
+        setIsCustomDelivery(false);
+        setCustomDeliveryCostInput("");
         fetchActiveOrders();
+        fetchReservations();
       }
     });
   };
@@ -1553,9 +1889,44 @@ export function CajaClient({
       {/* 2. CONTENEDOR PRINCIPAL: SPLIT SCREEN POS (Toast / Square) */}
       <div className="max-w-7xl w-full mx-auto p-3 sm:p-5 flex-1 flex flex-col lg:flex-row gap-5 min-h-0">
         {/* COLUMNA IZQUIERDA (65%): CANALES, MESAS Y CATÁLOGO TÁCTIL */}
-        <div className="flex-1 lg:w-7/12 xl:w-2/3 flex flex-col gap-4 min-w-0">
-          {/* BARRA DE CANALES (Mesas, Llevar, Domicilio, Venta Táctil, Escáner) */}
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+        <div className={`flex-1 lg:w-7/12 xl:w-2/3 flex flex-col gap-4 min-w-0 pb-20 lg:pb-0 ${
+          mobileActiveView === "TICKET" ? "hidden lg:flex" : "flex"
+        }`}>
+          {/* MOBILE VIEW SWITCHER (SOLO CELULAR / PANTALLAS PEQUEÑAS) */}
+          <div className="lg:hidden grid grid-cols-2 gap-2 bg-slate-950/90 p-1.5 rounded-2xl border border-slate-800 shrink-0 shadow-lg">
+            <button
+              type="button"
+              onClick={() => setMobileActiveView("OPERATIONS")}
+              className={`py-2 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                mobileActiveView === "OPERATIONS"
+                  ? "bg-slate-800 text-white shadow-md border border-slate-700"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Canales & Platos</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileActiveView("TICKET")}
+              className={`py-2 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 cursor-pointer relative ${
+                mobileActiveView === "TICKET"
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              <span>Ticket ({totalQuantity})</span>
+              {totalAmount > 0 && (
+                <span className="font-mono text-[11px] bg-black/40 px-1.5 py-0.5 rounded-md text-emerald-300">
+                  ${totalAmount.toFixed(2)}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* BARRA DE CANALES (Mesas, Llevar, Domicilio, Reservas, Venta Táctil, Escáner) */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button
               type="button"
               onClick={() => setActiveChannel("MESAS")}
@@ -1607,6 +1978,24 @@ export function CajaClient({
                 domicilioOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
               }`}>
                 {domicilioOrders.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveChannel("RESERVAS")}
+              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeChannel === "RESERVAS"
+                  ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30 font-black scale-102"
+                  : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+              }`}
+            >
+              <CalendarDays className="w-4 h-4 text-purple-400" />
+              <span>Reservas</span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                reservations.length > 0 ? "bg-purple-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+              }`}>
+                {reservations.length}
               </span>
             </button>
 
@@ -1850,6 +2239,181 @@ export function CajaClient({
               </div>
             )}
 
+            {/* CANAL: RESERVAS DE MESAS */}
+            {activeChannel === "RESERVAS" && (
+              <div className="space-y-4 flex-1 flex flex-col">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-white text-base">Reservas de Mesas</h3>
+                    <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setReservationDateFilter("TODAY")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                          reservationDateFilter === "TODAY"
+                            ? "bg-purple-600 text-white font-black"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Hoy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReservationDateFilter("ALL")}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                          reservationDateFilter === "ALL"
+                            ? "bg-purple-600 text-white font-black"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Todas
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsNewReservationModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black shadow-md shadow-purple-600/30 transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                      <span>+ Nueva Reserva</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={fetchReservations}
+                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                      title="Refrescar reservas"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {reservations.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border border-dashed border-slate-800 rounded-2xl text-slate-400 space-y-2">
+                    <CalendarDays className="w-12 h-12 text-slate-600" />
+                    <p className="font-bold text-sm text-slate-300">No hay reservas registradas para este período</p>
+                    <p className="text-xs text-slate-500">Toca &quot;+ Nueva Reserva&quot; para agendar comensales y abonos.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 overflow-y-auto max-h-[560px]">
+                    {reservations.map((res) => {
+                      const isLinked = selectedReservationForOrder?.id === res.id;
+                      return (
+                        <div
+                          key={res.id}
+                          className={`p-4 rounded-2xl border transition space-y-3 flex flex-col justify-between ${
+                            isLinked
+                              ? "bg-purple-950/40 border-purple-500/80 shadow-lg shadow-purple-600/20"
+                              : "bg-slate-900/90 border-slate-800 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-xs font-black px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-purple-300 flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-purple-400" />
+                                {res.reservationTime} · {res.reservationDate}
+                              </span>
+                              <span
+                                className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                  res.status === "CONFIRMED"
+                                    ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                                    : res.status === "SEATED"
+                                    ? "bg-blue-500/15 text-blue-300 border-blue-500/30"
+                                    : res.status === "COMPLETED"
+                                    ? "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                                    : res.status === "CANCELLED"
+                                    ? "bg-red-500/15 text-red-300 border-red-500/30"
+                                    : "bg-amber-500/15 text-amber-300 border-amber-500/30"
+                                }`}
+                              >
+                                {res.status === "CONFIRMED"
+                                  ? "Confirmada"
+                                  : res.status === "SEATED"
+                                  ? "En Sala"
+                                  : res.status === "COMPLETED"
+                                  ? "Completada"
+                                  : res.status === "CANCELLED"
+                                  ? "Cancelada"
+                                  : "Pendiente"}
+                              </span>
+                            </div>
+
+                            <div>
+                              <h4 className="font-black text-white text-sm">{res.customerName}</h4>
+                              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                                <span className="font-bold text-purple-400">Mesa #{res.tableName}</span>
+                                <span>·</span>
+                                <span>{res.peopleCount} personas</span>
+                                {res.customerPhone && (
+                                  <>
+                                    <span>·</span>
+                                    <span>{res.customerPhone}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Abono */}
+                            <div className="p-2 rounded-xl bg-slate-950 border border-slate-800/80 flex items-center justify-between text-xs">
+                              <span className="text-slate-400">Abono:</span>
+                              {res.depositAmount > 0 ? (
+                                <span className="font-mono font-black text-emerald-400">
+                                  ${res.depositAmount.toFixed(2)} ({res.depositMethod || "Efectivo"})
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 italic">Sin abono</span>
+                              )}
+                            </div>
+
+                            {res.notes && (
+                              <p className="text-[11px] text-amber-300/80 italic bg-amber-950/20 p-1.5 rounded-lg border border-amber-800/30">
+                                &quot;{res.notes}&quot;
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Botón de Acción Principal para Caja */}
+                          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                            {res.status !== "COMPLETED" && res.status !== "CANCELLED" ? (
+                              <button
+                                type="button"
+                                onClick={() => handleSeatReservation(res)}
+                                className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs transition flex items-center justify-center gap-1.5 shadow-md shadow-purple-600/20 cursor-pointer"
+                              >
+                                <BookmarkCheck className="w-3.5 h-3.5 stroke-[3]" />
+                                <span>
+                                  Sentar Mesa #{res.tableName}
+                                  {res.depositAmount > 0 ? ` (-$${res.depositAmount.toFixed(2)})` : ""}
+                                </span>
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-500 font-bold italic">
+                                {res.status === "COMPLETED" ? "Reserva cobrada / cerrada" : "Reserva cancelada"}
+                              </span>
+                            )}
+
+                            {res.status !== "COMPLETED" && res.status !== "CANCELLED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelReservation(res.id, res.customerName)}
+                                className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition"
+                                title="Cancelar reserva"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* CANAL: VENTA TÁCTIL (GRID DE PLATOS) */}
             {activeChannel === "TACTIL" && (
               <div className="space-y-3.5 flex-1 flex flex-col">
@@ -1965,7 +2529,24 @@ export function CajaClient({
         </div>
 
         {/* COLUMNA DERECHA (35%): TICKET DE COBRO & MÉTODOS DE PAGO */}
-        <div className="w-full lg:w-5/12 xl:w-1/3 flex flex-col gap-4 bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-2xl backdrop-blur-md shrink-0 lg:sticky lg:top-20 max-h-[calc(100vh-6rem)] overflow-y-auto">
+        <div className={`w-full lg:w-5/12 xl:w-1/3 flex flex-col gap-4 bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-2xl backdrop-blur-md shrink-0 lg:sticky lg:top-20 max-h-[calc(100vh-6rem)] overflow-y-auto ${
+          mobileActiveView === "OPERATIONS" ? "hidden lg:flex" : "flex"
+        }`}>
+          {/* BOTÓN VOLVER EN CELULAR */}
+          <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-800">
+            <button
+              type="button"
+              onClick={() => setMobileActiveView("OPERATIONS")}
+              className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4 text-emerald-400" />
+              <span>← Volver a Canales / Platos</span>
+            </button>
+            <span className="text-xs font-mono font-black text-emerald-400">
+              Total: ${totalAmount.toFixed(2)}
+            </span>
+          </div>
+
           {/* CABECERA DEL TICKET */}
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div>
@@ -1994,6 +2575,8 @@ export function CajaClient({
                     : "Cobro de comanda en salón"
                   : saleModality === "MESA"
                   ? `Consumo en Mesa #${saleTableNumber}`
+                  : saleModality === "DOMICILIO"
+                  ? "Pedido telefónico / despacho a domicilio"
                   : "Pedido para llevar (empaque)"}
               </span>
             </div>
@@ -2011,7 +2594,7 @@ export function CajaClient({
             )}
           </div>
 
-          {/* SELECTOR DE MODALIDAD: PARA LLEVAR / MESA */}
+          {/* SELECTOR DE MODALIDAD: PARA LLEVAR / DOMICILIO / MESA */}
           {!selectedActiveOrder && mode === "VENTA" && (
             <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-2.5 space-y-2">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
@@ -2019,36 +2602,64 @@ export function CajaClient({
                 <span className="text-emerald-400 font-mono text-[10px]">
                   {saleModality === "LLEVAR"
                     ? "🛍️ Para Llevar"
+                    : saleModality === "DOMICILIO"
+                    ? "🛵 Domicilio"
                     : `🪑 Mesa #${saleTableNumber}`}
                 </span>
               </div>
 
-              {/* 2 Botones de Selección */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* 3 Botones de Selección */}
+              <div className="grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setSaleModality("LLEVAR")}
-                  className={`py-2 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 border ${
+                  onClick={() => {
+                    setSaleModality("LLEVAR");
+                    setShowCustomerDropdown(false);
+                  }}
+                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border cursor-pointer ${
                     saleModality === "LLEVAR"
-                      ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 font-black"
+                      ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30"
                       : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
                   }`}
                 >
-                  <ShoppingBag className="w-4 h-4" />
-                  <span>Para Llevar</span>
+                  <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Llevar</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setSaleModality("MESA")}
-                  className={`py-2 px-3 rounded-xl text-xs font-black transition flex items-center justify-center gap-2 border ${
-                    saleModality === "MESA"
-                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30 font-black"
+                  onClick={() => {
+                    setSaleModality("DOMICILIO");
+                    setShowCustomerDropdown(false);
+                    if (selectedRateId === "none" && kmRatesList.length > 0) {
+                      setSelectedRateId(kmRatesList[0].id);
+                      setSaleDeliveryCost(kmRatesList[0].price);
+                    }
+                  }}
+                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border cursor-pointer ${
+                    saleModality === "DOMICILIO"
+                      ? "bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/30"
                       : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
                   }`}
                 >
-                  <Users className="w-4 h-4" />
-                  <span>Mesa en Salón</span>
+                  <Bike className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Domicilio</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSaleModality("MESA");
+                    setShowCustomerDropdown(false);
+                  }}
+                  className={`py-2 px-2 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 border cursor-pointer ${
+                    saleModality === "MESA"
+                      ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30"
+                      : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Mesa</span>
                 </button>
               </div>
 
@@ -2078,15 +2689,255 @@ export function CajaClient({
                 </div>
               )}
 
+              {/* FORMULARIO INLINE: DOMICILIO (TELÉFONO + CRM, NOMBRE, DIRECCIÓN, TARIFA ENVÍO, NOTA) */}
+              {saleModality === "DOMICILIO" && (
+                <div className="space-y-2 pt-1.5 border-t border-slate-800/80 text-xs">
+                  {/* Teléfono con Búsqueda CRM */}
+                  <div className="relative">
+                    <div className="relative">
+                      <Phone className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-cyan-400" />
+                      <input
+                        type="text"
+                        placeholder="Teléfono / WhatsApp (escribe para autocompletar)..."
+                        value={saleCustomerPhone}
+                        onChange={(e) => {
+                          setSaleCustomerPhone(e.target.value);
+                          triggerCustomerSearch(e.target.value);
+                        }}
+                        onFocus={() => {
+                          if (customerSuggestions.length > 0) setShowCustomerDropdown(true);
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-500 font-mono"
+                      />
+                      {isSearchingCustomer && (
+                        <RefreshCw className="w-3 h-3 animate-spin absolute right-2.5 top-1/2 -translate-y-1/2 text-cyan-400" />
+                      )}
+                    </div>
+
+                    {/* Dropdown de Coincidencias CRM */}
+                    {showCustomerDropdown && customerSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900/95 backdrop-blur-md border border-cyan-500/40 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-800 max-h-48 overflow-y-auto">
+                        <div className="px-2.5 py-1 text-[10px] font-bold text-cyan-400 uppercase tracking-wider bg-slate-950 flex items-center justify-between sticky top-0">
+                          <span>✨ Clientes Frecuentes ({customerSuggestions.length}):</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowCustomerDropdown(false)}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        {customerSuggestions.map((cust) => (
+                          <button
+                            key={cust.id}
+                            type="button"
+                            onClick={() => handleSelectCustomerSuggestion(cust)}
+                            className="w-full text-left p-2 hover:bg-cyan-950/40 transition flex flex-col gap-0.5 group cursor-pointer"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-white group-hover:text-cyan-300">
+                                {cust.name}
+                              </span>
+                              <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/80 px-1.5 py-0.2 rounded border border-cyan-800/60">
+                                📞 {cust.phone}
+                              </span>
+                            </div>
+                            {cust.address && (
+                              <span className="text-[10px] text-slate-400 truncate">
+                                📍 {cust.address}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Nombre del Cliente */}
+                  <div className="relative">
+                    <User className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Nombre del cliente (ej. Carlos) *"
+                      value={saleCustomerName}
+                      onChange={(e) => {
+                        setSaleCustomerName(e.target.value);
+                        if (!saleCustomerPhone) triggerCustomerSearch(e.target.value);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  {/* Dirección de Entrega */}
+                  <div className="relative">
+                    <MapPin className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-cyan-400" />
+                    <input
+                      type="text"
+                      placeholder="Dirección de entrega y referencia *"
+                      value={saleDeliveryAddress}
+                      onChange={(e) => setSaleDeliveryAddress(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  {/* Selector de Tarifa de Envío */}
+                  <div className="space-y-1 pt-1 border-t border-slate-800/60">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                      <span className="flex items-center gap-1 text-cyan-300">
+                        <Bike className="w-3 h-3" /> Tarifa de Envío:
+                      </span>
+                      <span className="font-mono text-cyan-400 font-bold">
+                        +${saleDeliveryCost.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <select
+                        value={isCustomDelivery ? "custom" : selectedRateId}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === "custom") {
+                            setIsCustomDelivery(true);
+                          } else if (val === "none") {
+                            setIsCustomDelivery(false);
+                            setSelectedRateId("none");
+                            setSaleDeliveryCost(0);
+                          } else {
+                            setIsCustomDelivery(false);
+                            setSelectedRateId(val);
+                            const foundRate = kmRatesList.find((r) => r.id === val);
+                            setSaleDeliveryCost(foundRate ? foundRate.price : 0);
+                          }
+                        }}
+                        className="bg-slate-900 border border-slate-800 rounded-xl px-2 py-1.5 text-[11px] text-white outline-none focus:border-cyan-500 cursor-pointer"
+                      >
+                        <option value="none">Sin recargo ($0.00)</option>
+                        {kmRatesList.map((rate) => (
+                          <option key={rate.id} value={rate.id}>
+                            {rate.label} (${rate.price.toFixed(2)})
+                          </option>
+                        ))}
+                        <option value="custom">✏️ Personalizado...</option>
+                      </select>
+
+                      {isCustomDelivery ? (
+                        <input
+                          type="number"
+                          step="0.25"
+                          min="0"
+                          placeholder="Monto $"
+                          value={customDeliveryCostInput}
+                          onChange={(e) => {
+                            setCustomDeliveryCostInput(e.target.value);
+                            setSaleDeliveryCost(parseFloat(e.target.value) || 0);
+                          }}
+                          className="bg-slate-900 border border-slate-800 rounded-xl px-2 py-1.5 text-[11px] text-cyan-300 font-mono outline-none focus:border-cyan-500 text-right"
+                        />
+                      ) : (
+                        <div className="flex items-center justify-end px-2.5 py-1.5 bg-slate-900/60 border border-slate-800 rounded-xl text-[11px] font-mono text-cyan-400 font-bold">
+                          +${saleDeliveryCost.toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Nota Interna / Despacho */}
+                  <div className="relative">
+                    <FileText className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Nota de despacho (ej. cambio de $20, timbre 3)..."
+                      value={saleInternalNotes}
+                      onChange={(e) => setSaleInternalNotes(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* FORMULARIO INLINE: PARA LLEVAR (TELÉFONO + CRM, NOMBRE, NOTA EMPAQUE) */}
               {saleModality === "LLEVAR" && (
-                <div className="pt-1.5 border-t border-slate-800/80">
-                  <input
-                    type="text"
-                    placeholder="Nombre del cliente para entrega (opcional)..."
-                    value={saleCustomerName}
-                    onChange={(e) => setSaleCustomerName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500"
-                  />
+                <div className="space-y-2 pt-1.5 border-t border-slate-800/80 text-xs">
+                  {/* Teléfono con Búsqueda CRM */}
+                  <div className="relative">
+                    <div className="relative">
+                      <Phone className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-400" />
+                      <input
+                        type="text"
+                        placeholder="Teléfono del cliente (opcional / buscar en CRM)..."
+                        value={saleCustomerPhone}
+                        onChange={(e) => {
+                          setSaleCustomerPhone(e.target.value);
+                          triggerCustomerSearch(e.target.value);
+                        }}
+                        onFocus={() => {
+                          if (customerSuggestions.length > 0) setShowCustomerDropdown(true);
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500 font-mono"
+                      />
+                      {isSearchingCustomer && (
+                        <RefreshCw className="w-3 h-3 animate-spin absolute right-2.5 top-1/2 -translate-y-1/2 text-amber-400" />
+                      )}
+                    </div>
+
+                    {showCustomerDropdown && customerSuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900/95 backdrop-blur-md border border-amber-500/40 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-800 max-h-48 overflow-y-auto">
+                        <div className="px-2.5 py-1 text-[10px] font-bold text-amber-400 uppercase tracking-wider bg-slate-950 flex items-center justify-between sticky top-0">
+                          <span>✨ Clientes Frecuentes ({customerSuggestions.length}):</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowCustomerDropdown(false)}
+                            className="text-slate-400 hover:text-white"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        {customerSuggestions.map((cust) => (
+                          <button
+                            key={cust.id}
+                            type="button"
+                            onClick={() => handleSelectCustomerSuggestion(cust)}
+                            className="w-full text-left p-2 hover:bg-amber-950/40 transition flex flex-col gap-0.5 group cursor-pointer"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-white group-hover:text-amber-300">
+                                {cust.name}
+                              </span>
+                              <span className="text-[10px] font-mono text-amber-400 bg-amber-950/80 px-1.5 py-0.2 rounded border border-amber-800/60">
+                                📞 {cust.phone}
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Nombre del Cliente */}
+                  <div className="relative">
+                    <User className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Nombre del cliente para entrega..."
+                      value={saleCustomerName}
+                      onChange={(e) => {
+                        setSaleCustomerName(e.target.value);
+                        if (!saleCustomerPhone) triggerCustomerSearch(e.target.value);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  {/* Nota Interna / Empaque */}
+                  <div className="relative">
+                    <FileText className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Nota interna / empaque (ej. salsas aparte)..."
+                      value={saleInternalNotes}
+                      onChange={(e) => setSaleInternalNotes(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                    />
+                  </div>
                 </div>
               )}
 
@@ -2193,10 +3044,29 @@ export function CajaClient({
                 <span className="font-mono font-semibold">+${chargesBreakdown.service.toFixed(2)}</span>
               </div>
             )}
-            {selectedOrderDeliveryCost > 0 && (
-              <div className="flex items-center justify-between text-xs text-amber-300 bg-amber-950/20 px-2 py-1 rounded-lg border border-amber-800/40">
+            {chargesBreakdown.deliveryCost > 0 && (
+              <div className="flex items-center justify-between text-xs text-cyan-300 bg-cyan-950/30 px-2 py-1 rounded-lg border border-cyan-800/40">
                 <span className="flex items-center gap-1 font-semibold">🛵 Recargo de Envío (Delivery):</span>
-                <span className="font-mono font-bold">+${selectedOrderDeliveryCost.toFixed(2)}</span>
+                <span className="font-mono font-bold">+${chargesBreakdown.deliveryCost.toFixed(2)}</span>
+              </div>
+            )}
+            {appliedDepositDiscount > 0 && (
+              <div className="flex items-center justify-between text-xs text-purple-300 bg-purple-950/40 px-2 py-1.5 rounded-lg border border-purple-800/60 animate-in fade-in">
+                <span className="flex items-center gap-1 font-bold">
+                  <BookmarkCheck className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Abono Reserva ({selectedReservationForOrder?.customerName || "Mesa"}):</span>
+                </span>
+                <div className="flex items-center gap-1.5 font-mono">
+                  <span className="font-black text-purple-200">-${appliedDepositDiscount.toFixed(2)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedReservationForOrder(null)}
+                    title="Desvincular reserva del ticket"
+                    className="text-slate-400 hover:text-red-400 p-0.5 rounded cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             )}
             <div className="flex items-center justify-between pt-1 border-t border-slate-850">
@@ -2336,16 +3206,36 @@ export function CajaClient({
             </button>
           )}
 
-          {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA */}
-          {!selectedActiveOrder && mode === "VENTA" && saleModality === "MESA" && sessionItems.length > 0 && (
+          {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA O PEDIDO PENDIENTE */}
+          {!selectedActiveOrder && mode === "VENTA" && sessionItems.length > 0 && (
             <button
               type="button"
               disabled={isPending}
-              onClick={handleSendToKitchenOpenTable}
-              className="w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border border-indigo-500/50 flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+              onClick={handleSendOrderToKitchenOpen}
+              className={`w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer border ${
+                saleModality === "DOMICILIO"
+                  ? "bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border-cyan-500/50"
+                  : saleModality === "LLEVAR"
+                  ? "bg-amber-950/80 hover:bg-amber-900 text-amber-300 border-amber-500/50"
+                  : "bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 border-indigo-500/50"
+              }`}
             >
-              <UtensilsCrossed className="w-4 h-4 text-indigo-400" />
-              <span>Enviar a Cocina (Dejar Mesa #{saleTableNumber} Abierta)</span>
+              {saleModality === "DOMICILIO" ? (
+                <>
+                  <Bike className="w-4 h-4 text-cyan-400" />
+                  <span>Enviar a Cocina (Pendiente Cobro al Entregar)</span>
+                </>
+              ) : saleModality === "LLEVAR" ? (
+                <>
+                  <ShoppingBag className="w-4 h-4 text-amber-400" />
+                  <span>Enviar a Cocina (Cobrar al Retirar)</span>
+                </>
+              ) : (
+                <>
+                  <UtensilsCrossed className="w-4 h-4 text-indigo-400" />
+                  <span>Enviar a Cocina (Dejar Mesa #{saleTableNumber} Abierta)</span>
+                </>
+              )}
             </button>
           )}
 
@@ -2359,6 +3249,10 @@ export function CajaClient({
                 ? "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30"
                 : selectedActiveOrder
                 ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30"
+                : saleModality === "DOMICILIO"
+                ? "bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-600/30"
+                : saleModality === "LLEVAR"
+                ? "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30"
                 : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30"
             }`}
           >
@@ -2387,13 +3281,203 @@ export function CajaClient({
               <>
                 <Check className="w-5 h-5 stroke-[3]" />
                 <span>
-                  {sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Ticket"} (${totalAmount.toFixed(2)})
+                  {saleModality === "DOMICILIO"
+                    ? (sendToKitchen ? "Cobrar y Despachar Domicilio" : "Cobrar Domicilio")
+                    : saleModality === "LLEVAR"
+                    ? (sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Pedido Llevar")
+                    : (sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Ticket")}{" "}
+                  (${totalAmount.toFixed(2)})
                 </span>
               </>
             )}
           </button>
         </div>
       </div>
+
+      {/* 3. BARRA FLOTANTE DE TICKET EN CELULAR (SOLO MÓVIL CUANDO HAY ITEMS O MESA SELECCIONADA) */}
+      {mobileActiveView === "OPERATIONS" && (sessionItems.length > 0 || selectedActiveOrder) && (
+        <div className="lg:hidden fixed bottom-3 left-3 right-3 z-40 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white rounded-2xl p-3 shadow-2xl flex items-center justify-between border border-emerald-400/50 animate-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-black/30 flex items-center justify-center font-black text-sm shrink-0 border border-white/20">
+              {totalQuantity || (selectedActiveOrder?.items?.length || 1)}
+            </div>
+            <div className="min-w-0">
+              <span className="text-[10px] uppercase font-bold text-emerald-100 block truncate">
+                {selectedActiveOrder
+                  ? `Mesa #${selectedActiveOrder.mesa}`
+                  : saleModality === "DOMICILIO"
+                  ? "🛵 Domicilio"
+                  : saleModality === "LLEVAR"
+                  ? "🥡 Para Llevar"
+                  : `Consumo Mesa #${saleTableNumber}`}
+              </span>
+              <span className="text-base font-mono font-black text-white leading-none">
+                ${totalAmount.toFixed(2)}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileActiveView("TICKET")}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-slate-950 font-black text-xs shadow-lg active:scale-95 transition cursor-pointer shrink-0"
+          >
+            <Receipt className="w-4 h-4 text-emerald-700" />
+            <span>Ver Ticket ({totalQuantity || 1}) →</span>
+          </button>
+        </div>
+      )}
+
+      {/* MODAL: NUEVA RESERVA DE MESA DESDE CAJA */}
+      {isNewReservationModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-sm animate-fadeIn overflow-y-auto">
+          <div className="max-w-lg w-full max-h-[92vh] overflow-y-auto my-auto bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <span className="font-black text-white text-base flex items-center gap-2">
+                <CalendarDays className="w-5 h-5 text-purple-400" />
+                <span>Registrar Reserva de Mesa</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsNewReservationModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateReservation} className="space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Nombre del Cliente *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: David Salazar"
+                    value={newResName}
+                    onChange={(e) => setNewResName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Teléfono WhatsApp</label>
+                  <input
+                    type="tel"
+                    placeholder="Ej: 0991234567"
+                    value={newResPhone}
+                    onChange={(e) => setNewResPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Comensales</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={newResPeople}
+                    onChange={(e) => setNewResPeople(parseInt(e.target.value) || 1)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Fecha</label>
+                  <input
+                    type="date"
+                    required
+                    value={newResDate}
+                    onChange={(e) => setNewResDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Hora</label>
+                  <input
+                    type="time"
+                    required
+                    value={newResTime}
+                    onChange={(e) => setNewResTime(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Mesa</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 1, 4, VIP"
+                    value={newResTable}
+                    onChange={(e) => setNewResTable(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Abono ($)</label>
+                  <input
+                    type="number"
+                    step="0.50"
+                    min="0"
+                    placeholder="0.00"
+                    value={newResDeposit}
+                    onChange={(e) => setNewResDeposit(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-emerald-400 font-mono font-bold focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-300">Método Abono</label>
+                  <select
+                    value={newResDepositMethod}
+                    onChange={(e) => setNewResDepositMethod(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-purple-500 cursor-pointer"
+                  >
+                    <option value="EFECTIVO">Efectivo</option>
+                    <option value="TRANSFERENCIA">Transferencia</option>
+                    <option value="DEUNA">QR DeUna</option>
+                    <option value="TARJETA">Tarjeta / POS</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300">Notas / Petición</label>
+                <textarea
+                  rows={2}
+                  placeholder="Ej: Aniversario, mesa tranquila..."
+                  value={newResNotes}
+                  onChange={(e) => setNewResNotes(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsNewReservationModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-800 text-xs text-slate-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingReservation}
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs shadow-lg shadow-purple-600/30 transition cursor-pointer"
+                >
+                  {isSavingReservation ? "Guardando..." : "Guardar Reserva"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 0: DIGITAR CÓDIGO MANUAL */}
       {isManualModalOpen && (

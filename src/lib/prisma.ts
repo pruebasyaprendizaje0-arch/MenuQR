@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-const PRISMA_SCHEMA_VERSION = "20261014_cat_aspect_ratio";
+const PRISMA_SCHEMA_VERSION = "20261111_table_reservations_v2";
 
 const globalForPrisma = globalThis as unknown as {
   prismaMain: PrismaClient | undefined;
@@ -8,8 +8,11 @@ const globalForPrisma = globalThis as unknown as {
   tenantCache: Map<string, PrismaClient> | undefined;
 };
 
-// Invalidate in-memory PrismaClient when schema version advances in development
-if (globalForPrisma.prismaVersion !== PRISMA_SCHEMA_VERSION) {
+// Invalidate in-memory PrismaClient when schema version advances in development or if new models are missing
+if (
+  globalForPrisma.prismaVersion !== PRISMA_SCHEMA_VERSION ||
+  (globalForPrisma.prismaMain && !(globalForPrisma.prismaMain as any).tableReservation)
+) {
   globalForPrisma.prismaMain = undefined;
   globalForPrisma.prismaVersion = PRISMA_SCHEMA_VERSION;
 }

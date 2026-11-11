@@ -218,7 +218,7 @@ export default async function AdminPage(props: {
     ivaOnTable: (restaurant as any).ivaOnTable ?? true,
     ivaOnTakeout: (restaurant as any).ivaOnTakeout ?? true,
     serviceOnTable: (restaurant as any).serviceOnTable ?? true,
-    serviceOnTakeout: (restaurant as any).serviceOnTakeout ?? false,
+    serviceOnTakeout: (restaurant as any).serviceOnTakeout ?? (restaurant as any).serviceOnTable ?? true,
     whatsappBotEnabled: Boolean((restaurant as any).whatsappBotEnabled ?? false),
     testMode: Boolean((restaurant as any).testMode ?? false),
     categories: (restaurant.categories || []).map((c: any) => ({

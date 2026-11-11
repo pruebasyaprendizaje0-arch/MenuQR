@@ -133,7 +133,7 @@ function getMockDemoRestaurant() {
     ivaOnTable: true,
     ivaOnTakeout: true,
     serviceOnTable: true,
-    serviceOnTakeout: false,
+    serviceOnTakeout: true,
     trialEndsAt: new Date(Date.now() + 86400000 * 365).toISOString(),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

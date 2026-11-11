@@ -63,5 +63,30 @@ ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS motivo_cancelacion VARCHAR(255
 ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(50);
 ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_pedido_items_estado ON pedido_items(estado_item);
+
+-- Tabla de Reservas de Mesas para Restaurantes y Cafeterías
+CREATE TABLE IF NOT EXISTS "TableReservation" (
+  "id" TEXT PRIMARY KEY,
+  "restaurantId" TEXT NOT NULL,
+  "customerName" TEXT NOT NULL,
+  "customerPhone" TEXT NOT NULL,
+  "peopleCount" INTEGER NOT NULL DEFAULT 2,
+  "reservationDate" TIMESTAMP(3) NOT NULL,
+  "reservationTime" TEXT NOT NULL,
+  "tableName" TEXT,
+  "depositAmount" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+  "depositPaid" BOOLEAN NOT NULL DEFAULT false,
+  "depositMethod" TEXT,
+  "status" TEXT NOT NULL DEFAULT 'CONFIRMED',
+  "notes" TEXT,
+  "usedInOrderId" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS "TableReservation_restaurantId_reservationDate_idx" ON "TableReservation"("restaurantId", "reservationDate");
+CREATE INDEX IF NOT EXISTS "TableReservation_restaurantId_status_idx" ON "TableReservation"("restaurantId", "status");
+CREATE INDEX IF NOT EXISTS "TableReservation_restaurantId_customerPhone_idx" ON "TableReservation"("restaurantId", "customerPhone");
+
 CREATE INDEX IF NOT EXISTS idx_pedidos_es_prueba ON pedidos(negocio_id, es_prueba);
 

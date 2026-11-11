@@ -46,6 +46,9 @@ export default async function CajaPage() {
       serviceOnTable: true;
       ivaOnTakeout: true;
       serviceOnTakeout: true;
+      deliveryCost: true;
+      deliveryEnabled: true;
+      deliveryRates: true;
     };
   }>>>>;
 
@@ -76,6 +79,9 @@ export default async function CajaPage() {
           serviceOnTable: true,
           ivaOnTakeout: true,
           serviceOnTakeout: true,
+          deliveryCost: true,
+          deliveryEnabled: true,
+          deliveryRates: true,
         },
       });
     }
@@ -103,6 +109,9 @@ export default async function CajaPage() {
           serviceOnTable: true,
           ivaOnTakeout: true,
           serviceOnTakeout: true,
+          deliveryCost: true,
+          deliveryEnabled: true,
+          deliveryRates: true,
         },
       });
     }
@@ -129,6 +138,9 @@ export default async function CajaPage() {
           serviceOnTable: true,
           ivaOnTakeout: true,
           serviceOnTakeout: true,
+          deliveryCost: true,
+          deliveryEnabled: true,
+          deliveryRates: true,
         },
       });
     }
@@ -302,8 +314,11 @@ export default async function CajaPage() {
           servicePercent: typeof restaurant.servicePercent === "number" ? restaurant.servicePercent : 10,
           ivaOnTable: restaurant.ivaOnTable ?? true,
           serviceOnTable: restaurant.serviceOnTable ?? true,
-          ivaOnTakeout: restaurant.ivaOnTakeout ?? true,
-          serviceOnTakeout: restaurant.serviceOnTakeout ?? false,
+          ivaOnTakeout: restaurant.ivaOnTakeout ?? restaurant.ivaOnTable ?? true,
+          serviceOnTakeout: restaurant.serviceOnTakeout ?? restaurant.serviceOnTable ?? true,
+          deliveryCost: typeof restaurant.deliveryCost === "number" ? restaurant.deliveryCost : 0,
+          deliveryEnabled: restaurant.deliveryEnabled ?? true,
+          deliveryRates: (restaurant as any).deliveryRates || null,
         }}
         categories={categories}
         initialShift={initialShift}

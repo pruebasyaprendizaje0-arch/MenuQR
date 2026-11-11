@@ -49,6 +49,57 @@ export type ScannedDishResult = {
   error?: string;
 };
 
+export type CustomerSearchResult = {
+  id: string;
+  name: string;
+  phone: string;
+  address: string | null;
+  notes: string | null;
+  totalOrders: number;
+};
+
+/**
+ * Busca clientes registrados en el CRM para autocompletar ventas por teléfono/caja
+ */
+export async function searchCustomersForCajaAction(
+  restaurantId: string,
+  query: string
+): Promise<CustomerSearchResult[]> {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return [];
+
+    const q = query.trim();
+    if (!q || q.length < 2) return [];
+
+    const customers = await prisma.customer.findMany({
+      where: {
+        restaurantId,
+        OR: [
+          { phone: { contains: q, mode: "insensitive" } },
+          { name: { contains: q, mode: "insensitive" } },
+        ],
+      },
+      take: 6,
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        address: true,
+        notes: true,
+        totalOrders: true,
+      },
+    });
+
+    return customers;
+  } catch (err) {
+    console.error("Error buscando clientes para caja:", err);
+    return [];
+  }
+}
+
 /**
  * Busca un producto por código de barras de unidad o código de caja/bulto.
  */
@@ -305,6 +356,14 @@ export async function processCajaSaleAction(
     items: Array<{ dishId: string; quantity: number; price: number; name: string }>;
     paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA" | "TRANSFERENCIA";
     customerName?: string;
+    customerPhone?: string;
+    customerAddress?: string;
+    deliveryCost?: number;
+    iva?: number;
+    serviceCharge?: number;
+    depositDiscount?: number;
+    reservationId?: string;
+    total?: number;
     tableName?: string;
     splitDetails?: SplitPaymentDetail[];
   }
@@ -322,6 +381,13 @@ export async function processCajaSaleAction(
       (acc, it) => acc + (Number(it.price) || 0) * (Number(it.quantity) || 0),
       0
     );
+
+    const safeIva = typeof data.iva === "number" ? Math.max(0, data.iva) : 0;
+    const safeService = typeof data.serviceCharge === "number" ? Math.max(0, data.serviceCharge) : 0;
+    const safeDelivery = typeof data.deliveryCost === "number" ? Math.max(0, data.deliveryCost) : 0;
+    const safeDeposit = typeof data.depositDiscount === "number" ? Math.max(0, data.depositDiscount) : 0;
+    const computedTotal = Math.max(0, Math.round((subtotal + safeIva + safeService + safeDelivery - safeDeposit) * 100) / 100);
+    const finalTotal = typeof data.total === "number" && data.total >= 0 ? data.total : computedTotal;
 
     const result = await prisma.$transaction(async (tx) => {
       // 1. Validar existencias de stock estricto
@@ -366,12 +432,17 @@ export async function processCajaSaleAction(
           cashShiftId: activeShift?.id || null,
           tableName: data.tableName?.trim() || `Caja POS (${data.paymentMethod})`,
           customerName: data.customerName?.trim() || `Venta Directa (${data.paymentMethod})`,
+          customerPhone: data.customerPhone?.trim() || null,
+          customerAddress: data.customerAddress?.trim() || null,
+          deliveryCost: safeDelivery,
+          depositDiscount: safeDeposit,
+          reservationId: data.reservationId?.trim() || null,
           status: "COMPLETED",
           subtotal,
-          iva: 0.0,
-          serviceCharge: 0.0,
+          iva: safeIva,
+          serviceCharge: safeService,
           tip: 0.0,
-          total: subtotal,
+          total: finalTotal,
           paymentMethod: data.paymentMethod,
           isTest: isTestSale,
           items: {
@@ -400,16 +471,16 @@ export async function processCajaSaleAction(
             else cardSum += amt;
           });
         } else {
-          if (data.paymentMethod === "EFECTIVO") cashSum = subtotal;
-          else if (data.paymentMethod === "DEUNA") deunaSum = subtotal;
-          else if (data.paymentMethod === "TRANSFERENCIA") transferSum = subtotal;
-          else cardSum = subtotal;
+          if (data.paymentMethod === "EFECTIVO") cashSum = finalTotal;
+          else if (data.paymentMethod === "DEUNA") deunaSum = finalTotal;
+          else if (data.paymentMethod === "TRANSFERENCIA") transferSum = finalTotal;
+          else cardSum = finalTotal;
         }
 
         await tx.cashShift.update({
           where: { id: activeShift.id },
           data: {
-            totalSales: { increment: subtotal },
+            totalSales: { increment: finalTotal },
             totalCash: { increment: cashSum },
             expectedCash: { increment: cashSum },
             totalDeuna: { increment: deunaSum },
@@ -417,6 +488,37 @@ export async function processCajaSaleAction(
             totalCard: { increment: cardSum },
           },
         });
+      }
+
+      // Sincronizar con CRM Customer si se suministró teléfono
+      if (data.customerPhone) {
+        const cleanPhone = data.customerPhone.trim();
+        const existingCust = await tx.customer.findFirst({
+          where: { restaurantId, phone: cleanPhone },
+          select: { id: true, totalOrders: true, totalSpent: true },
+        });
+        if (existingCust) {
+          await tx.customer.update({
+            where: { id: existingCust.id },
+            data: {
+              name: data.customerName?.trim() || undefined,
+              address: data.customerAddress?.trim() || undefined,
+              totalOrders: { increment: 1 },
+              totalSpent: { increment: finalTotal },
+            },
+          });
+        } else {
+          await tx.customer.create({
+            data: {
+              restaurantId,
+              name: data.customerName?.trim() || "Cliente",
+              phone: cleanPhone,
+              address: data.customerAddress?.trim() || null,
+              totalOrders: 1,
+              totalSpent: finalTotal,
+            },
+          });
+        }
       }
 
       // 3. Descontar Stock y marcar agotado si llega a 0
@@ -476,6 +578,22 @@ export async function processCajaSaleAction(
           [result.orderId, it.name, it.quantity, it.price]
         );
       }
+
+      if (data.reservationId) {
+        try {
+          if ((prisma as any)?.tableReservation) {
+            await (prisma as any).tableReservation.update({
+              where: { id: data.reservationId },
+              data: {
+                status: "COMPLETED",
+                usedInOrderId: result.orderId,
+              },
+            });
+          }
+        } catch (resErr) {
+          console.warn("Error updating reservation status in processCajaSaleAction:", resErr);
+        }
+      }
     } catch (pgErr) {
       console.error("Error sincronizando venta Caja POS a PG pedidos:", pgErr);
     }
@@ -530,6 +648,8 @@ export async function settleOrderInCashShiftAction(
     total: number;
     paymentMethod: "EFECTIVO" | "DEUNA" | "PAYPHONE" | "TARJETA" | "TRANSFERENCIA";
     customerName?: string | null;
+    depositDiscount?: number;
+    reservationId?: string;
     splitDetails?: SplitPaymentDetail[];
   }
 ) {
@@ -573,6 +693,8 @@ export async function settleOrderInCashShiftAction(
         data: {
           status: "COMPLETED",
           paymentMethod: data.paymentMethod,
+          ...(data.depositDiscount !== undefined ? { depositDiscount: data.depositDiscount } : {}),
+          ...(data.reservationId ? { reservationId: data.reservationId } : {}),
         },
       });
     } catch {}
@@ -647,6 +769,23 @@ export async function settleOrderInCashShiftAction(
           });
         }
       } catch {}
+    }
+
+    // 5.b. Si vino una reserva asociada, marcarla como completada y asociar la orden
+    if (data.reservationId) {
+      try {
+        if ((prisma as any)?.tableReservation) {
+          await (prisma as any).tableReservation.update({
+            where: { id: data.reservationId },
+            data: {
+              status: "COMPLETED",
+              usedInOrderId: data.orderId,
+            },
+          });
+        }
+      } catch (resErr) {
+        console.warn("Error updating reservation status in settleOrderInCashShiftAction:", resErr);
+      }
     }
 
     // 6. Notificar a través de Socket.IO para actualizar pantallas de meseros y cocina
