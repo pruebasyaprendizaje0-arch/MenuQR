@@ -158,7 +158,11 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${outfit.variable} ${playfair.variable} dark scroll-smooth`}>
+    <html
+      lang="es"
+      data-scroll-behavior="smooth"
+      className={`${geistSans.variable} ${geistMono.variable} ${outfit.variable} ${playfair.variable} dark scroll-smooth`}
+    >
       <head>
         <script
           type="application/ld+json"
