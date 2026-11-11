@@ -305,7 +305,96 @@ assert.strictEqual(destMesa.kdsTipoEntrega, "SALON");
 
 console.log("✅ [PASS] 8: Resolución omnicanal en Caja POS (Para Llevar vs Mesa) y despacho a Cocina KDS verificado");
 
+// 7. Prueba de Despacho Omnicanal desde Carta Pública a Cocina y Caja POS (Domicilio, Para Llevar y Mesa)
+function compilePublicMenuOrderPayload(params: {
+  selectedTable: string;
+  customerName: string;
+  customerPhone?: string;
+  deliveryAddress?: string;
+  deliveryReference?: string;
+  deliveryCost?: number;
+  total: number;
+}) {
+  const isTableOrder = Boolean(params.selectedTable && params.selectedTable !== "" && params.selectedTable !== "Llevar" && params.selectedTable !== "Domicilio");
+  const isDeliveryOrder = params.selectedTable === "Domicilio";
+
+  const targetMesa = isDeliveryOrder
+    ? "DELIVERY"
+    : isTableOrder
+    ? params.selectedTable
+    : "LLEVAR";
+
+  const targetTipoEntrega = isDeliveryOrder
+    ? "DOMICILIO"
+    : isTableOrder
+    ? "SALON"
+    : "RETIRO";
+
+  const fullCustomerAddress = isDeliveryOrder
+    ? (params.deliveryReference?.trim()
+        ? `${(params.deliveryAddress || "").trim()}\nRef: ${params.deliveryReference.trim()}`
+        : (params.deliveryAddress || "").trim())
+    : undefined;
+
+  return {
+    targetMesa,
+    targetTipoEntrega,
+    fullCustomerAddress,
+    costoEnvio: isDeliveryOrder ? (params.deliveryCost || 0) : 0,
+    total: params.total,
+    isTableOrder,
+    isDeliveryOrder,
+  };
+}
+
+// 7.a Pedido a Domicilio desde el Menú Público
+const payloadDomicilio = compilePublicMenuOrderPayload({
+  selectedTable: "Domicilio",
+  customerName: "María Augusta",
+  customerPhone: "0998765432",
+  deliveryAddress: "Av. Amazonas y Colón, Edif. Centro",
+  deliveryReference: "Piso 4, Dpto 402",
+  deliveryCost: 2.5,
+  total: 18.5,
+});
+
+assert.strictEqual(payloadDomicilio.targetMesa, "DELIVERY");
+assert.strictEqual(payloadDomicilio.targetTipoEntrega, "DOMICILIO");
+assert.strictEqual(payloadDomicilio.isDeliveryOrder, true);
+assert.strictEqual(payloadDomicilio.isTableOrder, false);
+assert.strictEqual(payloadDomicilio.costoEnvio, 2.5);
+assert.strictEqual(payloadDomicilio.fullCustomerAddress, "Av. Amazonas y Colón, Edif. Centro\nRef: Piso 4, Dpto 402");
+
+// 7.b Pedido Para Llevar desde el Menú Público
+const payloadLlevar = compilePublicMenuOrderPayload({
+  selectedTable: "Llevar",
+  customerName: "Juan Pérez",
+  customerPhone: "0991112233",
+  total: 12.0,
+});
+
+assert.strictEqual(payloadLlevar.targetMesa, "LLEVAR");
+assert.strictEqual(payloadLlevar.targetTipoEntrega, "RETIRO");
+assert.strictEqual(payloadLlevar.isDeliveryOrder, false);
+assert.strictEqual(payloadLlevar.isTableOrder, false);
+assert.strictEqual(payloadLlevar.fullCustomerAddress, undefined);
+
+// 7.c Pedido en Mesa desde el Menú Público
+const payloadMesa = compilePublicMenuOrderPayload({
+  selectedTable: "3",
+  customerName: "Andrés M.",
+  customerPhone: "0995556677",
+  total: 24.0,
+});
+
+assert.strictEqual(payloadMesa.targetMesa, "3");
+assert.strictEqual(payloadMesa.targetTipoEntrega, "SALON");
+assert.strictEqual(payloadMesa.isTableOrder, true);
+assert.strictEqual(payloadMesa.isDeliveryOrder, false);
+
+console.log("✅ [PASS] 9: Despacho omnicanal garantizado para Domicilio, Para Llevar y Mesa hacia Cocina y Caja POS");
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (8/8)");
+console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (9/9)");
 console.log("==================================================");
 

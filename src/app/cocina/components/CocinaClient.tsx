@@ -54,6 +54,9 @@ interface Pedido {
   estado: "nuevo" | "en_cocina" | "listo" | "por_pagar" | "pagado" | "cancelado";
   camarero_id?: string;
   camarero_nombre?: string;
+  cliente_nombre?: string;
+  cliente_telefono?: string;
+  metadata?: any;
   total: number;
   created_at: string;
   items: PedidoItem[];
@@ -699,6 +702,75 @@ export function CocinaClient({
 
   const isConnected = isLiveConnected || socketConnected;
 
+  const renderOrderTitle = (pedido: Pedido) => {
+    const mesaStr = (pedido.mesa || "").trim().toUpperCase();
+    let meta: any = {};
+    try {
+      meta = typeof pedido.metadata === "string" ? JSON.parse(pedido.metadata) : (pedido.metadata || {});
+    } catch {}
+
+    const isDelivery =
+      mesaStr === "DELIVERY" ||
+      mesaStr === "DOMICILIO" ||
+      meta?.tipo_entrega === "DOMICILIO" ||
+      meta?.tipo_pedido === "delivery";
+
+    const isLlevar =
+      mesaStr === "LLEVAR" ||
+      mesaStr === "RETIRO" ||
+      mesaStr === "TAKEAWAY" ||
+      meta?.tipo_entrega === "RETIRO" ||
+      meta?.tipo_pedido === "llevar";
+
+    if (isDelivery) {
+      return (
+        <div>
+          <span className="text-xl font-black text-amber-400 tracking-tight flex items-center gap-1.5">
+            🛵 Domicilio
+          </span>
+          <div className="flex items-center space-x-1.5 text-xs text-slate-300 mt-0.5">
+            <User className="w-3 h-3 text-amber-400/80" />
+            <span className="font-semibold text-white">{pedido.cliente_nombre || "Cliente Domicilio"}</span>
+            {pedido.cliente_telefono && (
+              <span className="text-slate-400 font-mono text-[11px]">({pedido.cliente_telefono})</span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (isLlevar) {
+      return (
+        <div>
+          <span className="text-xl font-black text-sky-400 tracking-tight flex items-center gap-1.5">
+            🛍️ Para Llevar
+          </span>
+          <div className="flex items-center space-x-1.5 text-xs text-slate-300 mt-0.5">
+            <User className="w-3 h-3 text-sky-400/80" />
+            <span className="font-semibold text-white">{pedido.cliente_nombre || "Cliente Llevar"}</span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div>
+        <span className="text-xl font-black text-white tracking-tight">Mesa {pedido.mesa}</span>
+        <div className="flex items-center space-x-1.5 text-xs text-slate-400 mt-0.5">
+          <User className="w-3 h-3 text-slate-500" />
+          <span>{pedido.camarero_nombre || pedido.cliente_nombre || "Camarero"}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const getOrderDoneLabel = (pedido: Pedido) => {
+    const mesaStr = (pedido.mesa || "").trim().toUpperCase();
+    if (mesaStr === "DELIVERY" || mesaStr === "DOMICILIO") return "Listo para repartidor";
+    if (mesaStr === "LLEVAR" || mesaStr === "RETIRO" || mesaStr === "TAKEAWAY") return "Listo para entrega";
+    return "Listo en mesa";
+  };
+
   // Si se requiere PIN de seguridad y la app aún no ha completado el montaje del cliente (SSR / Hydration safe)
   if (kitchenPinRequired && !isMounted) {
     return (
@@ -1133,14 +1205,8 @@ export function CocinaClient({
                   className="bg-slate-950 rounded-xl p-4 border-2 border-rose-500/60 shadow-lg shadow-rose-950/20 hover:border-rose-400 transition"
                 >
                   <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2.5 mb-2.5">
-                    <div>
-                      <span className="text-xl font-black text-white tracking-tight">Mesa {pedido.mesa}</span>
-                      <div className="flex items-center space-x-1.5 text-xs text-slate-400 mt-0.5">
-                        <User className="w-3 h-3 text-slate-500" />
-                        <span>{pedido.camarero_nombre || "Camarero"}</span>
-                      </div>
-                    </div>
-                    <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-rose-300 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800">
+                    {renderOrderTitle(pedido)}
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-rose-300 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800 shrink-0">
                       <Clock className="w-3 h-3" />
                       <span>{calcularHaceMinutos(pedido.created_at)}</span>
                     </span>
@@ -1242,14 +1308,8 @@ export function CocinaClient({
                   className="bg-slate-950 rounded-xl p-4 border-2 border-amber-500/50 shadow-lg shadow-amber-950/20 hover:border-amber-400 transition"
                 >
                   <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2.5 mb-2.5">
-                    <div>
-                      <span className="text-xl font-black text-white tracking-tight">Mesa {pedido.mesa}</span>
-                      <div className="flex items-center space-x-1.5 text-xs text-slate-400 mt-0.5">
-                        <User className="w-3 h-3 text-slate-500" />
-                        <span>{pedido.camarero_nombre || "Camarero"}</span>
-                      </div>
-                    </div>
-                    <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800">
+                    {renderOrderTitle(pedido)}
+                    <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800 shrink-0">
                       <Clock className="w-3 h-3" />
                       <span>{calcularHaceMinutos(pedido.created_at)}</span>
                     </span>
@@ -1351,16 +1411,10 @@ export function CocinaClient({
                   className="bg-slate-950 rounded-xl p-4 border border-emerald-600/50 opacity-90 hover:opacity-100 transition shadow-lg shadow-emerald-950/10"
                 >
                   <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2 mb-2">
-                    <div>
-                      <span className="text-xl font-black text-white tracking-tight">Mesa {pedido.mesa}</span>
-                      <div className="flex items-center space-x-1.5 text-xs text-slate-400 mt-0.5">
-                        <User className="w-3 h-3 text-slate-500" />
-                        <span>{pedido.camarero_nombre || "Camarero"}</span>
-                      </div>
-                    </div>
-                    <span className="bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 font-bold text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1">
+                    {renderOrderTitle(pedido)}
+                    <span className="bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 font-bold text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                       <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      <span>Listo en mesa</span>
+                      <span>{getOrderDoneLabel(pedido)}</span>
                     </span>
                   </div>
 

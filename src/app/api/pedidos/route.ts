@@ -423,9 +423,22 @@ export async function POST(req: NextRequest) {
       // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
       // =========================================================================
       if (vertical === "menuqr" && !isCatalogOrder) {
-        const rawMesa = mesa ? String(mesa).trim() : "Delivery";
-        const cleanMesa = rawMesa === "Delivery" ? "Delivery" : rawMesa.replace(/^(mesa\s*#?|#)/i, "").trim();
-        const mesaStr = rawMesa === "Delivery" ? "Delivery" : cleanMesa;
+        const isDeliveryReq =
+          String(mesa || "").toUpperCase().trim() === "DELIVERY" ||
+          String(mesa || "").toUpperCase().trim() === "DOMICILIO" ||
+          String(tipo_entrega || "").toUpperCase().trim() === "DOMICILIO" ||
+          String(metodo_entrega || "").toUpperCase().trim() === "DOMICILIO";
+
+        const isLlevarReq =
+          String(mesa || "").toUpperCase().trim() === "LLEVAR" ||
+          String(mesa || "").toUpperCase().trim() === "RETIRO" ||
+          String(mesa || "").toUpperCase().trim() === "TAKEAWAY" ||
+          String(mesa || "").toUpperCase().trim() === "MOSTRADOR" ||
+          String(tipo_entrega || "").toUpperCase().trim() === "RETIRO";
+
+        const rawMesa = mesa ? String(mesa).trim() : (isDeliveryReq ? "DELIVERY" : "Delivery");
+        const cleanMesa = rawMesa.replace(/^(mesa\s*#?|#)/i, "").trim();
+        const mesaStr = isDeliveryReq ? "DELIVERY" : (isLlevarReq ? "LLEVAR" : (cleanMesa || "1"));
 
         if (!Array.isArray(items) || items.length === 0) {
           await client.query("ROLLBACK");
@@ -456,18 +469,22 @@ export async function POST(req: NextRequest) {
         }
 
         // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
+        // Canales como Domicilio y Para Llevar SIEMPRE generan comandas independientes
+        const isNonTableChannel = isDeliveryReq || isLlevarReq;
         const mesaVariants = getMesaVariants(rawMesa);
         const searchIds = Array.from(new Set([resolvedNegocioId, restaurantPrismaId].filter(Boolean)));
-        const { rows: existingOrders } = await pool.query(
-          `SELECT * FROM pedidos 
+        const { rows: existingOrders } = isNonTableChannel
+          ? { rows: [] }
+          : await pool.query(
+              `SELECT * FROM pedidos 
            WHERE (negocio_id = ANY($1::uuid[])${businessSlug ? " OR negocio_id IN (SELECT id FROM negocios WHERE slug = $3)" : ""})
              AND LOWER(TRIM(mesa)) = ANY($2::text[])
              AND estado NOT IN ('pagado', 'cancelado')
            ORDER BY created_at DESC LIMIT 1`,
-          businessSlug ? [searchIds, mesaVariants, businessSlug] : [searchIds, mesaVariants]
-        );
+              businessSlug ? [searchIds, mesaVariants, businessSlug] : [searchIds, mesaVariants]
+            );
 
-        if (existingOrders.length > 0 && mesaStr !== "Delivery") {
+        if (existingOrders.length > 0 && !isNonTableChannel) {
           // --- MESA ABIERTA: Añadir items al pedido existente ---
           const currentOrder = existingOrders[0];
           createdOrderId = currentOrder.id;
@@ -559,11 +576,17 @@ export async function POST(req: NextRequest) {
           });
         } else {
           // --- NUEVO PEDIDO RESTAURANTE ---
+          let itemsTotal = 0;
           for (const item of items) {
             const cantidad = parseInt(item.cantidad) || 1;
             const precio = parseFloat(item.precio) || 0;
-            orderTotal += cantidad * precio;
+            itemsTotal += cantidad * precio;
           }
+
+          const parsedDeliveryCost = parseFloat(String(costo_envio)) || 0;
+          orderTotal = typeof total === "number" && total > 0
+            ? total
+            : itemsTotal + parsedDeliveryCost;
 
           let finalCamareroId = camarero_id || null;
           if (!finalCamareroId) {
@@ -575,8 +598,11 @@ export async function POST(req: NextRequest) {
           }
 
           const metaObj = {
-            tipo_pedido: mesaStr === "Delivery" ? "delivery" : "mesa",
+            tipo_pedido: isDeliveryReq ? "delivery" : isLlevarReq ? "llevar" : "mesa",
+            tipo_entrega: isDeliveryReq ? "DOMICILIO" : isLlevarReq ? "RETIRO" : "SALON",
             cliente_direccion: cliente_direccion || null,
+            costo_envio: parsedDeliveryCost,
+            notas_entrega: notas_entrega || null,
           };
 
           const { rows: newOrderRows } = await client.query(
@@ -630,20 +656,28 @@ export async function POST(req: NextRequest) {
           emitNuevoPedido(resolvedNegocioId, responseOrder);
           void syncSinglePedidoToPrisma(createdOrderId, resolvedNegocioId);
 
+          const channelLabel = isDeliveryReq 
+            ? "🛵 Domicilio" 
+            : isLlevarReq 
+            ? "🛍️ Para Llevar" 
+            : (mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr);
+
           // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
           void sendTelegramAlert({
-            mensaje: `🍽️ Nuevo pedido en ${mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr} (${businessName}) por $${orderTotal.toFixed(2)} (${insertedItems.length} platos): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
+            mensaje: `🍽️ Nuevo pedido [${channelLabel}] (${businessName}) por $${orderTotal.toFixed(2)} (${insertedItems.length} platos): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
             cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente",
             negocio: businessName,
           });
 
           whatsappMessageText = `*🍽️ Nuevo Pedido - MenuQR Pro*\n` +
             `*Restaurante:* ${businessName}\n` +
-            `*Lugar:* ${mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr}\n` +
+            `*Destino:* ${channelLabel}\n` +
             `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
             (cliente_telefono ? `*Teléfono:* ${cliente_telefono}\n` : "") +
+            (cliente_direccion ? `*Dirección:* ${cliente_direccion}\n` : "") +
             `\n*Detalle del pedido:*\n` +
             insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)})`).join("\n") +
+            (parsedDeliveryCost > 0 ? `\n*Costo de Envío:* $${parsedDeliveryCost.toFixed(2)}` : "") +
             `\n\n*Total a pagar:* $${orderTotal.toFixed(2)}`;
 
           const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");

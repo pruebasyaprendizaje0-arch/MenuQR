@@ -366,14 +366,25 @@ export function CajaClient({
 
     activeOrders.forEach((o) => {
       const mesaStr = (o.mesa || "").trim().toUpperCase();
+      let meta: any = {};
+      try {
+        meta = typeof (o as any).metadata === "string" ? JSON.parse((o as any).metadata) : ((o as any).metadata || {});
+      } catch {}
+
       const isDelivery =
         mesaStr === "DELIVERY" ||
+        mesaStr === "DOMICILIO" ||
         (o as any).tipo_entrega === "DOMICILIO" ||
+        meta?.tipo_entrega === "DOMICILIO" ||
+        meta?.tipo_pedido === "delivery" ||
         (o as any).vertical === "ctalo";
       const isLlevar =
         mesaStr === "LLEVAR" ||
         mesaStr === "TAKEAWAY" ||
-        (o as any).tipo_entrega === "RETIRO";
+        mesaStr === "RETIRO" ||
+        (o as any).tipo_entrega === "RETIRO" ||
+        meta?.tipo_entrega === "RETIRO" ||
+        meta?.tipo_pedido === "llevar";
 
       if (isDelivery) {
         domicilio.push(o);
@@ -1607,25 +1618,44 @@ export function CajaClient({
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 overflow-y-auto max-h-[560px]">
-                    {domicilioOrders.map((order) => (
-                      <div
-                        key={order.id}
-                        onClick={() => handleSelectActiveOrder(order)}
-                        className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-amber-500/60 cursor-pointer transition flex flex-col justify-between gap-3"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <span className="font-black text-base text-white">🛵 {order.cliente_nombre || "Cliente"}</span>
-                            <span className="text-xs text-slate-400 block">{order.cliente_telefono || "Domicilio"}</span>
+                    {domicilioOrders.map((order) => {
+                      let meta: any = {};
+                      try {
+                        meta = typeof (order as any).metadata === "string" ? JSON.parse((order as any).metadata) : ((order as any).metadata || {});
+                      } catch {}
+                      const direccion = meta?.cliente_direccion || "";
+
+                      return (
+                        <div
+                          key={order.id}
+                          onClick={() => handleSelectActiveOrder(order)}
+                          className="p-4 rounded-2xl bg-slate-950 border border-slate-800 hover:border-amber-500/60 cursor-pointer transition flex flex-col justify-between gap-3 shadow-lg shadow-black/40"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <span className="font-black text-base text-white flex items-center gap-1.5 truncate">
+                                🛵 {order.cliente_nombre || "Cliente Domicilio"}
+                              </span>
+                              <span className="text-xs text-slate-400 block mt-0.5 font-mono">
+                                📞 {order.cliente_telefono || "Sin teléfono"}
+                              </span>
+                              {direccion && (
+                                <p className="text-[11px] text-amber-300/80 line-clamp-2 mt-1 bg-amber-950/20 p-1.5 rounded-lg border border-amber-900/30">
+                                  📍 {direccion}
+                                </p>
+                              )}
+                            </div>
+                            <span className="text-xl font-mono font-black text-amber-400 shrink-0">
+                              ${order.total.toFixed(2)}
+                            </span>
                           </div>
-                          <span className="text-xl font-mono font-black text-amber-400">${order.total.toFixed(2)}</span>
+                          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs text-amber-400 font-bold">
+                            <span>{order.items.length} plato(s) / item(s)</span>
+                            <span className="hover:underline">Cobrar / Despachar →</span>
+                          </div>
                         </div>
-                        <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-amber-400 font-bold">
-                          <span>{order.items.length} item(s)</span>
-                          <span>Liquidar con Repartidor →</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

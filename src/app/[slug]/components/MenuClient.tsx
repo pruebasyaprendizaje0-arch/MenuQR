@@ -1541,39 +1541,56 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       }
     } catch {}
 
-    // Si es pedido en mesa, sincronizar con el KDS de cocina / mesero en PostgreSQL
-    if (isTableOrder) {
-      try {
-        const kdsRes = await fetch("/api/pedidos", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            negocio_id: restaurant.id,
-            slug: restaurant.slug,
-            mesa: selectedTable,
-            skip_stock_deduction: true, // createOrderAction ya dedució atómicamente el stock
-            items: cart.map((i) => ({
-              dishId: i.dish.id,
-              id: i.dish.id,
-              nombre: i.dish.name,
-              cantidad: i.quantity,
-              precio: i.unitPrice ?? i.dish.price,
-              notas: i.modifiersNotes || null,
-            })),
-            cliente_nombre: customerName.trim(),
-            cliente_telefono: customerPhone.trim() || null,
-          }),
-        });
-        const kdsData = await kdsRes.json();
-        if (kdsRes.ok && kdsData.ok && kdsData.pedido) {
-          setLiveTableOrder(kdsData.pedido);
-        } else if (!kdsRes.ok || !kdsData.ok) {
-          console.warn("Aviso KDS /api/pedidos:", kdsData?.error);
-        }
-      } catch (kdsErr) {
-        console.warn("Error enviando a KDS /api/pedidos:", kdsErr);
-      }
+    // Sincronizar el pedido con el KDS de cocina y Caja POS en PostgreSQL (Mesas, Domicilio o Para Llevar)
+    const targetMesa = isDeliveryOrder
+      ? "DELIVERY"
+      : isTableOrder
+      ? selectedTable
+      : "LLEVAR";
+    const targetTipoEntrega = isDeliveryOrder
+      ? "DOMICILIO"
+      : isTableOrder
+      ? "SALON"
+      : "RETIRO";
 
+    try {
+      const kdsRes = await fetch("/api/pedidos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          negocio_id: restaurant.id,
+          slug: restaurant.slug,
+          mesa: targetMesa,
+          tipo_entrega: targetTipoEntrega,
+          skip_stock_deduction: true, // createOrderAction ya dedució atómicamente el stock
+          items: cart.map((i) => ({
+            dishId: i.dish.id,
+            id: i.dish.id,
+            nombre: i.dish.name,
+            cantidad: i.quantity,
+            precio: i.unitPrice ?? i.dish.price,
+            notas: i.modifiersNotes || null,
+          })),
+          cliente_nombre: customerName.trim(),
+          cliente_telefono: customerPhone.trim() || null,
+          cliente_direccion: fullCustomerAddress || null,
+          costo_envio: deliveryCost || 0,
+          total: total,
+        }),
+      });
+      const kdsData = await kdsRes.json();
+      if (kdsRes.ok && kdsData.ok && kdsData.pedido) {
+        if (isTableOrder) {
+          setLiveTableOrder(kdsData.pedido);
+        }
+      } else if (!kdsRes.ok || !kdsData.ok) {
+        console.warn("Aviso KDS /api/pedidos:", kdsData?.error);
+      }
+    } catch (kdsErr) {
+      console.warn("Error enviando a KDS /api/pedidos:", kdsErr);
+    }
+
+    if (isTableOrder) {
       // Persistir sesión de mesa abierta (Opción 3)
       const sessionData = {
         tableName: selectedTable,
