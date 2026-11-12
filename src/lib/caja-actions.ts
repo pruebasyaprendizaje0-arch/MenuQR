@@ -553,7 +553,7 @@ export async function processCajaSaleAction(
         }
       }
 
-      return { orderId: order.id, orderNumber: order.orderNumber, total: subtotal, updatedDishes, isTestSale };
+      return { orderId: order.id, orderNumber: order.orderNumber, total: finalTotal, updatedDishes, isTestSale };
     });
 
     // Sincronizar venta de Caja POS a la tabla de PostgreSQL pedidos para visibilidad inmediata en módulo mesero
@@ -686,23 +686,24 @@ export async function settleOrderInCashShiftAction(
       );
     }
 
-    // 3. Si existe en el modelo Order de Prisma, actualizarlo también
+    // 3. Vincular y registrar la venta en el Turno de Caja (CashShift) activo
+    const activeShift = await prisma.cashShift.findFirst({
+      where: { restaurantId, status: "OPEN" },
+    });
+
+    // 4. Si existe en el modelo Order de Prisma, actualizarlo y asociarlo al turno
     try {
       await prisma.order.updateMany({
         where: { id: data.orderId },
         data: {
           status: "COMPLETED",
           paymentMethod: data.paymentMethod,
+          cashShiftId: activeShift?.id || null,
           ...(data.depositDiscount !== undefined ? { depositDiscount: data.depositDiscount } : {}),
           ...(data.reservationId ? { reservationId: data.reservationId } : {}),
         },
       });
     } catch {}
-
-    // 4. Vincular y registrar la venta en el Turno de Caja (CashShift) activo
-    const activeShift = await prisma.cashShift.findFirst({
-      where: { restaurantId, status: "OPEN" },
-    });
 
     if (activeShift) {
       const deltaTotal = totalToSettle;
@@ -959,6 +960,34 @@ export async function getActiveCashShift(
       else liveCashSales += orderTotal;
     }
 
+    // Reconciliación robusta: priorizar los acumuladores atómicos del turno que soportan Split Pay,
+    // garantizando que nunca se descarte una venta registrada ni se desfiguren transferencias/tarjetas.
+    const dbCash = Number(shift.totalCash) || 0;
+    const dbCard = Number(shift.totalCard) || 0;
+    const dbTransfer = Number(shift.totalTransfer) || 0;
+    const dbDeuna = Number(shift.totalDeuna) || 0;
+    const dbSales = Number(shift.totalSales) || 0;
+
+    let resolvedCashSales = dbCash;
+    let resolvedCardSales = dbCard;
+    let resolvedTransferSales = dbTransfer;
+    let resolvedDeunaSales = dbDeuna;
+    let resolvedTotalSales = dbSales;
+
+    if (resolvedTotalSales === 0 && liveTotalSales > 0) {
+      resolvedCashSales = liveCashSales;
+      resolvedCardSales = liveCardSales;
+      resolvedTransferSales = liveTransferSales;
+      resolvedDeunaSales = liveDeunaSales;
+      resolvedTotalSales = liveTotalSales;
+    } else if (liveTotalSales > resolvedTotalSales) {
+      resolvedTotalSales = liveTotalSales;
+      resolvedCashSales += Math.max(0, liveCashSales - dbCash);
+      resolvedCardSales += Math.max(0, liveCardSales - dbCard);
+      resolvedTransferSales += Math.max(0, liveTransferSales - dbTransfer);
+      resolvedDeunaSales += Math.max(0, liveDeunaSales - dbDeuna);
+    }
+
     let cashInTotal = 0;
     let cashOutTotal = 0;
     for (const m of (shift.movements || [])) {
@@ -968,16 +997,16 @@ export async function getActiveCashShift(
     }
 
     const initialCash = Number(shift.initialCash) || 0;
-    const computedExpectedCash = Math.round((initialCash + liveCashSales + cashInTotal - cashOutTotal) * 100) / 100;
+    const computedExpectedCash = Math.round((initialCash + resolvedCashSales + cashInTotal - cashOutTotal) * 100) / 100;
 
     return {
       success: true,
       shift: serializeShift(shift, {
-        totalCash: Math.round(liveCashSales * 100) / 100,
-        totalCard: Math.round(liveCardSales * 100) / 100,
-        totalTransfer: Math.round(liveTransferSales * 100) / 100,
-        totalDeuna: Math.round(liveDeunaSales * 100) / 100,
-        totalSales: Math.round(liveTotalSales * 100) / 100,
+        totalCash: Math.round(resolvedCashSales * 100) / 100,
+        totalCard: Math.round(resolvedCardSales * 100) / 100,
+        totalTransfer: Math.round(resolvedTransferSales * 100) / 100,
+        totalDeuna: Math.round(resolvedDeunaSales * 100) / 100,
+        totalSales: Math.round(resolvedTotalSales * 100) / 100,
         expectedCash: computedExpectedCash,
       }),
     };
@@ -1182,32 +1211,59 @@ export async function closeCashShift(params: {
     const auth = await verifyRestaurantOwnership(shift.restaurantId);
     if (!auth.authorized) return { success: false, error: auth.error };
 
-    // 1. Totales de ventas asociadas a este turno
-    let totalCashSales = 0;
-    let totalCardSales = 0;
-    let totalTransferSales = 0;
-    let totalDeunaSales = 0;
-    let totalSales = 0;
+    // 1. Totales de ventas asociadas a este turno (Live Order scan)
+    let liveCashSales = 0;
+    let liveCardSales = 0;
+    let liveTransferSales = 0;
+    let liveDeunaSales = 0;
+    let liveTotalSales = 0;
 
     for (const order of shift.orders) {
       // Solo sumamos órdenes no canceladas
       if (order.status === "CANCELLED") continue;
 
       const orderTotal = Number(order.total) || 0;
-      totalSales += orderTotal;
+      liveTotalSales += orderTotal;
 
       const pm = (order.paymentMethod || "").toUpperCase();
       if (pm.includes("EFECTIVO") || pm === "CASH") {
-        totalCashSales += orderTotal;
+        liveCashSales += orderTotal;
       } else if (pm.includes("TARJETA") || pm.includes("CARD") || pm.includes("PAYPHONE")) {
-        totalCardSales += orderTotal;
+        liveCardSales += orderTotal;
       } else if (pm.includes("TRANSFERENCIA") || pm.includes("TRANSFER")) {
-        totalTransferSales += orderTotal;
+        liveTransferSales += orderTotal;
       } else if (pm.includes("DEUNA")) {
-        totalDeunaSales += orderTotal;
+        liveDeunaSales += orderTotal;
       } else {
-        totalCashSales += orderTotal; // Default fallback
+        liveCashSales += orderTotal; // Default fallback
       }
+    }
+
+    // Reconciliación con acumuladores atómicos persistidos en el CashShift (soporte Split Pay y comandas)
+    const dbCash = Number(shift.totalCash) || 0;
+    const dbCard = Number(shift.totalCard) || 0;
+    const dbTransfer = Number(shift.totalTransfer) || 0;
+    const dbDeuna = Number(shift.totalDeuna) || 0;
+    const dbSales = Number(shift.totalSales) || 0;
+
+    let resolvedCashSales = dbCash;
+    let resolvedCardSales = dbCard;
+    let resolvedTransferSales = dbTransfer;
+    let resolvedDeunaSales = dbDeuna;
+    let resolvedTotalSales = dbSales;
+
+    if (resolvedTotalSales === 0 && liveTotalSales > 0) {
+      resolvedCashSales = liveCashSales;
+      resolvedCardSales = liveCardSales;
+      resolvedTransferSales = liveTransferSales;
+      resolvedDeunaSales = liveDeunaSales;
+      resolvedTotalSales = liveTotalSales;
+    } else if (liveTotalSales > resolvedTotalSales) {
+      resolvedTotalSales = liveTotalSales;
+      resolvedCashSales += Math.max(0, liveCashSales - dbCash);
+      resolvedCardSales += Math.max(0, liveCardSales - dbCard);
+      resolvedTransferSales += Math.max(0, liveTransferSales - dbTransfer);
+      resolvedDeunaSales += Math.max(0, liveDeunaSales - dbDeuna);
     }
 
     // 2. Totales de movimientos de caja chica
@@ -1220,7 +1276,7 @@ export async function closeCashShift(params: {
     }
 
     const initialCash = Number(shift.initialCash) || 0;
-    const expectedCash = Math.round((initialCash + totalCashSales + cashInTotal - cashOutTotal) * 100) / 100;
+    const expectedCash = Math.round((initialCash + resolvedCashSales + cashInTotal - cashOutTotal) * 100) / 100;
     const actualCash = Math.round((Number(params.actualCash) || 0) * 100) / 100;
     const difference = Math.round((actualCash - expectedCash) * 100) / 100;
 
@@ -1236,11 +1292,11 @@ export async function closeCashShift(params: {
         expectedCash,
         actualCash,
         difference,
-        totalCash: Math.round(totalCashSales * 100) / 100,
-        totalCard: Math.round(totalCardSales * 100) / 100,
-        totalTransfer: Math.round(totalTransferSales * 100) / 100,
-        totalDeuna: Math.round(totalDeunaSales * 100) / 100,
-        totalSales: Math.round(totalSales * 100) / 100,
+        totalCash: Math.round(resolvedCashSales * 100) / 100,
+        totalCard: Math.round(resolvedCardSales * 100) / 100,
+        totalTransfer: Math.round(resolvedTransferSales * 100) / 100,
+        totalDeuna: Math.round(resolvedDeunaSales * 100) / 100,
+        totalSales: Math.round(resolvedTotalSales * 100) / 100,
         notes: params.notes?.trim() || null,
       },
       include: {
@@ -1263,11 +1319,11 @@ export async function closeCashShift(params: {
         openedAt: updatedShift.openedAt.toISOString(),
         closedAt: now.toISOString(),
         initialCash,
-        totalCashSales: Math.round(totalCashSales * 100) / 100,
-        totalCardSales: Math.round(totalCardSales * 100) / 100,
-        totalTransferSales: Math.round(totalTransferSales * 100) / 100,
-        totalDeunaSales: Math.round(totalDeunaSales * 100) / 100,
-        totalSales: Math.round(totalSales * 100) / 100,
+        totalCashSales: Math.round(resolvedCashSales * 100) / 100,
+        totalCardSales: Math.round(resolvedCardSales * 100) / 100,
+        totalTransferSales: Math.round(resolvedTransferSales * 100) / 100,
+        totalDeunaSales: Math.round(resolvedDeunaSales * 100) / 100,
+        totalSales: Math.round(resolvedTotalSales * 100) / 100,
         cashInTotal: Math.round(cashInTotal * 100) / 100,
         cashOutTotal: Math.round(cashOutTotal * 100) / 100,
         expectedCash,

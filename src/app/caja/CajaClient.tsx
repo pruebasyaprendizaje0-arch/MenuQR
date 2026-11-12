@@ -1744,7 +1744,7 @@ export function CajaClient({
 
       const res = await processCajaSaleAction(restaurant.id, {
         items: itemsPayload,
-        paymentMethod: paymentMethod === "TRANSFERENCIA" ? "PAYPHONE" : paymentMethod,
+        paymentMethod: paymentMethod,
         customerName: effectiveCustomerName,
         customerPhone: cleanPhone || undefined,
         customerAddress: saleModality === "DOMICILIO" ? saleDeliveryAddress.trim() : undefined,

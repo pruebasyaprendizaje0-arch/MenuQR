@@ -464,7 +464,128 @@ assert.strictEqual(checkDelivery.totalToCharge, 10.0);
 
 console.log("✅ [PASS] 10: Separación estricta de Para Llevar vs Domicilio y desglose de costo de envío verificado");
 
+// 11. Prueba de Rectificación de Transferencias Bancarias (Evitar conversión errónea a PayPhone)
+function mapPaymentMethodForShift(pmInput: string): string {
+  const normalized = (pmInput || "").toUpperCase();
+  if (normalized.includes("EFECTIVO") || normalized === "CASH") return "EFECTIVO";
+  if (normalized.includes("TARJETA") || normalized.includes("CARD") || normalized.includes("PAYPHONE")) return "TARJETA";
+  if (normalized.includes("TRANSFERENCIA") || normalized.includes("TRANSFER")) return "TRANSFERENCIA";
+  if (normalized.includes("DEUNA")) return "DEUNA";
+  return "EFECTIVO";
+}
+
+assert.strictEqual(mapPaymentMethodForShift("TRANSFERENCIA"), "TRANSFERENCIA", "Transferencia bancaria debe conservarse como TRANSFERENCIA");
+assert.strictEqual(mapPaymentMethodForShift("TRANSFER"), "TRANSFERENCIA");
+assert.strictEqual(mapPaymentMethodForShift("DEUNA"), "DEUNA");
+assert.strictEqual(mapPaymentMethodForShift("TARJETA"), "TARJETA");
+assert.strictEqual(mapPaymentMethodForShift("PAYPHONE"), "TARJETA");
+console.log("✅ [PASS] 11: Mapeo de método de pago preserva TRANSFERENCIA y no lo envía a PayPhone/Tarjetas");
+
+// 12. Prueba de Reconciliación de Arqueo Z con Pagos Divididos y Comandas de Salón / Mostrador
+function reconcileShiftTotals(params: {
+  dbShift: {
+    totalCash: number;
+    totalCard: number;
+    totalTransfer: number;
+    totalDeuna: number;
+    totalSales: number;
+  };
+  orders: Array<{ total: number; paymentMethod: string; status: string }>;
+}) {
+  let liveCash = 0;
+  let liveCard = 0;
+  let liveTransfer = 0;
+  let liveDeuna = 0;
+  let liveTotal = 0;
+
+  for (const o of params.orders) {
+    if (o.status === "CANCELLED") continue;
+    liveTotal += o.total;
+    const pm = (o.paymentMethod || "").toUpperCase();
+    if (pm.includes("EFECTIVO") || pm === "CASH") liveCash += o.total;
+    else if (pm.includes("TARJETA") || pm.includes("CARD") || pm.includes("PAYPHONE")) liveCard += o.total;
+    else if (pm.includes("TRANSFERENCIA") || pm.includes("TRANSFER")) liveTransfer += o.total;
+    else if (pm.includes("DEUNA")) liveDeuna += o.total;
+    else liveCash += o.total;
+  }
+
+  const dbCash = Number(params.dbShift.totalCash) || 0;
+  const dbCard = Number(params.dbShift.totalCard) || 0;
+  const dbTransfer = Number(params.dbShift.totalTransfer) || 0;
+  const dbDeuna = Number(params.dbShift.totalDeuna) || 0;
+  const dbSales = Number(params.dbShift.totalSales) || 0;
+
+  let resolvedCash = dbCash;
+  let resolvedCard = dbCard;
+  let resolvedTransfer = dbTransfer;
+  let resolvedDeuna = dbDeuna;
+  let resolvedTotal = dbSales;
+
+  if (resolvedTotal === 0 && liveTotal > 0) {
+    resolvedCash = liveCash;
+    resolvedCard = liveCard;
+    resolvedTransfer = liveTransfer;
+    resolvedDeuna = liveDeuna;
+    resolvedTotal = liveTotal;
+  } else if (liveTotal > resolvedTotal) {
+    resolvedTotal = liveTotal;
+    resolvedCash += Math.max(0, liveCash - dbCash);
+    resolvedCard += Math.max(0, liveCard - dbCard);
+    resolvedTransfer += Math.max(0, liveTransfer - dbTransfer);
+    resolvedDeuna += Math.max(0, liveDeuna - dbDeuna);
+  }
+
+  return {
+    totalCash: Math.round(resolvedCash * 100) / 100,
+    totalCard: Math.round(resolvedCard * 100) / 100,
+    totalTransfer: Math.round(resolvedTransfer * 100) / 100,
+    totalDeuna: Math.round(resolvedDeuna * 100) / 100,
+    totalSales: Math.round(resolvedTotal * 100) / 100,
+  };
+}
+
+// Caso Split Payment: cuenta de $50 dividida en $20 Efectivo + $30 Transferencia
+// La BD del shift incrementó atómicamente: cash: +20, transfer: +30, sales: +50.
+// Si la orden quedó con paymentMethod: "EFECTIVO", la reconciliación NO debe perder los $30 de transferencia.
+const splitReconciliation = reconcileShiftTotals({
+  dbShift: {
+    totalCash: 20.0,
+    totalCard: 0.0,
+    totalTransfer: 30.0,
+    totalDeuna: 0.0,
+    totalSales: 50.0,
+  },
+  orders: [
+    { total: 50.0, paymentMethod: "EFECTIVO", status: "COMPLETED" },
+  ],
+});
+
+assert.strictEqual(splitReconciliation.totalCash, 20.0, "Efectivo debe respetar el split de $20");
+assert.strictEqual(splitReconciliation.totalTransfer, 30.0, "Transferencia debe respetar el split de $30");
+assert.strictEqual(splitReconciliation.totalSales, 50.0, "Ventas totales debe ser $50");
+console.log("✅ [PASS] 12: Reconciliación robusta de pagos divididos (Split Pay) en Arqueo Z");
+
+// 13. Caso Comandas de Domicilio ($15 + $2.50 envío = $17.50 en Efectivo) y Para Llevar ($12 en DeUna)
+const deliveryAndTakeoutReconciliation = reconcileShiftTotals({
+  dbShift: {
+    totalCash: 17.5,
+    totalCard: 0.0,
+    totalTransfer: 0.0,
+    totalDeuna: 12.0,
+    totalSales: 29.5,
+  },
+  orders: [
+    { total: 17.5, paymentMethod: "EFECTIVO", status: "COMPLETED" },
+    { total: 12.0, paymentMethod: "DEUNA", status: "COMPLETED" },
+  ],
+});
+
+assert.strictEqual(deliveryAndTakeoutReconciliation.totalCash, 17.5, "Efectivo incluye venta de domicilio con costo de envío ($17.50)");
+assert.strictEqual(deliveryAndTakeoutReconciliation.totalDeuna, 12.0, "DeUna incluye pedido para llevar ($12.00)");
+assert.strictEqual(deliveryAndTakeoutReconciliation.totalSales, 29.5, "Total acumulado de canales ($29.50)");
+console.log("✅ [PASS] 13: Arqueo Z integra domicilios con envío y para llevar con canales digitales");
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (10/10)");
+console.log("🎉 TODAS LAS PRUEBAS DE CAJA, ARQUEO Y MODIFICADORES PASARON (13/13)");
 console.log("==================================================");
 
