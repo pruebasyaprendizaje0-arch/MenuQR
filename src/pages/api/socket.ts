@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { Server as ServerIO } from "socket.io";
 import type { Server as NetServer } from "http";
 import type { Socket as NetSocket } from "net";
-import { setIO } from "@/lib/socket-server";
+import { setIO, getIO } from "@/lib/socket-server";
 
 export const config = {
   api: {
@@ -26,6 +26,14 @@ export default function SocketHandler(
   req: NextApiRequest,
   res: NextApiResponseWithSocket
 ) {
+  const existingIO = getIO();
+  if (existingIO) {
+    if (res.socket?.server && !res.socket.server.io) {
+      res.socket.server.io = existingIO;
+    }
+    return res.end();
+  }
+
   if (!res.socket?.server?.io) {
     console.log("[Socket.IO] Inicializando servidor Socket.IO...");
     const io = new ServerIO(res.socket.server as any, {

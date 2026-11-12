@@ -36,6 +36,7 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/public ./.next/standalone/public
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/server.js ./server.js
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
@@ -48,4 +49,4 @@ USER nextjs
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "for i in 1 2 3 4 5; do if npx prisma migrate deploy; then break; fi; if [ \"$i\" -eq 5 ]; then echo \"Database migration failed after 5 attempts\"; exit 1; fi; sleep 3; done; exec node .next/standalone/server.js"]
+CMD ["sh", "-c", "for i in 1 2 3 4 5; do if npx prisma migrate deploy; then break; fi; if [ \"$i\" -eq 5 ]; then echo \"Database migration failed after 5 attempts\"; exit 1; fi; sleep 3; done; exec node server.js"]

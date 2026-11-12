@@ -8,6 +8,15 @@ function logAuthError(context: string, error: any) {
   console.error(`Error en Auth (${context}):`, error);
 }
 
+function shouldSetSecureCookie(): boolean {
+  if (process.env.NODE_ENV !== "production") return false;
+  const appUrl = (process.env.APP_URL || process.env.NEXTAUTH_URL || "").toLowerCase();
+  if (appUrl.startsWith("http://localhost") || appUrl.startsWith("http://127.0.0.1")) {
+    return false;
+  }
+  return true;
+}
+
 // User session (SaaS Multi-tenant)
 export async function getUserSession() {
   try {
@@ -29,9 +38,10 @@ export async function setUserSession(userId: string, email: string, restaurantId
       ...(restaurantId ? { restaurantId } : {}) 
     });
     const cookieStore = await cookies();
+    const secure = shouldSetSecureCookie();
     cookieStore.set("session_token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure,
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 7, // 7 days
       path: "/",
@@ -39,7 +49,7 @@ export async function setUserSession(userId: string, email: string, restaurantId
     if (restaurantId) {
       cookieStore.set("active_restaurant_id", restaurantId, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure,
         sameSite: "lax",
         maxAge: 60 * 60 * 24 * 7,
         path: "/",
@@ -78,7 +88,7 @@ export async function refreshUserSession() {
     });
     cookieStore.set("session_token", freshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: shouldSetSecureCookie(),
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 7, // 7 days
       path: "/",
@@ -106,7 +116,7 @@ export async function setSuperAdminSession() {
     const cookieStore = await cookies();
     cookieStore.set("super_admin_session", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: shouldSetSecureCookie(),
       sameSite: "lax",
       maxAge: 60 * 60 * 24, // 1 day
       path: "/",

@@ -8,13 +8,31 @@ export interface AlertaSuperAdmin {
   cliente?: string;
 }
 
+function resolveSuperAdminWebhookUrl(): string | null {
+  const raw =
+    process.env.N8N_SUPERADMIN_WEBHOOK_URL ||
+    process.env.N8N_TELEGRAM_WEBHOOK_URL ||
+    "https://n8n.ubicame.cc/webhook/alertas-superadmin";
+
+  if (!raw || typeof raw !== "string") return null;
+  let clean = raw.trim();
+  if (!clean || clean.toLowerCase() === "disabled" || clean.toLowerCase() === "none") {
+    return null;
+  }
+
+  if (clean.includes("/webhook-test/")) {
+    clean = clean.replace("/webhook-test/", "/webhook/");
+  }
+
+  return clean;
+}
+
 export async function notificarSuperAdmin({
   mensaje,
   cliente = "Sistema Ubícame",
 }: AlertaSuperAdmin): Promise<void> {
-  const webhookUrl =
-    process.env.N8N_SUPERADMIN_WEBHOOK_URL ||
-    "https://n8n.ubicame.cc/webhook/alertas-superadmin";
+  const webhookUrl = resolveSuperAdminWebhookUrl();
+  if (!webhookUrl) return;
 
   try {
     // Despacho asíncrono no bloqueante (fire-and-forget)
@@ -22,9 +40,20 @@ export async function notificarSuperAdmin({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mensaje, cliente }),
-    }).catch((err) => console.error("[Telegram Alert Webhook Error]:", err));
+      signal: AbortSignal.timeout(3500),
+    })
+      .then((res) => {
+        if (!res.ok && res.status === 404) {
+          console.warn(
+            `[Telegram Admin Alert] n8n respondió 404 Not Found. Verifique que el workflow en n8n esté ACTIVO (N8N_SUPERADMIN_WEBHOOK_URL).`
+          );
+        }
+      })
+      .catch((err) => {
+        // Silencioso no bloqueante
+      });
   } catch (error) {
-    console.error("[Telegram Alert Error]:", error);
+    // Silencioso no bloqueante
   }
 }
 

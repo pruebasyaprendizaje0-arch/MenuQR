@@ -149,7 +149,14 @@ export default function LoginPage() {
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10 px-4 sm:px-0">
-        <Suspense fallback={<div className="text-center text-slate-400 py-8">Cargando...</div>}>
+        <Suspense
+          fallback={
+            <div className="bg-slate-900/60 backdrop-blur-xl py-8 px-4 border border-slate-800/80 shadow-2xl rounded-3xl sm:px-10 min-h-[380px] flex flex-col items-center justify-center gap-3">
+              <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-slate-400 font-medium">Iniciando formulario seguro...</span>
+            </div>
+          }
+        >
           <LoginForm />
         </Suspense>
       </div>

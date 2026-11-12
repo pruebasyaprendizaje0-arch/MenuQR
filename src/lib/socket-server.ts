@@ -2,14 +2,29 @@ import type { Server as ServerIO } from "socket.io";
 
 const globalForSocket = globalThis as unknown as {
   ioServer?: ServerIO;
+  io?: ServerIO;
 };
 
 export function setIO(io: ServerIO): void {
   globalForSocket.ioServer = io;
+  globalForSocket.io = io;
+  (globalThis as any).io = io;
+  (globalThis as any).ioServer = io;
+  if (typeof global !== "undefined") {
+    (global as any).io = io;
+    (global as any).ioServer = io;
+  }
 }
 
 export function getIO(): ServerIO | null {
-  return globalForSocket.ioServer ?? null;
+  return (
+    globalForSocket.io ||
+    globalForSocket.ioServer ||
+    (globalThis as any).io ||
+    (globalThis as any).ioServer ||
+    (typeof global !== "undefined" && ((global as any).io || (global as any).ioServer)) ||
+    null
+  );
 }
 
 /**
