@@ -29,6 +29,7 @@ export interface CustomLabels {
   kitchenPin?: string;               // PIN de 4-6 dígitos para acceso a Cocina KDS
   kitchenPinRequired?: boolean;      // Requerir PIN obligatorio al entrar a Cocina KDS
   waiterPinRequired?: boolean;       // Requerir PIN obligatorio al entrar a Módulo Mesero
+  showDietaryInCrm?: boolean;        // Mostrar/ocultar filtros y campos de Dietas y Alergias en CRM
 }
 
 export interface ProductVariant {

@@ -31,6 +31,7 @@ export interface ResolvedBusinessLabels {
   topItemTitle: string;
   topChannelTitle: string;
   isGastro: boolean;
+  showDietaryInCrm: boolean;
   imageAspectRatio: "1:1" | "9:16";
   suggestedAspectRatio: "1:1" | "9:16";
   popularAspectRatio: "1:1" | "9:16";
@@ -73,6 +74,7 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Plato Más Vendido",
     topChannelTitle: "Mesa que Más Vende",
     isGastro: true,
+    showDietaryInCrm: true,
     imageAspectRatio: "1:1",
     suggestedAspectRatio: "1:1",
     popularAspectRatio: "1:1",
@@ -113,6 +115,7 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Producto Más Vendido",
     topChannelTitle: "Canal Principal de Pedidos",
     isGastro: false,
+    showDietaryInCrm: false,
     imageAspectRatio: "1:1",
     suggestedAspectRatio: "1:1",
     popularAspectRatio: "1:1",
@@ -153,6 +156,7 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Servicio Más Solicitado",
     topChannelTitle: "Canal Principal de Solicitudes",
     isGastro: false,
+    showDietaryInCrm: false,
     imageAspectRatio: "1:1",
     suggestedAspectRatio: "1:1",
     popularAspectRatio: "1:1",
@@ -193,6 +197,7 @@ const DEFAULTS: Record<BusinessType, ResolvedBusinessLabels> = {
     topItemTitle: "Ítem Más Vendido",
     topChannelTitle: "Canal Principal de Pedidos",
     isGastro: false,
+    showDietaryInCrm: false,
     imageAspectRatio: "1:1",
     suggestedAspectRatio: "1:1",
     popularAspectRatio: "1:1",
@@ -282,6 +287,9 @@ export function getBusinessLabels(
     const isGastro = !isGastroDisabled && (hasGastroForced || (typeKey === "RESTAURANT" && !isReservas && !isServicios && !isCitas && !isRetail));
     const showTablesConfig = isGastro;
     const showSplitBill = !disabledModules.includes("split-bill") && (hasGastroForced || (isGastro && (custom.showSplitBill ?? base.showSplitBill)));
+    const showDietaryInCrm = custom.showDietaryInCrm !== undefined
+      ? Boolean(custom.showDietaryInCrm)
+      : (isGastro && (base.showDietaryInCrm ?? true));
 
     return {
       ...base,
@@ -331,6 +339,7 @@ export function getBusinessLabels(
       topItemTitle,
       topChannelTitle,
       isGastro,
+      showDietaryInCrm,
       imageAspectRatio: custom.imageAspectRatio || base.imageAspectRatio || "1:1",
       suggestedAspectRatio: custom.suggestedAspectRatio || custom.imageAspectRatio || base.suggestedAspectRatio || "1:1",
       popularAspectRatio: custom.popularAspectRatio || custom.imageAspectRatio || base.popularAspectRatio || "1:1",

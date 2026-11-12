@@ -128,7 +128,31 @@ console.log("=== INICIANDO PRUEBAS DE ADAPTACIÓN VERTICAL EN CAJA POS (/caja) =
   console.log("✅ [PASS] 4: Las ventas en mostrador computan y desglosan exactamente en el Arqueo Z de caja");
 }
 
+// 5. Aislamiento y Configuración Híbrida de Dietas & Alergias en CRM
+{
+  // 5.1 En Restaurante por defecto: showDietaryInCrm debe ser TRUE
+  const labelsRestaurant = getBusinessLabels(null, "RESTAURANT");
+  assert.strictEqual(labelsRestaurant.showDietaryInCrm, true, "Restaurante debe mostrar Dietas & Alergias por defecto");
+
+  // 5.2 En Catálogo / Retail por defecto: showDietaryInCrm debe ser FALSE
+  const labelsRetail = getBusinessLabels(null, "RETAIL");
+  assert.strictEqual(labelsRetail.showDietaryInCrm, false, "Retail/Catálogo debe ocultar Dietas & Alergias por defecto");
+
+  const labelsCatalog = getBusinessLabels(null, "GENERAL_CATALOG");
+  assert.strictEqual(labelsCatalog.showDietaryInCrm, false, "Catálogo General debe ocultar Dietas & Alergias por defecto");
+
+  // 5.3 Tienda retail que activa explícitamente el toggle en customLabels
+  const labelsRetailWithToggle = getBusinessLabels(JSON.stringify({ showDietaryInCrm: true }), "RETAIL");
+  assert.strictEqual(labelsRetailWithToggle.showDietaryInCrm, true, "Retail con toggle explícito debe poder activar Dietas & Alergias");
+
+  // 5.4 Restaurante que apaga explícitamente el toggle
+  const labelsRestaurantDisabled = getBusinessLabels(JSON.stringify({ showDietaryInCrm: false }), "RESTAURANT");
+  assert.strictEqual(labelsRestaurantDisabled.showDietaryInCrm, false, "Restaurante con toggle apagado debe poder ocultar Dietas & Alergias");
+
+  console.log("✅ [PASS] 5: Adaptación híbrida de Dietas & Alergias en CRM verificada (oculto en catálogo, activo en menú, configurable)");
+}
+
 console.log("==================================================");
-console.log("🎉 TODAS LAS PRUEBAS DE ADAPTACIÓN DE CAJA PASARON EXITOSAMENTE (4/4)");
+console.log("🎉 TODAS LAS PRUEBAS DE ADAPTACIÓN DE CAJA Y CRM PASARON EXITOSAMENTE (5/5)");
 console.log("==================================================");
 

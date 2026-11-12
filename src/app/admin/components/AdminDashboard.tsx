@@ -1214,6 +1214,10 @@ export function AdminDashboard({
     ? customCatalogTabInput
     : customCatalogTabChoice;
 
+  const [showDietaryInCrmCustom, setShowDietaryInCrmCustom] = useState<boolean | undefined>(
+    initialCustomLabels.showDietaryInCrm !== undefined ? Boolean(initialCustomLabels.showDietaryInCrm) : undefined
+  );
+
   const currentCustomLabelsJSON = JSON.stringify({
     ...initialCustomLabels,
     vertical: selectedPreset === "RESERVAS" 
@@ -1240,6 +1244,7 @@ export function AdminDashboard({
     disabledModules: disabledModules,
     enabledModules: enabledModules,
     showSplitBill: !disabledModules.includes("split-bill"),
+    showDietaryInCrm: showDietaryInCrmCustom,
     galleryImages: galleryImages.filter((u) => typeof u === "string" && u.trim().length > 0).slice(0, 4),
   });
 
@@ -4724,6 +4729,42 @@ export function AdminDashboard({
                           </label>
                         );
                       })}
+                    </div>
+
+                    {/* Toggle específico: Dietas & Alergias en CRM */}
+                    <div className="pt-2">
+                      <label
+                        className={`flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer select-none transition-all ${
+                          bLabels.showDietaryInCrm
+                            ? "bg-slate-900/90 border-slate-800 text-white"
+                            : "bg-slate-950/40 border-slate-900 opacity-60 text-slate-500"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={bLabels.showDietaryInCrm}
+                          onChange={(e) => {
+                            setShowDietaryInCrmCustom(e.target.checked);
+                          }}
+                          className="h-4.5 w-4.5 mt-0.5 rounded border-slate-800 bg-slate-950 text-amber-500 focus:ring-amber-500 cursor-pointer shrink-0"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-1.5 font-bold text-xs text-white">
+                            <Wheat className="h-3.5 w-3.5 text-amber-400" />
+                            <span>Filtros de Dietas & Alergias en CRM</span>
+                            {bLabels.isGastro && (
+                              <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                                Recomendado en Restaurantes
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                            {bLabels.showDietaryInCrm
+                              ? "Habilitado: Muestra filtros dietéticos (Vegano, Celíaco, etc.) y alérgenos en el CRM de clientes."
+                              : "Deshabilitado: CRM limpio y optimizado para retail/catálogo con foco en compras, productos favoritos y notas."}
+                          </p>
+                        </div>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -9494,7 +9535,7 @@ export function AdminDashboard({
               </div>
 
               {/* Dietary Preferences Filter Row */}
-              {!isServiciosTecnicos ? (
+              {bLabels.showDietaryInCrm && !isServiciosTecnicos ? (
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60 text-xs">
                   <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
                     <Wheat className="h-3.5 w-3.5 text-amber-400" />
@@ -9536,7 +9577,7 @@ export function AdminDashboard({
                     <span>Con Alergias</span>
                   </button>
                 </div>
-              ) : (
+              ) : isServiciosTecnicos ? (
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60 text-xs text-slate-400">
                   <span className="text-[11px] font-bold text-cyan-400 flex items-center gap-1 mr-1">
                     <Wrench className="h-3.5 w-3.5" />
@@ -9546,7 +9587,7 @@ export function AdminDashboard({
                     Captura automática de leads desde el cotizador web con registro de equipos, marcas y visitas domiciliarias.
                   </span>
                 </div>
-              )}
+              ) : null}
             </div>
 
             {/* Customer List Table */}
@@ -9557,8 +9598,20 @@ export function AdminDashboard({
                     <tr className="border-b border-slate-800 text-slate-400 text-xs font-bold uppercase tracking-wider bg-slate-950/60">
                       <th className="pb-3 pt-4 pl-4">Cliente & Contacto</th>
                       <th className="pb-3 pt-4">Categoría</th>
-                      <th className="pb-3 pt-4">{isServiciosTecnicos ? "Equipo & Marca" : "Preferencias & Alergias"}</th>
-                      <th className="pb-3 pt-4">{isServiciosTecnicos ? "Servicio & Visitas" : "Plato Favorito & Visitas"}</th>
+                      <th className="pb-3 pt-4">
+                        {isServiciosTecnicos
+                          ? "Equipo & Marca"
+                          : bLabels.showDietaryInCrm
+                            ? "Preferencias & Alergias"
+                            : "Notas / Preferencias"}
+                      </th>
+                      <th className="pb-3 pt-4">
+                        {isServiciosTecnicos
+                          ? "Servicio & Visitas"
+                          : bLabels.showDietaryInCrm
+                            ? "Plato Favorito & Visitas"
+                            : "Producto Favorito & Pedidos"}
+                      </th>
                       <th className="pb-3 pt-4 text-right">Puntos & Total</th>
                       <th className="pb-3 pt-4">Última Visita</th>
                       <th className="pb-3 pt-4 pr-4 text-right">Acciones</th>
@@ -9702,7 +9755,7 @@ export function AdminDashboard({
                                     <span className="text-slate-600 italic text-[11px]">Sin equipo registrado</span>
                                   )}
                                 </div>
-                              ) : (
+                              ) : bLabels.showDietaryInCrm ? (
                                 <div className="flex flex-wrap gap-1 max-w-[220px]">
                                   {(meta.dietary && meta.dietary.length > 0) ? (
                                     meta.dietary.map((d) => {
@@ -9733,6 +9786,20 @@ export function AdminDashboard({
                                     <span className="text-slate-600 italic text-[11px]">Sin restricciones</span>
                                   )}
                                 </div>
+                              ) : (
+                                <div className="max-w-[220px]">
+                                  {meta.customNotes ? (
+                                    <span className="text-slate-300 text-xs block truncate" title={meta.customNotes}>
+                                      {meta.customNotes}
+                                    </span>
+                                  ) : meta.allergies ? (
+                                    <span className="text-amber-400 text-xs block truncate" title={meta.allergies}>
+                                      Nota: {meta.allergies}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-600 italic text-[11px]">Sin notas</span>
+                                  )}
+                                </div>
                               )}
                             </td>
 
@@ -9749,7 +9816,7 @@ export function AdminDashboard({
                                     {cust.totalOrders} {cust.totalOrders === 1 ? "visita técnica" : "visitas técnicas"}
                                   </span>
                                 </div>
-                              ) : (
+                              ) : bLabels.showDietaryInCrm ? (
                                 <div className="space-y-0.5">
                                   <div className="font-bold text-white flex items-center gap-1 text-xs">
                                     <Utensils className="h-3 w-3 text-amber-400 shrink-0" />
@@ -9759,6 +9826,18 @@ export function AdminDashboard({
                                   </div>
                                   <span className="text-[10px] text-slate-500 block">
                                     {cust.totalOrders} {cust.totalOrders === 1 ? "pedido / visita" : "pedidos / visitas"}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="space-y-0.5">
+                                  <div className="font-bold text-white flex items-center gap-1 text-xs">
+                                    <ShoppingBag className="h-3 w-3 text-amber-400 shrink-0" />
+                                    <span className="truncate max-w-[150px]" title={meta.favoriteDish || insights.favoriteDish || "Sin producto"}>
+                                      {meta.favoriteDish || insights.favoriteDish || "Sin producto"}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-500 block">
+                                    {cust.totalOrders} {cust.totalOrders === 1 ? "pedido / compra" : "pedidos / compras"}
                                   </span>
                                 </div>
                               )}
@@ -10291,62 +10370,66 @@ export function AdminDashboard({
                           />
                         </div>
 
-                        {/* Preferencias Dietéticas (Checkboxes) */}
-                        <div className="bg-slate-950/60 border border-slate-850 p-3.5 rounded-2xl space-y-2">
-                          <label className="block text-slate-300 font-bold flex items-center gap-1.5">
-                            <Wheat className="h-4 w-4 text-emerald-400" />
-                            Preferencias Dietéticas
-                          </label>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {DIETARY_PREFERENCES_LIST.map((diet) => {
-                              const isSelected = custDietary.includes(diet.id);
-                              return (
-                                <button
-                                  type="button"
-                                  key={diet.id}
-                                  onClick={() => {
-                                    if (isSelected) {
-                                      setCustDietary(custDietary.filter((d) => d !== diet.id));
-                                    } else {
-                                      setCustDietary([...custDietary, diet.id]);
-                                    }
-                                  }}
-                                  className={`p-2 rounded-xl text-left font-bold transition flex items-center justify-between border ${
-                                    isSelected
-                                      ? `${diet.color} shadow-sm`
-                                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
-                                  }`}
-                                >
-                                  <span className="flex items-center gap-1.5">
-                                    <span>{diet.emoji}</span>
-                                    <span className="text-[11px]">{diet.label}</span>
-                                  </span>
-                                  {isSelected ? (
-                                    <CheckSquare className="h-3.5 w-3.5 text-current shrink-0" />
-                                  ) : (
-                                    <Square className="h-3.5 w-3.5 text-slate-600 shrink-0" />
-                                  )}
-                                </button>
-                              );
-                            })}
+                        {/* Preferencias Dietéticas (Solo si showDietaryInCrm está activo) */}
+                        {bLabels.showDietaryInCrm && (
+                          <div className="bg-slate-950/60 border border-slate-850 p-3.5 rounded-2xl space-y-2">
+                            <label className="block text-slate-300 font-bold flex items-center gap-1.5">
+                              <Wheat className="h-4 w-4 text-emerald-400" />
+                              Preferencias Dietéticas
+                            </label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {DIETARY_PREFERENCES_LIST.map((diet) => {
+                                const isSelected = custDietary.includes(diet.id);
+                                return (
+                                  <button
+                                    type="button"
+                                    key={diet.id}
+                                    onClick={() => {
+                                      if (isSelected) {
+                                        setCustDietary(custDietary.filter((d) => d !== diet.id));
+                                      } else {
+                                        setCustDietary([...custDietary, diet.id]);
+                                      }
+                                    }}
+                                    className={`p-2 rounded-xl text-left font-bold transition flex items-center justify-between border ${
+                                      isSelected
+                                        ? `${diet.color} shadow-sm`
+                                        : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                                    }`}
+                                  >
+                                    <span className="flex items-center gap-1.5">
+                                      <span>{diet.emoji}</span>
+                                      <span className="text-[11px]">{diet.label}</span>
+                                    </span>
+                                    {isSelected ? (
+                                      <CheckSquare className="h-3.5 w-3.5 text-current shrink-0" />
+                                    ) : (
+                                      <Square className="h-3.5 w-3.5 text-slate-600 shrink-0" />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         {/* Alergias & Cumpleaños */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
-                              <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
-                              Alergias o Restricciones Críticas
-                            </label>
-                            <input
-                              type="text"
-                              value={custAllergies}
-                              onChange={(e) => setCustAllergies(e.target.value)}
-                              placeholder="Ej. Mariscos, Maní, Frutos secos"
-                              className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl px-3 py-2 text-white focus:outline-none"
-                            />
-                          </div>
+                        <div className={`grid grid-cols-1 ${bLabels.showDietaryInCrm ? "sm:grid-cols-2" : "sm:grid-cols-1"} gap-3`}>
+                          {bLabels.showDietaryInCrm && (
+                            <div>
+                              <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
+                                <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                                Alergias o Restricciones Críticas
+                              </label>
+                              <input
+                                type="text"
+                                value={custAllergies}
+                                onChange={(e) => setCustAllergies(e.target.value)}
+                                placeholder="Ej. Mariscos, Maní, Frutos secos"
+                                className="w-full bg-slate-950 border border-slate-800 focus:border-rose-500 rounded-xl px-3 py-2 text-white focus:outline-none"
+                              />
+                            </div>
+                          )}
 
                           <div>
                             <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
@@ -10362,18 +10445,27 @@ export function AdminDashboard({
                           </div>
                         </div>
 
-                        {/* Plato Favorito & Puntos */}
+                        {/* Plato / Producto Favorito & Puntos */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-slate-300 mb-1 font-semibold flex items-center gap-1">
-                              <Utensils className="h-3.5 w-3.5 text-amber-400" />
-                              Plato Favorito (Opcional)
+                              {bLabels.showDietaryInCrm ? (
+                                <>
+                                  <Utensils className="h-3.5 w-3.5 text-amber-400" />
+                                  Plato Favorito (Opcional)
+                                </>
+                              ) : (
+                                <>
+                                  <ShoppingBag className="h-3.5 w-3.5 text-amber-400" />
+                                  Producto Favorito (Opcional)
+                                </>
+                              )}
                             </label>
                             <input
                               type="text"
                               value={custFavoriteDish}
                               onChange={(e) => setCustFavoriteDish(e.target.value)}
-                              placeholder="Ej. Empanada de Carne y Queso"
+                              placeholder={bLabels.showDietaryInCrm ? "Ej. Empanada de Carne y Queso" : "Ej. Ron San Miguel, Talla L..."}
                               className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl px-3 py-2 text-white focus:outline-none"
                             />
                           </div>
@@ -10637,7 +10729,7 @@ export function AdminDashboard({
                           </div>
                         )}
                       </div>
-                    ) : (
+                    ) : bLabels.showDietaryInCrm ? (
                       <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
                         <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
                           <Wheat className="h-4 w-4 text-amber-400" />
@@ -10698,6 +10790,51 @@ export function AdminDashboard({
                         {meta.customNotes && (
                           <div className="pt-2 border-t border-slate-850">
                             <span className="text-[11px] font-bold text-slate-400 block">Notas de atención:</span>
+                            <p className="text-slate-300 text-xs mt-0.5 italic bg-slate-900/60 p-2.5 rounded-xl border border-slate-850">
+                              "{meta.customNotes}"
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-slate-950/60 border border-slate-800 p-4 rounded-2xl space-y-3 text-xs">
+                        <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
+                          <Users className="h-4 w-4 text-amber-400" />
+                          Perfil del Cliente & Preferencias
+                        </h4>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Producto / Gusto Favorito:</span>
+                            <span className="text-white font-bold text-xs flex items-center gap-1">
+                              <ShoppingBag className="h-3.5 w-3.5 text-amber-400" />
+                              {meta.favoriteDish || insights.favoriteDish || "No especificado"}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">Cumpleaños:</span>
+                            {meta.birthDate ? (
+                              <div className="space-y-0.5">
+                                <span className="text-pink-300 font-bold flex items-center gap-1 text-[11px]">
+                                  <Cake className="h-3 w-3 text-pink-400" />
+                                  {insights.formattedBirthday}
+                                </span>
+                                {insights.isBirthdayToday ? (
+                                  <span className="text-[10px] text-emerald-400 font-extrabold block">🎉 ¡Hoy cumple años!</span>
+                                ) : insights.daysUntilBirthday !== null ? (
+                                  <span className="text-[10px] text-slate-500 block">Faltan {insights.daysUntilBirthday} días</span>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 italic text-[11px]">No registrado</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {meta.customNotes && (
+                          <div className="pt-2 border-t border-slate-850">
+                            <span className="text-[11px] font-bold text-slate-400 block">Notas del cliente:</span>
                             <p className="text-slate-300 text-xs mt-0.5 italic bg-slate-900/60 p-2.5 rounded-xl border border-slate-850">
                               "{meta.customNotes}"
                             </p>
