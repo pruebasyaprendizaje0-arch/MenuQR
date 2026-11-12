@@ -239,12 +239,14 @@ export function CajaClient({
   }, [restaurant]);
 
   // Canales Operativos de POS (Opción 2 Split Screen)
-  const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "TACTIL" | "SCANNER">("MESAS");
+  const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "TACTIL" | "SCANNER">(() => {
+    return isCatalogVertical ? "TACTIL" : "MESAS";
+  });
 
-  // Salvaguarda: si se intenta activar RESERVAS en modo catálogo, redirigir inmediatamente a MESAS (Mostrador)
+  // Salvaguarda: si se intenta activar RESERVAS o MESAS en modo catálogo, redirigir inmediatamente a Venta Táctil
   useEffect(() => {
-    if (isCatalogVertical && activeChannel === "RESERVAS") {
-      setActiveChannel("MESAS");
+    if (isCatalogVertical && (activeChannel === "RESERVAS" || activeChannel === "MESAS")) {
+      setActiveChannel("TACTIL");
     }
   }, [isCatalogVertical, activeChannel]);
 
@@ -1951,25 +1953,27 @@ export function CajaClient({
             </button>
           </div>
 
-          {/* BARRA DE CANALES (Mesas/Mostrador, Llevar, Domicilio, Reservas, Venta Táctil, Escáner) */}
+          {/* BARRA DE CANALES (Mesas en Salón [solo restaurante], Llevar, Domicilio, Reservas, Venta Táctil, Escáner) */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <button
-              type="button"
-              onClick={() => setActiveChannel("MESAS")}
-              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                activeChannel === "MESAS"
-                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 font-black scale-102"
-                  : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-              }`}
-            >
-              {isCatalogVertical ? <Store className="w-4 h-4" /> : <Users className="w-4 h-4" />}
-              <span>{isCatalogVertical ? "Mostrador" : "Mesas en Salón"}</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                mesasOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse" : "bg-slate-800 text-slate-400"
-              }`}>
-                {mesasOrders.length}
-              </span>
-            </button>
+            {!isCatalogVertical && (
+              <button
+                type="button"
+                onClick={() => setActiveChannel("MESAS")}
+                className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                  activeChannel === "MESAS"
+                    ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 font-black scale-102"
+                    : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Mesas en Salón</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                  mesasOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse" : "bg-slate-800 text-slate-400"
+                }`}>
+                  {mesasOrders.length}
+                </span>
+              </button>
+            )}
 
             <button
               type="button"

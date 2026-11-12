@@ -44,15 +44,17 @@ console.log("=== INICIANDO PRUEBAS DE ADAPTACIÓN VERTICAL EN CAJA POS (/caja) =
   assert.strictEqual(isCatalog, false, "Restaurante NO debe ser catalog");
 
   // Simulación de UI flags
-  const channelTabTitle = isCatalog ? "Mostrador" : "Mesas en Salón";
+  const showMesasTab = !isCatalog;
   const showReservationsTab = !isCatalog;
+  const defaultChannel = isCatalog ? "TACTIL" : "MESAS";
   const destinationButtonLabel = isCatalog ? "Mostrador" : "Mesa";
   const showTableSelector = !isCatalog;
   const sendToKitchenDefault = !isCatalog;
   const showKdsSwitch = !isCatalog;
   const checkoutButtonLabel = isCatalog ? "Cobrar y Registrar Venta" : "Cobrar y Enviar a Cocina";
 
-  assert.strictEqual(channelTabTitle, "Mesas en Salón");
+  assert.strictEqual(showMesasTab, true, "Restaurante debe mostrar pestaña de Mesas en Salón");
+  assert.strictEqual(defaultChannel, "MESAS", "Restaurante debe abrir por defecto en Mesas");
   assert.strictEqual(showReservationsTab, true);
   assert.strictEqual(destinationButtonLabel, "Mesa");
   assert.strictEqual(showTableSelector, true);
@@ -78,25 +80,25 @@ console.log("=== INICIANDO PRUEBAS DE ADAPTACIÓN VERTICAL EN CAJA POS (/caja) =
   assert.strictEqual(isCatalog, true, "Retail DEBE ser catalog");
 
   // Simulación de UI flags
-  const channelTabTitle = isCatalog ? "Mostrador" : "Mesas en Salón";
+  const showMesasTab = !isCatalog;
   const showReservationsTab = !isCatalog;
+  const defaultChannel = isCatalog ? "TACTIL" : "MESAS";
   const destinationButtonLabel = isCatalog ? "Mostrador" : "Mesa";
   const showTableSelector = !isCatalog;
   const sendToKitchenDefault = !isCatalog;
   const showKdsSwitch = !isCatalog;
   const checkoutButtonLabel = isCatalog ? "Cobrar y Registrar Venta" : "Cobrar y Enviar a Cocina";
-  const activeOrdersTitle = isCatalog ? "Órdenes Activas en Mostrador" : "Cuentas Abiertas en Salón";
 
-  assert.strictEqual(channelTabTitle, "Mostrador");
+  assert.strictEqual(showMesasTab, false, "Catálogo debe ocultar pestaña superior de Mesas/Mostrador (venta directa en ticket)");
+  assert.strictEqual(defaultChannel, "TACTIL", "Catálogo debe abrir por defecto en Venta Táctil");
   assert.strictEqual(showReservationsTab, false);
   assert.strictEqual(destinationButtonLabel, "Mostrador");
   assert.strictEqual(showTableSelector, false);
   assert.strictEqual(sendToKitchenDefault, false);
   assert.strictEqual(showKdsSwitch, false);
   assert.strictEqual(checkoutButtonLabel, "Cobrar y Registrar Venta");
-  assert.strictEqual(activeOrdersTitle, "Órdenes Activas en Mostrador");
 
-  console.log("✅ [PASS] 3: Vertical Catálogo adapta 'Mostrador', oculta Reservas, desactiva KDS y muestra 'Cobrar y Registrar Venta'");
+  console.log("✅ [PASS] 3: Vertical Catálogo oculta Mesas/Mostrador superior, abre en Venta Táctil y cobra directo en ticket");
 }
 
 // 4. Compatibilidad Financiera con Arqueo Z y Turnos de Caja (CashShift)
