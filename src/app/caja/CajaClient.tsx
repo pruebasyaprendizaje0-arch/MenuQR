@@ -83,6 +83,7 @@ import {
   SerializedCashMovement,
 } from "@/lib/caja-actions";
 import { ReporteZTicketModal, ReporteZData } from "./components/ReporteZTicketModal";
+import { resolveBusinessVertical } from "@/lib/business-labels";
 
 export interface TouchDishModifierOption {
   id: string;
@@ -175,6 +176,7 @@ interface CajaRestaurantProps {
   bankAccountName?: string | null;
   tablesConfig?: string | null;
   businessType?: string | null;
+  customLabels?: any;
   ivaPercent?: number;
   servicePercent?: number;
   ivaOnTable?: boolean;
@@ -226,8 +228,25 @@ export function CajaClient({
   const [isTransferVerified, setIsTransferVerified] = useState(false);
   const [isCardVerified, setIsCardVerified] = useState(false);
 
+  // Detección canónica de vertical Catálogo / Retail (Zero-regressions gastronómico)
+  const isCatalogVertical = useMemo(() => {
+    const v = resolveBusinessVertical(restaurant);
+    return (
+      v === "retail" ||
+      restaurant.businessType === "RETAIL" ||
+      restaurant.businessType === "GENERAL_CATALOG"
+    );
+  }, [restaurant]);
+
   // Canales Operativos de POS (Opción 2 Split Screen)
   const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "TACTIL" | "SCANNER">("MESAS");
+
+  // Salvaguarda: si se intenta activar RESERVAS en modo catálogo, redirigir inmediatamente a MESAS (Mostrador)
+  useEffect(() => {
+    if (isCatalogVertical && activeChannel === "RESERVAS") {
+      setActiveChannel("MESAS");
+    }
+  }, [isCatalogVertical, activeChannel]);
 
   // Vista activa en celular / móvil (Canales vs Ticket)
   const [mobileActiveView, setMobileActiveView] = useState<"OPERATIONS" | "TICKET">("OPERATIONS");
@@ -283,7 +302,13 @@ export function CajaClient({
   const [selectedRateId, setSelectedRateId] = useState<string>("none");
   const [customDeliveryCostInput, setCustomDeliveryCostInput] = useState<string>("");
   const [isCustomDelivery, setIsCustomDelivery] = useState<boolean>(false);
-  const [sendToKitchen, setSendToKitchen] = useState<boolean>(true);
+  const [sendToKitchen, setSendToKitchen] = useState<boolean>(() => !isCatalogVertical);
+
+  useEffect(() => {
+    if (isCatalogVertical) {
+      setSendToKitchen(false);
+    }
+  }, [isCatalogVertical]);
 
   // CRM Search state (Búsqueda predictiva de clientes recurrentes)
   const [customerSuggestions, setCustomerSuggestions] = useState<CustomerSearchResult[]>([]);
@@ -480,8 +505,9 @@ export function CajaClient({
     return () => clearInterval(interval);
   }, [fetchActiveOrders]);
 
-  // Cargar reservas de mesas
+  // Cargar reservas de mesas (solo para restaurantes)
   const fetchReservations = useCallback(async () => {
+    if (isCatalogVertical) return;
     try {
       const todayStr = new Date().toISOString().split("T")[0];
       const res = await getTableReservationsAction(restaurant.id, {
@@ -1925,7 +1951,7 @@ export function CajaClient({
             </button>
           </div>
 
-          {/* BARRA DE CANALES (Mesas, Llevar, Domicilio, Reservas, Venta Táctil, Escáner) */}
+          {/* BARRA DE CANALES (Mesas/Mostrador, Llevar, Domicilio, Reservas, Venta Táctil, Escáner) */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button
               type="button"
@@ -1936,8 +1962,8 @@ export function CajaClient({
                   : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
               }`}
             >
-              <Users className="w-4 h-4" />
-              <span>Mesas en Salón</span>
+              {isCatalogVertical ? <Store className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+              <span>{isCatalogVertical ? "Mostrador" : "Mesas en Salón"}</span>
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
                 mesasOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse" : "bg-slate-800 text-slate-400"
               }`}>
@@ -1981,23 +2007,25 @@ export function CajaClient({
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveChannel("RESERVAS")}
-              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                activeChannel === "RESERVAS"
-                  ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30 font-black scale-102"
-                  : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-              }`}
-            >
-              <CalendarDays className="w-4 h-4 text-purple-400" />
-              <span>Reservas</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                reservations.length > 0 ? "bg-purple-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
-              }`}>
-                {reservations.length}
-              </span>
-            </button>
+            {!isCatalogVertical && (
+              <button
+                type="button"
+                onClick={() => setActiveChannel("RESERVAS")}
+                className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                  activeChannel === "RESERVAS"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30 font-black scale-102"
+                    : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                }`}
+              >
+                <CalendarDays className="w-4 h-4 text-purple-400" />
+                <span>Reservas</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                  reservations.length > 0 ? "bg-purple-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+                }`}>
+                  {reservations.length}
+                </span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -2028,19 +2056,25 @@ export function CajaClient({
 
           {/* ÁREA DE CONTENIDO SEGÚN CANAL */}
           <div className="flex-1 bg-slate-900/60 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl backdrop-blur-md flex flex-col min-h-[460px]">
-            {/* CANAL: MESAS EN SALÓN */}
+            {/* CANAL: MESAS EN SALÓN / MOSTRADOR */}
             {activeChannel === "MESAS" && (
               <div className="space-y-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-black text-white text-base">Cuentas Abiertas en Salón</h3>
-                    <span className="text-xs text-slate-400">Toca una mesa para cargar su cuenta al ticket</span>
+                    <h3 className="font-black text-white text-base">
+                      {isCatalogVertical ? "Órdenes Activas en Mostrador" : "Cuentas Abiertas en Salón"}
+                    </h3>
+                    <span className="text-xs text-slate-400">
+                      {isCatalogVertical
+                        ? "Toca una orden para cargar su cuenta al ticket"
+                        : "Toca una mesa para cargar su cuenta al ticket"}
+                    </span>
                   </div>
                   <button
                     type="button"
                     onClick={fetchActiveOrders}
                     className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                    title="Actualizar mesas"
+                    title={isCatalogVertical ? "Actualizar mostrador" : "Actualizar mesas"}
                   >
                     <RefreshCw className="w-4 h-4" />
                   </button>
@@ -2048,10 +2082,20 @@ export function CajaClient({
 
                 {mesasOrders.length === 0 ? (
                   <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border border-dashed border-slate-800 rounded-2xl text-slate-400 space-y-2">
-                    <Users className="w-12 h-12 text-slate-600" />
-                    <p className="font-bold text-sm text-slate-300">No hay mesas con consumo activo en este momento</p>
+                    {isCatalogVertical ? (
+                      <Store className="w-12 h-12 text-slate-600" />
+                    ) : (
+                      <Users className="w-12 h-12 text-slate-600" />
+                    )}
+                    <p className="font-bold text-sm text-slate-300">
+                      {isCatalogVertical
+                        ? "No hay órdenes pendientes en mostrador en este momento"
+                        : "No hay mesas con consumo activo en este momento"}
+                    </p>
                     <p className="text-xs text-slate-500">
-                      Cuando un comensal o mesero tome una orden en el salón, figurará aquí con su total por cobrar.
+                      {isCatalogVertical
+                        ? "Cuando se genere una orden en mostrador o tienda, figurará aquí con su total por cobrar."
+                        : "Cuando un comensal o mesero tome una orden en el salón, figurará aquí con su total por cobrar."}
                     </p>
                   </div>
                 ) : (
@@ -2076,7 +2120,9 @@ export function CajaClient({
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="font-black text-lg text-white">
-                                  🪑 Mesa #{order.mesa}
+                                  {isCatalogVertical
+                                    ? `🏪 Mostrador ${order.mesa && order.mesa !== "Caja POS" ? `#${order.mesa}` : ""}`
+                                    : `🪑 Mesa #${order.mesa}`}
                                 </span>
                                 {pideCuenta && (
                                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950 tracking-wider">
@@ -2085,7 +2131,11 @@ export function CajaClient({
                                 )}
                               </div>
                               <span className="text-[11px] text-slate-400 block mt-0.5">
-                                {order.cliente_nombre ? `Comensal: ${order.cliente_nombre}` : "Consumo en mesa"}
+                                {order.cliente_nombre
+                                  ? `Cliente: ${order.cliente_nombre}`
+                                  : isCatalogVertical
+                                  ? "Venta en mostrador"
+                                  : "Consumo en mesa"}
                               </span>
                             </div>
 
@@ -2094,7 +2144,7 @@ export function CajaClient({
                                 ${order.total.toFixed(2)}
                               </span>
                               <span className="text-[10px] text-slate-500 block">
-                                {order.items.length} plato(s)
+                                {order.items.length} {isCatalogVertical ? "producto(s)" : "plato(s)"}
                               </span>
                             </div>
                           </div>
@@ -2239,8 +2289,8 @@ export function CajaClient({
               </div>
             )}
 
-            {/* CANAL: RESERVAS DE MESAS */}
-            {activeChannel === "RESERVAS" && (
+            {/* CANAL: RESERVAS DE MESAS (Solo para Restaurantes) */}
+            {!isCatalogVertical && activeChannel === "RESERVAS" && (
               <div className="space-y-4 flex-1 flex flex-col">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -2560,6 +2610,8 @@ export function CajaClient({
                       ? "🛵 Pedido a Domicilio"
                       : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
                       ? "🥡 Pedido Para Llevar"
+                      : isCatalogVertical
+                      ? `Mostrador #${selectedActiveOrder.mesa}`
                       : `Mesa #${selectedActiveOrder.mesa}`
                     : "Ticket de Venta Directa"}
                 </h3>
@@ -2572,9 +2624,13 @@ export function CajaClient({
                     ? "Cobro y despacho a repartidor"
                     : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
                     ? "Cobro y entrega en mostrador"
+                    : isCatalogVertical
+                    ? "Cobro y registro de venta en mostrador"
                     : "Cobro de comanda en salón"
                   : saleModality === "MESA"
-                  ? `Consumo en Mesa #${saleTableNumber}`
+                  ? isCatalogVertical
+                    ? "Venta en mostrador / tienda"
+                    : `Consumo en Mesa #${saleTableNumber}`
                   : saleModality === "DOMICILIO"
                   ? "Pedido telefónico / despacho a domicilio"
                   : "Pedido para llevar (empaque)"}
@@ -2604,6 +2660,8 @@ export function CajaClient({
                     ? "🛍️ Para Llevar"
                     : saleModality === "DOMICILIO"
                     ? "🛵 Domicilio"
+                    : isCatalogVertical
+                    ? "🏪 Mostrador"
                     : `🪑 Mesa #${saleTableNumber}`}
                 </span>
               </div>
@@ -2623,7 +2681,7 @@ export function CajaClient({
                   }`}
                 >
                   <ShoppingBag className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Llevar</span>
+                  <span className="truncate">{isCatalogVertical ? "Para Llevar" : "Llevar"}</span>
                 </button>
 
                 <button
@@ -2643,7 +2701,7 @@ export function CajaClient({
                   }`}
                 >
                   <Bike className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Domicilio</span>
+                  <span className="truncate">{isCatalogVertical ? "Envío / Delivery" : "Domicilio"}</span>
                 </button>
 
                 <button
@@ -2658,35 +2716,51 @@ export function CajaClient({
                       : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
                   }`}
                 >
-                  <Users className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Mesa</span>
+                  {isCatalogVertical ? (
+                    <Store className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <Users className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span className="truncate">{isCatalogVertical ? "Mostrador" : "Mesa"}</span>
                 </button>
               </div>
 
               {/* Opciones según modalidad */}
               {saleModality === "MESA" && (
-                <div className="space-y-1.5 pt-1.5 border-t border-slate-800/80">
-                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
-                    <span>Selecciona la Mesa:</span>
-                    <span className="text-indigo-400 font-mono">Mesa #{saleTableNumber}</span>
+                isCatalogVertical ? (
+                  <div className="space-y-1 pt-1.5 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                      <span>Modalidad de Atención:</span>
+                      <span className="text-indigo-400 font-mono">Venta Directa en Mostrador</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                      Venta rápida en tienda o mostrador (sin número de mesa).
+                    </p>
                   </div>
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-                    {configuredTables.map((tbl) => (
-                      <button
-                        key={tbl}
-                        type="button"
-                        onClick={() => setSaleTableNumber(tbl)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition shrink-0 border ${
-                          saleTableNumber === tbl
-                            ? "bg-indigo-600 text-white border-indigo-400 shadow-sm"
-                            : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
-                        }`}
-                      >
-                        #{tbl}
-                      </button>
-                    ))}
+                ) : (
+                  <div className="space-y-1.5 pt-1.5 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                      <span>Selecciona la Mesa:</span>
+                      <span className="text-indigo-400 font-mono">Mesa #{saleTableNumber}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                      {configuredTables.map((tbl) => (
+                        <button
+                          key={tbl}
+                          type="button"
+                          onClick={() => setSaleTableNumber(tbl)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black transition shrink-0 border ${
+                            saleTableNumber === tbl
+                              ? "bg-indigo-600 text-white border-indigo-400 shadow-sm"
+                              : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                          }`}
+                        >
+                          #{tbl}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )
               )}
 
               {/* FORMULARIO INLINE: DOMICILIO (TELÉFONO + CRM, NOMBRE, DIRECCIÓN, TARIFA ENVÍO, NOTA) */}
@@ -2941,19 +3015,21 @@ export function CajaClient({
                 </div>
               )}
 
-              {/* Switch Enviar a Cocina (KDS) */}
-              <label className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 cursor-pointer select-none">
-                <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
-                  <UtensilsCrossed className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Enviar comanda a Cocina (KDS)</span>
-                </span>
-                <input
-                  type="checkbox"
-                  checked={sendToKitchen}
-                  onChange={(e) => setSendToKitchen(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-emerald-500 focus:ring-offset-slate-950 cursor-pointer"
-                />
-              </label>
+              {/* Switch Enviar a Cocina (KDS) - Oculto en modo catálogo / retail */}
+              {!isCatalogVertical && (
+                <label className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 cursor-pointer select-none">
+                  <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                    <UtensilsCrossed className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Enviar comanda a Cocina (KDS)</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={sendToKitchen}
+                    onChange={(e) => setSendToKitchen(e.target.checked)}
+                    className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-emerald-500 focus:ring-offset-slate-950 cursor-pointer"
+                  />
+                </label>
+              )}
             </div>
           )}
 
@@ -3206,8 +3282,8 @@ export function CajaClient({
             </button>
           )}
 
-          {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA O PEDIDO PENDIENTE */}
-          {!selectedActiveOrder && mode === "VENTA" && sessionItems.length > 0 && (
+          {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA O PEDIDO PENDIENTE (Solo Restaurantes) */}
+          {!selectedActiveOrder && !isCatalogVertical && mode === "VENTA" && sessionItems.length > 0 && (
             <button
               type="button"
               disabled={isPending}
@@ -3274,6 +3350,8 @@ export function CajaClient({
                     ? `Cobrar y Despachar Domicilio ($${totalAmount.toFixed(2)})`
                     : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
                     ? `Cobrar y Entregar Pedido ($${totalAmount.toFixed(2)})`
+                    : isCatalogVertical
+                    ? `Cobrar y Registrar Venta ($${totalAmount.toFixed(2)})`
                     : `Cobrar y Liberar Mesa (${totalAmount.toFixed(2)})`}
                 </span>
               </>
@@ -3285,6 +3363,8 @@ export function CajaClient({
                     ? (sendToKitchen ? "Cobrar y Despachar Domicilio" : "Cobrar Domicilio")
                     : saleModality === "LLEVAR"
                     ? (sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Pedido Llevar")
+                    : isCatalogVertical
+                    ? "Cobrar y Registrar Venta"
                     : (sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Ticket")}{" "}
                   (${totalAmount.toFixed(2)})
                 </span>
@@ -3304,11 +3384,13 @@ export function CajaClient({
             <div className="min-w-0">
               <span className="text-[10px] uppercase font-bold text-emerald-100 block truncate">
                 {selectedActiveOrder
-                  ? `Mesa #${selectedActiveOrder.mesa}`
+                  ? (isCatalogVertical ? `Mostrador #${selectedActiveOrder.mesa}` : `Mesa #${selectedActiveOrder.mesa}`)
                   : saleModality === "DOMICILIO"
                   ? "🛵 Domicilio"
                   : saleModality === "LLEVAR"
                   ? "🥡 Para Llevar"
+                  : isCatalogVertical
+                  ? "🏪 Mostrador"
                   : `Consumo Mesa #${saleTableNumber}`}
               </span>
               <span className="text-base font-mono font-black text-white leading-none">
@@ -4329,7 +4411,11 @@ export function CajaClient({
                   </h3>
                   <span className="text-[11px] text-slate-400">
                     {selectedActiveOrder?.mesa
-                      ? `Mesa #${selectedActiveOrder.mesa} · ${selectedActiveOrder.cliente_nombre || "Clientes en Salón"}`
+                      ? isCatalogVertical
+                        ? `Mostrador #${selectedActiveOrder.mesa} · ${selectedActiveOrder.cliente_nombre || "Cliente en Tienda"}`
+                        : `Mesa #${selectedActiveOrder.mesa} · ${selectedActiveOrder.cliente_nombre || "Clientes en Salón"}`
+                      : isCatalogVertical
+                      ? "Ticket de Venta Directa en Mostrador"
                       : "Ticket de Venta Directa en Caja"}
                   </span>
                 </div>
