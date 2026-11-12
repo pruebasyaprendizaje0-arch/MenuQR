@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 import {
@@ -36,6 +35,7 @@ import {
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
 import { SmartExitButton } from "@/components/public/SmartExitButton";
 import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
+import { SmartLogo, SmartCover, resolveSafeImageUrl } from "@/components/SmartImage";
 import { validateCouponAction } from "@/lib/actions";
 import { parseDishImages, getPrimaryDishImage } from "@/lib/dish-images";
 import { syncTableOrderToPass } from "@/lib/ubicame-pass";
@@ -817,7 +817,12 @@ export function CtaloClient({ store }: { store: StoreData }) {
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <div className="relative w-8 h-8 rounded-xl overflow-hidden border border-amber-500/50 bg-slate-900 shrink-0">
-              <Image src={store.logoUrl} alt={store.name} fill className="object-cover" />
+              <SmartLogo
+                src={store.logoUrl}
+                name={store.name}
+                className="w-full h-full object-cover"
+                fallbackClassName="w-full h-full flex items-center justify-center font-black text-[10px] text-amber-400 bg-slate-900"
+              />
             </div>
             <div className="min-w-0">
               <span className="text-[10px] text-amber-400 font-bold uppercase tracking-widest block">Tienda Oficial & Catálogo</span>
@@ -888,19 +893,22 @@ export function CtaloClient({ store }: { store: StoreData }) {
         <>
           {/* Header / Banner de la Tienda */}
           <div className="relative h-48 sm:h-64 w-full overflow-hidden bg-slate-900 border-b border-slate-800">
-            <Image
+            <SmartCover
               src={store.coverUrl}
-              alt={store.name}
-              fill
-              className="object-cover opacity-40 blur-xs"
-              priority
+              name={store.name}
+              className="w-full h-full object-cover opacity-40 blur-xs"
             />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-transparent pointer-events-none"></div>
 
         <div className="absolute bottom-4 left-4 right-4 max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-amber-500 shadow-xl bg-slate-900 shrink-0">
-              <Image src={store.logoUrl} alt={store.name} fill className="object-cover" />
+              <SmartLogo
+                src={store.logoUrl}
+                name={store.name}
+                className="w-full h-full object-cover"
+                fallbackClassName="w-full h-full flex items-center justify-center font-black text-xl text-amber-400 bg-slate-900"
+              />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -1022,7 +1030,9 @@ export function CtaloClient({ store }: { store: StoreData }) {
                       }`}
                     >
                       {(() => {
-                        const imgs = parseDishImages(product.imageUrl);
+                        const imgs = parseDishImages(product.imageUrl)
+                          .map((img) => resolveSafeImageUrl(img))
+                          .filter(Boolean) as string[];
                         const primary = imgs[0] || null;
                         const secondary = imgs[1] || null;
 
@@ -1037,20 +1047,22 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
                         return (
                           <>
-                            <Image
+                            <img
                               src={primary}
                               alt={product.name}
-                              fill
-                              className={`object-cover transition-opacity duration-300 ${
+                              loading="lazy"
+                              decoding="async"
+                              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
                                 secondary ? "group-hover:opacity-0" : "group-hover:scale-105 transition-transform"
                               }`}
                             />
                             {secondary && (
-                              <Image
+                              <img
                                 src={secondary}
                                 alt={`${product.name} - reverso`}
-                                fill
-                                className="object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                loading="lazy"
+                                decoding="async"
+                                className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                               />
                             )}
                             {imgs.length > 1 && (
@@ -1231,7 +1243,9 @@ export function CtaloClient({ store }: { store: StoreData }) {
             {(() => {
               const modalAspect = getProductAspect(activeProduct);
               const isModal916 = modalAspect === "9:16";
-              const modalImages = parseDishImages(activeProduct.imageUrl);
+              const modalImages = parseDishImages(activeProduct.imageUrl)
+                .map((img) => resolveSafeImageUrl(img))
+                .filter(Boolean) as string[];
               const hasMultiple = modalImages.length > 1;
               const currentImg = modalImages[activeModalImgIdx] || modalImages[0] || null;
 
@@ -1245,11 +1259,10 @@ export function CtaloClient({ store }: { store: StoreData }) {
                       }`}
                     >
                       {currentImg ? (
-                        <Image
+                        <img
                           src={currentImg}
                           alt={`${activeProduct.name} - ángulo ${activeModalImgIdx + 1}`}
-                          fill
-                          className="object-cover"
+                          className="w-full h-full object-cover"
                         />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-600">
@@ -1301,7 +1314,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
                             }`}
                             title={`Ver ${i === 0 ? "Frente" : i === 1 ? "Espalda" : "Detalle"}`}
                           >
-                            <Image src={img} alt={`Ángulo ${i + 1}`} fill className="object-cover" />
+                            <img src={img} alt={`Ángulo ${i + 1}`} className="w-full h-full object-cover" />
                           </button>
                         ))}
                       </div>
@@ -1500,9 +1513,10 @@ export function CtaloClient({ store }: { store: StoreData }) {
                       >
                         <div className="relative w-14 h-14 rounded-lg overflow-hidden bg-slate-900 shrink-0">
                           {(() => {
-                            const cartThumb = getPrimaryDishImage(item.imageUrl) || item.imageUrl;
+                            const rawThumb = getPrimaryDishImage(item.imageUrl) || item.imageUrl;
+                            const cartThumb = resolveSafeImageUrl(rawThumb);
                             return cartThumb ? (
-                              <Image src={cartThumb} alt={item.name} fill className="object-cover" />
+                              <img src={cartThumb} alt={item.name} className="w-full h-full object-cover" />
                             ) : (
                               <div className="h-full w-full flex items-center justify-center bg-slate-800 text-slate-500">
                                 <ShoppingBag className="w-6 h-6 opacity-40" />

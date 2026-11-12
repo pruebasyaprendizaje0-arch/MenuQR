@@ -3,6 +3,7 @@ const nextConfig = {
   output: "standalone",
   serverExternalPackages: ["pg"],
   images: {
+    unoptimized: true,
     // Restricción estricta de orígenes autorizados para mitigar SSRF (Server-Side Request Forgery)
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },

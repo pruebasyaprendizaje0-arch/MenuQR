@@ -3,6 +3,24 @@
 import React, { useState } from "react";
 import { Utensils } from "lucide-react";
 
+export function resolveSafeImageUrl(url?: string | null): string | null {
+  if (!url || typeof url !== "string") return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:") ||
+    trimmed.startsWith("blob:")
+  ) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("/")) {
+    return trimmed;
+  }
+  return `/${trimmed}`;
+}
+
 export function getInitials(name?: string | null): string {
   if (!name || !name.trim()) return "QR";
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -28,7 +46,7 @@ export function SmartLogo({
   themeColor,
 }: SmartLogoProps) {
   const [hasError, setHasError] = useState(false);
-  const cleanSrc = src && src.trim() !== "" ? src.trim() : null;
+  const cleanSrc = resolveSafeImageUrl(src);
 
   if (!cleanSrc || hasError) {
     return (
@@ -80,7 +98,7 @@ export function SmartCover({
 }: SmartCoverProps) {
   const [hasError, setHasError] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
-  const cleanSrc = src && src.trim() !== "" ? src.trim() : null;
+  const cleanSrc = resolveSafeImageUrl(src);
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-slate-950 bg-gradient-to-tr from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">

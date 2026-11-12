@@ -47,9 +47,21 @@ const STATIC_EXT_REGEX = /\.(ico|png|jpg|jpeg|svg|webp|gif|css|js|txt|xml|json|w
 export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
 
-  // 1. Omitir archivos estáticos o chunks internos
-  if (STATIC_EXT_REGEX.test(pathname) || pathname.startsWith("/_next")) {
+  // 1. Omitir archivos estáticos, chunks internos o uploads persistentes
+  if (
+    STATIC_EXT_REGEX.test(pathname) ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/uploads") ||
+    pathname.startsWith("/api/uploads")
+  ) {
     return NextResponse.next();
+  }
+
+  // Si accidentalmente una URL relativa se resolvió como /ctalo/[slug]/uploads/... o similar, reescribir hacia /uploads/...
+  if (pathname.includes("/uploads/")) {
+    const uploadIndex = pathname.indexOf("/uploads/");
+    const cleanUploadPath = pathname.substring(uploadIndex);
+    return NextResponse.rewrite(new URL(cleanUploadPath, request.url));
   }
 
   // 2. Perímetro de seguridad para /admin (redirección preventiva a login si no hay sesión)
