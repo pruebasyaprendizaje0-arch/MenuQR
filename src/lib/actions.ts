@@ -60,7 +60,7 @@ export async function validateExternalImageUrl(
 
  * or is logged in as a SuperAdmin.
  */
-async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; userId?: string; error?: string }> {
+export async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; userId?: string; error?: string }> {
   const isSuperAdmin = await getSuperAdminSession();
   if (isSuperAdmin) {
     return { authorized: true };

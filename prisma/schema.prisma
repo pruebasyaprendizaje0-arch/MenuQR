@@ -194,6 +194,7 @@ model Restaurant {
   inAppNotificationReads InAppNotificationRead[]
   cashShifts             CashShift[]
   tableReservations      TableReservation[]
+  datilConfig            DatilConfig?
   createdAt         DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -318,6 +319,20 @@ model Order {
   isTest           Boolean     @default(false)
   cashShiftId      String?
   cashShift        CashShift?  @relation(fields: [cashShiftId], references: [id], onDelete: SetNull)
+
+  // Facturación Electrónica (Dátil / SRI Ecuador)
+  invoiceStatus        String?     // "NO_EMITIDA", "PENDIENTE_SRI", "AUTORIZADA", "RECHAZADA_SRI"
+  invoiceAccessKey     String?     // Clave de acceso de 49 dígitos
+  invoiceAuthNumber    String?     // Número de autorización del SRI
+  invoiceAuthDate      DateTime?   // Fecha y hora de autorización
+  invoiceSequential    String?     // Ej. 001-001-000000001
+  invoiceRideUrl       String?     // URL RIDE PDF en Dátil
+  invoiceXmlUrl        String?     // URL XML firmado en Dátil
+  invoiceCustomerDoc   String?     // Cédula / RUC / Pasaporte / 9999999999999
+  invoiceCustomerDocType String?   // "CEDULA", "RUC", "PASAPORTE", "CONSUMIDOR_FINAL"
+  invoiceCustomerEmail String?
+  invoiceCustomerAddress String?
+  invoiceErrorMessage  String?     // Mensaje de rechazo del SRI o error
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   items            OrderItem[]
@@ -926,6 +941,36 @@ model TableReservation {
   @@index([restaurantId, reservationDate])
   @@index([restaurantId, status])
   @@index([restaurantId, customerPhone])
+}
+
+model DatilConfig {
+  id                       String      @id @default(uuid())
+  restaurantId             String      @unique
+  restaurant               Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  isEnabled                Boolean     @default(false)
+  environment              String      @default("TEST") // "TEST" (Pruebas) | "PROD" (Producción)
+  apiKey                   String      // X-Key
+  apiPasswordEncrypted     String      // X-Password cifrado en AES-256
+  
+  // Datos tributarios del Emisor (SRI Ecuador)
+  ruc                      String      // RUC 13 dígitos
+  razonSocial              String      // Razón Social registrada en SRI
+  nombreComercial          String?     // Nombre Comercial
+  direccionMatriz          String      // Dirección Matriz
+  direccionEstablecimiento String?     // Dirección Sucursal/Establecimiento
+  regimen                  String      @default("GENERAL") // "GENERAL" | "RIMPE_EMPRENDEDOR" | "RIMPE_POPULAR"
+  obligadoContabilidad     Boolean     @default(false)
+  contribuyenteEspecial    String?     // Número de resolución si aplica
+  
+  // Puntos de Emisión SRI
+  establecimiento          String      @default("001") // 3 dígitos
+  puntoEmision             String      @default("001") // 3 dígitos
+  secuencialFactura        Int         @default(1)     // Siguiente secuencial
+  
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  @@index([restaurantId])
 }
 
 

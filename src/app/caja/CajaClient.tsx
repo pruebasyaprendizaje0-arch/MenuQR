@@ -53,6 +53,7 @@ import {
   Phone,
   MapPin,
   FileText,
+  Printer,
   User,
   CalendarDays,
   Calendar,
@@ -84,6 +85,8 @@ import {
 } from "@/lib/caja-actions";
 import { ReporteZTicketModal, ReporteZData } from "./components/ReporteZTicketModal";
 import { resolveBusinessVertical } from "@/lib/business-labels";
+import { printThermalTicket } from "@/lib/thermal-printer";
+import { emitDatilInvoiceAction } from "@/lib/datil-actions";
 
 export interface TouchDishModifierOption {
   id: string;
@@ -186,6 +189,18 @@ interface CajaRestaurantProps {
   deliveryCost?: number;
   deliveryEnabled?: boolean;
   deliveryRates?: string | null;
+  datilConfig?: {
+    isEnabled: boolean;
+    environment: string;
+    ruc: string;
+    razonSocial: string;
+    nombreComercial?: string | null;
+    direccionMatriz?: string | null;
+    regimen?: string | null;
+    obligadoContabilidad?: boolean | null;
+    establecimiento?: string | null;
+    puntoEmision?: string | null;
+  } | null;
 }
 
 interface CajaClientProps {
@@ -432,7 +447,18 @@ export function CajaClient({
     title: string;
     message: string;
     badge: string;
+    orderData?: any;
+    invoiceData?: any;
   } | null>(null);
+
+  // Facturación Electrónica SRI (Ecuador)
+  const [invoiceCustomerType, setInvoiceCustomerType] = useState<"FINAL" | "DATOS">("FINAL");
+  const [invoiceDocType, setInvoiceDocType] = useState<"04" | "05" | "06">("05"); // 05: Cédula, 04: RUC, 06: Pasaporte
+  const [invoiceDoc, setInvoiceDoc] = useState<string>("");
+  const [invoiceName, setInvoiceName] = useState<string>("");
+  const [invoiceEmail, setInvoiceEmail] = useState<string>("");
+  const [invoiceAddress, setInvoiceAddress] = useState<string>("");
+  const [thermalPaperWidth, setThermalPaperWidth] = useState<"80mm" | "58mm">("80mm");
 
   // Pending transition
   const [isPending, startTransition] = useTransition();
@@ -1630,6 +1656,42 @@ export function CajaClient({
       return;
     }
 
+    // Validación Normativa SRI Ecuador: Venta > $50 USD exige datos del cliente (Cédula o RUC)
+    const isOverFifty = totalAmount > 50.00;
+    const isInvoiceWithData = isOverFifty || invoiceCustomerType === "DATOS";
+
+    if (isOverFifty) {
+      if (!invoiceDoc.trim()) {
+        alert("Normativa SRI Ecuador: Las ventas superiores a $50.00 USD requieren registrar la Cédula o RUC del cliente.");
+        return;
+      }
+      if (invoiceDocType === "05" && invoiceDoc.trim().length !== 10) {
+        alert("La cédula ecuatoriana debe tener exactamente 10 dígitos numéricos.");
+        return;
+      }
+      if (invoiceDocType === "04" && invoiceDoc.trim().length !== 13) {
+        alert("El RUC ecuatoriano debe tener exactamente 13 dígitos numéricos.");
+        return;
+      }
+      if (!invoiceName.trim()) {
+        alert("Por favor ingresa el nombre o razón social del cliente para la factura.");
+        return;
+      }
+    } else if (invoiceCustomerType === "DATOS") {
+      if (invoiceDocType === "05" && invoiceDoc.trim().length !== 10) {
+        alert("La cédula ecuatoriana debe tener exactamente 10 dígitos numéricos.");
+        return;
+      }
+      if (invoiceDocType === "04" && invoiceDoc.trim().length !== 13) {
+        alert("El RUC ecuatoriano debe tener exactamente 13 dígitos numéricos.");
+        return;
+      }
+      if (!invoiceName.trim()) {
+        alert("Por favor ingresa el nombre o razón social del cliente para la factura.");
+        return;
+      }
+    }
+
     // 0. Si estamos en Modo Devolución (Reingreso de existencias + salida de efectivo)
     if (mode === "ENTRADA") {
       startTransition(async () => {
@@ -1700,10 +1762,62 @@ export function CajaClient({
             ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Pedido entregado al cliente en mostrador.`
             : `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. La mesa ha quedado liberada.`;
 
+          // Emitir Factura Electrónica Dátil / SRI si está configurado
+          let invoiceResult: any = null;
+          if (res.orderId && restaurant.datilConfig?.isEnabled) {
+            const customerPayload: any = isInvoiceWithData ? {
+              doc: invoiceDoc.trim(),
+              docType: invoiceDocType,
+              name: invoiceName.trim() || selectedActiveOrder.cliente_nombre || "Cliente",
+              email: invoiceEmail.trim() || undefined,
+              address: invoiceAddress.trim() || undefined,
+            } : {
+              doc: "9999999999999",
+              docType: "07",
+              name: "CONSUMIDOR FINAL",
+            };
+
+            try {
+              invoiceResult = await emitDatilInvoiceAction(restaurant.id, res.orderId, customerPayload);
+            } catch (invErr) {
+              console.warn("Dátil invoice emission error (handled gracefully):", invErr);
+            }
+          }
+
           setSuccessInfo({
             title: targetTitle,
             message: targetMessage,
             badge: `✅ ${paymentMethod} · $${totalAmount.toFixed(2)}`,
+            orderData: {
+              id: res.orderId || selectedActiveOrder.id,
+              orderNumber: selectedActiveOrder.id?.slice(0, 6),
+              createdAt: new Date(),
+              items: sessionItems.map(it => ({ dishName: it.name, quantity: it.quantity, price: it.price })),
+              subtotal: chargesBreakdown.subtotal,
+              iva: chargesBreakdown.iva,
+              serviceCharge: chargesBreakdown.service,
+              deliveryCost: saleDeliveryCost,
+              total: totalAmount,
+              tableName: selectedActiveOrder.mesa,
+              paymentMethod,
+              customerName: isInvoiceWithData ? invoiceName : (selectedActiveOrder.cliente_nombre || "Cliente"),
+              customerPhone: selectedActiveOrder.cliente_telefono,
+              customerAddress: (selectedActiveOrder as any).cliente_direccion || null,
+            },
+            invoiceData: invoiceResult ? {
+              status: invoiceResult.status,
+              accessKey: invoiceResult.accessKey,
+              authNumber: invoiceResult.authNumber,
+              sequential: invoiceResult.sequential,
+              customerDoc: isInvoiceWithData ? invoiceDoc : "9999999999999",
+              customerDocType: isInvoiceWithData ? invoiceDocType : "07",
+              customerEmail: invoiceEmail,
+              ruc: restaurant.datilConfig?.ruc,
+              razonSocial: restaurant.datilConfig?.razonSocial,
+              direccionMatriz: restaurant.datilConfig?.direccionMatriz,
+              regimen: restaurant.datilConfig?.regimen,
+              obligadoContabilidad: restaurant.datilConfig?.obligadoContabilidad,
+            } : null,
           });
           setSelectedActiveOrder(null);
           setSelectedReservationForOrder(null);
@@ -1780,10 +1894,63 @@ export function CajaClient({
         }
 
         const kitchenNotice = sendToKitchen ? " Comanda enviada a Cocina (KDS)." : "";
+
+        // Emitir Factura Electrónica Dátil / SRI si está configurado
+        let invoiceResult: any = null;
+        if (res.orderId && restaurant.datilConfig?.isEnabled) {
+          const customerPayload: any = isInvoiceWithData ? {
+            doc: invoiceDoc.trim(),
+            docType: invoiceDocType,
+            name: invoiceName.trim() || cleanName || "Cliente",
+            email: invoiceEmail.trim() || undefined,
+            address: invoiceAddress.trim() || saleDeliveryAddress.trim() || undefined,
+          } : {
+            doc: "9999999999999",
+            docType: "07",
+            name: "CONSUMIDOR FINAL",
+          };
+
+          try {
+            invoiceResult = await emitDatilInvoiceAction(restaurant.id, res.orderId, customerPayload);
+          } catch (invErr) {
+            console.warn("Dátil invoice emission error (handled gracefully):", invErr);
+          }
+        }
+
         setSuccessInfo({
           title: "¡Venta Completada!",
           message: `Ticket #${res.orderNumber} por $${totalAmount.toFixed(2)} (${effectiveTableName}) cobrado con ${paymentMethod}.${kitchenNotice}`,
           badge: `⚡ Cobrado: ${effectiveTableName} · ${paymentMethod}`,
+          orderData: {
+            id: res.orderId,
+            orderNumber: res.orderNumber,
+            createdAt: new Date(),
+            items: sessionItems.map((it) => ({ dishName: it.name, quantity: it.quantity, price: it.price })),
+            subtotal: chargesBreakdown.subtotal,
+            iva: chargesBreakdown.iva,
+            serviceCharge: chargesBreakdown.service,
+            deliveryCost: saleDeliveryCost,
+            total: totalAmount,
+            tableName: effectiveTableName,
+            paymentMethod,
+            customerName: isInvoiceWithData ? invoiceName : effectiveCustomerName,
+            customerPhone: cleanPhone,
+            customerAddress: saleDeliveryAddress,
+          },
+          invoiceData: invoiceResult ? {
+            status: invoiceResult.status,
+            accessKey: invoiceResult.accessKey,
+            authNumber: invoiceResult.authNumber,
+            sequential: invoiceResult.sequential,
+            customerDoc: isInvoiceWithData ? invoiceDoc : "9999999999999",
+            customerDocType: isInvoiceWithData ? invoiceDocType : "07",
+            customerEmail: invoiceEmail,
+            ruc: restaurant.datilConfig?.ruc,
+            razonSocial: restaurant.datilConfig?.razonSocial,
+            direccionMatriz: restaurant.datilConfig?.direccionMatriz,
+            regimen: restaurant.datilConfig?.regimen,
+            obligadoContabilidad: restaurant.datilConfig?.obligadoContabilidad,
+          } : null,
         });
         setSessionItems([]);
         setSelectedReservationForOrder(null);
@@ -3286,6 +3453,130 @@ export function CajaClient({
             </button>
           )}
 
+          {/* DATOS DE FACTURACIÓN ELECTRÓNICA SRI ECUADOR */}
+          {sessionItems.length > 0 && totalAmount > 0 && (
+            <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-bold text-white">
+                  <FileText className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Comprobante / Factura SRI</span>
+                </div>
+                {restaurant.datilConfig?.isEnabled && (
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                    Dátil {restaurant.datilConfig.environment === "PROD" ? "PROD" : "TEST"}
+                  </span>
+                )}
+              </div>
+
+              {/* Alerta de $50 USD */}
+              {totalAmount > 50.00 && (
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] leading-tight flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-black">Normativa SRI Ecuador:</span> Ventas mayores a $50.00 USD requieren registrar los datos del cliente (Cédula o RUC). Consumidor Final no permitido.
+                  </div>
+                </div>
+              )}
+
+              {/* Selector Consumidor Final vs Con Datos */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={totalAmount > 50.00}
+                  onClick={() => setInvoiceCustomerType("FINAL")}
+                  className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    totalAmount > 50.00
+                      ? "opacity-40 cursor-not-allowed bg-slate-900 border-slate-800 text-slate-500"
+                      : invoiceCustomerType === "FINAL"
+                      ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 font-black shadow"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span>Consumidor Final</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInvoiceCustomerType("DATOS")}
+                  className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    totalAmount > 50.00 || invoiceCustomerType === "DATOS"
+                      ? "bg-amber-500/20 border-amber-500 text-amber-300 font-black shadow"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Con Datos de Factura</span>
+                </button>
+              </div>
+
+              {/* Formulario de Datos de Factura */}
+              {(totalAmount > 50.00 || invoiceCustomerType === "DATOS") && (
+                <div className="space-y-2 pt-1 border-t border-slate-850">
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: "05", label: "Cédula (10)" },
+                      { id: "04", label: "RUC (13)" },
+                      { id: "06", label: "Pasaporte" },
+                    ].map((dt) => (
+                      <button
+                        key={dt.id}
+                        type="button"
+                        onClick={() => setInvoiceDocType(dt.id as any)}
+                        className={`py-1 rounded-lg text-[10px] font-bold border transition ${
+                          invoiceDocType === dt.id
+                            ? "bg-slate-800 border-amber-500 text-amber-300 font-black"
+                            : "bg-slate-900/60 border-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {dt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <input
+                        type="text"
+                        placeholder={invoiceDocType === "05" ? "Nº Cédula (10 dígitos) *" : invoiceDocType === "04" ? "Nº RUC (13 dígitos) *" : "Nº Pasaporte *"}
+                        value={invoiceDoc}
+                        onChange={(e) => setInvoiceDoc(e.target.value.replace(/[^0-9a-zA-Z]/g, ""))}
+                        maxLength={invoiceDocType === "05" ? 10 : invoiceDocType === "04" ? 13 : 20}
+                        className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs font-mono placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Nombre / Razón Social *"
+                        value={invoiceName}
+                        onChange={(e) => setInvoiceName(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="email"
+                      placeholder="Email para RIDE y XML (opcional)"
+                      value={invoiceEmail}
+                      onChange={(e) => setInvoiceEmail(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Dirección fiscal (opcional)"
+                      value={invoiceAddress}
+                      onChange={(e) => setInvoiceAddress(e.target.value)}
+                      className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA O PEDIDO PENDIENTE (Solo Restaurantes) */}
           {!selectedActiveOrder && !isCatalogVertical && mode === "VENTA" && sessionItems.length > 0 && (
             <button
@@ -3763,10 +4054,10 @@ export function CajaClient({
         </div>
       )}
 
-      {/* MODAL 3: ÉXITO DE COBRO */}
+      {/* MODAL 3: ÉXITO DE COBRO Y TICKET TÉRMICO */}
       {successInfo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fadeIn">
-          <div className="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center space-y-4 shadow-2xl">
+          <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center space-y-4 shadow-2xl">
             <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/20">
               <CheckCircle2 className="w-9 h-9" />
             </div>
@@ -3775,10 +4066,97 @@ export function CajaClient({
             <span className="inline-block px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
               {successInfo.badge}
             </span>
+
+            {/* Estado de Facturación SRI */}
+            {successInfo.invoiceData && (
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-left text-xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Factura Electrónica SRI</span>
+                  </span>
+                  {successInfo.invoiceData.status === "AUTORIZADA" ? (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-black border border-emerald-500/30">
+                      ✓ Autorizada SRI
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-black border border-amber-500/30">
+                      ⏳ En Proceso SRI
+                    </span>
+                  )}
+                </div>
+                {successInfo.invoiceData.sequential && (
+                  <div className="text-[11px] font-mono text-slate-400">
+                    Nº Comprobante: <strong className="text-white">{successInfo.invoiceData.sequential}</strong>
+                  </div>
+                )}
+                {successInfo.invoiceData.status === "PENDIENTE_SRI" && (
+                  <p className="text-[10px] text-amber-400/90 leading-tight">
+                    * El SRI está procesando la autorización. El ticket térmico incluye la constancia provisional.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Acciones de Impresión Térmica */}
+            {successInfo.orderData && (
+              <div className="pt-2 border-t border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+                  <span>Ancho de Papel:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setThermalPaperWidth("80mm")}
+                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border transition ${
+                        thermalPaperWidth === "80mm"
+                          ? "bg-slate-800 text-amber-300 border-amber-500/50"
+                          : "bg-slate-950 text-slate-400 border-slate-800"
+                      }`}
+                    >
+                      80mm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setThermalPaperWidth("58mm")}
+                      className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border transition ${
+                        thermalPaperWidth === "58mm"
+                          ? "bg-slate-800 text-amber-300 border-amber-500/50"
+                          : "bg-slate-950 text-slate-400 border-slate-800"
+                      }`}
+                    >
+                      58mm
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await printThermalTicket({
+                      order: successInfo.orderData,
+                      restaurant: {
+                        name: restaurant.name,
+                        phone: (restaurant as any).whatsappNumber,
+                        ruc: restaurant.datilConfig?.ruc,
+                        razonSocial: restaurant.datilConfig?.razonSocial,
+                        address: restaurant.datilConfig?.direccionMatriz,
+                      },
+                      invoice: successInfo.invoiceData,
+                      paperWidth: thermalPaperWidth,
+                    });
+                  }}
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-black text-xs shadow-lg transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Imprimir Ticket Térmico ({thermalPaperWidth})</span>
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => setSuccessInfo(null)}
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition"
+              className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
             >
               Continuar
             </button>

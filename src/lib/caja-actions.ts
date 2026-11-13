@@ -620,6 +620,7 @@ export async function processCajaSaleAction(
 
     return {
       success: true,
+      orderId: result.orderId,
       orderNumber: result.orderNumber,
       total: result.total,
     };
@@ -814,6 +815,7 @@ export async function settleOrderInCashShiftAction(
 
     return {
       success: true,
+      orderId: data.orderId,
       message: `Cobro de $${totalToSettle.toFixed(2)} registrado exitosamente. Mesa liberada.`,
       total: totalToSettle,
     };

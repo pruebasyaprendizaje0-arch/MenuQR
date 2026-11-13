@@ -49,6 +49,20 @@ export default async function CajaPage() {
       deliveryCost: true;
       deliveryEnabled: true;
       deliveryRates: true;
+      datilConfig: {
+        select: {
+          isEnabled: true;
+          environment: true;
+          ruc: true;
+          razonSocial: true;
+          nombreComercial: true;
+          direccionMatriz: true;
+          regimen: true;
+          obligadoContabilidad: true;
+          establecimiento: true;
+          puntoEmision: true;
+        };
+      };
     };
   }>>>>;
 
@@ -82,6 +96,20 @@ export default async function CajaPage() {
           deliveryCost: true,
           deliveryEnabled: true,
           deliveryRates: true,
+          datilConfig: {
+            select: {
+              isEnabled: true,
+              environment: true,
+              ruc: true,
+              razonSocial: true,
+              nombreComercial: true,
+              direccionMatriz: true,
+              regimen: true,
+              obligadoContabilidad: true,
+              establecimiento: true,
+              puntoEmision: true,
+            },
+          },
         },
       });
     }
@@ -112,6 +140,20 @@ export default async function CajaPage() {
           deliveryCost: true,
           deliveryEnabled: true,
           deliveryRates: true,
+          datilConfig: {
+            select: {
+              isEnabled: true,
+              environment: true,
+              ruc: true,
+              razonSocial: true,
+              nombreComercial: true,
+              direccionMatriz: true,
+              regimen: true,
+              obligadoContabilidad: true,
+              establecimiento: true,
+              puntoEmision: true,
+            },
+          },
         },
       });
     }
@@ -141,6 +183,20 @@ export default async function CajaPage() {
           deliveryCost: true,
           deliveryEnabled: true,
           deliveryRates: true,
+          datilConfig: {
+            select: {
+              isEnabled: true,
+              environment: true,
+              ruc: true,
+              razonSocial: true,
+              nombreComercial: true,
+              direccionMatriz: true,
+              regimen: true,
+              obligadoContabilidad: true,
+              establecimiento: true,
+              puntoEmision: true,
+            },
+          },
         },
       });
     }
@@ -320,6 +376,7 @@ export default async function CajaPage() {
           deliveryCost: typeof restaurant.deliveryCost === "number" ? restaurant.deliveryCost : 0,
           deliveryEnabled: restaurant.deliveryEnabled ?? true,
           deliveryRates: (restaurant as any).deliveryRates || null,
+          datilConfig: (restaurant as any).datilConfig || null,
         }}
         categories={categories}
         initialShift={initialShift}

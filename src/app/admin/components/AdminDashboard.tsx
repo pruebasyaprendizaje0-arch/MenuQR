@@ -137,6 +137,9 @@ import SalesAnalyticsDashboard from "./SalesAnalyticsDashboard";
 import { DailyMenuBoard } from "./DailyMenuBoard";
 import { getSuggestedDishIdsAction, toggleSuggestedDishAction } from "@/lib/suggested-dishes-actions";
 import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
+import DatilConfigTab from "./DatilConfigTab";
+import { printThermalTicket } from "@/lib/thermal-printer";
+import { checkDatilInvoiceStatusAction } from "@/lib/datil-actions";
 
 type SeasonRate = {
   id: string;
@@ -618,9 +621,19 @@ export const VALID_ADMIN_TABS = [
   "reservas",
   "reservas-mesas",
   "subscription",
+  "facturacion",
 ] as const;
 
 export type AdminTab = (typeof VALID_ADMIN_TABS)[number];
+
+function normalizeAdminTab(tab: string | null | undefined): AdminTab | null {
+  if (!tab) return null;
+  const clean = tab.toLowerCase().trim();
+  if (clean === "tienda" || clean === "restaurante") return "restaurant";
+  if (clean === "facturacion" || clean === "sri" || clean === "datil") return "facturacion";
+  if (VALID_ADMIN_TABS.includes(clean as AdminTab)) return clean as AdminTab;
+  return null;
+}
 
 export function AdminDashboard({ 
   restaurant, 
@@ -648,9 +661,8 @@ export function AdminDashboard({
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(false);
 
   const resolveInitialTab = (): AdminTab => {
-    if (initialTab && VALID_ADMIN_TABS.includes(initialTab as AdminTab)) {
-      return initialTab as AdminTab;
-    }
+    const normalized = normalizeAdminTab(initialTab);
+    if (normalized) return normalized;
     return "metrics";
   };
 
@@ -675,18 +687,18 @@ export function AdminDashboard({
     setIsMounted(true);
     if (typeof window !== "undefined") {
       try {
-        const queryTab = new URLSearchParams(window.location.search).get("tab");
-        if (queryTab && VALID_ADMIN_TABS.includes(queryTab as AdminTab)) {
+        const queryTab = normalizeAdminTab(new URLSearchParams(window.location.search).get("tab"));
+        if (queryTab) {
           if (queryTab !== activeTab) {
-            setActiveTabRaw(queryTab as AdminTab);
+            setActiveTabRaw(queryTab);
           }
           localStorage.setItem("admin_active_tab_" + restaurant.id, queryTab);
           return;
         }
-        const hashTab = window.location.hash.replace("#", "");
-        if (hashTab && VALID_ADMIN_TABS.includes(hashTab as AdminTab)) {
+        const hashTab = normalizeAdminTab(window.location.hash.replace("#", ""));
+        if (hashTab) {
           if (hashTab !== activeTab) {
-            setActiveTabRaw(hashTab as AdminTab);
+            setActiveTabRaw(hashTab);
           }
           localStorage.setItem("admin_active_tab_" + restaurant.id, hashTab);
           const url = new URL(window.location.href);
@@ -694,10 +706,10 @@ export function AdminDashboard({
           window.history.replaceState(null, "", url.toString());
           return;
         }
-        const storedTab = localStorage.getItem("admin_active_tab_" + restaurant.id);
-        if (storedTab && VALID_ADMIN_TABS.includes(storedTab as AdminTab)) {
+        const storedTab = normalizeAdminTab(localStorage.getItem("admin_active_tab_" + restaurant.id));
+        if (storedTab) {
           if (storedTab !== activeTab) {
-            setActiveTabRaw(storedTab as AdminTab);
+            setActiveTabRaw(storedTab);
           }
           const url = new URL(window.location.href);
           url.searchParams.set("tab", storedTab);
@@ -712,9 +724,9 @@ export function AdminDashboard({
   useEffect(() => {
     const handlePopState = () => {
       if (typeof window !== "undefined") {
-        const queryTab = new URLSearchParams(window.location.search).get("tab");
-        if (queryTab && VALID_ADMIN_TABS.includes(queryTab as AdminTab)) {
-          setActiveTabRaw(queryTab as AdminTab);
+        const queryTab = normalizeAdminTab(new URLSearchParams(window.location.search).get("tab"));
+        if (queryTab) {
+          setActiveTabRaw(queryTab);
         }
       }
     };
@@ -743,117 +755,60 @@ export function AdminDashboard({
   const [ticketModalOrder, setTicketModalOrder] = useState<Order | null>(null);
   const [ordersDisplayLimit, setOrdersDisplayLimit] = useState<number>(25);
 
-  const handlePrintThermalReceipt = (order: Order) => {
-    const printWindow = window.open("", "_blank", "width=420,height=650");
-    if (!printWindow) {
-      alert("Por favor habilita las ventanas emergentes (pop-ups) en tu navegador para imprimir el ticket.");
-      return;
+  const handlePrintThermalReceipt = async (order: any) => {
+    try {
+      await printThermalTicket({
+        order: {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          createdAt: order.createdAt,
+          items: (order.items || []).map((it: any) => ({
+            id: it.id,
+            dishName: it.dishName,
+            quantity: it.quantity,
+            price: Number(it.price || 0),
+          })),
+          subtotal: Number(order.subtotal || 0),
+          iva: Number(order.iva || 0),
+          serviceCharge: Number(order.serviceCharge || 0),
+          deliveryCost: Number(order.deliveryCost || 0),
+          discountAmount: Number(order.discountAmount || 0),
+          total: Number(order.total || 0),
+          tableName: order.tableName,
+          paymentMethod: order.paymentMethod,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+          customerAddress: order.customerAddress,
+        },
+        restaurant: {
+          name: restaurant.name,
+          phone: restaurant.whatsappNumber,
+          address: restaurant.address,
+          ruc: (restaurant as any).datilConfig?.ruc,
+          razonSocial: (restaurant as any).datilConfig?.razonSocial,
+        },
+        invoice: order.invoiceStatus ? {
+          status: order.invoiceStatus,
+          accessKey: order.invoiceAccessKey,
+          authNumber: order.invoiceAuthNumber,
+          authDate: order.invoiceAuthDate,
+          sequential: order.invoiceSequential,
+          customerDoc: order.invoiceCustomerDoc,
+          customerDocType: order.invoiceCustomerDocType,
+          customerEmail: order.invoiceCustomerEmail,
+          customerAddress: order.invoiceCustomerAddress,
+          ruc: (restaurant as any).datilConfig?.ruc,
+          razonSocial: (restaurant as any).datilConfig?.razonSocial,
+          direccionMatriz: (restaurant as any).datilConfig?.direccionMatriz,
+          regimen: (restaurant as any).datilConfig?.regimen,
+          obligadoContabilidad: (restaurant as any).datilConfig?.obligadoContabilidad,
+        } : null,
+        paperWidth: "80mm",
+      });
+    } catch (err) {
+      console.error("Error al imprimir ticket térmico:", err);
+      alert("Error al generar el ticket de impresión.");
     }
-    const formattedDate = new Date(order.createdAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
-    const channelLabel = order.tableName === "Llevar" 
-      ? "🛍 PARA LLEVAR" 
-      : order.tableName === "Domicilio" 
-        ? "🛵 A DOMICILIO" 
-        : `🪑 MESA #${order.tableName}`;
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8"/>
-          <title>Ticket #${order.orderNumber || order.id.slice(0, 6)}</title>
-          <style>
-            @page { margin: 0; size: 80mm auto; }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
-              width: 76mm;
-              margin: 0 auto;
-              padding: 8px 4px;
-              color: #000;
-              font-size: 11px;
-              line-height: 1.3;
-            }
-            .center { text-align: center; }
-            .right { text-align: right; }
-            .bold { font-weight: bold; }
-            .dashed { border-top: 1px dashed #000; margin: 6px 0; }
-            .double { border-top: 2px solid #000; margin: 6px 0; }
-            .flex { display: flex; justify-content: space-between; }
-            .title { font-size: 15px; font-weight: bold; text-transform: uppercase; }
-            .channel-badge {
-              font-size: 13px;
-              font-weight: bold;
-              border: 1.5px solid #000;
-              padding: 3px 6px;
-              display: inline-block;
-              margin: 4px 0;
-              border-radius: 4px;
-            }
-            .item-row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 12px; }
-            .item-name { max-width: 52mm; word-break: break-word; }
-            .total-row { font-size: 15px; font-weight: bold; margin: 4px 0; }
-            @media print {
-              body { width: 100%; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="center">
-            <div class="title">${restaurant.name}</div>
-            <div>${formattedDate}</div>
-            <div class="channel-badge">${channelLabel}</div>
-            <div class="bold" style="font-size: 13px;">ORDEN #${order.orderNumber || order.id.slice(0, 6)}</div>
-          </div>
-
-          <div class="dashed"></div>
-
-          ${order.customerName ? `<div><strong>Cliente:</strong> ${order.customerName}</div>` : ""}
-          ${order.customerPhone ? `<div><strong>Teléfono:</strong> ${order.customerPhone}</div>` : ""}
-          ${order.customerAddress ? `<div><strong>Dirección:</strong> ${order.customerAddress}</div>` : ""}
-          <div><strong>Método de Pago:</strong> ${order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Transferencia"}</div>
-
-          <div class="dashed"></div>
-          <div class="bold item-row" style="font-size: 10px; text-transform: uppercase;">
-            <span>CANT / PRODUCTO</span>
-            <span>TOTAL</span>
-          </div>
-          <div class="dashed"></div>
-
-          ${(order.items || []).map((it) => `
-            <div class="item-row">
-              <span class="item-name"><strong>${it.quantity}x</strong> ${it.dishName}</span>
-              <span class="right bold">$${(it.price * it.quantity).toFixed(2)}</span>
-            </div>
-          `).join("")}
-
-          <div class="dashed"></div>
-
-          <div class="flex"><span>Subtotal:</span><span>$${Number(order.subtotal || 0).toFixed(2)}</span></div>
-          ${(order.deliveryCost || 0) > 0 ? `<div class="flex"><span>Envío / Delivery:</span><span>+$${Number(order.deliveryCost).toFixed(2)}</span></div>` : ""}
-          ${(order.discountAmount || 0) > 0 ? `<div class="flex"><span>Descuento cupón:</span><span>-$${Number(order.discountAmount).toFixed(2)}</span></div>` : ""}
-          ${(order.iva || 0) > 0 ? `<div class="flex"><span>IVA:</span><span>+$${Number(order.iva).toFixed(2)}</span></div>` : ""}
-          ${(order.serviceCharge || 0) > 0 ? `<div class="flex"><span>Servicio:</span><span>+$${Number(order.serviceCharge).toFixed(2)}</span></div>` : ""}
-
-          <div class="double"></div>
-          <div class="flex total-row">
-            <span>TOTAL A COBRAR:</span>
-            <span>$${Number(order.total).toFixed(2)}</span>
-          </div>
-          <div class="dashed"></div>
-
-          <div class="center" style="font-size: 10px; margin-top: 8px;">
-            ¡Muchas gracias por su compra!<br/>
-            Comprobante emitido con MenuQR Pro
-          </div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-    }, 250);
   };
 
   const handleToggleTestMode = async () => {
@@ -2781,6 +2736,24 @@ export function AdminDashboard({
                 </span>
               </button>
             )}
+            {/* Facturación Electrónica SRI (Dátil) */}
+            <button
+              onClick={() => setActiveTab("facturacion")}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                activeTab === "facturacion"
+                  ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-400 border-l-4 border-emerald-500 shadow-md"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <FileText className="h-4 w-4 text-emerald-400" />
+                <span>Facturación SRI</span>
+              </div>
+              <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                Dátil
+              </span>
+            </button>
+
             <button
               onClick={() => setActiveTab("subscription")}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -6162,6 +6135,18 @@ export function AdminDashboard({
                 )}
               </div>
             </div>
+
+            {/* Facturación Electrónica SRI (Dátil) Integrada en Negocio */}
+            <div className="pt-6 border-t border-slate-800/80">
+              <DatilConfigTab restaurant={restaurant} />
+            </div>
+          </div>
+        )}
+
+        {/* Facturación Electrónica SRI (Dátil) Tab Directo */}
+        {activeTab === "facturacion" && (
+          <div className="space-y-6">
+            <DatilConfigTab restaurant={restaurant} />
           </div>
         )}
 
