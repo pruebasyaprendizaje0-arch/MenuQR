@@ -121,6 +121,7 @@ import {
   Layers,
   Image as ImageIcon,
   SlidersHorizontal,
+  Clock,
   X
 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -226,6 +227,18 @@ type Order = {
   createdAt: string;
   updatedAt: string;
   items: OrderItem[];
+  invoiceStatus?: string | null;
+  invoiceAccessKey?: string | null;
+  invoiceAuthNumber?: string | null;
+  invoiceAuthDate?: string | Date | null;
+  invoiceSequential?: string | null;
+  invoiceRideUrl?: string | null;
+  invoiceXmlUrl?: string | null;
+  invoiceCustomerDoc?: string | null;
+  invoiceCustomerDocType?: string | null;
+  invoiceCustomerEmail?: string | null;
+  invoiceCustomerAddress?: string | null;
+  invoiceErrorMessage?: string | null;
 };
 
 type Restaurant = {
@@ -285,6 +298,18 @@ type Restaurant = {
   city?: string | null;
   province?: string | null;
   parish?: string | null;
+  datilConfig?: {
+    isEnabled: boolean;
+    environment: string;
+    ruc: string;
+    razonSocial: string;
+    nombreComercial?: string | null;
+    direccionMatriz: string;
+    regimen: string;
+    obligadoContabilidad: boolean;
+    establecimiento: string;
+    puntoEmision: string;
+  } | null;
   sector?: string | null;
   latitude?: number | null;
   longitude?: number | null;
@@ -808,6 +833,27 @@ export function AdminDashboard({
     } catch (err) {
       console.error("Error al imprimir ticket térmico:", err);
       alert("Error al generar el ticket de impresión.");
+    }
+  };
+
+  const [checkingInvoiceOrderId, setCheckingInvoiceOrderId] = useState<string | null>(null);
+  const [invoiceActionMsg, setInvoiceActionMsg] = useState<{ orderId: string; success: boolean; text: string } | null>(null);
+
+  const handleCheckInvoiceStatus = async (orderId: string) => {
+    setCheckingInvoiceOrderId(orderId);
+    setInvoiceActionMsg(null);
+    try {
+      const res = await checkDatilInvoiceStatusAction(restaurant.id, orderId);
+      if (res.success) {
+        setInvoiceActionMsg({ orderId, success: true, text: res.message || `Estado SRI: ${res.status}` });
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        setInvoiceActionMsg({ orderId, success: false, text: res.error || "No se pudo actualizar el estado SRI." });
+      }
+    } catch (err: any) {
+      setInvoiceActionMsg({ orderId, success: false, text: err?.message || "Error al conectar con Dátil." });
+    } finally {
+      setCheckingInvoiceOrderId(null);
     }
   };
 
@@ -9301,6 +9347,96 @@ export function AdminDashboard({
                                       )}
                                     </div>
                                   </div>
+
+                                  {/* Facturación Electrónica SRI (Dátil) */}
+                                  {(order.invoiceStatus || (restaurant as any).datilConfig?.isEnabled) && (
+                                    <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <FileText className="h-4 w-4 text-amber-400 shrink-0" />
+                                        <span className="font-bold text-slate-300">Factura Electrónica SRI:</span>
+                                        {order.invoiceStatus === "AUTORIZADA" ? (
+                                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                            <CheckCircle2 className="h-3 w-3" />
+                                            Autorizada {order.invoiceSequential ? `(${order.invoiceSequential})` : ""}
+                                          </span>
+                                        ) : order.invoiceStatus === "PENDIENTE_SRI" ? (
+                                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                            <Clock className="h-3 w-3 animate-spin" />
+                                            En proceso SRI {order.invoiceSequential ? `(${order.invoiceSequential})` : ""}
+                                          </span>
+                                        ) : order.invoiceStatus === "RECHAZADA_SRI" ? (
+                                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-red-500/20 text-red-300 border border-red-500/30 flex items-center gap-1" title={order.invoiceErrorMessage || "Rechazada por SRI"}>
+                                            <AlertCircle className="h-3 w-3" />
+                                            Rechazada SRI
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-500 italic text-[11px]">No emitida</span>
+                                        )}
+
+                                        {order.invoiceCustomerDoc && (
+                                          <span className="text-slate-400 text-[11px] font-mono">
+                                            RUC/CI: {order.invoiceCustomerDoc}
+                                          </span>
+                                        )}
+
+                                        {order.invoiceAccessKey && (
+                                          <span className="text-[10px] text-slate-500 font-mono hidden md:inline truncate max-w-[200px]" title={order.invoiceAccessKey}>
+                                            Clave: {order.invoiceAccessKey.slice(0, 16)}...
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        {order.invoiceStatus === "PENDIENTE_SRI" && (
+                                          <button
+                                            type="button"
+                                            disabled={checkingInvoiceOrderId === order.id}
+                                            onClick={() => handleCheckInvoiceStatus(order.id)}
+                                            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                          >
+                                            {checkingInvoiceOrderId === order.id ? (
+                                              <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                              <RefreshCw className="h-3 w-3" />
+                                            )}
+                                            <span>Consultar estado SRI</span>
+                                          </button>
+                                        )}
+
+                                        {order.invoiceRideUrl && (
+                                          <a
+                                            href={order.invoiceRideUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold flex items-center gap-1 transition"
+                                          >
+                                            <span>📄 RIDE (PDF)</span>
+                                          </a>
+                                        )}
+
+                                        {order.invoiceXmlUrl && (
+                                          <a
+                                            href={order.invoiceXmlUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold flex items-center gap-1 transition"
+                                          >
+                                            <span>📑 XML</span>
+                                          </a>
+                                        )}
+                                      </div>
+
+                                      {invoiceActionMsg?.orderId === order.id && (
+                                        <div className={`w-full mt-2 p-2 rounded-lg text-[11px] font-bold ${
+                                          invoiceActionMsg.success
+                                            ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                                            : "bg-red-500/10 text-red-300 border border-red-500/20"
+                                        }`}>
+                                          {invoiceActionMsg.text}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </td>
                             </tr>

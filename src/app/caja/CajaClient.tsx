@@ -701,6 +701,9 @@ export function CajaClient({
     }));
     setSessionItems(convertedItems);
     setCashReceivedInput("");
+    if (order.cliente_nombre && order.cliente_nombre !== "Cliente") {
+      setInvoiceName(order.cliente_nombre);
+    }
     setMobileActiveView("TICKET");
     playBeep();
   };
@@ -711,6 +714,10 @@ export function CajaClient({
     setSessionItems([]);
     setMobileActiveView("OPERATIONS");
     setCashReceivedInput("");
+    setInvoiceCustomerType("FINAL");
+    setInvoiceDoc("");
+    setInvoiceName("");
+    setInvoiceEmail("");
   };
 
   const openModifierModalForDish = (dish: TouchDishItem) => {
@@ -1379,6 +1386,10 @@ export function CajaClient({
         setSelectedRateId("none");
         setIsCustomDelivery(false);
         setCustomDeliveryCostInput("");
+        setInvoiceCustomerType("FINAL");
+        setInvoiceDoc("");
+        setInvoiceName("");
+        setInvoiceEmail("");
         fetchActiveOrders();
 
         // Cambiar pestaña activa automáticamente para conveniencia del cajero
@@ -1420,6 +1431,11 @@ export function CajaClient({
       .map(([m, val]) => `${m}: $${val.toFixed(2)}`)
       .join(" · ");
 
+    const isOverFifty = totalAmount > 50.00;
+    const isInvoiceWithData = isOverFifty || invoiceCustomerType === "DATOS";
+    const cleanName = saleCustomerName.trim();
+    const cleanPhone = saleCustomerPhone.trim();
+
     if (selectedActiveOrder) {
       startTransition(async () => {
         const res = await settleOrderInCashShiftAction(restaurant.id, {
@@ -1445,9 +1461,29 @@ export function CajaClient({
             title: targetTitle,
             message: `Cuenta de $${totalAmount.toFixed(2)} liquidada con ${splitPayments.length} abonos (${summaryText}). La mesa ha quedado liberada.`,
             badge: `✂️ Cuenta Dividida · $${totalAmount.toFixed(2)}`,
+            orderData: {
+              id: selectedActiveOrder.id,
+              orderNumber: selectedActiveOrder.id?.slice(0, 6),
+              createdAt: new Date(),
+              items: sessionItems.map(it => ({ dishName: it.name, quantity: it.quantity, price: it.price })),
+              subtotal: chargesBreakdown.subtotal,
+              iva: chargesBreakdown.iva,
+              serviceCharge: chargesBreakdown.service,
+              deliveryCost: saleDeliveryCost,
+              total: totalAmount,
+              tableName: selectedActiveOrder.mesa,
+              paymentMethod: `Dividido (${summaryText})`,
+              customerName: isInvoiceWithData ? invoiceName : (selectedActiveOrder.cliente_nombre || "Cliente"),
+              customerPhone: selectedActiveOrder.cliente_telefono,
+              customerAddress: (selectedActiveOrder as any).cliente_direccion || null,
+            },
           });
           setSelectedActiveOrder(null);
           setSessionItems([]);
+          setInvoiceCustomerType("FINAL");
+          setInvoiceDoc("");
+          setInvoiceName("");
+          setInvoiceEmail("");
           fetchActiveOrders();
         }
       });
@@ -1499,10 +1535,30 @@ export function CajaClient({
           title: "¡Venta Dividida Completada!",
           message: `Ticket #${res.orderNumber} por $${res.total?.toFixed(2)} (${effectiveTableName}) pagado con ${splitPayments.length} abonos (${summaryText}).`,
           badge: `✂️ Split Pay: ${effectiveTableName} · $${res.total?.toFixed(2)}`,
+          orderData: {
+            id: res.orderId,
+            orderNumber: res.orderNumber,
+            createdAt: new Date(),
+            items: sessionItems.map((it) => ({ dishName: it.name, quantity: it.quantity, price: it.price })),
+            subtotal: chargesBreakdown.subtotal,
+            iva: chargesBreakdown.iva,
+            serviceCharge: chargesBreakdown.service,
+            deliveryCost: saleDeliveryCost,
+            total: totalAmount,
+            tableName: effectiveTableName,
+            paymentMethod: `Dividido (${summaryText})`,
+            customerName: isInvoiceWithData ? invoiceName : (cleanName || "Cliente"),
+            customerPhone: cleanPhone,
+            customerAddress: saleDeliveryAddress,
+          },
         });
         setSessionItems([]);
         setMobileActiveView("OPERATIONS");
         setSaleCustomerName("");
+        setInvoiceCustomerType("FINAL");
+        setInvoiceDoc("");
+        setInvoiceName("");
+        setInvoiceEmail("");
         fetchActiveOrders();
       }
     });
@@ -1822,6 +1878,10 @@ export function CajaClient({
           setSelectedActiveOrder(null);
           setSelectedReservationForOrder(null);
           setSessionItems([]);
+          setInvoiceCustomerType("FINAL");
+          setInvoiceDoc("");
+          setInvoiceName("");
+          setInvoiceEmail("");
           fetchActiveOrders();
           fetchReservations();
         }
@@ -1962,6 +2022,10 @@ export function CajaClient({
         setSelectedRateId("none");
         setIsCustomDelivery(false);
         setCustomDeliveryCostInput("");
+        setInvoiceCustomerType("FINAL");
+        setInvoiceDoc("");
+        setInvoiceName("");
+        setInvoiceEmail("");
         fetchActiveOrders();
         fetchReservations();
       }

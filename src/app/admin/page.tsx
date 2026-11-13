@@ -85,7 +85,21 @@ export default async function AdminPage(props: {
           },
           customers: {
             orderBy: { lastOrderAt: "desc" }
-          }
+          },
+          datilConfig: {
+            select: {
+              isEnabled: true,
+              environment: true,
+              ruc: true,
+              razonSocial: true,
+              nombreComercial: true,
+              direccionMatriz: true,
+              regimen: true,
+              obligadoContabilidad: true,
+              establecimiento: true,
+              puntoEmision: true,
+            },
+          },
         },
       });
     }
@@ -119,7 +133,21 @@ export default async function AdminPage(props: {
           },
           customers: {
             orderBy: { lastOrderAt: "desc" }
-          }
+          },
+          datilConfig: {
+            select: {
+              isEnabled: true,
+              environment: true,
+              ruc: true,
+              razonSocial: true,
+              nombreComercial: true,
+              direccionMatriz: true,
+              regimen: true,
+              obligadoContabilidad: true,
+              establecimiento: true,
+              puntoEmision: true,
+            },
+          },
         },
       });
     }
@@ -161,7 +189,21 @@ export default async function AdminPage(props: {
           },
           customers: {
             orderBy: { lastOrderAt: "desc" }
-          }
+          },
+          datilConfig: {
+            select: {
+              isEnabled: true,
+              environment: true,
+              ruc: true,
+              razonSocial: true,
+              nombreComercial: true,
+              direccionMatriz: true,
+              regimen: true,
+              obligadoContabilidad: true,
+              establecimiento: true,
+              puntoEmision: true,
+            },
+          },
         },
       });
     } catch (err) {
