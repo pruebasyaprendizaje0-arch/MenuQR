@@ -17,11 +17,14 @@ import {
   Eye,
   EyeOff,
   Zap,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import {
   getDatilConfigAction,
   saveDatilConfigAction,
   testDatilConnectionAction,
+  resetDatilCredentialsAction,
   DatilConfigDTO,
 } from "@/lib/datil-actions";
 import { validateEcuadorianRuc } from "@/lib/datil-utils";
@@ -175,6 +178,35 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
     }
   };
 
+  const [resettingCreds, setResettingCreds] = useState(false);
+
+  const handleResetCredentials = async () => {
+    if (!confirm("¿Deseas borrar y dejar completamente en blanco las credenciales de Dátil de este negocio?")) {
+      return;
+    }
+    setResettingCreds(true);
+    setSaveErrorMsg("");
+    setSaveSuccessMsg("");
+    try {
+      const res = await resetDatilCredentialsAction(restaurant.id);
+      if (res.success) {
+        setApiKey("");
+        setApiPassword("");
+        setHasStoredPassword(false);
+        setIsEnabled(false);
+        setTestResult(null);
+        setSaveSuccessMsg(res.message || "Credenciales borradas exitosamente.");
+        setTimeout(() => setSaveSuccessMsg(""), 5000);
+      } else {
+        setSaveErrorMsg(res.error || "Error al borrar credenciales.");
+      }
+    } catch (err: any) {
+      setSaveErrorMsg(err?.message || "Error al procesar el reseteo.");
+    } finally {
+      setResettingCreds(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-12 text-center text-slate-400 flex flex-col items-center justify-center space-y-3">
@@ -230,7 +262,24 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} autoComplete="off" className="space-y-6">
+        {/* Señuelo anti-autocompletado para evitar que el navegador (Chrome/Edge/Safari) inyecte credenciales personales */}
+        <div
+          style={{
+            position: "absolute",
+            opacity: 0,
+            pointerEvents: "none",
+            height: 0,
+            width: 0,
+            overflow: "hidden",
+          }}
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          <input type="text" name="chrome_autofill_trap_user" tabIndex={-1} autoComplete="off" />
+          <input type="password" name="chrome_autofill_trap_pwd" tabIndex={-1} autoComplete="off" />
+        </div>
+
         {/* BLOQUE 1: Credenciales API de Dátil */}
         <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-5 shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
@@ -240,10 +289,44 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
                 1. Credenciales de Acceso a Dátil
               </h3>
             </div>
-            <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              Cifrado en servidor con AES-256-GCM
-            </span>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {(apiKey || apiPassword) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiKey("");
+                    setApiPassword("");
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold border border-slate-700/60 transition flex items-center gap-1 cursor-pointer"
+                  title="Limpiar entradas actuales y dejarlas en blanco"
+                >
+                  <RotateCcw className="w-3 h-3 text-amber-400" />
+                  <span>Limpiar campos</span>
+                </button>
+              )}
+
+              {hasStoredPassword && (
+                <button
+                  type="button"
+                  disabled={resettingCreds}
+                  onClick={handleResetCredentials}
+                  className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                  title="Eliminar credenciales guardadas en el servidor"
+                >
+                  {resettingCreds ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-rose-400" />
+                  ) : (
+                    <Trash2 className="w-3 h-3 text-rose-400" />
+                  )}
+                  <span>Borrar credenciales del negocio</span>
+                </button>
+              )}
+
+              <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                Cifrado en servidor con AES-256-GCM
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -281,11 +364,20 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
             {/* X-Key */}
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
-                <span>X-Key (API Key)</span>
+                <span>X-Key (API Key de Dátil)</span>
                 <span className="text-[10px] text-slate-500 font-normal">Header obligatorio</span>
               </label>
               <input
                 type="text"
+                id="dtl_acc_key_token"
+                name="dtl_acc_key_token"
+                autoComplete="new-password"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                readOnly
+                onFocus={(e) => e.target.removeAttribute("readonly")}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="Ej. dtl_live_key_9f81a7b..."
@@ -296,21 +388,30 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
             {/* X-Password */}
             <div className="sm:col-span-2">
               <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
-                <span>X-Password (Contraseña de API)</span>
+                <span>X-Password (Contraseña de API Dátil)</span>
                 <span className="text-[10px] text-slate-500 font-normal">
-                  {hasStoredPassword ? "✓ Contraseña guardada y cifrada" : "Requerida"}
+                  {hasStoredPassword ? "✓ Contraseña guardada y cifrada" : "Requerida por Dátil"}
                 </span>
               </label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <input
                     type={showPassword ? "text" : "password"}
+                    id="dtl_acc_pwd_token"
+                    name="dtl_acc_pwd_token"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    readOnly
+                    onFocus={(e) => e.target.removeAttribute("readonly")}
                     value={apiPassword}
                     onChange={(e) => setApiPassword(e.target.value)}
                     placeholder={
                       hasStoredPassword
                         ? "•••••••••••••••• (Deja vacío para mantener la actual)"
-                        : "Ingresa tu X-Password de Dátil"
+                        : "Ingresa tu X-Password proporcionada por Dátil"
                     }
                     className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 px-3.5 py-2.5 rounded-xl text-xs text-white font-mono focus:outline-none pr-10"
                   />
@@ -382,6 +483,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={ruc}
                 onChange={(e) => setRuc(e.target.value.replace(/\D/g, "").slice(0, 13))}
                 placeholder="1790012345001"
@@ -402,6 +504,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={razonSocial}
                 onChange={(e) => setRazonSocial(e.target.value)}
                 placeholder="Ej. CORPORACIÓN COMERCIAL ANDINA CIA. LTDA."
@@ -416,6 +519,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={nombreComercial}
                 onChange={(e) => setNombreComercial(e.target.value)}
                 placeholder="Ej. Sumeria Liquors"
@@ -446,6 +550,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={direccionMatriz}
                 onChange={(e) => setDireccionMatriz(e.target.value)}
                 placeholder="Ej. Av. Amazonas N34-120 y Naciones Unidas"
@@ -460,6 +565,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={direccionEstablecimiento}
                 onChange={(e) => setDireccionEstablecimiento(e.target.value)}
                 placeholder="Ej. Local #4, Plaza Central"
@@ -489,6 +595,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={contribuyenteEspecial}
                 onChange={(e) => setContribuyenteEspecial(e.target.value)}
                 placeholder="Ej. Resolución NAC-00123 (opcional)"
@@ -516,6 +623,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={establecimiento}
                 maxLength={3}
                 onChange={(e) => setEstablecimiento(e.target.value.replace(/\D/g, "").slice(0, 3))}
@@ -530,6 +638,7 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={puntoEmision}
                 maxLength={3}
                 onChange={(e) => setPuntoEmision(e.target.value.replace(/\D/g, "").slice(0, 3))}

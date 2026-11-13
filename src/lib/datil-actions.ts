@@ -382,3 +382,34 @@ export async function checkDatilInvoiceStatusAction(
   }
 }
 
+/**
+ * Server Action para resetear y eliminar por completo las credenciales de Dátil de un negocio
+ */
+export async function resetDatilCredentialsAction(
+  restaurantId: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { success: false, error: auth.error };
+
+    await prisma.datilConfig.updateMany({
+      where: { restaurantId },
+      data: {
+        apiKey: "",
+        apiPasswordEncrypted: "",
+        isEnabled: false,
+      },
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/caja");
+    return {
+      success: true,
+      message: "Credenciales de Dátil eliminadas y reseteadas por defecto en blanco.",
+    };
+  } catch (err: any) {
+    console.error("Error reseteando credenciales de Dátil:", err);
+    return { success: false, error: err?.message || "Error al resetear credenciales." };
+  }
+}
+
