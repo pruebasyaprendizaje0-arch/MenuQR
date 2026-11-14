@@ -371,13 +371,13 @@ export function CajaClient({
   const [selectedRateId, setSelectedRateId] = useState<string>("none");
   const [customDeliveryCostInput, setCustomDeliveryCostInput] = useState<string>("");
   const [isCustomDelivery, setIsCustomDelivery] = useState<boolean>(false);
-  const [sendToKitchen, setSendToKitchen] = useState<boolean>(() => !isCatalogVertical);
+  const [sendToKitchen, setSendToKitchen] = useState<boolean>(() => !isCatalogVertical && !isReservasVertical);
 
   useEffect(() => {
-    if (isCatalogVertical) {
+    if (isCatalogVertical || isReservasVertical) {
       setSendToKitchen(false);
     }
-  }, [isCatalogVertical]);
+  }, [isCatalogVertical, isReservasVertical]);
 
   // CRM Search state (Búsqueda predictiva de clientes recurrentes)
   const [customerSuggestions, setCustomerSuggestions] = useState<CustomerSearchResult[]>([]);
@@ -585,6 +585,7 @@ export function CajaClient({
   }, [initialReservaOrder]);
 
   const handleLoadReservaToTicket = (reserva: any) => {
+    setSelectedActiveOrder(reserva);
     const meta = reserva.metadata || {};
     const roomName = meta.tipo_habitacion || "Alojamiento / Cabaña";
     const noches = meta.noches || 1;
@@ -603,6 +604,49 @@ export function CajaClient({
     ]);
     setActiveChannel("TACTIL");
     setMobileActiveView("TICKET");
+  };
+
+  // Extras de Hospedaje y Experiencias (Vertical Reservas: Desayunos, Paseos, Jacuzzi, Leña, etc.)
+  const lodgingExtras = useMemo(() => {
+    if (!isReservasVertical) return [];
+    try {
+      const raw = restaurant.customLabels;
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : (raw || {});
+      if (Array.isArray(parsed.availableExtras) && parsed.availableExtras.length > 0) {
+        return parsed.availableExtras;
+      }
+    } catch {}
+    return [
+      { id: "ext-1", name: "Desayuno Campestre Tradicional", price: 6.5, perPerson: true },
+      { id: "ext-2", name: "Cesta de Leña Seca para Fogata", price: 5.0, perPerson: false },
+      { id: "ext-3", name: "Sesión Privada de Jacuzzi con Sales", price: 20.0, perPerson: false },
+      { id: "ext-4", name: "Paseo a Caballo Guiado (1 hora)", price: 15.0, perPerson: true },
+    ];
+  }, [isReservasVertical, restaurant.customLabels]);
+
+  const handleAddLodgingExtra = (extra: { id: string; name: string; price: number }) => {
+    setSessionItems((prev) => {
+      const existingIndex = prev.findIndex((item) => item.dishId === `extra-${extra.id}`);
+      if (existingIndex >= 0) {
+        const copy = [...prev];
+        copy[existingIndex] = {
+          ...copy[existingIndex],
+          quantity: copy[existingIndex].quantity + 1,
+        };
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          dishId: `extra-${extra.id}`,
+          name: extra.name,
+          price: Number(extra.price) || 0,
+          quantity: 1,
+          stock: null,
+          trackStock: false,
+        },
+      ];
+    });
   };
 
   const configuredTables = useMemo(() => {
@@ -1698,6 +1742,15 @@ export function CajaClient({
               customerAddress: (selectedActiveOrder as any).cliente_direccion || null,
             },
           });
+          if (isReservasVertical && selectedActiveOrder) {
+            setReservasDelDia((prev) =>
+              prev.map((r) =>
+                r.id === selectedActiveOrder.id
+                  ? { ...r, estado: "completada", metadata: { ...(r.metadata || {}), cobrado_en_caja: true } }
+                  : r
+              )
+            );
+          }
           setSelectedActiveOrder(null);
           setSessionItems([]);
           setInvoiceCustomerType("FINAL");
@@ -2037,16 +2090,21 @@ export function CajaClient({
           alert(res.error);
         } else {
           playBeep();
-          const isDom = selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO";
-          const isLlev = selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO";
-          const targetTitle = isDom
+          const isReserva = isReservasVertical || selectedActiveOrder.mesa === "RESERVA" || (selectedActiveOrder as any).vertical === "reservas";
+          const isDom = !isReserva && (selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO");
+          const isLlev = !isReserva && (selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO");
+          const targetTitle = isReserva
+            ? `¡Check-out de ${selectedActiveOrder.cliente_nombre || "Huésped"} Finalizado!`
+            : isDom
             ? "¡Domicilio Cobrado y Despachado!"
             : isLlev
             ? "¡Pedido para Llevar Entregado!"
             : selectedActiveOrder.mesa
             ? `¡Mesa #${selectedActiveOrder.mesa} Cobrada!`
             : "¡Pedido Cobrado!";
-          const targetMessage = isDom
+          const targetMessage = isReserva
+            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Habitación liberada y check-out cerrado exitosamente.`
+            : isDom
             ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Pedido a domicilio despachado.`
             : isLlev
             ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Pedido entregado al cliente en mostrador.`
@@ -2109,6 +2167,15 @@ export function CajaClient({
               obligadoContabilidad: restaurant.datilConfig?.obligadoContabilidad,
             } : null,
           });
+          if (isReservasVertical && selectedActiveOrder) {
+            setReservasDelDia((prev) =>
+              prev.map((r) =>
+                r.id === selectedActiveOrder.id
+                  ? { ...r, estado: "completada", metadata: { ...(r.metadata || {}), cobrado_en_caja: true } }
+                  : r
+              )
+            );
+          }
           setSelectedActiveOrder(null);
           setSelectedReservationForOrder(null);
           setSessionItems([]);
@@ -2477,7 +2544,7 @@ export function CajaClient({
               </>
             ) : (
               <>
-                {!isCatalogVertical && (
+                {!isCatalogVertical && !isReservasVertical && (
                   <button
                     type="button"
                     onClick={() => setActiveChannel("MESAS")}
@@ -2497,41 +2564,45 @@ export function CajaClient({
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => setActiveChannel("LLEVAR")}
-                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                    activeChannel === "LLEVAR"
-                      ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/30 font-black scale-102"
-                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-                  }`}
-                >
-                  <ShoppingBag className="w-4 h-4" />
-                  <span>Para Llevar</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                    llevarOrders.length > 0 ? "bg-cyan-300 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
-                  }`}>
-                    {llevarOrders.length}
-                  </span>
-                </button>
+                {!isReservasVertical && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveChannel("LLEVAR")}
+                    className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                      activeChannel === "LLEVAR"
+                        ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/30 font-black scale-102"
+                        : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                    }`}
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    <span>Para Llevar</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                      llevarOrders.length > 0 ? "bg-cyan-300 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+                    }`}>
+                      {llevarOrders.length}
+                    </span>
+                  </button>
+                )}
 
-                <button
-                  type="button"
-                  onClick={() => setActiveChannel("DOMICILIO")}
-                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                    activeChannel === "DOMICILIO"
-                      ? "bg-amber-600 text-white shadow-lg shadow-amber-600/30 font-black scale-102"
-                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-                  }`}
-                >
-                  <Bike className="w-4 h-4" />
-                  <span>Domicilios</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                    domicilioOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
-                  }`}>
-                    {domicilioOrders.length}
-                  </span>
-                </button>
+                {!isReservasVertical && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveChannel("DOMICILIO")}
+                    className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                      activeChannel === "DOMICILIO"
+                        ? "bg-amber-600 text-white shadow-lg shadow-amber-600/30 font-black scale-102"
+                        : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                    }`}
+                  >
+                    <Bike className="w-4 h-4" />
+                    <span>Domicilios</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                      domicilioOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+                    }`}>
+                      {domicilioOrders.length}
+                    </span>
+                  </button>
+                )}
 
                 {isReservasVertical ? (
                   <button
@@ -2580,8 +2651,17 @@ export function CajaClient({
                       : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
                   }`}
                 >
-                  <Zap className="w-4 h-4 text-amber-300" />
-                  <span>Venta Táctil</span>
+                  {isReservasVertical ? (
+                    <>
+                      <ShoppingBag className="w-4 h-4 text-emerald-400" />
+                      <span>Boutique & Extras</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Venta Táctil</span>
+                    </>
+                  )}
                 </button>
 
                 <button
@@ -3340,16 +3420,48 @@ export function CajaClient({
               </div>
             )}
 
-            {/* CANAL: VENTA TÁCTIL (GRID DE PLATOS) */}
+            {/* CANAL: VENTA TÁCTIL (GRID DE PLATOS O BOUTIQUE & EXTRAS) */}
             {activeChannel === "TACTIL" && (
               <div className="space-y-3.5 flex-1 flex flex-col">
+                {/* Banner de Check-out en Curso (Vertical Reservas) */}
+                {isReservasVertical && selectedActiveOrder && (
+                  <div className="p-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between gap-3 shadow-md animate-in fade-in">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                        <Trees className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-black text-white truncate">
+                          Liquidando Estadía: <span className="text-emerald-300">{selectedActiveOrder.cliente_nombre || "Huésped"}</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400 truncate">
+                          {(selectedActiveOrder as any).metadata?.tipo_habitacion || "Alojamiento"} · Toca cualquier extra o souvenir para sumarlo al ticket antes del cobro.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveChannel("RESERVAS")}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-emerald-800 text-[11px] text-emerald-300 hover:text-white font-bold transition shrink-0 cursor-pointer"
+                    >
+                      ← Volver a Huéspedes
+                    </button>
+                  </div>
+                )}
+
                 {/* Categorías y Buscador */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="relative flex-1 min-w-[200px]">
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       type="text"
-                      placeholder={isCitasVertical ? "Buscar servicio, tratamiento o producto..." : "Buscar plato o combo..."}
+                      placeholder={
+                        isReservasVertical
+                          ? "Buscar souvenir, paseo, desayuno o extra..."
+                          : isCitasVertical
+                          ? "Buscar servicio, tratamiento o producto..."
+                          : "Buscar plato o combo..."
+                      }
                       value={touchSearch}
                       onChange={(e) => setTouchSearch(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
@@ -3366,8 +3478,23 @@ export function CajaClient({
                           : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
                       }`}
                     >
-                      Todas ({dishes.length})
+                      Todas ({dishes.length + (isReservasVertical ? lodgingExtras.length : 0)})
                     </button>
+
+                    {isReservasVertical && lodgingExtras.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTouchCategory("SERVICIOS_EXTRAS")}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                          touchCategory === "SERVICIOS_EXTRAS"
+                            ? "bg-emerald-600 text-white font-black"
+                            : "bg-slate-950 text-emerald-400 hover:text-white border border-emerald-800/60"
+                        }`}
+                      >
+                        🌿 Servicios & Paseos ({lodgingExtras.length})
+                      </button>
+                    )}
+
                     {categories.map((cat) => (
                       <button
                         key={cat.id}
@@ -3387,7 +3514,43 @@ export function CajaClient({
 
                 {/* Cuadrícula Táctil */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 overflow-y-auto max-h-[520px] pr-1">
-                  {filteredTouchDishes.map((dish) => (
+                  {/* Servicios Extras de Hospedaje (Desayunos, Paseos a caballo, Jacuzzi, Leña, etc.) */}
+                  {isReservasVertical && (touchCategory === "SERVICIOS_EXTRAS" || touchCategory === "TODAS") && (
+                    lodgingExtras
+                      .filter((ex: any) => !touchSearch.trim() || ex.name.toLowerCase().includes(touchSearch.toLowerCase()))
+                      .map((extra: any) => (
+                        <button
+                          key={`extra-${extra.id}`}
+                          type="button"
+                          onClick={() => handleAddLodgingExtra(extra)}
+                          className="p-3 rounded-2xl bg-emerald-950/25 border border-emerald-800/50 hover:border-emerald-500 hover:bg-emerald-950/45 text-left transition flex flex-col justify-between gap-2 group active:scale-95 shadow-sm cursor-pointer"
+                        >
+                          <div className="w-full aspect-video rounded-xl overflow-hidden bg-slate-900/90 border border-emerald-900/30 relative flex items-center justify-center">
+                            <Trees className="w-7 h-7 text-emerald-400 group-hover:scale-110 transition" />
+                            <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-lg bg-emerald-950/90 text-[10px] font-bold text-emerald-300 border border-emerald-800/40 backdrop-blur-sm">
+                              Servicio / Paseo
+                            </span>
+                          </div>
+
+                          <div>
+                            <h4 className="font-bold text-xs text-white line-clamp-2 leading-tight group-hover:text-emerald-300 transition">
+                              {extra.name}
+                            </h4>
+                            <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-800/60">
+                              <span className="text-sm font-mono font-black text-emerald-400">
+                                ${Number(extra.price || 0).toFixed(2)}
+                              </span>
+                              <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-black text-xs group-hover:bg-emerald-500 group-hover:text-white transition">
+                                +
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      ))
+                  )}
+
+                  {/* Productos del Catálogo / Boutique (Camisetas, Souvenirs, Artesanías, etc.) */}
+                  {touchCategory !== "SERVICIOS_EXTRAS" && filteredTouchDishes.map((dish) => (
                     <button
                       key={dish.id}
                       type="button"
@@ -3477,10 +3640,14 @@ export function CajaClient({
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div>
               <div className="flex items-center gap-2">
-                <Receipt className={`w-4 h-4 ${mode === "ENTRADA" ? "text-amber-400" : isCitasVertical ? "text-purple-400" : "text-emerald-400"}`} />
+                <Receipt className={`w-4 h-4 ${mode === "ENTRADA" ? "text-amber-400" : isReservasVertical ? "text-emerald-400" : isCitasVertical ? "text-purple-400" : "text-emerald-400"}`} />
                 <h3 className="font-black text-white text-base">
                   {mode === "ENTRADA"
                     ? "Ticket de Devolución"
+                    : isReservasVertical
+                    ? selectedActiveOrder
+                      ? `Check-out · ${selectedActiveOrder.cliente_nombre || "Huésped"}`
+                      : "Folio de Hospedaje & Tienda"
                     : isCitasVertical
                     ? selectedActiveOrder
                       ? `Turno · ${selectedActiveOrder.cliente_nombre || "Cita"}`
@@ -3499,6 +3666,10 @@ export function CajaClient({
               <span className="text-[11px] text-slate-400">
                 {mode === "ENTRADA"
                   ? "Reingreso de existencias a bodega"
+                  : isReservasVertical
+                  ? selectedActiveOrder
+                    ? `Liquidación de estadía (${(selectedActiveOrder as any).metadata?.tipo_habitacion || "Habitación"}) y consumos adicionales`
+                    : "Venta en tienda / boutique o liquidación de habitación"
                   : isCitasVertical
                   ? "Registro de atención, profesional asignado y cobro"
                   : selectedActiveOrder
@@ -3691,6 +3862,100 @@ export function CajaClient({
                   value={saleInternalNotes}
                   onChange={(e) => setSaleInternalNotes(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-500"
+                />
+              </div>
+            </div>
+          ) : isReservasVertical ? (
+            <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-3 space-y-2.5">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                  <span className="flex items-center gap-1 text-emerald-300">
+                    <User className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Huésped / Titular:</span>
+                  </span>
+                  {saleCustomerPhone && (
+                    <span className="text-[10px] font-mono text-emerald-400">
+                      📞 {saleCustomerPhone}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="relative">
+                    <Phone className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-400" />
+                    <input
+                      type="text"
+                      placeholder="Teléfono (buscar en CRM)..."
+                      value={saleCustomerPhone}
+                      onChange={(e) => {
+                        setSaleCustomerPhone(e.target.value);
+                        triggerCustomerSearch(e.target.value);
+                      }}
+                      onFocus={() => {
+                        if (customerSuggestions.length > 0) setShowCustomerDropdown(true);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-emerald-500 font-mono"
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <User className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Nombre del huésped..."
+                      value={saleCustomerName}
+                      onChange={(e) => {
+                        setSaleCustomerName(e.target.value);
+                        if (!saleCustomerPhone) triggerCustomerSearch(e.target.value);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Dropdown sugerencias CRM Huéspedes */}
+                {showCustomerDropdown && customerSuggestions.length > 0 && (
+                  <div className="mt-1 bg-slate-900/95 backdrop-blur-md border border-emerald-500/40 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-800 max-h-48 overflow-y-auto">
+                    <div className="px-2.5 py-1 text-[10px] font-bold text-emerald-400 uppercase tracking-wider bg-slate-950 flex items-center justify-between sticky top-0">
+                      <span>✨ Huéspedes en CRM ({customerSuggestions.length}):</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomerDropdown(false)}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {customerSuggestions.map((cust) => (
+                      <button
+                        key={cust.id}
+                        type="button"
+                        onClick={() => handleSelectCustomerSuggestion(cust)}
+                        className="w-full text-left p-2 hover:bg-emerald-950/40 transition flex flex-col gap-0.5 group cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white group-hover:text-emerald-300">
+                            {cust.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-800/60">
+                            📞 {cust.phone}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Notas de estadía */}
+              <div className="relative pt-1 border-t border-slate-800/80">
+                <FileText className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Observaciones de estadía o check-out..."
+                  value={saleInternalNotes}
+                  onChange={(e) => setSaleInternalNotes(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
@@ -4058,8 +4323,8 @@ export function CajaClient({
                 </div>
               )}
 
-              {/* Switch Enviar a Cocina (KDS) - Oculto en modo catálogo / retail */}
-              {!isCatalogVertical && (
+              {/* Switch Enviar a Cocina (KDS) - Oculto en modo catálogo / retail y reservas */}
+              {!isCatalogVertical && !isReservasVertical && (
                 <label className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 cursor-pointer select-none">
                   <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
                     <UtensilsCrossed className="w-3.5 h-3.5 text-amber-400" />
@@ -4584,7 +4849,9 @@ export function CajaClient({
               <>
                 <Check className="w-5 h-5 stroke-[3]" />
                 <span>
-                  {isCitasVertical
+                  {isReservasVertical
+                    ? `Finalizar Check-out & Cobrar ($${totalAmount.toFixed(2)})`
+                    : isCitasVertical
                     ? paymentMode === "ABONO"
                       ? `Cobrar Abono ($${(parseFloat(montoAbonoInput) || 0).toFixed(2)})`
                       : `Cobrar y Finalizar Cita ($${totalAmount.toFixed(2)})`
@@ -4601,7 +4868,9 @@ export function CajaClient({
               <>
                 <Check className="w-5 h-5 stroke-[3]" />
                 <span>
-                  {isCitasVertical
+                  {isReservasVertical
+                    ? `Cobrar Venta de Boutique ($${totalAmount.toFixed(2)})`
+                    : isCitasVertical
                     ? paymentMode === "ABONO"
                       ? `Cobrar Abono / Cuota ($${(parseFloat(montoAbonoInput) || 0).toFixed(2)})`
                       : `Cobrar y Registrar Atención ($${totalAmount.toFixed(2)})`
@@ -4612,7 +4881,7 @@ export function CajaClient({
                     : isCatalogVertical
                     ? "Cobrar y Registrar Venta"
                     : (sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Ticket")}{" "}
-                  {!isCitasVertical && `($${totalAmount.toFixed(2)})`}
+                  {!isCitasVertical && !isReservasVertical && `($${totalAmount.toFixed(2)})`}
                 </span>
               </>
             )}
