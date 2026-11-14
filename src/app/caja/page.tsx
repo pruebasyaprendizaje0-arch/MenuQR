@@ -280,11 +280,59 @@ export default async function CajaPage({
   }
 
   // Fetch active cash shift (Arqueo y Sesión)
-  let initialShift = null;
+  let initialShift: any = null;
   try {
-    const shiftRes = await getActiveCashShift(restaurant.id);
-    if (shiftRes.success && shiftRes.shift) {
-      initialShift = shiftRes.shift;
+    const shift = await prisma.cashShift.findFirst({
+      where: {
+        restaurantId: restaurant.id,
+        status: "OPEN",
+      },
+      include: {
+        movements: {
+          orderBy: { createdAt: "asc" },
+        },
+        orders: {
+          select: {
+            id: true,
+            total: true,
+            paymentMethod: true,
+            status: true,
+          },
+        },
+      },
+      orderBy: { openedAt: "desc" },
+    });
+
+    if (shift) {
+      initialShift = {
+        id: shift.id,
+        restaurantId: shift.restaurantId,
+        openedById: shift.openedById,
+        openedByName: shift.openedByName,
+        openedAt: shift.openedAt.toISOString(),
+        closedAt: shift.closedAt ? shift.closedAt.toISOString() : null,
+        status: shift.status,
+        initialCash: Number(shift.initialCash) || 0,
+        expectedCash: Number(shift.expectedCash) || 0,
+        actualCash: shift.actualCash !== null ? Number(shift.actualCash) : null,
+        difference: shift.difference !== null ? Number(shift.difference) : null,
+        notes: shift.notes || null,
+        movements: (shift.movements || []).map((m: any) => ({
+          id: m.id,
+          shiftId: m.shiftId,
+          type: m.type,
+          amount: Number(m.amount) || 0,
+          reason: m.reason,
+          performedBy: m.performedBy,
+          createdAt: m.createdAt.toISOString(),
+        })),
+        orders: (shift.orders || []).map((o: any) => ({
+          id: o.id,
+          total: Number(o.total) || 0,
+          paymentMethod: o.paymentMethod,
+          status: o.status,
+        })),
+      };
     }
   } catch (shiftErr) {
     console.error("Error querying active cash shift for Caja:", shiftErr);

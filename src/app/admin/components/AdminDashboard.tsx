@@ -11229,8 +11229,8 @@ export function AdminDashboard({
                       </div>
                     </div>
 
-                    {/* Bitácora y Notas de Evolución Clínica (Solo Vertical Citas) */}
-                    {isCitasVertical && (
+                    {/* Bitácora y Notas de Evolución Clínica (Vertical Citas & Servicios de Salud/Estética) */}
+                    {(isCitasVertical || (meta.evolutionNotes && meta.evolutionNotes.length > 0) || Boolean(meta.lastService) || bLabels.items === "Servicios" || bLabels.catalogTabTitle === "Servicios") && (
                       <div className="bg-slate-950/60 border border-purple-900/40 p-4 rounded-2xl space-y-3 text-xs">
                         <div className="flex items-center justify-between">
                           <h4 className="font-extrabold text-white flex items-center gap-2 text-sm">
@@ -11372,33 +11372,37 @@ export function AdminDashboard({
                         <History className="h-4 w-4 text-amber-400" />
                         {isServiciosTecnicos
                           ? `Historial de Visitas y Cotizaciones (${insights.matchingOrders.length})`
-                          : isCitasVertical
+                          : (isCitasVertical || bLabels.items === "Servicios" || bLabels.catalogTabTitle === "Servicios" || Boolean(meta.lastService))
                           ? `Historial de Atenciones & Compras (${insights.matchingOrders.length})`
                           : `Historial de Pedidos (${insights.matchingOrders.length})`}
                       </h4>
                       {insights.matchingOrders.length === 0 ? (
                         <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-center text-slate-500 text-xs">
-                          {isCitasVertical
+                          {isCitasVertical || bLabels.items === "Servicios"
                             ? `No se encontraron atenciones ni compras registradas para ${cust.name || cust.phone}.`
                             : `No se encontraron pedidos registrados con el teléfono ${cust.phone}.`}
                         </div>
                       ) : (
                         <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
                           {insights.matchingOrders.map((ord) => {
-                            let canalBadge = ord.tableName === "Llevar" ? "Para llevar" : ord.tableName === "Domicilio" ? "Domicilio" : `Mesa #${ord.tableName}`;
-                            if (isCitasVertical) {
-                              const tLower = String(ord.tableName || "").toLowerCase();
-                              if (tLower.includes("cita")) {
-                                canalBadge = "Turno / Cita en Consultorio";
-                              } else if (tLower.includes("tactil") || tLower.includes("atención") || tLower.includes("atencion")) {
-                                canalBadge = "Atención Directa / Mostrador";
-                              } else if (tLower.includes("llevar") || tLower.includes("retiro")) {
-                                canalBadge = "Retiro de Productos";
-                              } else if (tLower.includes("domicilio") || tLower.includes("delivery")) {
-                                canalBadge = "Envío a Domicilio";
-                              } else {
-                                canalBadge = String(ord.tableName || "Atención").replace(/^Mesa\s*#?/i, "").trim() || "Atención";
-                              }
+                            const rawTable = String(ord.tableName || "").trim();
+                            const cleanTable = rawTable.replace(/^Mesa\s*#?\s*/i, "").trim();
+                            const tLower = rawTable.toLowerCase();
+                            const isHealthServiceContext = isCitasVertical || bLabels.items === "Servicios" || tLower.includes("cita") || tLower.includes("turno");
+
+                            let canalBadge = "Atención Directa / Mostrador";
+                            if (tLower.includes("cita") || tLower.includes("turno")) {
+                              canalBadge = "Turno / Cita en Consultorio";
+                            } else if (tLower.includes("tactil") || tLower.includes("atención") || tLower.includes("atencion") || tLower.includes("directa")) {
+                              canalBadge = "Atención Directa / Mostrador";
+                            } else if (tLower.includes("llevar") || tLower.includes("retiro")) {
+                              canalBadge = isHealthServiceContext ? "Retiro de Productos" : "Para Llevar";
+                            } else if (tLower.includes("domicilio") || tLower.includes("delivery")) {
+                              canalBadge = "Envío a Domicilio";
+                            } else if (cleanTable) {
+                              canalBadge = isHealthServiceContext ? cleanTable : `Mesa #${cleanTable}`;
+                            } else {
+                              canalBadge = isHealthServiceContext ? "Atención" : "Mostrador";
                             }
 
                             return (
@@ -11406,14 +11410,14 @@ export function AdminDashboard({
                                 <div>
                                   <div className="font-bold text-white flex items-center gap-2">
                                     <span>
-                                      {isCitasVertical
+                                      {isHealthServiceContext
                                         ? `Atención #${ord.orderNumber || ord.id.substring(0, 6)}`
                                         : `Pedido #${ord.orderNumber || ord.id.substring(0, 6)}`}
                                     </span>
                                     <span
                                       className={
-                                        isCitasVertical
-                                          ? "text-[10px] font-semibold text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded-full border border-purple-800/40"
+                                        isHealthServiceContext
+                                          ? "text-[10px] font-semibold text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded-full border border-purple-800/40 shadow-sm"
                                           : "text-[10px] text-amber-400 font-normal"
                                       }
                                     >
@@ -11421,7 +11425,7 @@ export function AdminDashboard({
                                     </span>
                                   </div>
                                   <p className="text-[11px] text-slate-400 mt-0.5">
-                                    {(ord.items || []).map(it => `${it.quantity}x ${it.dishName}`).join(", ") || (isCitasVertical ? "Sin detalle de servicios o productos" : "Sin detalle de platos")}
+                                    {(ord.items || []).map(it => `${it.quantity}x ${it.dishName}`).join(", ") || (isHealthServiceContext ? "Sin detalle de servicios o productos" : "Sin detalle de platos")}
                                   </p>
                                 </div>
                                 <div className="text-right">

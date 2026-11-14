@@ -493,6 +493,8 @@ export function CajaClient({
       path: "/api/socket",
       transports: ["polling", "websocket"],
       query: { negocio_id: restaurant.id },
+      reconnectionAttempts: 5,
+      timeout: 5000,
     });
     socket.emit("join_negocio", restaurant.id);
 
