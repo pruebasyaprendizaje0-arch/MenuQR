@@ -257,9 +257,10 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
       const ivaFinal = typeof meta?.iva === "number" ? meta.iva : calcIva;
       const serviceFinal = typeof meta?.service_charge === "number" ? meta.service_charge : calcService;
 
-      if (!existing) {
-        await prisma.order.create({
-          data: {
+      try {
+        await prisma.order.upsert({
+          where: { id: p.id },
+          create: {
             id: p.id,
             restaurantId: rest.id,
             tableName: pTable,
@@ -283,23 +284,24 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
               })),
             },
           },
+          update: {
+            status: pStatus,
+            subtotal: subtotalFinal,
+            iva: ivaFinal,
+            serviceCharge: serviceFinal,
+            deliveryCost: deliveryCost,
+            total: pTotal,
+            customerName: p.cliente_nombre?.trim() || undefined,
+            customerPhone: p.cliente_telefono?.trim() || undefined,
+          },
         });
         syncedCount++;
-      } else {
-        if (existing.status !== pStatus || existing.total !== pTotal) {
-          await prisma.order.update({
-            where: { id: p.id },
-            data: {
-              status: pStatus,
-              subtotal: subtotalFinal,
-              iva: ivaFinal,
-              serviceCharge: serviceFinal,
-              deliveryCost: deliveryCost,
-              total: pTotal,
-            },
-          });
-          syncedCount++;
+      } catch (itemErr: any) {
+        if (itemErr?.code === "P2002") {
+          // Clave duplicada por concurrencia paralela en base de datos: ignorar de forma segura
+          continue;
         }
+        console.warn(`[syncPedidosToPrismaOrders] Error en pedido ${p.id}:`, itemErr?.message || itemErr);
       }
     }
 

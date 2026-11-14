@@ -168,15 +168,40 @@ export default async function CitasSlugPage({ params: paramsPromise }: PageProps
       return <CitasClient business={demoClinic} />;
     }
 
-    // Adaptar servicios desde categorías y platos
+    // Adaptar servicios desde categorías y platos (excluyendo productos físicos de venta)
     const services = business.categories.flatMap((cat) =>
-      cat.dishes.map((dish) => ({
-        id: dish.id,
-        name: dish.name,
-        durationMin: 45,
-        price: dish.price,
-        description: dish.description || "Servicio profesional programado.",
-      }))
+      cat.dishes
+        .filter((dish) => {
+          // Si está marcado con control de inventario de bodega, es un producto físico de venta, no un servicio agendable
+          if (dish.trackStock) return false;
+          try {
+            if (dish.variants) {
+              const v = typeof dish.variants === "string" ? JSON.parse(dish.variants) : dish.variants;
+              if (v.itemType === "producto") return false;
+            }
+          } catch {}
+          return true;
+        })
+        .map((dish) => {
+          let durationMin = 45;
+          try {
+            if (dish.variants) {
+              const v = typeof dish.variants === "string" ? JSON.parse(dish.variants) : dish.variants;
+              if (v.durationMin && Number(v.durationMin) > 0) {
+                durationMin = Number(v.durationMin);
+              }
+            }
+          } catch {}
+          return {
+            id: dish.id,
+            name: dish.name,
+            durationMin,
+            price: dish.price,
+            description: dish.description || "Servicio profesional programado.",
+            categoryName: cat.name || "Servicios Generales",
+            imageUrl: dish.imageUrl || null,
+          };
+        })
     );
 
     let customMeta: any = {};

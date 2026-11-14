@@ -65,7 +65,7 @@ export function SuperAdminLoginForm() {
                   name="email"
                   type="email"
                   required
-                  placeholder="pruebasyaprendizaje0@gmail.com"
+                  placeholder="admin@ejemplo.com"
                   className="bg-slate-950/80 border border-slate-800 focus:border-red-500 focus:ring-1 focus:ring-red-500 block w-full pl-10 pr-3 py-3 rounded-xl text-white placeholder-slate-550 focus:outline-none sm:text-sm transition-all duration-200"
                 />
               </div>

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { getUserSession, getSuperAdminSession, refreshUserSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
-import { emitStockActualizado, emitProductoActualizado, emitPedidoActualizado } from "@/lib/socket-server";
+import { emitStockActualizado, emitProductoActualizado, emitPedidoActualizado, emitCitaActualizada } from "@/lib/socket-server";
 
 async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; error?: string }> {
   const isSuperAdmin = await getSuperAdminSession();
@@ -366,6 +366,15 @@ export async function processCajaSaleAction(
     total?: number;
     tableName?: string;
     splitDetails?: SplitPaymentDetail[];
+    partialPayment?: {
+      isPartial: boolean;
+      montoAbonado: number;
+      saldoPendiente: number;
+      costoTotal: number;
+      treatmentName?: string;
+    };
+    specialistId?: string;
+    specialistName?: string;
   }
 ) {
   try {
@@ -390,7 +399,7 @@ export async function processCajaSaleAction(
     const finalTotal = typeof data.total === "number" && data.total >= 0 ? data.total : computedTotal;
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Validar existencias de stock estricto
+      // 1. Validar existencias de stock estricto (solo para productos físicos con trackStock activo)
       for (const it of data.items) {
         const dish = await tx.dish.findUnique({
           where: { id: it.dishId },
@@ -398,18 +407,24 @@ export async function processCajaSaleAction(
         });
 
         if (!dish || dish.restaurantId !== restaurantId) {
-          throw new Error(`El producto "${it.name}" no fue encontrado en este negocio.`);
+          throw new Error(`El producto o servicio "${it.name}" no fue encontrado en este negocio.`);
         }
 
-        const currentStock = typeof dish.stock === "number" ? dish.stock : 0;
-        if (!dish.isAvailable || currentStock <= 0) {
-          throw new Error(`El producto "${dish.name}" se encuentra agotado en bodega.`);
+        if (!dish.isAvailable) {
+          throw new Error(`"${dish.name}" no se encuentra disponible actualmente.`);
         }
 
-        if (currentStock < it.quantity) {
-          throw new Error(
-            `Stock insuficiente para "${dish.name}". Disponible en bodega: ${currentStock}, solicitado: ${it.quantity}.`
-          );
+        if (dish.trackStock) {
+          const currentStock = typeof dish.stock === "number" ? dish.stock : 0;
+          if (currentStock <= 0) {
+            throw new Error(`El producto "${dish.name}" se encuentra agotado en bodega.`);
+          }
+
+          if (currentStock < it.quantity) {
+            throw new Error(
+              `Stock insuficiente para "${dish.name}". Disponible en bodega: ${currentStock}, solicitado: ${it.quantity}.`
+            );
+          }
         }
       }
 
@@ -456,6 +471,11 @@ export async function processCajaSaleAction(
       });
 
       // Si hay turno de caja activo, actualizar contadores en el arqueo Z
+      // Para abonos / cuotas parciales, registrar ÚNICAMENTE el monto efectivamente abonado hoy
+      const effectiveAmountToShift = (data.partialPayment?.isPartial && typeof data.partialPayment.montoAbonado === "number")
+        ? data.partialPayment.montoAbonado
+        : finalTotal;
+
       if (activeShift) {
         let cashSum = 0;
         let deunaSum = 0;
@@ -471,16 +491,16 @@ export async function processCajaSaleAction(
             else cardSum += amt;
           });
         } else {
-          if (data.paymentMethod === "EFECTIVO") cashSum = finalTotal;
-          else if (data.paymentMethod === "DEUNA") deunaSum = finalTotal;
-          else if (data.paymentMethod === "TRANSFERENCIA") transferSum = finalTotal;
-          else cardSum = finalTotal;
+          if (data.paymentMethod === "EFECTIVO") cashSum = effectiveAmountToShift;
+          else if (data.paymentMethod === "DEUNA") deunaSum = effectiveAmountToShift;
+          else if (data.paymentMethod === "TRANSFERENCIA") transferSum = effectiveAmountToShift;
+          else cardSum = effectiveAmountToShift;
         }
 
         await tx.cashShift.update({
           where: { id: activeShift.id },
           data: {
-            totalSales: { increment: finalTotal },
+            totalSales: { increment: effectiveAmountToShift },
             totalCash: { increment: cashSum },
             expectedCash: { increment: cashSum },
             totalDeuna: { increment: deunaSum },
@@ -495,16 +515,46 @@ export async function processCajaSaleAction(
         const cleanPhone = data.customerPhone.trim();
         const existingCust = await tx.customer.findFirst({
           where: { restaurantId, phone: cleanPhone },
-          select: { id: true, totalOrders: true, totalSpent: true },
+          select: { id: true, totalOrders: true, totalSpent: true, notes: true },
         });
+
+        let updatedNotes = existingCust?.notes || "";
+        if (data.partialPayment?.isPartial) {
+          let parsedNotes: any = {};
+          try {
+            parsedNotes = existingCust?.notes ? JSON.parse(existingCust.notes) : {};
+          } catch {}
+          const prevTotalAbonado = Number(parsedNotes.activePaymentPlan?.totalAbonado) || 0;
+          const currentTotalAbonado = prevTotalAbonado + data.partialPayment.montoAbonado;
+          parsedNotes.activePaymentPlan = {
+            treatmentName: data.partialPayment.treatmentName || "Tratamiento / Servicio",
+            costoTotal: data.partialPayment.costoTotal,
+            totalAbonado: currentTotalAbonado,
+            saldoPendiente: data.partialPayment.saldoPendiente,
+            updatedAt: new Date().toISOString(),
+            historial: [
+              ...(Array.isArray(parsedNotes.activePaymentPlan?.historial) ? parsedNotes.activePaymentPlan.historial : []),
+              {
+                fecha: new Date().toISOString(),
+                abono: data.partialPayment.montoAbonado,
+                metodo: data.paymentMethod,
+                saldoDespues: data.partialPayment.saldoPendiente,
+                especialista: data.specialistName || undefined,
+              },
+            ],
+          };
+          updatedNotes = JSON.stringify(parsedNotes);
+        }
+
         if (existingCust) {
           await tx.customer.update({
             where: { id: existingCust.id },
             data: {
               name: data.customerName?.trim() || undefined,
               address: data.customerAddress?.trim() || undefined,
+              notes: data.partialPayment?.isPartial ? updatedNotes : undefined,
               totalOrders: { increment: 1 },
-              totalSpent: { increment: finalTotal },
+              totalSpent: { increment: effectiveAmountToShift },
             },
           });
         } else {
@@ -514,14 +564,15 @@ export async function processCajaSaleAction(
               name: data.customerName?.trim() || "Cliente",
               phone: cleanPhone,
               address: data.customerAddress?.trim() || null,
+              notes: data.partialPayment?.isPartial ? updatedNotes : null,
               totalOrders: 1,
-              totalSpent: finalTotal,
+              totalSpent: effectiveAmountToShift,
             },
           });
         }
       }
 
-      // 3. Descontar Stock y marcar agotado si llega a 0
+      // 3. Descontar Stock SOLO para productos físicos que tengan trackStock activo
       const updatedDishes: any[] = [];
       for (const it of data.items) {
         const dish = await tx.dish.findUnique({
@@ -529,7 +580,7 @@ export async function processCajaSaleAction(
           select: { id: true, name: true, stock: true, trackStock: true, isAvailable: true },
         });
 
-        if (dish) {
+        if (dish && dish.trackStock) {
           const currentStock = typeof dish.stock === "number" ? dish.stock : 0;
           const newStock = Math.max(0, currentStock - it.quantity);
           const stillAvailable = newStock > 0;
@@ -538,7 +589,6 @@ export async function processCajaSaleAction(
             where: { id: it.dishId },
             data: {
               stock: newStock,
-              trackStock: true,
               isAvailable: stillAvailable,
             },
           });
@@ -652,6 +702,20 @@ export async function settleOrderInCashShiftAction(
     depositDiscount?: number;
     reservationId?: string;
     splitDetails?: SplitPaymentDetail[];
+    items?: {
+      dishId?: string;
+      name: string;
+      price: number;
+      quantity: number;
+      trackStock?: boolean;
+    }[];
+    partialPayment?: {
+      isPartial: boolean;
+      montoAbonado: number;
+      saldoPendiente: number;
+      costoTotal: number;
+      treatmentName?: string;
+    };
   }
 ) {
   try {
@@ -659,19 +723,178 @@ export async function settleOrderInCashShiftAction(
     const auth = await verifyRestaurantOwnership(restaurantId);
     if (!auth.authorized) return { error: auth.error };
 
+    const effectiveTotalToShift = (data.partialPayment?.isPartial && typeof data.partialPayment.montoAbonado === "number")
+      ? data.partialPayment.montoAbonado
+      : Math.max(0, Number(data.total) || 0);
+
     const totalToSettle = Math.max(0, Number(data.total) || 0);
 
     await ensureDbTables();
 
-    // 1. Marcar como pagado en la tabla relacional de pedidos
+    // 1. Marcar como pagado o completada en la tabla relacional de pedidos
     if (data.orderId) {
-      await pool.query(
-        `UPDATE pedidos 
-         SET estado = 'pagado',
-             solicita_mesero = false
-         WHERE id = $1 AND negocio_id = $2`,
+      const { rows: orderRows } = await pool.query(
+        `SELECT id, vertical, mesa, metadata, total::float, cliente_telefono, cliente_nombre FROM pedidos WHERE id = $1 AND negocio_id = $2 LIMIT 1`,
         [data.orderId, restaurantId]
       );
+
+      if (orderRows.length > 0) {
+        const orderRecord = orderRows[0];
+        let meta: any = {};
+        try {
+          meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});
+        } catch {}
+
+        const isCitaOrder = orderRecord.vertical === "citas" || String(orderRecord.mesa).toUpperCase() === "CITA";
+
+        if (isCitaOrder) {
+          meta.cobrado_en_caja = true;
+          meta.monto_cobrado = effectiveTotalToShift;
+          meta.fecha_cobro = new Date().toISOString();
+
+          if (data.partialPayment?.isPartial) {
+            meta.isPartialPayment = true;
+            meta.monto_abonado_hoy = data.partialPayment.montoAbonado;
+            meta.saldo_pendiente = data.partialPayment.saldoPendiente;
+            meta.costo_total = data.partialPayment.costoTotal;
+            meta.historial_abonos = [
+              ...(Array.isArray(meta.historial_abonos) ? meta.historial_abonos : []),
+              {
+                fecha: new Date().toISOString(),
+                monto: data.partialPayment.montoAbonado,
+                metodo: data.paymentMethod,
+                saldoDespues: data.partialPayment.saldoPendiente,
+              },
+            ];
+          }
+
+          // Calcular comisión por especialista si tiene porcentaje configurado
+          let comisionCalculada = meta.comision_calculada || 0;
+          if (meta.especialista_id) {
+            try {
+              const rest = await prisma.restaurant.findUnique({
+                where: { id: restaurantId },
+                select: { customLabels: true },
+              });
+              let cLabels: any = {};
+              try {
+                cLabels = typeof rest?.customLabels === "string" ? JSON.parse(rest.customLabels) : (rest?.customLabels || {});
+              } catch {}
+              const specialists = Array.isArray(cLabels.specialists) ? cLabels.specialists : [];
+              const spec = specialists.find((s: any) => s.id === meta.especialista_id);
+              const commPercent = Number(spec?.commissionPercentage) || 0;
+              if (commPercent > 0) {
+                const servicePrice = Number(meta.precio_estimado) || Number(orderRecord.total) || 0;
+                comisionCalculada = Math.round(((servicePrice * commPercent) / 100) * 100) / 100;
+              }
+            } catch (specErr) {
+              console.warn("Error calculating specialist commission:", specErr);
+            }
+          }
+          if (comisionCalculada > 0) {
+            meta.comision_calculada = comisionCalculada;
+          }
+
+          // Si el cajero agregó productos físicos retail al ticket de la cita
+          if (Array.isArray(data.items) && data.items.length > 0) {
+            for (const it of data.items) {
+              if (it.dishId && it.dishId !== "cita-item" && it.dishId !== "abono-cuota") {
+                try {
+                  await pool.query(
+                    `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas)
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [data.orderId, it.name, it.quantity, it.price, "Agregado en Caja POS"]
+                  );
+                  const dish = await prisma.dish.findUnique({
+                    where: { id: it.dishId },
+                    select: { id: true, trackStock: true },
+                  });
+                  if (dish && dish.trackStock) {
+                    await prisma.dish.update({
+                      where: { id: it.dishId },
+                      data: { stock: { decrement: it.quantity } },
+                    });
+                  }
+                } catch (prodErr) {
+                  console.warn("Error agregando producto físico a la cita:", prodErr);
+                }
+              }
+            }
+          }
+
+          const newEstado = (data.partialPayment?.isPartial && data.partialPayment.saldoPendiente > 0)
+            ? "en_atencion"
+            : "completada";
+
+          const { rows: updatedCitaRows } = await pool.query(
+            `UPDATE pedidos 
+             SET estado = $1,
+                 total = $2,
+                 metadata = $3,
+                 solicita_mesero = false
+             WHERE id = $4 AND negocio_id = $5
+             RETURNING *`,
+            [newEstado, effectiveTotalToShift, JSON.stringify(meta), data.orderId, restaurantId]
+          );
+
+          // Actualizar plan activo en Customer del CRM si tiene teléfono
+          if (orderRecord.cliente_telefono) {
+            try {
+              const cust = await prisma.customer.findFirst({
+                where: { restaurantId, phone: orderRecord.cliente_telefono },
+              });
+              if (cust) {
+                let custNotes: any = {};
+                try {
+                  custNotes = typeof cust.notes === "string" ? JSON.parse(cust.notes) : (cust.notes || {});
+                } catch {}
+
+                if (data.partialPayment?.isPartial) {
+                  const prevAbonado = Number(custNotes.activePaymentPlan?.totalAbonado) || 0;
+                  custNotes.activePaymentPlan = {
+                    treatmentName: data.partialPayment.treatmentName || "Tratamiento / Cita",
+                    costoTotal: data.partialPayment.costoTotal,
+                    totalAbonado: prevAbonado + data.partialPayment.montoAbonado,
+                    saldoPendiente: data.partialPayment.saldoPendiente,
+                    updatedAt: new Date().toISOString(),
+                    historial: [
+                      ...(Array.isArray(custNotes.activePaymentPlan?.historial) ? custNotes.activePaymentPlan.historial : []),
+                      {
+                        fecha: new Date().toISOString(),
+                        abono: data.partialPayment.montoAbonado,
+                        metodo: data.paymentMethod,
+                        saldoDespues: data.partialPayment.saldoPendiente,
+                      },
+                    ],
+                  };
+                }
+
+                await prisma.customer.update({
+                  where: { id: cust.id },
+                  data: {
+                    notes: JSON.stringify(custNotes),
+                    totalSpent: { increment: effectiveTotalToShift },
+                  },
+                });
+              }
+            } catch (custErr) {
+              console.warn("Error updating customer activePaymentPlan:", custErr);
+            }
+          }
+
+          try {
+            emitCitaActualizada(restaurantId, updatedCitaRows[0]);
+          } catch {}
+        } else {
+          await pool.query(
+            `UPDATE pedidos 
+             SET estado = 'pagado',
+                 solicita_mesero = false
+             WHERE id = $1 AND negocio_id = $2`,
+            [data.orderId, restaurantId]
+          );
+        }
+      }
     }
 
     // 2. Si es una mesa de salón, liberar todas las comandas activas huérfanas de esa mesa
@@ -707,7 +930,7 @@ export async function settleOrderInCashShiftAction(
     } catch {}
 
     if (activeShift) {
-      const deltaTotal = totalToSettle;
+      const deltaTotal = effectiveTotalToShift;
 
       // Desglose de pagos si proviene de cobro dividido (Split Pay)
       let cashSum = 0;

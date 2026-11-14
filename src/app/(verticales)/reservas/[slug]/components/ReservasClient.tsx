@@ -243,8 +243,12 @@ export function ReservasClient({ property }: { property: PropertyData }) {
       <div className="sticky top-0 z-40 backdrop-blur-xl bg-slate-950/85 border-b border-white/10 py-2.5 px-4">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <div className="relative w-8 h-8 rounded-xl overflow-hidden border border-emerald-500/50 bg-slate-900 shrink-0">
-              <Image src={property.logoUrl} alt={property.name} fill className="object-cover" />
+            <div className="relative w-8 h-8 rounded-xl overflow-hidden border border-emerald-500/50 bg-gradient-to-br from-emerald-900/60 to-slate-900 flex items-center justify-center shrink-0">
+              {property.logoUrl?.trim() ? (
+                <Image src={property.logoUrl.trim()} alt={property.name} fill className="object-cover" />
+              ) : (
+                <BedDouble className="w-4 h-4 text-emerald-400" />
+              )}
             </div>
             <div className="min-w-0">
               <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest block">Hospedaje & Cabañas</span>

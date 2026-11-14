@@ -35,7 +35,11 @@ import {
   Save,
   CheckSquare,
   Camera,
+  Percent,
+  Receipt,
+  Copy,
 } from "lucide-react";
+import { io } from "socket.io-client";
 
 interface Specialist {
   id: string;
@@ -43,6 +47,7 @@ interface Specialist {
   title: string;
   rating: string;
   imageUrl: string;
+  commissionPercentage?: number;
 }
 
 interface CitaItem {
@@ -64,6 +69,10 @@ interface CitaItem {
     duracion_min?: number;
     notas_cita?: string;
     notas_internas?: string;
+    cobrado_en_caja?: boolean;
+    monto_cobrado?: number;
+    comision_calculada?: number;
+    comision_especialista?: number;
   };
   items?: Array<{
     id: string;
@@ -139,6 +148,7 @@ export default function CitasAdminTab({ restaurant }: CitasAdminTabProps) {
     title: "",
     rating: "5.0",
     imageUrl: "",
+    commissionPercentage: 0,
   });
 
   // Inputs para añadir nuevas horas a las franjas
@@ -264,6 +274,38 @@ export default function CitasAdminTab({ restaurant }: CitasAdminTabProps) {
     fetchConfig();
   }, [fetchCitas, fetchConfig]);
 
+  // Sincronización en tiempo real vía Socket.IO
+  useEffect(() => {
+    let socket: any = null;
+    try {
+      socket = io({
+        path: "/api/socket",
+        transports: ["polling", "websocket"],
+        query: { negocio_id: restaurant.id },
+      });
+
+      socket.on("connect", () => {
+        socket.emit("join_negocio", restaurant.id);
+      });
+
+      socket.on("nueva_cita", () => {
+        fetchCitas();
+      });
+
+      socket.on("cita_actualizada", () => {
+        fetchCitas();
+      });
+    } catch (e) {
+      console.warn("Socket.IO no disponible en CitasAdminTab:", e);
+    }
+
+    return () => {
+      if (socket) {
+        socket.disconnect();
+      }
+    };
+  }, [restaurant.id, fetchCitas]);
+
   // Guardar configuración completa de Especialistas, Horarios y Galería en la Base de Datos
   const handleSaveConfig = async (
     newSpecs: Specialist[],
@@ -313,6 +355,7 @@ export default function CitasAdminTab({ restaurant }: CitasAdminTabProps) {
       title: "Médico / Especialista / Profesional",
       rating: "5.0",
       imageUrl: "",
+      commissionPercentage: 0,
     });
     setShowSpecialistModal(true);
   };
@@ -1143,9 +1186,9 @@ export default function CitasAdminTab({ restaurant }: CitasAdminTabProps) {
               >
                 <div className="flex items-start gap-3.5">
                   <div className="relative w-14 h-14 rounded-2xl overflow-hidden bg-purple-900/30 border border-purple-500/30 shrink-0">
-                    {spec.imageUrl ? (
+                    {spec.imageUrl && spec.imageUrl.trim() ? (
                       /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={spec.imageUrl} alt={spec.name} className="w-full h-full object-cover" />
+                      <img src={spec.imageUrl.trim()} alt={spec.name} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-purple-400">
                         <User className="w-6 h-6" />

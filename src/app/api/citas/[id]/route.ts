@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
+import { emitCitaActualizada } from "@/lib/socket-server";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,10 @@ export async function PATCH(
       ]
     );
 
+    try {
+      emitCitaActualizada(currentOrder.negocio_id, updatedRows[0]);
+    } catch {}
+
     return NextResponse.json({
       ok: true,
       cita: updatedRows[0],
@@ -120,7 +125,7 @@ export async function DELETE(
       `UPDATE pedidos 
        SET estado = 'cancelada' 
        WHERE id = $1 AND vertical = 'citas'
-       RETURNING id, estado`,
+       RETURNING id, negocio_id, estado`,
       [id]
     );
 
@@ -130,6 +135,12 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    try {
+      if (rows[0].negocio_id) {
+        emitCitaActualizada(rows[0].negocio_id, rows[0]);
+      }
+    } catch {}
 
     return NextResponse.json({
       ok: true,

@@ -59,7 +59,9 @@ import {
   Calendar,
   BookmarkCheck,
   LayoutGrid,
+  Stethoscope,
 } from "lucide-react";
+import { io } from "socket.io-client";
 import {
   getTableReservationsAction,
   createTableReservationAction,
@@ -213,6 +215,8 @@ interface CajaClientProps {
     email: string;
   };
   dishes?: TouchDishItem[];
+  initialCitaOrder?: any | null;
+  initialCitasDelDia?: any[] | null;
 }
 
 export function CajaClient({
@@ -221,6 +225,8 @@ export function CajaClient({
   initialShift = null,
   currentUser,
   dishes = [],
+  initialCitaOrder = null,
+  initialCitasDelDia = null,
 }: CajaClientProps) {
   // Cash shift / Turno de caja state
   const [activeShift, setActiveShift] = useState<SerializedCashShift | null>(initialShift);
@@ -243,6 +249,32 @@ export function CajaClient({
   const [isTransferVerified, setIsTransferVerified] = useState(false);
   const [isCardVerified, setIsCardVerified] = useState(false);
 
+  // Citas del Día (Vertical Citas)
+  const [citasDelDia, setCitasDelDia] = useState<any[]>(initialCitasDelDia || []);
+
+  // Lista de Especialistas desde restaurant.customLabels
+  const specialistsList: Array<{ id: string; name: string; title?: string; commissionPercentage?: number }> = useMemo(() => {
+    let cMeta: any = {};
+    try {
+      cMeta = typeof restaurant.customLabels === "string" ? JSON.parse(restaurant.customLabels) : (restaurant.customLabels || {});
+    } catch {}
+    return Array.isArray(cMeta.specialists) ? cMeta.specialists : [];
+  }, [restaurant.customLabels]);
+
+  const [ticketSpecialistId, setTicketSpecialistId] = useState<string>("");
+
+  // Modalidad de cobro para tratamientos largos (Pago Total vs Abono / Cuota Parcial)
+  const [paymentMode, setPaymentMode] = useState<"TOTAL" | "ABONO">("TOTAL");
+  const [montoAbonoInput, setMontoAbonoInput] = useState<string>("");
+
+  // Plan de pagos activo del paciente si existe
+  const [patientActivePlan, setPatientActivePlan] = useState<{
+    treatmentName: string;
+    costoTotal: number;
+    totalAbonado: number;
+    saldoPendiente: number;
+  } | null>(null);
+
   // Detección canónica de vertical Catálogo / Retail (Zero-regressions gastronómico)
   const isCatalogVertical = useMemo(() => {
     const v = resolveBusinessVertical(restaurant);
@@ -253,8 +285,14 @@ export function CajaClient({
     );
   }, [restaurant]);
 
+  // Detección canónica de vertical Citas / Salud / Belleza
+  const isCitasVertical = useMemo(() => {
+    return resolveBusinessVertical(restaurant) === "citas";
+  }, [restaurant]);
+
   // Canales Operativos de POS (Opción 2 Split Screen)
-  const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "TACTIL" | "SCANNER">(() => {
+  const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "CITAS" | "TACTIL" | "SCANNER">(() => {
+    if (resolveBusinessVertical(restaurant) === "citas") return "CITAS";
     return isCatalogVertical ? "TACTIL" : "MESAS";
   });
 
@@ -390,10 +428,89 @@ export function CajaClient({
       setSaleDeliveryAddress(cust.address);
     }
     if (cust.notes && !saleInternalNotes) {
-      setSaleInternalNotes(cust.notes);
+      if (cust.notes.trim().startsWith("{")) {
+        try {
+          const parsed = JSON.parse(cust.notes);
+          const cleanText = [
+            parsed.allergies ? `Alergias: ${parsed.allergies}` : "",
+            parsed.clinicalNotes || parsed.observations || parsed.notesText || "",
+          ].filter(Boolean).join(" · ");
+          if (cleanText) setSaleInternalNotes(cleanText);
+        } catch {}
+      } else {
+        setSaleInternalNotes(cust.notes);
+      }
+    }
+    if (cust.notes) {
+      try {
+        const parsed = JSON.parse(cust.notes);
+        if (parsed.activePaymentPlan && Number(parsed.activePaymentPlan.saldoPendiente) > 0) {
+          setPatientActivePlan(parsed.activePaymentPlan);
+        } else {
+          setPatientActivePlan(null);
+        }
+      } catch {
+        setPatientActivePlan(null);
+      }
+    } else {
+      setPatientActivePlan(null);
     }
     setShowCustomerDropdown(false);
   };
+
+  // Auto-cargar cita inicial cuando proviene de un parámetro de URL (?citaId=...)
+  useEffect(() => {
+    if (initialCitaOrder) {
+      setSelectedActiveOrder(initialCitaOrder);
+      if (initialCitaOrder.metadata?.especialista_id) {
+        setTicketSpecialistId(initialCitaOrder.metadata.especialista_id);
+      }
+      if (initialCitaOrder.cliente_nombre) {
+        setSaleCustomerName(initialCitaOrder.cliente_nombre);
+      }
+      if (initialCitaOrder.cliente_telefono) {
+        setSaleCustomerPhone(initialCitaOrder.cliente_telefono);
+      }
+      if (Array.isArray(initialCitaOrder.items) && initialCitaOrder.items.length > 0) {
+        setSessionItems(
+          initialCitaOrder.items.map((it: any) => ({
+            dishId: it.id || "cita-item",
+            name: it.nombre,
+            price: Number(it.precio) || 0,
+            quantity: Number(it.cantidad) || 1,
+            stock: null,
+            trackStock: false,
+          }))
+        );
+      }
+    }
+  }, [initialCitaOrder]);
+
+  // Sincronización en tiempo real vía Socket.IO para Citas del Día
+  useEffect(() => {
+    if (!isCitasVertical) return;
+    const socket = io({
+      path: "/api/socket",
+      transports: ["polling", "websocket"],
+      query: { negocio_id: restaurant.id },
+    });
+    socket.emit("join_negocio", restaurant.id);
+
+    socket.on("nueva_cita", (cita: any) => {
+      setCitasDelDia((prev) => [cita, ...prev.filter((c) => c.id !== cita.id)]);
+    });
+
+    socket.on("cita_actualizada", (cita: any) => {
+      setCitasDelDia((prev) => {
+        if (cita.estado === "cancelada") return prev.filter((c) => c.id !== cita.id);
+        return prev.map((c) => (c.id === cita.id ? { ...c, ...cita } : c));
+      });
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [isCitasVertical, restaurant.id]);
 
   const configuredTables = useMemo(() => {
     if (!restaurant.tablesConfig) return ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -836,11 +953,18 @@ export function CajaClient({
   // Añadir un plato táctil al ticket de cobro
   const handleAddTouchDish = (dish: TouchDishItem) => {
     if (selectedActiveOrder) {
-      if (!confirm("Tienes una mesa seleccionada en el ticket. ¿Deseas iniciar una Venta Rápida nueva?")) {
-        return;
+      const isCitaOrder =
+        (selectedActiveOrder as any).vertical === "citas" ||
+        selectedActiveOrder.mesa === "CITA" ||
+        isCitasVertical;
+
+      if (!isCitaOrder) {
+        if (!confirm("Tienes una mesa seleccionada en el ticket. ¿Deseas iniciar una Venta Rápida nueva?")) {
+          return;
+        }
+        setSelectedActiveOrder(null);
+        setSessionItems([]);
       }
-      setSelectedActiveOrder(null);
-      setSessionItems([]);
     }
 
     if (dish.modifierGroups && dish.modifierGroups.length > 0) {
@@ -1127,9 +1251,12 @@ export function CajaClient({
           ? false
           : (isTable ? (restaurant.serviceOnTable ?? true) : (restaurant.serviceOnTakeout ?? true)));
 
-    const baseAmount = selectedActiveOrder
-      ? (selectedActiveOrder.items || []).reduce((acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1), 0)
-      : itemsSubtotal;
+    // Base amount: si sessionItems tiene items (servicios o productos añadidos en vivo), usar su suma real
+    const baseAmount = sessionItems.length > 0
+      ? itemsSubtotal
+      : (selectedActiveOrder
+          ? (selectedActiveOrder.items || []).reduce((acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1), 0)
+          : itemsSubtotal);
 
     let meta: any = {};
     if (selectedActiveOrder) {
@@ -1175,10 +1302,10 @@ export function CajaClient({
     return Math.round(net * 100) / 100;
   }, [chargesBreakdown, appliedDepositDiscount]);
 
-  const totalAmount = selectedActiveOrder && selectedActiveOrder.total > 0
+  const totalAmount = selectedActiveOrder && sessionItems.length === 0 && selectedActiveOrder.total > 0
     ? (selectedReservationForOrder
         ? Math.max(0, Math.round((selectedActiveOrder.total - appliedDepositDiscount) * 100) / 100)
-        : (selectedActiveOrder.total >= computedExpectedTotal ? selectedActiveOrder.total : computedExpectedTotal))
+        : selectedActiveOrder.total)
     : computedExpectedTotal;
 
   // Vuelto / Cambio en Efectivo
@@ -1796,6 +1923,20 @@ export function CajaClient({
           customerName: selectedActiveOrder.cliente_nombre,
           depositDiscount: appliedDepositDiscount,
           reservationId: selectedReservationForOrder?.id,
+          items: sessionItems.map((it) => ({
+            dishId: it.dishId,
+            name: it.name,
+            price: it.price,
+            quantity: it.quantity,
+            trackStock: it.trackStock,
+          })),
+          partialPayment: isCitasVertical && paymentMode === "ABONO" ? {
+            isPartial: true,
+            montoAbonado: Math.min(totalAmount, parseFloat(montoAbonoInput) || totalAmount),
+            saldoPendiente: Math.max(0, totalAmount - (parseFloat(montoAbonoInput) || totalAmount)),
+            costoTotal: totalAmount,
+            treatmentName: sessionItems.map(it => it.name).join(", ") || "Tratamiento / Cita",
+          } : undefined,
         });
 
         if (res.error) {
@@ -1921,7 +2062,7 @@ export function CajaClient({
       const res = await processCajaSaleAction(restaurant.id, {
         items: itemsPayload,
         paymentMethod: paymentMethod,
-        customerName: effectiveCustomerName,
+        customerName: isCitasVertical && cleanName ? cleanName : effectiveCustomerName,
         customerPhone: cleanPhone || undefined,
         customerAddress: saleModality === "DOMICILIO" ? saleDeliveryAddress.trim() : undefined,
         deliveryCost: saleModality === "DOMICILIO" ? saleDeliveryCost : 0,
@@ -1930,8 +2071,17 @@ export function CajaClient({
         iva: chargesBreakdown.iva,
         serviceCharge: chargesBreakdown.service,
         total: totalAmount,
-        tableName: effectiveTableName,
+        tableName: isCitasVertical ? "Atención Directa" : effectiveTableName,
         splitDetails: splitPayments.length > 0 ? splitPayments : undefined,
+        partialPayment: isCitasVertical && paymentMode === "ABONO" ? {
+          isPartial: true,
+          montoAbonado: Math.min(totalAmount, parseFloat(montoAbonoInput) || totalAmount),
+          saldoPendiente: Math.max(0, totalAmount - (parseFloat(montoAbonoInput) || totalAmount)),
+          costoTotal: totalAmount,
+          treatmentName: sessionItems.map(it => it.name).join(", ") || "Tratamiento / Cita",
+        } : undefined,
+        specialistId: isCitasVertical ? ticketSpecialistId : undefined,
+        specialistName: isCitasVertical ? specialistsList.find(s => s.id === ticketSpecialistId)?.name : undefined,
       });
 
       if (res.error) {
@@ -2184,109 +2334,159 @@ export function CajaClient({
             </button>
           </div>
 
-          {/* BARRA DE CANALES (Mesas en Salón [solo restaurante], Llevar, Domicilio, Reservas, Venta Táctil, Escáner) */}
+          {/* BARRA DE CANALES (En vertical Citas: Citas del Día, Atención Directa, Escáner; En Gastronomía: Mesas, Llevar, Domicilio, Reservas) */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {!isCatalogVertical && (
-              <button
-                type="button"
-                onClick={() => setActiveChannel("MESAS")}
-                className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                  activeChannel === "MESAS"
-                    ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 font-black scale-102"
-                    : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Mesas en Salón</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                  mesasOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse" : "bg-slate-800 text-slate-400"
-                }`}>
-                  {mesasOrders.length}
-                </span>
-              </button>
+            {isCitasVertical ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setActiveChannel("CITAS")}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                    activeChannel === "CITAS"
+                      ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30 font-black scale-102"
+                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  <CalendarDays className="w-4 h-4 text-purple-300" />
+                  <span>Citas del Día</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                    citasDelDia.length > 0 ? "bg-purple-300 text-slate-950 font-black animate-pulse" : "bg-slate-800 text-slate-400"
+                  }`}>
+                    {citasDelDia.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannel("TACTIL")}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                    activeChannel === "TACTIL"
+                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-black scale-102"
+                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>Atención Directa</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannel("SCANNER")}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                    activeChannel === "SCANNER"
+                      ? "bg-rose-600 text-white shadow-lg shadow-rose-600/30 font-black scale-102"
+                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  <Barcode className="w-4 h-4" />
+                  <span>Escáner Barcode</span>
+                </button>
+              </>
+            ) : (
+              <>
+                {!isCatalogVertical && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveChannel("MESAS")}
+                    className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                      activeChannel === "MESAS"
+                        ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 font-black scale-102"
+                        : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Mesas en Salón</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                      mesasOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse" : "bg-slate-800 text-slate-400"
+                    }`}>
+                      {mesasOrders.length}
+                    </span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannel("LLEVAR")}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                    activeChannel === "LLEVAR"
+                      ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/30 font-black scale-102"
+                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>Para Llevar</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                    llevarOrders.length > 0 ? "bg-cyan-300 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+                  }`}>
+                    {llevarOrders.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannel("DOMICILIO")}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                    activeChannel === "DOMICILIO"
+                      ? "bg-amber-600 text-white shadow-lg shadow-amber-600/30 font-black scale-102"
+                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  <Bike className="w-4 h-4" />
+                  <span>Domicilios</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                    domicilioOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+                  }`}>
+                    {domicilioOrders.length}
+                  </span>
+                </button>
+
+                {!isCatalogVertical && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveChannel("RESERVAS")}
+                    className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                      activeChannel === "RESERVAS"
+                        ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30 font-black scale-102"
+                        : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                    }`}
+                  >
+                    <CalendarDays className="w-4 h-4 text-purple-400" />
+                    <span>Reservas</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                      reservations.length > 0 ? "bg-purple-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+                    }`}>
+                      {reservations.length}
+                    </span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannel("TACTIL")}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                    activeChannel === "TACTIL"
+                      ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-black scale-102"
+                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>Venta Táctil</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveChannel("SCANNER")}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
+                    activeChannel === "SCANNER"
+                      ? "bg-rose-600 text-white shadow-lg shadow-rose-600/30 font-black scale-102"
+                      : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                  }`}
+                >
+                  <Barcode className="w-4 h-4" />
+                  <span>Escáner Barcode</span>
+                </button>
+              </>
             )}
-
-            <button
-              type="button"
-              onClick={() => setActiveChannel("LLEVAR")}
-              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                activeChannel === "LLEVAR"
-                  ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/30 font-black scale-102"
-                  : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-              }`}
-            >
-              <ShoppingBag className="w-4 h-4" />
-              <span>Para Llevar</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                llevarOrders.length > 0 ? "bg-cyan-300 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
-              }`}>
-                {llevarOrders.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveChannel("DOMICILIO")}
-              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                activeChannel === "DOMICILIO"
-                  ? "bg-amber-600 text-white shadow-lg shadow-amber-600/30 font-black scale-102"
-                  : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-              }`}
-            >
-              <Bike className="w-4 h-4" />
-              <span>Domicilios</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                domicilioOrders.length > 0 ? "bg-amber-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
-              }`}>
-                {domicilioOrders.length}
-              </span>
-            </button>
-
-            {!isCatalogVertical && (
-              <button
-                type="button"
-                onClick={() => setActiveChannel("RESERVAS")}
-                className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                  activeChannel === "RESERVAS"
-                    ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30 font-black scale-102"
-                    : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-                }`}
-              >
-                <CalendarDays className="w-4 h-4 text-purple-400" />
-                <span>Reservas</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
-                  reservations.length > 0 ? "bg-purple-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
-                }`}>
-                  {reservations.length}
-                </span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setActiveChannel("TACTIL")}
-              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                activeChannel === "TACTIL"
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-black scale-102"
-                  : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-              }`}
-            >
-              <Zap className="w-4 h-4 text-amber-300" />
-              <span>Venta Táctil</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveChannel("SCANNER")}
-              className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap ${
-                activeChannel === "SCANNER"
-                  ? "bg-rose-600 text-white shadow-lg shadow-rose-600/30 font-black scale-102"
-                  : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
-              }`}
-            >
-              <Barcode className="w-4 h-4" />
-              <span>Escáner Barcode</span>
-            </button>
           </div>
 
           {/* ÁREA DE CONTENIDO SEGÚN CANAL */}
@@ -2699,6 +2899,190 @@ export function CajaClient({
               </div>
             )}
 
+            {/* CANAL: CITAS DEL DÍA (VERTICAL CITAS) */}
+            {isCitasVertical && activeChannel === "CITAS" && (
+              <div className="space-y-4 flex-1 flex flex-col">
+                <div className="flex items-center justify-between gap-3 pb-2 border-b border-slate-800 flex-wrap">
+                  <div>
+                    <h3 className="font-black text-white text-base flex items-center gap-2">
+                      <CalendarDays className="w-5 h-5 text-purple-400" />
+                      <span>Citas & Turnos Agendados de Hoy</span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Toca una cita para cargar sus servicios al ticket, asignar especialista y cobrar.
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-purple-300 bg-purple-950/80 border border-purple-500/30 px-3 py-1 rounded-full">
+                    {citasDelDia.length} {citasDelDia.length === 1 ? "cita hoy" : "citas hoy"}
+                  </span>
+                </div>
+
+                {citasDelDia.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800">
+                    <div className="w-14 h-14 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center">
+                      <CalendarDays className="w-7 h-7" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">No hay citas pendientes de cobro para hoy</h4>
+                      <p className="text-xs text-slate-400 max-w-sm mt-1">
+                        Las citas que agenden tus clientes en línea o desde la Agenda aparecerán aquí en tiempo real. Para atender a un cliente que llegue sin cita, usa la pestaña <strong>Atención Directa</strong>.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveChannel("TACTIL")}
+                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-lg shadow-purple-600/20 cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Ir a Atención Directa</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[520px] overflow-y-auto pr-1">
+                    {citasDelDia.map((cita: any) => {
+                      const isSelected = selectedActiveOrder?.id === cita.id;
+                      const isSettled = cita.metadata?.cobrado_en_caja === true || cita.estado === "completada";
+                      const horaCita = cita.metadata?.hora || "Hoy";
+                      const especialista = cita.metadata?.especialista_nombre || "Especialista";
+                      const comisionEstimada = cita.metadata?.comision_calculada ? Number(cita.metadata.comision_calculada) : 0;
+
+                      return (
+                        <div
+                          key={cita.id}
+                          className={`p-4 rounded-2xl border transition-all space-y-3 flex flex-col justify-between ${
+                            isSelected
+                              ? "bg-purple-950/40 border-purple-500 ring-2 ring-purple-500/30 shadow-xl"
+                              : isSettled
+                              ? "bg-slate-950/40 border-slate-800/60 opacity-75"
+                              : "bg-slate-950/80 border-slate-800 hover:border-purple-500/50 hover:bg-slate-900/90"
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center gap-1 font-mono">
+                                <Clock className="w-3 h-3 text-purple-400" />
+                                {horaCita}
+                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                {cita.metadata?.modalidad_pago === "ABONO_PREVIO" && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                                    🟡 Anticipo: ${Number(cita.metadata.monto_abono || 0).toFixed(2)}
+                                  </span>
+                                )}
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                  isSettled
+                                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                    : cita.estado === "confirmada"
+                                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                                    : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                }`}>
+                                  {isSettled ? "✓ Cobrada" : cita.estado}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div>
+                              <h4 className="text-sm font-black text-white flex items-center gap-1.5 truncate">
+                                <span>{cita.cliente_nombre || "Paciente sin nombre"}</span>
+                              </h4>
+                              {cita.cliente_telefono && (
+                                <p className="text-[11px] text-purple-300 font-mono mt-0.5">
+                                  📞 {cita.cliente_telefono}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="p-2 rounded-xl bg-slate-900 border border-slate-800/80 text-xs space-y-1">
+                              <div className="flex items-center justify-between text-slate-300">
+                                <span className="text-[11px] text-slate-400">Atiende:</span>
+                                <span className="font-bold text-amber-300 flex items-center gap-1">
+                                  <Sparkles className="w-3 h-3 text-amber-400" />
+                                  {especialista}
+                                </span>
+                              </div>
+                              {Array.isArray(cita.items) && cita.items.length > 0 && (
+                                <div className="text-[11px] text-slate-300 line-clamp-2 pt-1 border-t border-slate-800">
+                                  {cita.items.map((it: any) => `${it.nombre} (x${it.cantidad})`).join(" · ")}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block font-semibold uppercase">Total Servicio</span>
+                              <span className="text-base font-black font-mono text-white">
+                                ${Number(cita.total || 0).toFixed(2)}
+                              </span>
+                            </div>
+
+                            {isSettled ? (
+                              <div className="text-right">
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 rounded-xl">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Cobrado</span>
+                                </span>
+                                {comisionEstimada > 0 && (
+                                  <p className="text-[10px] text-amber-400 font-mono mt-0.5 font-bold">
+                                    Comis: ${comisionEstimada.toFixed(2)}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedActiveOrder(cita);
+                                  if (cita.metadata?.especialista_id) {
+                                    setTicketSpecialistId(cita.metadata.especialista_id);
+                                  }
+                                  if (cita.cliente_nombre) {
+                                    setSaleCustomerName(cita.cliente_nombre);
+                                  }
+                                  if (cita.cliente_telefono) {
+                                    setSaleCustomerPhone(cita.cliente_telefono);
+                                  }
+                                  if (cita.metadata?.modalidad_pago === "ABONO_PREVIO") {
+                                    setPaymentMode("ABONO");
+                                    if (cita.metadata?.monto_abono) {
+                                      setMontoAbonoInput(String(cita.metadata.monto_abono));
+                                    }
+                                  } else {
+                                    setPaymentMode("TOTAL");
+                                  }
+                                  if (Array.isArray(cita.items) && cita.items.length > 0) {
+                                    setSessionItems(
+                                      cita.items.map((it: any) => ({
+                                        dishId: it.id || "cita-item",
+                                        name: it.nombre,
+                                        price: Number(it.precio) || 0,
+                                        quantity: Number(it.cantidad) || 1,
+                                        stock: null,
+                                        trackStock: false,
+                                      }))
+                                    );
+                                  }
+                                  setMobileActiveView("TICKET");
+                                }}
+                                className={`px-3 py-1.5 rounded-xl font-black text-xs transition flex items-center gap-1.5 shadow cursor-pointer ${
+                                  isSelected
+                                    ? "bg-purple-600 text-white ring-2 ring-purple-400"
+                                    : "bg-purple-600/90 hover:bg-purple-500 text-white"
+                                }`}
+                              >
+                                <Zap className="w-3.5 h-3.5 text-amber-300" />
+                                <span>{isSelected ? "Cargada al Ticket ✓" : "Cargar al Ticket →"}</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* CANAL: VENTA TÁCTIL (GRID DE PLATOS) */}
             {activeChannel === "TACTIL" && (
               <div className="space-y-3.5 flex-1 flex flex-col">
@@ -2708,7 +3092,7 @@ export function CajaClient({
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       type="text"
-                      placeholder="Buscar plato o combo..."
+                      placeholder={isCitasVertical ? "Buscar servicio, tratamiento o producto..." : "Buscar plato o combo..."}
                       value={touchSearch}
                       onChange={(e) => setTouchSearch(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
@@ -2836,10 +3220,14 @@ export function CajaClient({
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div>
               <div className="flex items-center gap-2">
-                <Receipt className={`w-4 h-4 ${mode === "ENTRADA" ? "text-amber-400" : "text-emerald-400"}`} />
+                <Receipt className={`w-4 h-4 ${mode === "ENTRADA" ? "text-amber-400" : isCitasVertical ? "text-purple-400" : "text-emerald-400"}`} />
                 <h3 className="font-black text-white text-base">
                   {mode === "ENTRADA"
                     ? "Ticket de Devolución"
+                    : isCitasVertical
+                    ? selectedActiveOrder
+                      ? `Turno · ${selectedActiveOrder.cliente_nombre || "Cita"}`
+                      : "Ticket de Atención & Turnos"
                     : selectedActiveOrder
                     ? selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
                       ? "🛵 Pedido a Domicilio"
@@ -2854,6 +3242,8 @@ export function CajaClient({
               <span className="text-[11px] text-slate-400">
                 {mode === "ENTRADA"
                   ? "Reingreso de existencias a bodega"
+                  : isCitasVertical
+                  ? "Registro de atención, profesional asignado y cobro"
                   : selectedActiveOrder
                   ? selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
                     ? "Cobro y despacho a repartidor"
@@ -2876,8 +3266,8 @@ export function CajaClient({
               <button
                 type="button"
                 onClick={handleClearSelectedOrder}
-                className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold flex items-center gap-1"
-                title="Deseleccionar mesa"
+                className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                title="Deseleccionar cita o mesa"
               >
                 <X className="w-3 h-3" />
                 <span>Despejar</span>
@@ -2885,9 +3275,170 @@ export function CajaClient({
             )}
           </div>
 
-          {/* SELECTOR DE MODALIDAD: PARA LLEVAR / DOMICILIO / MESA */}
-          {!selectedActiveOrder && mode === "VENTA" && (
-            <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-2.5 space-y-2">
+          {/* FORMULARIO ADAPTADO PARA VERTICAL CITAS O SELECTOR DE MODALIDAD GASTRONÓMICA */}
+          {isCitasVertical ? (
+            <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-3 space-y-2.5">
+              {/* Paciente / CRM */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                  <span className="flex items-center gap-1 text-purple-300">
+                    <User className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Paciente / Cliente:</span>
+                  </span>
+                  {saleCustomerPhone && (
+                    <span className="text-[10px] font-mono text-purple-400">
+                      📞 {saleCustomerPhone}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="relative">
+                    <Phone className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-purple-400" />
+                    <input
+                      type="text"
+                      placeholder="Teléfono (buscar en Expediente)..."
+                      value={saleCustomerPhone}
+                      onChange={(e) => {
+                        setSaleCustomerPhone(e.target.value);
+                        triggerCustomerSearch(e.target.value);
+                      }}
+                      onFocus={() => {
+                        if (customerSuggestions.length > 0) setShowCustomerDropdown(true);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <User className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Nombre del paciente..."
+                      value={saleCustomerName}
+                      onChange={(e) => {
+                        setSaleCustomerName(e.target.value);
+                        if (!saleCustomerPhone) triggerCustomerSearch(e.target.value);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Dropdown sugerencias CRM Pacientes */}
+                {showCustomerDropdown && customerSuggestions.length > 0 && (
+                  <div className="mt-1 bg-slate-900/95 backdrop-blur-md border border-purple-500/40 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-800 max-h-48 overflow-y-auto">
+                    <div className="px-2.5 py-1 text-[10px] font-bold text-purple-400 uppercase tracking-wider bg-slate-950 flex items-center justify-between sticky top-0">
+                      <span>✨ Pacientes en Expediente ({customerSuggestions.length}):</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomerDropdown(false)}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {customerSuggestions.map((cust) => (
+                      <button
+                        key={cust.id}
+                        type="button"
+                        onClick={() => handleSelectCustomerSuggestion(cust)}
+                        className="w-full text-left p-2 hover:bg-purple-950/40 transition flex flex-col gap-0.5 group cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-white group-hover:text-purple-300">
+                            {cust.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-purple-400 bg-purple-950/80 px-1.5 py-0.2 rounded border border-purple-800/60">
+                            📞 {cust.phone}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Selector de Especialista / Profesional */}
+              <div className="space-y-1 pt-1.5 border-t border-slate-800/80">
+                <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Especialista / Profesional:</span>
+                  </span>
+                  {ticketSpecialistId && (
+                    <span className="text-[10px] text-amber-300 font-mono font-bold">
+                      {(() => {
+                        const sp = specialistsList.find((s) => s.id === ticketSpecialistId);
+                        return sp?.commissionPercentage ? `Comisión: ${sp.commissionPercentage}%` : "";
+                      })()}
+                    </span>
+                  )}
+                </label>
+                <select
+                  value={ticketSpecialistId}
+                  onChange={(e) => setTicketSpecialistId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 focus:border-purple-500 rounded-xl px-3 py-1.5 text-xs text-white font-medium outline-none"
+                >
+                  <option value="">Seleccionar profesional...</option>
+                  {specialistsList.map((sp) => (
+                    <option key={sp.id} value={sp.id}>
+                      {sp.name} {sp.title ? `(${sp.title})` : ""} {sp.commissionPercentage ? `· ${sp.commissionPercentage}% com.` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Banner de Plan Activo de Pagos (si el paciente tiene saldo pendiente de tratamiento) */}
+              {patientActivePlan && patientActivePlan.saldoPendiente > 0 && (
+                <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-200 text-xs flex items-center justify-between gap-2 animate-in fade-in">
+                  <div className="min-w-0">
+                    <div className="font-bold flex items-center gap-1">
+                      <span>🦷 Plan activo: {patientActivePlan.treatmentName}</span>
+                    </div>
+                    <div className="text-[11px] text-purple-300">
+                      Total: ${patientActivePlan.costoTotal.toFixed(2)} · Abonado: ${patientActivePlan.totalAbonado.toFixed(2)} · <strong className="text-white font-mono">Saldo: ${patientActivePlan.saldoPendiente.toFixed(2)}</strong>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentMode("ABONO");
+                      setMontoAbonoInput(String(Math.min(patientActivePlan.saldoPendiente, 50)));
+                      if (sessionItems.length === 0) {
+                        setSessionItems([
+                          {
+                            dishId: "abono-cuota",
+                            name: `Cuota: ${patientActivePlan.treatmentName}`,
+                            price: patientActivePlan.saldoPendiente,
+                            quantity: 1,
+                            stock: null,
+                            trackStock: false,
+                          },
+                        ]);
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-black text-[11px] shrink-0 transition shadow-sm cursor-pointer"
+                  >
+                    Registrar Abono
+                  </button>
+                </div>
+              )}
+
+              {/* Nota / Observaciones de atención */}
+              <div className="relative pt-1 border-t border-slate-800/80">
+                <FileText className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Observaciones de atención..."
+                  value={saleInternalNotes}
+                  onChange={(e) => setSaleInternalNotes(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-500"
+                />
+              </div>
+            </div>
+          ) : !selectedActiveOrder && mode === "VENTA" ? (
+              <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-2.5 space-y-2">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
                 <span className="uppercase tracking-wider">Destino del Pedido:</span>
                 <span className="text-emerald-400 font-mono text-[10px]">
@@ -3266,7 +3817,7 @@ export function CajaClient({
                 </label>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* LISTA DE ITEMS DEL TICKET */}
           <div className="flex-1 space-y-2 min-h-[140px] max-h-[260px] overflow-y-auto pr-1">
@@ -3297,7 +3848,7 @@ export function CajaClient({
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {!selectedActiveOrder && (
+                      {(!selectedActiveOrder || item.dishId !== "cita-item") && (
                         <button
                           type="button"
                           onClick={() => changeItemQty(itemKey, -1)}
@@ -3309,7 +3860,7 @@ export function CajaClient({
                       <span className="w-6 text-center font-mono font-bold text-emerald-400">
                         {item.quantity}
                       </span>
-                      {!selectedActiveOrder && (
+                      {(!selectedActiveOrder || item.dishId !== "cita-item") && (
                         <button
                           type="button"
                           onClick={() => changeItemQty(itemKey, 1)}
@@ -3321,7 +3872,7 @@ export function CajaClient({
                       <span className="w-14 text-right font-mono font-black text-white">
                         ${(item.price * item.quantity).toFixed(2)}
                       </span>
-                      {!selectedActiveOrder && (
+                      {(!selectedActiveOrder || item.dishId !== "cita-item") && (
                         <button
                           type="button"
                           onClick={() => removeItem(itemKey)}
@@ -3340,7 +3891,13 @@ export function CajaClient({
           {/* DESGLOSE TOTAL */}
           <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
             <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Subtotal Productos ({totalQuantity}):</span>
+              <span>
+                {isCitasVertical
+                  ? `Subtotal Servicios & Productos (${totalQuantity}):`
+                  : isCatalogVertical
+                  ? `Subtotal Productos (${totalQuantity}):`
+                  : `Subtotal Consumo (${totalQuantity}):`}
+              </span>
               <span className="font-mono text-white">${chargesBreakdown.subtotal.toFixed(2)}</span>
             </div>
             {chargesBreakdown.iva > 0 && (
@@ -3387,6 +3944,71 @@ export function CajaClient({
               </span>
             </div>
           </div>
+
+          {/* SELECTOR DE MODALIDAD DE COBRO (SOLO CITAS: PAGO TOTAL VS ABONO / CUOTA) */}
+          {isCitasVertical && (
+            <div className="bg-purple-950/40 border border-purple-800/60 rounded-2xl p-2.5 space-y-2">
+              <label className="text-[11px] font-bold text-purple-300 block">
+                Modalidad de Cobro:
+              </label>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMode("TOTAL")}
+                  className={`py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 border cursor-pointer ${
+                    paymentMode === "TOTAL"
+                      ? "bg-purple-600 text-white border-purple-500 shadow-md font-black"
+                      : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                  }`}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Pago Total (100%)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentMode("ABONO");
+                    if (!montoAbonoInput && totalAmount > 0) {
+                      setMontoAbonoInput((totalAmount / 2).toFixed(2));
+                    }
+                  }}
+                  className={`py-1.5 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 border cursor-pointer ${
+                    paymentMode === "ABONO"
+                      ? "bg-amber-500 text-slate-950 border-amber-400 shadow-md font-black"
+                      : "bg-slate-900 text-slate-400 hover:text-white border-slate-800"
+                  }`}
+                >
+                  <DollarSign className="w-3.5 h-3.5" />
+                  <span>Abono / Cuota</span>
+                </button>
+              </div>
+
+              {paymentMode === "ABONO" && (
+                <div className="pt-2 border-t border-purple-800/40 space-y-2 animate-in fade-in">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-amber-300">
+                      Monto que abona hoy ($):
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max={totalAmount}
+                      value={montoAbonoInput}
+                      onChange={(e) => setMontoAbonoInput(e.target.value)}
+                      className="w-28 bg-slate-900 border border-amber-500/60 rounded-xl px-2.5 py-1 text-right text-sm font-mono font-bold text-amber-300 outline-none focus:border-amber-400"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-xs bg-purple-950/60 px-2.5 py-1.5 rounded-xl border border-purple-800/50">
+                    <span className="text-slate-300 font-bold">Saldo Pendiente:</span>
+                    <span className="font-mono font-black text-rose-400 text-sm">
+                      ${Math.max(0, totalAmount - (parseFloat(montoAbonoInput) || 0)).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* SELECTOR DE FORMA DE PAGO */}
           <div className="space-y-2">
@@ -3642,7 +4264,7 @@ export function CajaClient({
           )}
 
           {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA O PEDIDO PENDIENTE (Solo Restaurantes) */}
-          {!selectedActiveOrder && !isCatalogVertical && mode === "VENTA" && sessionItems.length > 0 && (
+          {!selectedActiveOrder && !isCatalogVertical && !isCitasVertical && mode === "VENTA" && sessionItems.length > 0 && (
             <button
               type="button"
               disabled={isPending}
@@ -3705,7 +4327,11 @@ export function CajaClient({
               <>
                 <Check className="w-5 h-5 stroke-[3]" />
                 <span>
-                  {selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
+                  {isCitasVertical
+                    ? paymentMode === "ABONO"
+                      ? `Cobrar Abono ($${(parseFloat(montoAbonoInput) || 0).toFixed(2)})`
+                      : `Cobrar y Finalizar Cita ($${totalAmount.toFixed(2)})`
+                    : selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
                     ? `Cobrar y Despachar Domicilio ($${totalAmount.toFixed(2)})`
                     : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
                     ? `Cobrar y Entregar Pedido ($${totalAmount.toFixed(2)})`
@@ -3718,14 +4344,18 @@ export function CajaClient({
               <>
                 <Check className="w-5 h-5 stroke-[3]" />
                 <span>
-                  {saleModality === "DOMICILIO"
+                  {isCitasVertical
+                    ? paymentMode === "ABONO"
+                      ? `Cobrar Abono / Cuota ($${(parseFloat(montoAbonoInput) || 0).toFixed(2)})`
+                      : `Cobrar y Registrar Atención ($${totalAmount.toFixed(2)})`
+                    : saleModality === "DOMICILIO"
                     ? (sendToKitchen ? "Cobrar y Despachar Domicilio" : "Cobrar Domicilio")
                     : saleModality === "LLEVAR"
                     ? (sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Pedido Llevar")
                     : isCatalogVertical
                     ? "Cobrar y Registrar Venta"
                     : (sendToKitchen ? "Cobrar y Enviar a Cocina" : "Cobrar Ticket")}{" "}
-                  (${totalAmount.toFixed(2)})
+                  {!isCitasVertical && `($${totalAmount.toFixed(2)})`}
                 </span>
               </>
             )}

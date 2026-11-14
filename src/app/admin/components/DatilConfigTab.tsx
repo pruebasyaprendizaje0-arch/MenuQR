@@ -19,6 +19,8 @@ import {
   Zap,
   RotateCcw,
   Trash2,
+  ShieldAlert,
+  ExternalLink,
 } from "lucide-react";
 import {
   getDatilConfigAction,
@@ -57,6 +59,61 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
   const [apiPassword, setApiPassword] = useState("");
   const [hasStoredPassword, setHasStoredPassword] = useState(false);
 
+  // Estados de solo lectura inicial para neutralizar el autocompletado intrusivo de contraseñas de Google Chrome
+  const [isKeyUnlocked, setIsKeyUnlocked] = useState(false);
+  const [isPassUnlocked, setIsPassUnlocked] = useState(false);
+
+  // Sanitizador estricto: Las API Keys de Dátil son tokens alfanuméricos provistos por Dátil (nunca correos personales)
+  const [emailWarning, setEmailWarning] = useState(false);
+
+  const handleApiKeyChange = (val: string) => {
+    if (val.includes("@")) {
+      setEmailWarning(true);
+      setApiKey("");
+      return;
+    }
+    setEmailWarning(false);
+    setApiKey(val);
+  };
+
+  // Guardián reactivo continuo: Si el navegador o un gestor inyecta un correo en apiKey o apiPassword, purgarlo de inmediato
+  useEffect(() => {
+    if (apiKey && apiKey.includes("@")) {
+      setEmailWarning(true);
+      setApiKey("");
+    }
+  }, [apiKey]);
+
+  useEffect(() => {
+    if (apiPassword && (apiPassword.includes("@") || apiPassword === "Frhc1971*02")) {
+      setApiPassword("");
+    }
+  }, [apiPassword]);
+
+  // Limpieza forzada de autofill invasivo en caso de que Google Chrome intente rellenar por sombra
+  useEffect(() => {
+    const purgeBrowserAutofill = () => {
+      const keyEl = document.getElementById("dtl_acc_param_1") as HTMLInputElement | null;
+      const passEl = document.getElementById("dtl_acc_param_2") as HTMLInputElement | null;
+      if (keyEl && keyEl.value && keyEl.value.includes("@")) {
+        keyEl.value = "";
+        setApiKey("");
+      }
+      if (passEl && passEl.value && (passEl.value.includes("@") || passEl.value === "Frhc1971*02")) {
+        passEl.value = "";
+        setApiPassword("");
+      }
+    };
+    const t1 = setTimeout(purgeBrowserAutofill, 50);
+    const t2 = setTimeout(purgeBrowserAutofill, 300);
+    const t3 = setTimeout(purgeBrowserAutofill, 800);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, []);
+
   // Datos Tributarios
   const [ruc, setRuc] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
@@ -80,7 +137,12 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
           const cfg = res.config;
           setIsEnabled(cfg.isEnabled);
           setEnvironment(cfg.environment);
-          setApiKey(cfg.apiKey);
+          // Si por error previo la clave contiene un correo electrónico, dejarla estrictamente en blanco
+          if (cfg.apiKey && cfg.apiKey.includes("@")) {
+            setApiKey("");
+          } else {
+            setApiKey(cfg.apiKey || "");
+          }
           setHasStoredPassword(cfg.hasPassword);
           setRuc(cfg.ruc);
           setRazonSocial(cfg.razonSocial);
@@ -262,22 +324,36 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} autoComplete="off" className="space-y-6">
-        {/* Señuelo anti-autocompletado para evitar que el navegador (Chrome/Edge/Safari) inyecte credenciales personales */}
+      <form onSubmit={handleSubmit} autoComplete="off" data-form-type="other" className="space-y-6">
+
+        {/* Honeypot / Señuelo invisible para neutralizar gestores de contraseñas de Google Chrome y extensiones */}
         <div
           style={{
             position: "absolute",
             opacity: 0,
-            pointerEvents: "none",
             height: 0,
             width: 0,
+            zIndex: -1,
             overflow: "hidden",
+            pointerEvents: "none",
           }}
-          tabIndex={-1}
           aria-hidden="true"
+          tabIndex={-1}
         >
-          <input type="text" name="chrome_autofill_trap_user" tabIndex={-1} autoComplete="off" />
-          <input type="password" name="chrome_autofill_trap_pwd" tabIndex={-1} autoComplete="off" />
+          <input
+            type="text"
+            name="system_prevent_autofill_username"
+            tabIndex={-1}
+            autoComplete="username"
+            defaultValue=""
+          />
+          <input
+            type="password"
+            name="system_prevent_autofill_password"
+            tabIndex={-1}
+            autoComplete="current-password"
+            defaultValue=""
+          />
         </div>
 
         {/* BLOQUE 1: Credenciales API de Dátil */}
@@ -329,6 +405,28 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
             </div>
           </div>
 
+          {/* Banner de Seguridad Informativo */}
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3.5">
+            <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="text-xs space-y-1">
+              <p className="font-bold text-amber-200">
+                Seguridad: No uses tu correo ni tu contraseña de Ubícame.cc
+              </p>
+              <p className="text-slate-300 leading-relaxed">
+                Estos campos vienen en blanco por defecto para que cada negocio ingrese exclusivamente sus llaves técnicas generadas en su portal de <strong>Dátil</strong> (
+                <a
+                  href="https://app.datil.co"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline text-amber-300 font-semibold hover:text-white inline-flex items-center gap-0.5"
+                >
+                  app.datil.co <ExternalLink className="w-3 h-3" />
+                </a>{" "}
+                &gt; Configuración &gt; API). El sistema nunca recuerda ni guarda tus accesos personales.
+              </p>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Ambiente */}
             <div>
@@ -369,20 +467,30 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               </label>
               <input
                 type="text"
-                id="dtl_acc_key_token"
-                name="dtl_acc_key_token"
-                autoComplete="new-password"
+                name="dtl_acc_param_1"
+                id="dtl_acc_param_1"
+                readOnly={!isKeyUnlocked}
+                onFocus={() => setIsKeyUnlocked(true)}
+                onPointerDown={() => setIsKeyUnlocked(true)}
+                autoComplete="one-time-code"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 data-lpignore="true"
                 data-1p-ignore="true"
                 data-bwignore="true"
                 data-form-type="other"
-                readOnly
-                onFocus={(e) => e.target.removeAttribute("readonly")}
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => handleApiKeyChange(e.target.value)}
                 placeholder="Ej. dtl_live_key_9f81a7b..."
                 className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 px-3.5 py-2.5 rounded-xl text-xs text-white font-mono focus:outline-none"
               />
+              {emailWarning && (
+                <p className="mt-1.5 text-[11px] text-amber-400 font-medium flex items-center gap-1 animate-in fade-in">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                  <span>No uses tu correo. Ingresa tu API Key obtenida en app.datil.co</span>
+                </p>
+              )}
             </div>
 
             {/* X-Password */}
@@ -396,29 +504,38 @@ export default function DatilConfigTab({ restaurant }: DatilConfigTabProps) {
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <input
-                    type={showPassword ? "text" : "password"}
-                    id="dtl_acc_pwd_token"
-                    name="dtl_acc_pwd_token"
-                    autoComplete="new-password"
+                    type="text"
+                    name="dtl_acc_param_2"
+                    id="dtl_acc_param_2"
+                    readOnly={!isPassUnlocked}
+                    onFocus={() => setIsPassUnlocked(true)}
+                    onPointerDown={() => setIsPassUnlocked(true)}
+                    autoComplete="one-time-code"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
-                    readOnly
-                    onFocus={(e) => e.target.removeAttribute("readonly")}
                     value={apiPassword}
                     onChange={(e) => setApiPassword(e.target.value)}
                     placeholder={
                       hasStoredPassword
-                        ? "•••••••••••••••• (Deja vacío para mantener la actual)"
+                        ? "•••••••••••••••• (Contraseña actual guardada y cifrada)"
                         : "Ingresa tu X-Password proporcionada por Dátil"
+                    }
+                    style={
+                      {
+                        WebkitTextSecurity: showPassword ? "none" : "disc",
+                      } as React.CSSProperties
                     }
                     className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 px-3.5 py-2.5 rounded-xl text-xs text-white font-mono focus:outline-none pr-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300"
+                    className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 cursor-pointer"
                     title={showPassword ? "Ocultar" : "Mostrar"}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

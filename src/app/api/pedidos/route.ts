@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
-import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado } from "@/lib/socket-server";
+import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado, emitNuevaCita } from "@/lib/socket-server";
 import { prisma } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { deductStockUniversal } from "@/lib/stock-service";
@@ -310,6 +310,9 @@ export async function POST(req: NextRequest) {
       duracion_min,
       notas_cita,
       precio_estimado = 0,
+      modalidad_pago = "RECEPCION",
+      monto_abono = 0,
+      comprobante_ref = null,
       // Vertical reservas (hospedaje)
       check_in,
       check_out,
@@ -1301,6 +1304,9 @@ export async function POST(req: NextRequest) {
       // CASO D: VERTICAL CITAS (Consultorios, Barberías, Dentistas, Spas)
       // =========================================================================
       else if (vertical === "citas") {
+        const abonoNum = parseFloat(monto_abono as any) || 0;
+        const totalEstimado = parseFloat(precio_estimado as any) || 0;
+
         const metadataCitas = {
           servicio_nombre: servicio_nombre || "Cita General",
           especialista_id: especialista_id || null,
@@ -1309,9 +1315,13 @@ export async function POST(req: NextRequest) {
           hora_cita: hora_cita || "Por confirmar",
           duracion_min: duracion_min || 30,
           notas_cita: notas_cita || "",
+          modalidad_pago: modalidad_pago || "RECEPCION",
+          monto_abono: modalidad_pago === "ABONO_PREVIO" ? abonoNum : 0,
+          saldo_pendiente: Math.max(0, totalEstimado - (modalidad_pago === "ABONO_PREVIO" ? abonoNum : 0)),
+          comprobante_ref: comprobante_ref ? String(comprobante_ref).trim() : null,
         };
 
-        orderTotal = parseFloat(precio_estimado) || 0;
+        orderTotal = totalEstimado;
 
         const { rows: orderRows } = await client.query(
           `INSERT INTO pedidos (negocio_id, mesa, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
@@ -1349,11 +1359,72 @@ export async function POST(req: NextRequest) {
           `*Hora solicitada:* ${hora_cita}\n` +
           (duracion_min ? `*Duración estimada:* ${duracion_min} minutos\n` : "") +
           (orderTotal > 0 ? `*Valor referencial:* $${orderTotal.toFixed(2)}\n` : "") +
+          (modalidad_pago === "ABONO_PREVIO" && abonoNum > 0
+            ? `*Modalidad:* Anticipo de $${abonoNum.toFixed(2)} (Saldo en recepción: $${Math.max(0, orderTotal - abonoNum).toFixed(2)})\n` +
+              (comprobante_ref ? `*Ref. Transferencia:* ${comprobante_ref}\n` : `_Adjunto foto del comprobante de transferencia_\n`)
+            : `*Modalidad:* Pago en recepción al llegar ($${orderTotal.toFixed(2)})\n`) +
           (notas_cita ? `*Notas adicionales:* ${notas_cita}\n` : "") +
           `\n_Por favor confirma la reserva de este turno._`;
 
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+        // Sincronización automática de Cita hacia Customer en Prisma (CRM sin trabajo manual)
+        if (cliente_telefono) {
+          try {
+            const rawPhone = String(cliente_telefono).trim();
+            const cleanPhone = rawPhone.replace(/\D/g, "");
+            const searchPhone = cleanPhone || rawPhone;
+
+            const existingCustomer = await prisma.customer.findFirst({
+              where: {
+                restaurantId: resolvedNegocioId,
+                phone: searchPhone,
+              },
+            });
+
+            if (!existingCustomer) {
+              await prisma.customer.create({
+                data: {
+                  restaurantId: resolvedNegocioId,
+                  name: cliente_nombre ? String(cliente_nombre).trim() : "Paciente / Cliente",
+                  phone: searchPhone,
+                  category: "NUEVO",
+                  totalOrders: 1,
+                  totalSpent: orderTotal,
+                  lastOrderAt: new Date(),
+                },
+              });
+            } else {
+              const newTotalOrders = (existingCustomer.totalOrders || 0) + 1;
+              const newTotalSpent = Number(existingCustomer.totalSpent || 0) + orderTotal;
+              const shouldPromote = newTotalOrders >= 3 && existingCustomer.category === "NUEVO";
+
+              await prisma.customer.update({
+                where: { id: existingCustomer.id },
+                data: {
+                  name: (!existingCustomer.name || existingCustomer.name === "Cliente") && cliente_nombre ? String(cliente_nombre).trim() : existingCustomer.name,
+                  totalOrders: newTotalOrders,
+                  totalSpent: newTotalSpent,
+                  lastOrderAt: new Date(),
+                  category: shouldPromote ? "FRECUENTE" : existingCustomer.category,
+                },
+              });
+            }
+          } catch (crmErr) {
+            console.error("[POST /api/pedidos citas] Error no bloqueante al sincronizar cliente en CRM:", crmErr);
+          }
+        }
+
+        // Notificación en tiempo real vía Socket.IO
+        try {
+          emitNuevaCita(resolvedNegocioId, {
+            ...orderRows[0],
+            items: insertedItems,
+          });
+        } catch (sockErr) {
+          console.warn("[POST /api/pedidos citas] Error emitiendo nueva_cita por socket:", sockErr);
+        }
 
         // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
         void sendTelegramAlert({

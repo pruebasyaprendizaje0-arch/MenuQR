@@ -261,8 +261,12 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
       <div className="sticky top-0 z-40 backdrop-blur-xl bg-slate-950/85 border-b border-white/10 py-2.5 px-4">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <div className="relative w-8 h-8 rounded-xl overflow-hidden border border-cyan-500/50 bg-slate-900 shrink-0">
-              <Image src={technician.logoUrl} alt={technician.name} fill className="object-cover" />
+            <div className="relative w-8 h-8 rounded-xl overflow-hidden border border-cyan-500/50 bg-gradient-to-br from-cyan-950 to-slate-900 flex items-center justify-center shrink-0">
+              {technician.logoUrl?.trim() ? (
+                <Image src={technician.logoUrl.trim()} alt={technician.name} fill className="object-cover" />
+              ) : (
+                <Wrench className="w-4 h-4 text-cyan-400" />
+              )}
             </div>
             <div className="min-w-0">
               <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest block">Servicios Técnicos Express</span>
@@ -317,20 +321,28 @@ export function ServiciosClient({ technician }: { technician: TechnicianData }) 
         ) : (
           <div className="space-y-8 animate-fade-in">
             {/* Banner Superior & Perfil del Técnico */}
-            <div className="relative h-48 sm:h-64 w-full rounded-3xl overflow-hidden bg-slate-900 border border-slate-800">
-              <Image
-                src={technician.coverUrl}
-                alt={technician.name}
-                fill
-                className="object-cover opacity-30 blur-xs"
-                priority
-              />
+            <div className="relative h-48 sm:h-64 w-full rounded-3xl overflow-hidden bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-950 border border-slate-800">
+              {technician.coverUrl?.trim() ? (
+                <Image
+                  src={technician.coverUrl.trim()}
+                  alt={technician.name}
+                  fill
+                  className="object-cover opacity-30 blur-xs"
+                  priority
+                />
+              ) : (
+                <div className="absolute inset-0 bg-gradient-to-r from-cyan-950/30 via-slate-900/60 to-cyan-950/30" />
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-transparent"></div>
 
               <div className="absolute bottom-4 left-4 right-4 max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div className="flex items-center gap-4">
-                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-cyan-500 shadow-xl bg-slate-900 shrink-0">
-                    <Image src={technician.logoUrl} alt={technician.name} fill className="object-cover" />
+                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border-2 border-cyan-500 shadow-xl bg-gradient-to-br from-cyan-950 to-slate-900 flex items-center justify-center shrink-0">
+                    {technician.logoUrl?.trim() ? (
+                      <Image src={technician.logoUrl.trim()} alt={technician.name} fill className="object-cover" />
+                    ) : (
+                      <Wrench className="w-8 h-8 text-cyan-400" />
+                    )}
                   </div>
                   <div>
                     <div className="flex flex-wrap items-center gap-2 mb-1">

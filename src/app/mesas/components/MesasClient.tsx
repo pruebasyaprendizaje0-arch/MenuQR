@@ -341,7 +341,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
     const socket = io({
       path: "/api/socket",
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       query: { negocio_id: negocioInfo.id },
     });
 

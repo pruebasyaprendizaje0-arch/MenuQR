@@ -141,3 +141,31 @@ export function emitPedidoCancelado(
     console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'pedido_cancelado'`);
   }
 }
+
+/**
+ * Emite evento 'nueva_cita' a la sala del negocio (Vertical Citas & Turnos)
+ */
+export function emitNuevaCita(negocio_id: string, cita: any): void {
+  const io = getIO();
+  if (io) {
+    const room = `negocio_${negocio_id}`;
+    io.to(room).emit("nueva_cita", cita);
+    console.log(`[Socket.IO] 'nueva_cita' emitido a la sala ${room}:`, cita?.id || cita);
+  } else {
+    console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'nueva_cita'`);
+  }
+}
+
+/**
+ * Emite evento 'cita_actualizada' a la sala del negocio (cambios de estado o cobro en caja)
+ */
+export function emitCitaActualizada(negocio_id: string, cita: any): void {
+  const io = getIO();
+  if (io) {
+    const room = `negocio_${negocio_id}`;
+    io.to(room).emit("cita_actualizada", cita);
+    console.log(`[Socket.IO] 'cita_actualizada' emitido a la sala ${room}:`, cita?.id || cita);
+  } else {
+    console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'cita_actualizada'`);
+  }
+}

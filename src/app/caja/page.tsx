@@ -1,5 +1,6 @@
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { pool, ensureDbTables } from "@/lib/db-pool";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { CajaClient } from "./CajaClient";
@@ -14,7 +15,13 @@ export const metadata = {
   description: "Terminal punto de venta con lector de código de barras para entradas de stock y ventas rápidas.",
 };
 
-export default async function CajaPage() {
+export default async function CajaPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ citaId?: string }>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const requestedCitaId = resolvedSearchParams?.citaId || null;
   const session = await getUserSession();
   const isSuperAdmin = await getSuperAdminSession();
 
@@ -345,6 +352,112 @@ export default async function CajaPage() {
     })),
   }));
 
+  let initialCitaOrder: any = null;
+  let citasDelDia: any[] = [];
+  if (restaurant) {
+    try {
+      await ensureDbTables();
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const { rows: citasRows } = await pool.query(
+        `SELECT id, negocio_id, mesa, estado, total::float, created_at, cliente_nombre, cliente_telefono, vertical, metadata
+         FROM pedidos
+         WHERE negocio_id = $1 
+           AND vertical = 'citas'
+           AND created_at >= $2
+           AND estado NOT IN ('cancelada')
+         ORDER BY created_at ASC`,
+        [restaurant.id, todayStart.toISOString()]
+      );
+
+      const cIds = citasRows.map((r: any) => r.id);
+      let itemsMap: Record<string, any[]> = {};
+      if (cIds.length > 0) {
+        const { rows: itemRows } = await pool.query(
+          `SELECT id, pedido_id, nombre, cantidad, precio::float, notas FROM pedido_items WHERE pedido_id = ANY($1)`,
+          [cIds]
+        );
+        for (const it of itemRows) {
+          if (!itemsMap[it.pedido_id]) itemsMap[it.pedido_id] = [];
+          itemsMap[it.pedido_id].push(it);
+        }
+      }
+
+      citasDelDia = citasRows.map((r: any) => {
+        let meta: any = {};
+        try {
+          meta = typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata || {});
+        } catch {}
+        return {
+          id: String(r.id),
+          negocio_id: String(r.negocio_id),
+          mesa: r.mesa ? String(r.mesa) : "CITA",
+          estado: String(r.estado),
+          total: Number(r.total) || 0,
+          created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at || ""),
+          cliente_nombre: r.cliente_nombre ? String(r.cliente_nombre) : "",
+          cliente_telefono: r.cliente_telefono ? String(r.cliente_telefono) : "",
+          vertical: r.vertical ? String(r.vertical) : "citas",
+          metadata: meta,
+          items: (itemsMap[r.id] || []).map((it: any) => ({
+            id: String(it.id),
+            nombre: String(it.nombre || ""),
+            cantidad: Number(it.cantidad) || 1,
+            precio: Number(it.precio) || 0,
+            notas: it.notas ? String(it.notas) : null,
+          })),
+        };
+      });
+
+      if (requestedCitaId) {
+        const found = citasDelDia.find((c) => c.id === requestedCitaId);
+        if (found) {
+          initialCitaOrder = found;
+        } else {
+          const { rows } = await pool.query(
+            `SELECT id, negocio_id, mesa, estado, total::float, created_at, cliente_nombre, cliente_telefono, vertical, metadata
+             FROM pedidos
+             WHERE id = $1 AND negocio_id = $2 AND vertical = 'citas'
+             LIMIT 1`,
+            [requestedCitaId, restaurant.id]
+          );
+          if (rows.length > 0) {
+            const c = rows[0];
+            const { rows: itemRows } = await pool.query(
+              `SELECT id, nombre, cantidad, precio::float, notas FROM pedido_items WHERE pedido_id = $1`,
+              [c.id]
+            );
+            let meta: any = {};
+            try {
+              meta = typeof c.metadata === "string" ? JSON.parse(c.metadata) : (c.metadata || {});
+            } catch {}
+            initialCitaOrder = {
+              id: String(c.id),
+              negocio_id: String(c.negocio_id),
+              mesa: c.mesa ? String(c.mesa) : "CITA",
+              estado: String(c.estado),
+              total: Number(c.total) || 0,
+              created_at: c.created_at instanceof Date ? c.created_at.toISOString() : String(c.created_at || ""),
+              cliente_nombre: c.cliente_nombre ? String(c.cliente_nombre) : "",
+              cliente_telefono: c.cliente_telefono ? String(c.cliente_telefono) : "",
+              vertical: c.vertical ? String(c.vertical) : "citas",
+              metadata: meta,
+              items: itemRows.map((it: any) => ({
+                id: String(it.id),
+                nombre: String(it.nombre || ""),
+                cantidad: Number(it.cantidad) || 1,
+                precio: Number(it.precio) || 0,
+                notas: it.notas ? String(it.notas) : null,
+              })),
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error loading citas in CajaPage:", e);
+    }
+  }
+
   const currentUser = {
     id: session?.userId || "admin",
     name: session?.email?.split("@")[0] || "Administrador",
@@ -354,6 +467,8 @@ export default async function CajaPage() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       <CajaClient
+        initialCitaOrder={initialCitaOrder}
+        initialCitasDelDia={citasDelDia}
         restaurant={{
           id: restaurant.id,
           name: restaurant.name,

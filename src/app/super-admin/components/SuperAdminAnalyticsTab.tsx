@@ -143,12 +143,12 @@ export function SuperAdminAnalyticsTab({
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-400 block mb-1">
             Escaneos de QR Totales
           </span>
-          <div className="text-3xl font-black text-white">
+          <div suppressHydrationWarning className="text-3xl font-black text-white">
             {analyticsEventStats.qrScans.toLocaleString()}
           </div>
           <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
             <Eye className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>{analyticsEventStats.menuViews.toLocaleString()} visitas a cartas y menús</span>
+            <span suppressHydrationWarning>{analyticsEventStats.menuViews.toLocaleString()} visitas a cartas y menús</span>
           </p>
         </div>
 
@@ -160,7 +160,7 @@ export function SuperAdminAnalyticsTab({
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-purple-400 block mb-1">
             Clics Directos a WhatsApp
           </span>
-          <div className="text-3xl font-black text-white">
+          <div suppressHydrationWarning className="text-3xl font-black text-white">
             {analyticsEventStats.whatsappClicks.toLocaleString()}
           </div>
           <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">

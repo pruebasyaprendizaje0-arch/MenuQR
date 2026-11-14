@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
+import { prisma } from "@/lib/db";
+import { emitNuevaCita } from "@/lib/socket-server";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +50,38 @@ export async function GET(req: NextRequest) {
           ingresos_estimados_hoy: 0,
         },
       });
+    }
+
+    // Fast Lookup: Búsqueda rápida de paciente recurrente para autocompletado en landing de citas
+    const lookupPhone = searchParams.get("lookup_phone");
+    if (lookupPhone) {
+      try {
+        const rawPhone = String(lookupPhone).trim();
+        const cleanPhone = rawPhone.replace(/\D/g, "");
+        const searchPhone = cleanPhone || rawPhone;
+
+        const customer = await prisma.customer.findFirst({
+          where: {
+            restaurantId: resolvedNegocioId,
+            phone: searchPhone,
+          },
+          select: {
+            id: true,
+            name: true,
+            category: true,
+          },
+        });
+
+        return NextResponse.json({
+          ok: true,
+          found: Boolean(customer),
+          name: customer?.name && customer.name !== "Cliente" ? customer.name : null,
+          category: customer?.category || null,
+        });
+      } catch (err) {
+        console.error("[GET /api/citas lookup_phone error]:", err);
+        return NextResponse.json({ ok: true, found: false });
+      }
     }
 
     // Consulta de citas
@@ -233,6 +267,60 @@ export async function POST(req: NextRequest) {
       );
 
       await client.query("COMMIT");
+
+      // 1. Sincronización automática de Cita hacia Customer en Prisma (CRM sin trabajo manual)
+      if (cliente_telefono) {
+        try {
+          const rawPhone = String(cliente_telefono).trim();
+          const cleanPhone = rawPhone.replace(/\D/g, "");
+          const searchPhone = cleanPhone || rawPhone;
+
+          const existingCustomer = await prisma.customer.findFirst({
+            where: {
+              restaurantId: negocio_id,
+              phone: searchPhone,
+            },
+          });
+
+          if (!existingCustomer) {
+            await prisma.customer.create({
+              data: {
+                restaurantId: negocio_id,
+                name: String(cliente_nombre).trim(),
+                phone: searchPhone,
+                category: "NUEVO",
+                totalOrders: 1,
+                totalSpent: total,
+                lastOrderAt: new Date(),
+              },
+            });
+          } else {
+            const newTotalOrders = (existingCustomer.totalOrders || 0) + 1;
+            const newTotalSpent = Number(existingCustomer.totalSpent || 0) + total;
+            const shouldPromote = newTotalOrders >= 3 && existingCustomer.category === "NUEVO";
+
+            await prisma.customer.update({
+              where: { id: existingCustomer.id },
+              data: {
+                name: (!existingCustomer.name || existingCustomer.name === "Cliente") ? String(cliente_nombre).trim() : existingCustomer.name,
+                totalOrders: newTotalOrders,
+                totalSpent: newTotalSpent,
+                lastOrderAt: new Date(),
+                category: shouldPromote ? "FRECUENTE" : existingCustomer.category,
+              },
+            });
+          }
+        } catch (crmErr) {
+          console.error("[POST /api/citas] Error no bloqueante al sincronizar cliente en CRM:", crmErr);
+        }
+      }
+
+      // 2. Notificación en tiempo real vía Socket.IO
+      try {
+        emitNuevaCita(negocio_id, createdOrder);
+      } catch (sockErr) {
+        console.warn("[POST /api/citas] Error emitiendo nueva_cita por socket:", sockErr);
+      }
 
       return NextResponse.json({
         ok: true,

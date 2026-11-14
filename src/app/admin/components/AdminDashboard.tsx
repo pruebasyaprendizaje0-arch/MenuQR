@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, Fragment } from "react";
 import Link from "next/link";
-import { getBusinessLabels } from "@/lib/business-labels";
+import { getBusinessLabels, resolveBusinessVertical } from "@/lib/business-labels";
 import { 
   logoutUserAction, 
   updateRestaurantAction, 
@@ -26,6 +26,7 @@ import {
   toggleSeasonRateAction,
   createCustomerAction,
   updateCustomerAction,
+  addCustomerEvolutionNoteAction,
   deleteCustomerAction,
   importCustomersAction,
   updateRestaurantSchedulesAction,
@@ -122,7 +123,8 @@ import {
   Image as ImageIcon,
   SlidersHorizontal,
   Clock,
-  X
+  X,
+  Stethoscope,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import RuletaAdminTab from "./RuletaAdminTab";
@@ -351,6 +353,13 @@ type Customer = {
   updatedAt: string;
 };
 
+export type CustomerEvolutionNote = {
+  id: string;
+  date: string;
+  author: string;
+  note: string;
+};
+
 export type CustomerMetadata = {
   dietary?: string[]; // ["VEGAN", "VEGETARIAN", "GLUTEN_FREE", "LACTOSE_FREE", "KETO", "HALAL"]
   allergies?: string;
@@ -358,6 +367,7 @@ export type CustomerMetadata = {
   points?: number;
   favoriteDish?: string;
   customNotes?: string;
+  evolutionNotes?: CustomerEvolutionNote[];
   lastService?: string;
   equipmentBrand?: string;
   equipmentTech?: string;
@@ -429,6 +439,7 @@ export function parseCustomerMetadata(notesString?: string | null): CustomerMeta
         points: typeof parsed.points === "number" ? parsed.points : 0,
         favoriteDish: typeof parsed.favoriteDish === "string" ? parsed.favoriteDish : "",
         customNotes: typeof parsed.customNotes === "string" ? parsed.customNotes : "",
+        evolutionNotes: Array.isArray(parsed.evolutionNotes) ? parsed.evolutionNotes : [],
         lastService: typeof parsed.lastService === "string" ? parsed.lastService : "",
         equipmentBrand: typeof parsed.equipmentBrand === "string" ? parsed.equipmentBrand : "",
         equipmentTech: typeof parsed.equipmentTech === "string" ? parsed.equipmentTech : "",
@@ -451,6 +462,7 @@ export function formatCustomerMetadata(meta: CustomerMetadata): string {
     points: meta.points || 0,
     favoriteDish: meta.favoriteDish || "",
     customNotes: meta.customNotes || "",
+    evolutionNotes: meta.evolutionNotes || [],
     lastService: meta.lastService || "",
     equipmentBrand: meta.equipmentBrand || "",
     equipmentTech: meta.equipmentTech || "",
@@ -682,11 +694,22 @@ export function AdminDashboard({
     active: boolean;
   } | null;
 }) {
+  const isCitasVertical = resolveBusinessVertical(restaurant) === "citas";
   const [isMounted, setIsMounted] = useState(false);
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(false);
 
   const resolveInitialTab = (): AdminTab => {
+    const raw = initialTab?.toLowerCase()?.trim();
     const normalized = normalizeAdminTab(initialTab);
+    if (
+      isCitasVertical &&
+      (normalized === "ruleta" ||
+        normalized === "seasons" ||
+        normalized === "orders" ||
+        raw === "tarifas")
+    ) {
+      return "citas";
+    }
     if (normalized) return normalized;
     return "metrics";
   };
@@ -712,7 +735,17 @@ export function AdminDashboard({
     setIsMounted(true);
     if (typeof window !== "undefined") {
       try {
-        const queryTab = normalizeAdminTab(new URLSearchParams(window.location.search).get("tab"));
+        const rawParam = new URLSearchParams(window.location.search).get("tab")?.toLowerCase()?.trim();
+        let queryTab = normalizeAdminTab(rawParam);
+        if (
+          isCitasVertical &&
+          (queryTab === "ruleta" ||
+            queryTab === "seasons" ||
+            queryTab === "orders" ||
+            rawParam === "tarifas")
+        ) {
+          queryTab = "citas";
+        }
         if (queryTab) {
           if (queryTab !== activeTab) {
             setActiveTabRaw(queryTab);
@@ -720,7 +753,17 @@ export function AdminDashboard({
           localStorage.setItem("admin_active_tab_" + restaurant.id, queryTab);
           return;
         }
-        const hashTab = normalizeAdminTab(window.location.hash.replace("#", ""));
+        const hashRaw = window.location.hash.replace("#", "").toLowerCase().trim();
+        let hashTab = normalizeAdminTab(hashRaw);
+        if (
+          isCitasVertical &&
+          (hashTab === "ruleta" ||
+            hashTab === "seasons" ||
+            hashTab === "orders" ||
+            hashRaw === "tarifas")
+        ) {
+          hashTab = "citas";
+        }
         if (hashTab) {
           if (hashTab !== activeTab) {
             setActiveTabRaw(hashTab);
@@ -731,7 +774,13 @@ export function AdminDashboard({
           window.history.replaceState(null, "", url.toString());
           return;
         }
-        const storedTab = normalizeAdminTab(localStorage.getItem("admin_active_tab_" + restaurant.id));
+        let storedTab = normalizeAdminTab(localStorage.getItem("admin_active_tab_" + restaurant.id));
+        if (
+          isCitasVertical &&
+          (storedTab === "ruleta" || storedTab === "seasons" || storedTab === "orders")
+        ) {
+          storedTab = "citas";
+        }
         if (storedTab) {
           if (storedTab !== activeTab) {
             setActiveTabRaw(storedTab);
@@ -1071,6 +1120,19 @@ export function AdminDashboard({
       setActiveTab("metrics");
     }
   }, [activeTab]);
+
+  // Redirigir silenciosamente a "citas" si se intenta ingresar a pestañas no aplicables en vertical citas
+  useEffect(() => {
+    if (
+      isCitasVertical &&
+      (activeTab === "ruleta" ||
+        activeTab === "seasons" ||
+        (activeTab as any) === "tarifas" ||
+        activeTab === "orders")
+    ) {
+      setActiveTab("citas");
+    }
+  }, [isCitasVertical, activeTab, setActiveTab]);
   const isLikelyStore = /licor|tienda|boutique|farmacia|ferreter|repuesto|minimarket|comercio/i.test(restaurant.name || "");
   const defaultBusinessType = (restaurant as any).businessType && (restaurant as any).businessType !== "RESTAURANT"
     ? (restaurant as any).businessType
@@ -1501,6 +1563,56 @@ export function AdminDashboard({
   const [custLastService, setCustLastService] = useState("");
   const [custLastQuoteAt, setCustLastQuoteAt] = useState("");
   const [custGpsLoading, setCustGpsLoading] = useState(false);
+
+  // Bitácora de evolución clínica del paciente (Vertical Citas)
+  const [showAddEvolutionNoteForm, setShowAddEvolutionNoteForm] = useState(false);
+  const [newEvolutionNoteText, setNewEvolutionNoteText] = useState("");
+  const [newEvolutionNoteAuthor, setNewEvolutionNoteAuthor] = useState("");
+  const [savingEvolutionNote, setSavingEvolutionNote] = useState(false);
+
+  const specialistsList: Array<{ id: string; name: string; title?: string }> = useMemo(() => {
+    let cMeta: any = {};
+    const rawLabels = (restaurant as any).customLabels;
+    try {
+      cMeta = typeof rawLabels === "string" ? JSON.parse(rawLabels) : (rawLabels || {});
+    } catch {}
+    return Array.isArray(cMeta.specialists) ? cMeta.specialists : [];
+  }, [(restaurant as any).customLabels]);
+
+  const handleAddEvolutionNote = async (customerId: string) => {
+    if (!newEvolutionNoteText.trim()) return;
+    setSavingEvolutionNote(true);
+    try {
+      const defaultAuthor = specialistsList.length > 0 ? specialistsList[0].name : "Especialista";
+      const author = newEvolutionNoteAuthor.trim() || defaultAuthor;
+      const res = await addCustomerEvolutionNoteAction(customerId, {
+        note: newEvolutionNoteText.trim(),
+        author,
+      });
+
+      if (res.error) {
+        alert(res.error);
+      } else if (res.success && res.customer) {
+        if (selectedCustomer360 && selectedCustomer360.id === customerId) {
+          setSelectedCustomer360({
+            ...selectedCustomer360,
+            notes: res.customer.notes,
+          });
+        }
+        if (restaurant.customers) {
+          const found = restaurant.customers.find((c: any) => c.id === customerId);
+          if (found) found.notes = res.customer.notes;
+        }
+        setNewEvolutionNoteText("");
+        setShowAddEvolutionNoteForm(false);
+      }
+    } catch (e: any) {
+      console.error("Error saving evolution note:", e);
+      alert("Error al guardar la nota de evolución.");
+    } finally {
+      setSavingEvolutionNote(false);
+    }
+  };
 
   const handleDetectCustomerGps = () => {
     if (typeof window === "undefined" || !navigator.geolocation) {
@@ -2237,6 +2349,10 @@ export function AdminDashboard({
   const [dishHasIce, setDishHasIce] = useState(false);
   const [dishStockFilter, setDishStockFilter] = useState<"ALL" | "TRACKED" | "LOW_STOCK" | "OUT_OF_STOCK">("ALL");
 
+  // Vertical Citas: Diferenciación entre Servicio Agendable vs Producto Físico de Venta
+  const [dishItemType, setDishItemType] = useState<"servicio" | "producto">("servicio");
+  const [dishDurationMinutes, setDishDurationMinutes] = useState<string>("45");
+
   const allDishesList = useMemo(() => categoriesList.flatMap((c) => c.dishes), [categoriesList]);
   const trackedDishesCount = useMemo(() => allDishesList.filter((d) => d.trackStock).length, [allDishesList]);
   const lowStockDishesCount = useMemo(
@@ -2607,7 +2723,7 @@ export function AdminDashboard({
                 </span>
               </Link>
             )}
-            {bLabels.showSeasons && (
+            {bLabels.showSeasons && !isCitasVertical && (
               <button
                 onClick={() => setActiveTab("seasons")}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -2633,7 +2749,7 @@ export function AdminDashboard({
                 Cupones de Descuento
               </button>
             )}
-            {bLabels.showRuleta && (
+            {bLabels.showRuleta && !isCitasVertical && (
               <button
                 onClick={() => setActiveTab("ruleta")}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -2671,17 +2787,19 @@ export function AdminDashboard({
  
 
             
-            <button
-              onClick={() => setActiveTab("orders")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "orders" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <ShoppingBag className="h-4 w-4" />
-              Historial de Pedidos
-            </button>
+            {!isCitasVertical && (
+              <button
+                onClick={() => setActiveTab("orders")}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  activeTab === "orders" 
+                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                }`}
+              >
+                <ShoppingBag className="h-4 w-4" />
+                Historial de Pedidos
+              </button>
+            )}
 
             {/* Equipo & Accesos (PIN Meseros & Cocina) - Exclusivo Restaurantes / Cafeterías / Gastro */}
             {bLabels.isGastro && (
@@ -2713,7 +2831,7 @@ export function AdminDashboard({
               >
                 <div className="flex items-center gap-3">
                   <Users className="h-4 w-4 text-amber-400" />
-                  <span>CRM Clientes</span>
+                  <span>{isCitasVertical ? "Expediente & Pacientes" : "CRM Clientes"}</span>
                 </div>
                 {restaurant.customers && restaurant.customers.length > 0 && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
@@ -2764,7 +2882,7 @@ export function AdminDashboard({
             )}
 
             {/* Citas & Turnos CRM (para Citas / Consultorios que NO son Hospedaje ni Servicios Técnicos) */}
-            {!isLodging && !isServiciosTecnicos && (restaurant as any).businessType === "SERVICES" && (
+            {(!isLodging && !isServiciosTecnicos && ((restaurant as any).businessType === "SERVICES" || isCitasVertical)) && (
               <button
                 onClick={() => setActiveTab("citas")}
                 className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
@@ -2775,7 +2893,7 @@ export function AdminDashboard({
               >
                 <div className="flex items-center gap-3">
                   <CalendarDays className="h-4 w-4 text-purple-400" />
-                  <span>Citas & Agenda CRM</span>
+                  <span>{isCitasVertical ? "Agenda & Turnos" : "Citas & Agenda CRM"}</span>
                 </div>
                 <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
                   1-Click WA
@@ -6559,6 +6677,11 @@ export function AdminDashboard({
                     setDishVatRate("STANDARD");
                     setDishHasIce(false);
                     setDishCatId(categoriesList[0]?.id || "");
+                    if (isCitasVertical) {
+                      setDishItemType("servicio");
+                      setDishDurationMinutes("45");
+                      setDishTrackStock(false);
+                    }
                     setIsDishModalOpen(true);
                   }}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
@@ -6952,6 +7075,19 @@ export function AdminDashboard({
                                       setDishVatRate(((dish as any).vatRate as any) || "STANDARD");
                                       setDishHasIce(Boolean((dish as any).hasIce));
                                       setDishCatId(dish.categoryId);
+                                      if (isCitasVertical) {
+                                        let itType: "servicio" | "producto" = dish.trackStock ? "producto" : "servicio";
+                                        let dur = "45";
+                                        try {
+                                          if (dish.variants) {
+                                            const v = typeof dish.variants === "string" ? JSON.parse(dish.variants) : dish.variants;
+                                            if (v.itemType) itType = v.itemType;
+                                            if (v.durationMin) dur = String(v.durationMin);
+                                          }
+                                        } catch {}
+                                        setDishItemType(itType);
+                                        setDishDurationMinutes(dur);
+                                      }
                                       setIsDishModalOpen(true);
                                     }}
                                     className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg hover:bg-slate-750 transition"
@@ -7054,6 +7190,19 @@ export function AdminDashboard({
                         delete variantsObj.colores;
                       }
 
+                      if (isCitasVertical) {
+                        variantsObj.itemType = dishItemType;
+                        if (dishItemType === "servicio") {
+                          variantsObj.durationMin = parseInt(dishDurationMinutes, 10) || 45;
+                          formData.set("trackStock", "false");
+                          formData.set("isService", "true");
+                        } else {
+                          variantsObj.durationMin = 0;
+                          formData.set("trackStock", "true");
+                          formData.set("isService", "false");
+                        }
+                      }
+
                       const finalVariants = Object.keys(variantsObj).length > 0 ? JSON.stringify(variantsObj) : "";
                       formData.append("variants", finalVariants);
                       formData.append("vatRate", dishVatRate);
@@ -7086,6 +7235,73 @@ export function AdminDashboard({
                     className="space-y-4"
                   >
                     <div className="grid grid-cols-2 gap-4">
+                      {/* Vertical Citas: Selector de Servicio Agendable vs Producto Físico de Venta */}
+                      {isCitasVertical && (
+                        <div className="col-span-2 p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+                          <label className="block text-xs font-bold text-slate-300">
+                            Tipo de Ítem en Citas & Consultorio:
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDishItemType("servicio");
+                                setDishTrackStock(false);
+                              }}
+                              className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                                dishItemType === "servicio"
+                                  ? "bg-purple-500/20 border-purple-500 text-purple-300 font-black shadow"
+                                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              <Sparkles className="w-4 h-4 text-purple-400" />
+                              <span>Servicio Agendable</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDishItemType("producto");
+                                setDishTrackStock(true);
+                              }}
+                              className={`p-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                                dishItemType === "producto"
+                                  ? "bg-amber-500/20 border-amber-500 text-amber-300 font-black shadow"
+                                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              <Package className="w-4 h-4 text-amber-400" />
+                              <span>Producto Físico</span>
+                            </button>
+                          </div>
+                          {dishItemType === "servicio" ? (
+                            <div className="pt-2 border-t border-slate-850 flex items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-400">
+                                📅 Se mostrará en <strong>citas.ubicame.cc</strong> para reserva online de turnos.
+                              </span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[10px] text-slate-400 font-bold">Duración:</span>
+                                <select
+                                  value={dishDurationMinutes}
+                                  onChange={(e) => setDishDurationMinutes(e.target.value)}
+                                  className="bg-slate-900 border border-purple-500/50 rounded-lg px-2 py-1 text-xs text-purple-300 font-bold outline-none"
+                                >
+                                  <option value="15">15 min</option>
+                                  <option value="30">30 min</option>
+                                  <option value="45">45 min</option>
+                                  <option value="60">1 hora</option>
+                                  <option value="90">1h 30m</option>
+                                  <option value="120">2 horas</option>
+                                </select>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-amber-300/90 pt-1 border-t border-slate-850">
+                              📦 <strong>Producto de venta física</strong> (cremas, ceras, cepillos, medicamentos). Se oculta de la agenda online para que nadie reserve una cita para comprarlo, pero estará disponible en tu Caja POS e Inventario de bodega.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
                       <div className="col-span-2">
                         <label className="block text-sm font-medium text-slate-300 mb-2">Nombre del {bLabels.itemSingle}</label>
                         <input
@@ -7706,61 +7922,63 @@ export function AdminDashboard({
                         </label>
                       </div>
 
-                      {/* Control de Stock Operativo */}
-                      <div className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl space-y-3">
-                        <div className="flex items-center justify-between">
-                          <label htmlFor="dishTrackStock" className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer">
-                            <Package className="h-4 w-4 text-amber-400" />
-                            <span>
-                              {bLabels.isGastro
-                                ? "Controlar raciones diarias (porciones)"
-                                : `Controlar existencias e inventario físico de bodega`}
-                            </span>
-                          </label>
-                          <input
-                            type="checkbox"
-                            id="dishTrackStock"
-                            checked={dishTrackStock}
-                            onChange={(e) => setDishTrackStock(e.target.checked)}
-                            className="h-4 w-4 text-amber-500 focus:ring-amber-400 border-slate-800 rounded bg-slate-900 cursor-pointer"
-                          />
-                        </div>
-
-                        {dishTrackStock && (
-                          <div className="pt-2 border-t border-slate-850/80 space-y-2.5">
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                                  Stock disponible ({bLabels.stockUnitPlural})
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={dishStock}
-                                  onChange={(e) => setDishStock(e.target.value)}
-                                  className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[11px] font-medium text-slate-300 mb-1 flex items-center gap-1">
-                                  <AlertTriangle className="h-3 w-3 text-amber-400" />
-                                  Stock mínimo / alerta ({bLabels.stockUnitPlural})
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={dishMinStock}
-                                  onChange={(e) => setDishMinStock(e.target.value)}
-                                  className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
-                                />
-                              </div>
-                            </div>
-                            <p className="text-[10px] text-slate-400 leading-relaxed">
-                              💡 Si las {bLabels.stockUnitPlural} llegan a <strong>0</strong>, el {bLabels.itemSingle.toLowerCase()} se marcará automáticamente como <strong>Agotado</strong>. Al llegar al mínimo ({dishMinStock || 0}), verás una alerta preventiva de reposición.
-                            </p>
+                      {/* Control de Stock Operativo (Solo productos físicos) */}
+                      {(!isCitasVertical || dishItemType === "producto") && (
+                        <div className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label htmlFor="dishTrackStock" className="flex items-center gap-2 text-xs font-semibold text-slate-200 cursor-pointer">
+                              <Package className="h-4 w-4 text-amber-400" />
+                              <span>
+                                {bLabels.isGastro
+                                  ? "Controlar raciones diarias (porciones)"
+                                  : `Controlar existencias e inventario físico de bodega`}
+                              </span>
+                            </label>
+                            <input
+                              type="checkbox"
+                              id="dishTrackStock"
+                              checked={dishTrackStock}
+                              onChange={(e) => setDishTrackStock(e.target.checked)}
+                              className="h-4 w-4 text-amber-500 focus:ring-amber-400 border-slate-800 rounded bg-slate-900 cursor-pointer"
+                            />
                           </div>
-                        )}
-                      </div>
+
+                          {dishTrackStock && (
+                            <div className="pt-2 border-t border-slate-850/80 space-y-2.5">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                                    Stock disponible ({bLabels.stockUnitPlural})
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={dishStock}
+                                    onChange={(e) => setDishStock(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-medium text-slate-300 mb-1 flex items-center gap-1">
+                                    <AlertTriangle className="h-3 w-3 text-amber-400" />
+                                    Stock mínimo / alerta ({bLabels.stockUnitPlural})
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={dishMinStock}
+                                    onChange={(e) => setDishMinStock(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-800 px-3 py-2 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                                  />
+                                </div>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-relaxed">
+                                💡 Si las {bLabels.stockUnitPlural} llegan a <strong>0</strong>, el {bLabels.itemSingle.toLowerCase()} se marcará automáticamente como <strong>Agotado</strong>. Al llegar al mínimo ({dishMinStock || 0}), verás una alerta preventiva de reposición.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between gap-3 pt-6 border-t border-slate-800">
@@ -11011,41 +11229,210 @@ export function AdminDashboard({
                       </div>
                     </div>
 
+                    {/* Bitácora y Notas de Evolución Clínica (Solo Vertical Citas) */}
+                    {isCitasVertical && (
+                      <div className="bg-slate-950/60 border border-purple-900/40 p-4 rounded-2xl space-y-3 text-xs">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-extrabold text-white flex items-center gap-2 text-sm">
+                            <Stethoscope className="h-4 w-4 text-purple-400" />
+                            <span>Bitácora & Evolución de Consultas</span>
+                            <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full border border-purple-500/30 font-mono font-bold">
+                              {meta.evolutionNotes?.length || 0}
+                            </span>
+                          </h4>
+                          {!showAddEvolutionNoteForm && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowAddEvolutionNoteForm(true);
+                                if (specialistsList.length > 0 && !newEvolutionNoteAuthor) {
+                                  setNewEvolutionNoteAuthor(specialistsList[0].name);
+                                }
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-md shadow-purple-600/20 cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>+ Nueva Nota</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {showAddEvolutionNoteForm && (
+                          <div className="bg-slate-900/90 border border-purple-800/60 p-3.5 rounded-2xl space-y-3 animate-in fade-in">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-purple-300 flex items-center gap-1">
+                                <Stethoscope className="w-3.5 h-3.5" />
+                                Especialista que atiende:
+                              </span>
+                              {specialistsList.length > 0 ? (
+                                <select
+                                  value={newEvolutionNoteAuthor}
+                                  onChange={(e) => setNewEvolutionNoteAuthor(e.target.value)}
+                                  className="bg-slate-950 border border-purple-800/60 rounded-xl px-2.5 py-1 text-xs text-purple-200 outline-none"
+                                >
+                                  {specialistsList.map((s: any) => (
+                                    <option key={s.id} value={s.name}>
+                                      {s.name} {s.title ? `(${s.title})` : ""}
+                                    </option>
+                                  ))}
+                                  <option value="Especialista">Otro / Titular</option>
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  placeholder="Nombre del profesional..."
+                                  value={newEvolutionNoteAuthor}
+                                  onChange={(e) => setNewEvolutionNoteAuthor(e.target.value)}
+                                  className="bg-slate-950 border border-purple-800/60 rounded-xl px-2.5 py-1 text-xs text-purple-200 outline-none w-48"
+                                />
+                              )}
+                            </div>
+
+                            <textarea
+                              rows={3}
+                              value={newEvolutionNoteText}
+                              onChange={(e) => setNewEvolutionNoteText(e.target.value)}
+                              placeholder="Escribe el diagnóstico, procedimiento realizado, hallazgos, medicación o recomendaciones..."
+                              className="w-full bg-slate-950 border border-purple-800/60 rounded-xl p-2.5 text-xs text-white placeholder-slate-500 outline-none focus:border-purple-400"
+                            />
+
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                disabled={savingEvolutionNote}
+                                onClick={() => {
+                                  setShowAddEvolutionNoteForm(false);
+                                  setNewEvolutionNoteText("");
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingEvolutionNote || !newEvolutionNoteText.trim()}
+                                onClick={() => handleAddEvolutionNote(cust.id)}
+                                className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-md shadow-purple-600/30 cursor-pointer"
+                              >
+                                {savingEvolutionNote ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Guardando...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>Guardar en Historial</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {(!meta.evolutionNotes || meta.evolutionNotes.length === 0) ? (
+                          <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-850 text-center text-slate-500 text-xs">
+                            Aún no hay notas de evolución registradas. Haz clic en <strong>+ Nueva Nota</strong> para documentar la consulta médica o estética.
+                          </div>
+                        ) : (
+                          <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                            {meta.evolutionNotes.map((evo) => (
+                              <div
+                                key={evo.id}
+                                className="p-3 rounded-xl bg-purple-950/20 border border-purple-850/40 space-y-1 hover:border-purple-700/50 transition"
+                              >
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="font-bold text-purple-300 flex items-center gap-1">
+                                    <Stethoscope className="w-3 h-3 text-purple-400" />
+                                    {evo.author || "Especialista"}
+                                  </span>
+                                  <span className="text-slate-400 font-mono text-[10px]">
+                                    {new Date(evo.date).toLocaleString("es-ES", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
+                                  {evo.note}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Order History Timeline */}
                     <div className="space-y-3">
                       <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
                         <History className="h-4 w-4 text-amber-400" />
                         {isServiciosTecnicos
                           ? `Historial de Visitas y Cotizaciones (${insights.matchingOrders.length})`
+                          : isCitasVertical
+                          ? `Historial de Atenciones & Compras (${insights.matchingOrders.length})`
                           : `Historial de Pedidos (${insights.matchingOrders.length})`}
                       </h4>
                       {insights.matchingOrders.length === 0 ? (
                         <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-center text-slate-500 text-xs">
-                          No se encontraron pedidos registrados con el teléfono {cust.phone}.
+                          {isCitasVertical
+                            ? `No se encontraron atenciones ni compras registradas para ${cust.name || cust.phone}.`
+                            : `No se encontraron pedidos registrados con el teléfono ${cust.phone}.`}
                         </div>
                       ) : (
                         <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                          {insights.matchingOrders.map((ord) => (
-                            <div key={ord.id} className="bg-slate-950/70 border border-slate-850 p-3 rounded-xl flex items-center justify-between text-xs">
-                              <div>
-                                <div className="font-bold text-white flex items-center gap-2">
-                                  <span>Pedido #{ord.orderNumber || ord.id.substring(0, 6)}</span>
-                                  <span className="text-[10px] text-amber-400 font-normal">
-                                    {ord.tableName === "Llevar" ? "Para llevar" : ord.tableName === "Domicilio" ? "Domicilio" : `Mesa #${ord.tableName}`}
+                          {insights.matchingOrders.map((ord) => {
+                            let canalBadge = ord.tableName === "Llevar" ? "Para llevar" : ord.tableName === "Domicilio" ? "Domicilio" : `Mesa #${ord.tableName}`;
+                            if (isCitasVertical) {
+                              const tLower = String(ord.tableName || "").toLowerCase();
+                              if (tLower.includes("cita")) {
+                                canalBadge = "Turno / Cita en Consultorio";
+                              } else if (tLower.includes("tactil") || tLower.includes("atención") || tLower.includes("atencion")) {
+                                canalBadge = "Atención Directa / Mostrador";
+                              } else if (tLower.includes("llevar") || tLower.includes("retiro")) {
+                                canalBadge = "Retiro de Productos";
+                              } else if (tLower.includes("domicilio") || tLower.includes("delivery")) {
+                                canalBadge = "Envío a Domicilio";
+                              } else {
+                                canalBadge = String(ord.tableName || "Atención").replace(/^Mesa\s*#?/i, "").trim() || "Atención";
+                              }
+                            }
+
+                            return (
+                              <div key={ord.id} className="bg-slate-950/70 border border-slate-850 p-3 rounded-xl flex items-center justify-between text-xs">
+                                <div>
+                                  <div className="font-bold text-white flex items-center gap-2">
+                                    <span>
+                                      {isCitasVertical
+                                        ? `Atención #${ord.orderNumber || ord.id.substring(0, 6)}`
+                                        : `Pedido #${ord.orderNumber || ord.id.substring(0, 6)}`}
+                                    </span>
+                                    <span
+                                      className={
+                                        isCitasVertical
+                                          ? "text-[10px] font-semibold text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded-full border border-purple-800/40"
+                                          : "text-[10px] text-amber-400 font-normal"
+                                      }
+                                    >
+                                      {canalBadge}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-0.5">
+                                    {(ord.items || []).map(it => `${it.quantity}x ${it.dishName}`).join(", ") || (isCitasVertical ? "Sin detalle de servicios o productos" : "Sin detalle de platos")}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-black text-emerald-400 text-sm block">${ord.total.toFixed(2)}</span>
+                                  <span className="text-[10px] text-slate-500">
+                                    {new Date(ord.createdAt).toLocaleDateString("es-ES")}
                                   </span>
                                 </div>
-                                <p className="text-[11px] text-slate-400 mt-0.5">
-                                  {(ord.items || []).map(it => `${it.quantity}x ${it.dishName}`).join(", ") || "Sin detalle de platos"}
-                                </p>
                               </div>
-                              <div className="text-right">
-                                <span className="font-black text-emerald-400 text-sm block">${ord.total.toFixed(2)}</span>
-                                <span className="text-[10px] text-slate-500">
-                                  {new Date(ord.createdAt).toLocaleDateString("es-ES")}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -11782,14 +12169,16 @@ export function AdminDashboard({
 
 
         {/* Orders Tab */}
-        <button
-          onClick={() => setActiveTab("orders")}
-          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-          style={{ color: activeTab === "orders" ? restaurant.themeColor : "#94a3b8" }}
-        >
-          <ShoppingBag className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">Historial</span>
-        </button>
+        {!isCitasVertical && (
+          <button
+            onClick={() => setActiveTab("orders")}
+            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
+            style={{ color: activeTab === "orders" ? restaurant.themeColor : "#94a3b8" }}
+          >
+            <ShoppingBag className="h-5 w-5" />
+            <span className="text-[9px] font-bold uppercase tracking-wider">Historial</span>
+          </button>
+        )}
 
         {/* Staff & Kitchen PIN (Mobile - Exclusivo Restaurantes / Salón) */}
         {bLabels.isGastro && (
@@ -11817,14 +12206,14 @@ export function AdminDashboard({
         )}
 
         {/* Citas Tab */}
-        {!isLodging && (selectedPreset === "CITAS" || enabledModules.includes("citas") || (!isServiciosTecnicos && (restaurant as any).businessType === "SERVICES")) && !disabledModules.includes("citas") && (
+        {((!isLodging && (selectedPreset === "CITAS" || enabledModules.includes("citas") || (!isServiciosTecnicos && (restaurant as any).businessType === "SERVICES")) && !disabledModules.includes("citas")) || isCitasVertical) && (
           <button
             onClick={() => setActiveTab("citas")}
             className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
             style={{ color: activeTab === "citas" ? "#c084fc" : "#94a3b8" }}
           >
             <CalendarDays className="h-5 w-5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">Citas</span>
+            <span className="text-[9px] font-bold uppercase tracking-wider">{isCitasVertical ? "Turnos" : "Citas"}</span>
           </button>
         )}
       </div>

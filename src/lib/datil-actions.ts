@@ -77,16 +77,31 @@ export async function getDatilConfigAction(
       };
     }
 
-    const hasPassword = Boolean(
+    // Si la apiKey almacenada accidentalmente contiene un correo electrónico (por autocompletado del navegador),
+    // purgar de inmediato de la base de datos para no retener credenciales personales jamás.
+    let sanitizedApiKey = config.apiKey || "";
+    let hasPassword = Boolean(
       config.apiPasswordEncrypted && config.apiPasswordEncrypted.length > 0
     );
+
+    if (config.apiKey && config.apiKey.includes("@")) {
+      await prisma.datilConfig.update({
+        where: { restaurantId },
+        data: {
+          apiKey: "",
+          apiPasswordEncrypted: null,
+        },
+      });
+      sanitizedApiKey = "";
+      hasPassword = false;
+    }
 
     return {
       success: true,
       config: {
         isEnabled: config.isEnabled,
         environment: (config.environment as "TEST" | "PROD") || "TEST",
-        apiKey: config.apiKey || "",
+        apiKey: sanitizedApiKey,
         hasPassword,
         apiPasswordMasked: maskDatilPassword(hasPassword),
         ruc: config.ruc || "",
@@ -125,6 +140,12 @@ export async function testDatilConnectionAction(params: {
     const apiKey = params.apiKey?.trim();
     if (!apiKey) {
       return { success: false, error: "Debes ingresar el X-Key (API Key) de Dátil." };
+    }
+    if (apiKey.includes("@")) {
+      return {
+        success: false,
+        error: "El X-Key no puede ser un correo electrónico personal. Debes ingresar la API Key provista por el portal de Dátil.",
+      };
     }
 
     let apiPasswordPlain = params.apiPassword?.trim();
@@ -254,6 +275,12 @@ export async function saveDatilConfigAction(
       return {
         success: false,
         error: "El X-Key (API Key) de Dátil es obligatorio si la facturación está habilitada.",
+      };
+    }
+    if (cleanApiKey.includes("@")) {
+      return {
+        success: false,
+        error: "El X-Key no puede ser un correo electrónico personal. Debes ingresar la API Key provista por el portal de Dátil.",
       };
     }
 

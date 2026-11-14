@@ -13,7 +13,7 @@ import { recordSlugChange, sanitizeSlug } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import { saveUploadedFile, deleteUploadedFile } from "@/lib/storage";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
-import { pool } from "@/lib/db-pool";
+import { pool, ensureDbTables } from "@/lib/db-pool";
 import { parseDishImages, serializeDishImages } from "@/lib/dish-images";
 import { emitStockActualizado, emitProductoActualizado } from "@/lib/socket-server";
 import { notificarSuperAdmin } from "@/lib/telegramAdmin";
@@ -3690,6 +3690,71 @@ export async function updateCustomerAction(
   }
 }
 
+/**
+ * Agrega una nota cronológica de evolución / consulta clínica al expediente del paciente
+ */
+export async function addCustomerEvolutionNoteAction(
+  customerId: string,
+  data: {
+    note: string;
+    author?: string;
+  }
+) {
+  await refreshUserSession();
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, restaurantId: true, notes: true },
+  });
+  if (!customer) return { error: "Cliente / Paciente no encontrado." };
+
+  const auth = await verifyRestaurantOwnership(customer.restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  const noteText = (data.note || "").trim();
+  if (!noteText) {
+    return { error: "La nota de consulta no puede estar vacía." };
+  }
+
+  try {
+    let meta: any = {};
+    if (customer.notes) {
+      try {
+        const trimmed = customer.notes.trim();
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+          meta = JSON.parse(trimmed);
+        } else {
+          meta = { customNotes: customer.notes };
+        }
+      } catch {
+        meta = { customNotes: customer.notes };
+      }
+    }
+
+    const newNote = {
+      id: `evo-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      date: new Date().toISOString(),
+      author: (data.author || "Especialista").trim(),
+      note: noteText,
+    };
+
+    const existingNotes = Array.isArray(meta.evolutionNotes) ? meta.evolutionNotes : [];
+    meta.evolutionNotes = [newNote, ...existingNotes];
+
+    const updated = await prisma.customer.update({
+      where: { id: customerId },
+      data: {
+        notes: JSON.stringify(meta),
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true, newNote, evolutionNotes: meta.evolutionNotes, customer: updated };
+  } catch (error: any) {
+    console.error("Error adding customer evolution note:", error);
+    return { error: "No se pudo guardar la nota de evolución." };
+  }
+}
+
 export async function deleteCustomerAction(customerId: string) {
   await refreshUserSession();
   const customer = await prisma.customer.findUnique({
@@ -4466,6 +4531,158 @@ export async function superAdminToggleRestaurantModuleAction(
   } catch (error: any) {
     console.error("Error in superAdminToggleRestaurantModuleAction:", error);
     return { error: error?.message || "Error al actualizar módulo en el negocio." };
+  }
+}
+
+/**
+ * ==========================================
+ * EXPEDIENTE TÉCNICO Y CLÍNICO (VERTICAL CITAS)
+ * ==========================================
+ */
+
+/**
+ * Sube una foto para el expediente clínico/estético de la vertical citas
+ */
+export async function uploadCitasExpedientePhotoAction(
+  formData: FormData
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  try {
+    await refreshUserSession();
+    const file = formData.get("file") as File | null;
+    if (!file || file.size === 0) {
+      return { success: false, error: "No se proporcionó un archivo de imagen válido." };
+    }
+    const uploadedUrl = await saveUploadedFile(file);
+    if (!uploadedUrl) {
+      return {
+        success: false,
+        error: "No se pudo guardar la imagen (formato no permitido o tamaño mayor a 5MB).",
+      };
+    }
+    return { success: true, url: uploadedUrl };
+  } catch (err: any) {
+    console.error("Error uploading citas photo:", err);
+    return { success: false, error: err?.message || "Error al subir foto de expediente." };
+  }
+}
+
+/**
+ * Obtiene el historial de atenciones / citas de un paciente en la vertical citas
+ */
+export async function getCustomerCitasHistoryAction(restaurantId: string, phone: string) {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { success: false, error: auth.error };
+
+    const rawPhone = String(phone || "").trim();
+    const cleanPhone = rawPhone.replace(/\D/g, "");
+    if (!cleanPhone && !rawPhone) {
+      return { success: true, appointments: [] };
+    }
+
+    await ensureDbTables();
+    const { rows } = await pool.query(
+      `SELECT id, mesa, estado, total::float as total, created_at, cliente_nombre, cliente_telefono, metadata
+       FROM pedidos
+       WHERE negocio_id = $1 
+         AND vertical = 'citas'
+         AND (
+           cliente_telefono = $2 
+           OR regexp_replace(COALESCE(cliente_telefono, ''), '\\D', '', 'g') = $3
+         )
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [restaurantId, rawPhone, cleanPhone]
+    );
+
+    const appointments = rows.map((r: any) => {
+      let meta: any = {};
+      try {
+        meta = typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata || {});
+      } catch {}
+      return {
+        id: r.id,
+        estado: r.estado,
+        total: r.total,
+        createdAt: r.created_at,
+        fechaCita: meta.fecha_cita || null,
+        horaCita: meta.hora_cita || null,
+        servicioNombre: meta.servicio_nombre || "Servicio",
+        especialistaNombre: meta.especialista_nombre || "Profesional",
+        duracionMin: meta.duracion_min || 30,
+        notasCita: meta.notas_cita || "",
+        notasInternas: meta.notas_internas || "",
+        cobradoEnCaja: Boolean(meta.cobrado_en_caja),
+      };
+    });
+
+    return { success: true, appointments };
+  } catch (err: any) {
+    console.error("Error fetching patient appointments history:", err);
+    return { success: false, error: err?.message || "Error al consultar historial del paciente." };
+  }
+}
+
+/**
+ * Guarda una nueva nota de evolución/técnica en el expediente del paciente
+ */
+export async function savePatientClinicalNoteAction(
+  restaurantId: string,
+  customerId: string,
+  noteData: {
+    note: string;
+    specialistName?: string;
+    beforePhoto?: string | null;
+    afterPhoto?: string | null;
+  }
+) {
+  try {
+    await refreshUserSession();
+    const auth = await verifyRestaurantOwnership(restaurantId);
+    if (!auth.authorized) return { success: false, error: auth.error };
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { id: true, notes: true, restaurantId: true },
+    });
+    if (!customer || customer.restaurantId !== restaurantId) {
+      return { success: false, error: "Paciente no encontrado." };
+    }
+
+    let meta: any = {};
+    try {
+      meta = typeof customer.notes === "string" ? JSON.parse(customer.notes) : {};
+    } catch {
+      meta = { customNotes: customer.notes || "" };
+    }
+
+    const clinicalNotes = Array.isArray(meta.clinicalNotes) ? meta.clinicalNotes : [];
+    const newNote = {
+      id: `note_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      date: new Date().toISOString(),
+      note: noteData.note.trim(),
+      specialistName: noteData.specialistName?.trim() || "Especialista",
+      beforePhoto: noteData.beforePhoto || null,
+      afterPhoto: noteData.afterPhoto || null,
+      createdAt: new Date().toISOString(),
+    };
+
+    clinicalNotes.unshift(newNote);
+    meta.clinicalNotes = clinicalNotes;
+
+    const updated = await prisma.customer.update({
+      where: { id: customerId },
+      data: {
+        notes: JSON.stringify(meta),
+      },
+    });
+
+    revalidatePath("/admin");
+    return { success: true, clinicalNotes, customer: updated };
+  } catch (err: any) {
+    console.error("Error saving patient clinical note:", err);
+    return { success: false, error: err?.message || "Error al registrar nota clínica." };
   }
 }
 

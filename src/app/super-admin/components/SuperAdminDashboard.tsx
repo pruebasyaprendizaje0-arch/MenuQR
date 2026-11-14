@@ -941,7 +941,7 @@ export function SuperAdminDashboard({
             <BarChart3 className="h-4 w-4 text-teal-400" />
             Analítica & GMV
             {analyticsData?.gmvTotal > 0 && (
-              <span className="bg-teal-500/20 text-teal-300 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+              <span suppressHydrationWarning className="bg-teal-500/20 text-teal-300 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
                 ${Math.round(analyticsData.gmvTotal).toLocaleString()}
               </span>
             )}
@@ -3090,7 +3090,7 @@ export function SuperAdminDashboard({
                   <div key={n.id} className="bg-slate-950 border border-slate-800 p-3 rounded-xl space-y-1">
                     <div className="flex justify-between text-[11px] text-slate-400">
                       <span className="font-semibold text-purple-400">{n.author}</span>
-                      <span>{new Date(n.createdAt).toLocaleString()}</span>
+                      <span suppressHydrationWarning>{new Date(n.createdAt).toLocaleString()}</span>
                     </div>
                     <p className="text-slate-200 leading-relaxed">{n.content}</p>
                   </div>

@@ -135,7 +135,7 @@ export function BusinessProfileView({
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [copiedBankField, setCopiedBankField] = useState<string | null>(null);
 
-  const effectivePaymentQr = paymentQrUrl || qrCobroUrl || null;
+  const effectivePaymentQr = (paymentQrUrl && paymentQrUrl.trim()) || (qrCobroUrl && qrCobroUrl.trim()) || null;
   const hasBankData = Boolean(bankAccountNumber || bankName || effectivePaymentQr);
 
   const copyToClipboard = async (text: string, fieldId: string) => {
