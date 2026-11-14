@@ -21,6 +21,8 @@ import {
   Store,
   BedDouble,
   Clock,
+  Lock,
+  AlertTriangle,
 } from "lucide-react";
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
@@ -137,6 +139,42 @@ export function ReservasClient({ property }: { property: PropertyData }) {
     }
   );
 
+  // Disponibilidad de habitaciones en tiempo real para evitar solapamientos
+  const [occupiedRoomNames, setOccupiedRoomNames] = useState<string[]>([]);
+  const [isCheckingAvailability, setIsCheckingAvailability] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!checkIn || !checkOut || !property.slug) return;
+    let isCancelled = false;
+    const fetchAvailability = async () => {
+      setIsCheckingAvailability(true);
+      try {
+        const res = await fetch(
+          `/api/reservas/disponibilidad?slug=${encodeURIComponent(property.slug)}&checkIn=${encodeURIComponent(checkIn)}&checkOut=${encodeURIComponent(checkOut)}`
+        );
+        const data = await res.json();
+        if (!isCancelled && data.ok && Array.isArray(data.occupiedRoomNames)) {
+          setOccupiedRoomNames(data.occupiedRoomNames);
+        }
+      } catch (err) {
+        console.error("Error al consultar disponibilidad:", err);
+      } finally {
+        if (!isCancelled) setIsCheckingAvailability(false);
+      }
+    };
+    fetchAvailability();
+    return () => {
+      isCancelled = true;
+    };
+  }, [checkIn, checkOut, property.slug]);
+
+  const isRoomSelectedOccupied = useMemo(() => {
+    if (!selectedRoom?.name) return false;
+    return occupiedRoomNames.some(
+      (name) => name.toLowerCase().trim() === selectedRoom.name.toLowerCase().trim()
+    );
+  }, [selectedRoom, occupiedRoomNames]);
+
   // Filtro de categorías de alojamiento
   const [roomCategoryFilter, setRoomCategoryFilter] = useState<string>("TODAS");
 
@@ -220,6 +258,13 @@ export function ReservasClient({ property }: { property: PropertyData }) {
       return;
     }
 
+    if (isRoomSelectedOccupied) {
+      alert(
+        `La habitación "${selectedRoom.name}" ya se encuentra reservada para las fechas seleccionadas (${checkIn} al ${checkOut}). Por favor selecciona otra habitación disponible o modifica tus fechas de estadía.`
+      );
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -257,7 +302,7 @@ export function ReservasClient({ property }: { property: PropertyData }) {
         setBooked(true);
         window.open(data.whatsapp_url, "_blank");
       } else {
-        alert("No se pudo completar la solicitud de reserva. Por favor intenta de nuevo.");
+        alert(data.error || "No se pudo completar la solicitud de reserva. Por favor intenta de nuevo.");
       }
     } catch (err) {
       console.error("Error booking lodging:", err);
@@ -594,77 +639,129 @@ export function ReservasClient({ property }: { property: PropertyData }) {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {filteredAccommodations.map((room, idx) => (
-                  <div
-                    key={room.id}
-                    onClick={() => setSelectedRoom(room)}
-                    className={`relative rounded-2xl border overflow-hidden cursor-pointer transition flex flex-col justify-between ${
-                      selectedRoom.id === room.id
-                        ? "bg-emerald-500/10 border-emerald-500 shadow-xl shadow-emerald-500/10 scale-102"
-                        : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700"
-                    }`}
-                  >
-                    <div>
-                      <div className="relative h-44 w-full overflow-hidden bg-slate-900">
-                        {room.imageUrl ? (
-                          <img src={room.imageUrl} alt={room.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-500 gap-1.5 p-4 text-center">
-                            <BedDouble className="w-8 h-8 text-emerald-500/40" />
-                            <span className="text-[11px] font-bold text-slate-400">{room.name}</span>
-                          </div>
-                        )}
-                        {idx === 0 && (
-                          <span className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] shadow-md flex items-center gap-1">
-                            ⭐ Más Reservada
-                          </span>
-                        )}
-                        <span className="absolute bottom-2 right-2 px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur border border-slate-700 text-emerald-400 font-black text-xs">
-                          ${room.pricePerNight.toFixed(2)} / noche
-                        </span>
-                      </div>
-
-                      <div className="p-4">
-                        <h4 className="text-sm font-bold text-white mb-1">{room.name}</h4>
-                        {room.description && (
-                          <p className="text-[11px] text-slate-400 mb-3 leading-relaxed line-clamp-2">
-                            {room.description}
-                          </p>
-                        )}
-                        {((property.showBedsBadge !== false && room.beds) ||
-                          (property.showGuestsBadge !== false && room.maxGuests && room.maxGuests > 0)) && (
-                          <div className="text-[10px] text-slate-400 space-y-1">
-                            {property.showBedsBadge !== false && room.beds && <div>🛏️ {room.beds}</div>}
-                            {property.showGuestsBadge !== false && room.maxGuests && room.maxGuests > 0 && (
-                              <div>👥 Hasta {room.maxGuests} huéspedes</div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="p-4 pt-0">
-                      <button
-                        type="button"
-                        className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                          selectedRoom.id === room.id
-                            ? "bg-emerald-500 text-slate-950 shadow font-black"
-                            : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-                        }`}
-                      >
-                        {selectedRoom.id === room.id ? (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Seleccionada</span>
-                          </>
-                        ) : (
-                          <span>Elegir este Alojamiento</span>
-                        )}
-                      </button>
-                    </div>
+              {/* Alerta de habitación seleccionada ocupada */}
+              {isRoomSelectedOccupied && (
+                <div className="mb-4 p-4 rounded-2xl bg-rose-950/60 border border-rose-800 text-rose-200 text-xs flex items-center gap-3 shadow-lg">
+                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-white">
+                      La unidad &quot;{selectedRoom.name}&quot; ya está reservada para las fechas seleccionadas ({checkIn} al {checkOut}).
+                    </p>
+                    <p className="text-slate-300 text-[11px]">
+                      Por favor selecciona otra opción de alojamiento disponible abajo o modifica las fechas de tu estadía arriba.
+                    </p>
                   </div>
-                ))}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {filteredAccommodations.map((room, idx) => {
+                  const isRoomOccupied = occupiedRoomNames.some(
+                    (name) => name.toLowerCase().trim() === room.name.toLowerCase().trim()
+                  );
+                  const isSelected = selectedRoom.id === room.id;
+
+                  return (
+                    <div
+                      key={room.id}
+                      onClick={() => {
+                        if (!isRoomOccupied) {
+                          setSelectedRoom(room);
+                        }
+                      }}
+                      className={`relative rounded-2xl border overflow-hidden transition flex flex-col justify-between ${
+                        isRoomOccupied
+                          ? "bg-slate-950/40 border-rose-950 opacity-65 cursor-not-allowed"
+                          : isSelected
+                          ? "bg-emerald-500/10 border-emerald-500 shadow-xl shadow-emerald-500/10 scale-102 cursor-pointer"
+                          : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700 cursor-pointer"
+                      }`}
+                    >
+                      <div>
+                        <div className="relative h-44 w-full overflow-hidden bg-slate-900">
+                          {room.imageUrl ? (
+                            <img
+                              src={room.imageUrl}
+                              alt={room.name}
+                              className={`w-full h-full object-cover ${isRoomOccupied ? "grayscale-[30%]" : ""}`}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 text-slate-500 gap-1.5 p-4 text-center">
+                              <BedDouble className="w-8 h-8 text-emerald-500/40" />
+                              <span className="text-[11px] font-bold text-slate-400">{room.name}</span>
+                            </div>
+                          )}
+                          {isRoomOccupied ? (
+                            <span className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-rose-950/90 text-rose-300 border border-rose-800 font-black text-[10px] shadow-md flex items-center gap-1">
+                              <Lock className="w-3 h-3 text-rose-400" />
+                              🚫 Ocupada en estas fechas
+                            </span>
+                          ) : idx === 0 ? (
+                            <span className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] shadow-md flex items-center gap-1">
+                              ⭐ Más Reservada
+                            </span>
+                          ) : null}
+                          <span className="absolute bottom-2 right-2 px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur border border-slate-700 text-emerald-400 font-black text-xs">
+                            ${room.pricePerNight.toFixed(2)} / noche
+                          </span>
+                        </div>
+
+                        <div className="p-4">
+                          <h4 className="text-sm font-bold text-white mb-1 flex items-center justify-between">
+                            <span>{room.name}</span>
+                            {isRoomOccupied && (
+                              <span className="text-[10px] font-bold text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded-full border border-rose-800/60">
+                                No disponible
+                              </span>
+                            )}
+                          </h4>
+                          {room.description && (
+                            <p className="text-[11px] text-slate-400 mb-3 leading-relaxed line-clamp-2">
+                              {room.description}
+                            </p>
+                          )}
+                          {((property.showBedsBadge !== false && room.beds) ||
+                            (property.showGuestsBadge !== false && room.maxGuests && room.maxGuests > 0)) && (
+                            <div className="text-[10px] text-slate-400 space-y-1">
+                              {property.showBedsBadge !== false && room.beds && <div>🛏️ {room.beds}</div>}
+                              {property.showGuestsBadge !== false && room.maxGuests && room.maxGuests > 0 && (
+                                <div>👥 Hasta {room.maxGuests} huéspedes</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-4 pt-0">
+                        <button
+                          type="button"
+                          disabled={isRoomOccupied}
+                          className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                            isRoomOccupied
+                              ? "bg-slate-900 text-rose-400/80 border border-rose-900/40 cursor-not-allowed font-semibold"
+                              : isSelected
+                              ? "bg-emerald-500 text-slate-950 shadow font-black"
+                              : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                          }`}
+                        >
+                          {isRoomOccupied ? (
+                            <>
+                              <Lock className="w-3.5 h-3.5 text-rose-400" />
+                              <span>No disponible en estas fechas</span>
+                            </>
+                          ) : isSelected ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Seleccionada</span>
+                            </>
+                          ) : (
+                            <span>Elegir este Alojamiento</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

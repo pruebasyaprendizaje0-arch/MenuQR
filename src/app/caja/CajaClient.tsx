@@ -43,6 +43,7 @@ import {
   Clock,
   ExternalLink,
   ChevronRight,
+  ChevronLeft,
   ShieldCheck,
   Scissors,
   PieChart,
@@ -302,6 +303,11 @@ export function CajaClient({
 
   // Reservas de Hospedaje del Día (Vertical Reservas)
   const [reservasDelDia, setReservasDelDia] = useState<any[]>(initialReservasDelDia || []);
+
+  // Modo de visualización de Reservas de Hospedaje en POS (Lista de Tarjetas vs Calendario Interactivo)
+  const [reservasViewMode, setReservasViewMode] = useState<"LIST" | "CALENDAR">("LIST");
+  const [calMonth, setCalMonth] = useState<Date>(() => new Date());
+  const [calSelectedDate, setCalSelectedDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
 
   // Canales Operativos de POS (Opción 2 Split Screen)
   const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "CITAS" | "TACTIL" | "SCANNER">(() => {
@@ -2928,12 +2934,329 @@ export function CajaClient({
                       Carga la estadía al ticket de caja para liquidar el check-out, sumar consumos (restaurante/frigobar) y emitir comprobante.
                     </p>
                   </div>
-                  <span className="text-xs font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/30 px-3 py-1 rounded-full">
-                    {reservasDelDia.length} {reservasDelDia.length === 1 ? "estadía registrada" : "estadías registradas"}
-                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setReservasViewMode("LIST")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          reservasViewMode === "LIST"
+                            ? "bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        <span>Tarjetas ({reservasDelDia.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReservasViewMode("CALENDAR")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          reservasViewMode === "CALENDAR"
+                            ? "bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <CalendarDays className="w-3.5 h-3.5 text-emerald-300" />
+                        <span>Calendario</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                {reservasDelDia.length === 0 ? (
+                {reservasViewMode === "CALENDAR" ? (
+                  (() => {
+                    const year = calMonth.getFullYear();
+                    const month = calMonth.getMonth();
+                    const monthNames = [
+                      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+                    ];
+                    const monthName = monthNames[month];
+                    const firstDay = new Date(year, month, 1);
+                    const totalDays = new Date(year, month + 1, 0).getDate();
+                    const startDay = (firstDay.getDay() + 6) % 7;
+                    const todayStr = new Date().toISOString().split("T")[0];
+
+                    const formatCellDate = (d: number) => {
+                      const mm = String(month + 1).padStart(2, "0");
+                      const dd = String(d).padStart(2, "0");
+                      return `${year}-${mm}-${dd}`;
+                    };
+
+                    const selectedDayReservas = reservasDelDia.filter((r) => {
+                      const meta = r.metadata || {};
+                      const cin = meta.check_in || "";
+                      const cout = meta.check_out || "";
+                      if (!cin) return false;
+                      return (
+                        calSelectedDate === cin ||
+                        calSelectedDate === cout ||
+                        (calSelectedDate > cin && calSelectedDate < cout)
+                      );
+                    });
+
+                    return (
+                      <div className="space-y-4 flex-1 flex flex-col">
+                        {/* Barra de Navegación del Mes */}
+                        <div className="flex items-center justify-between bg-slate-950/70 border border-slate-800/80 p-2.5 rounded-2xl flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setCalMonth(new Date(year, month - 1, 1))}
+                              className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition cursor-pointer"
+                              title="Mes Anterior"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <span className="text-sm font-black text-white px-2 min-w-[140px] text-center">
+                              {monthName} {year}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setCalMonth(new Date(year, month + 1, 1))}
+                              className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition cursor-pointer"
+                              title="Mes Siguiente"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-semibold hidden sm:flex">
+                              <span className="flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400"></span> Check-in (Llegada)
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-amber-400"></span> En Estadía
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-rose-400"></span> Check-out (Salida)
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const now = new Date();
+                                setCalMonth(now);
+                                setCalSelectedDate(now.toISOString().split("T")[0]);
+                              }}
+                              className="px-3 py-1 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/70 text-emerald-300 font-bold text-xs transition cursor-pointer"
+                            >
+                              Ir a Hoy
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Cuadrícula del Mes */}
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 shadow-inner">
+                          <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
+                            {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d, i) => (
+                              <div key={i} className="text-[11px] font-bold text-slate-400 py-1">
+                                {d}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div className="grid grid-cols-7 gap-1">
+                            {Array.from({ length: startDay }).map((_, i) => (
+                              <div
+                                key={`empty-${i}`}
+                                className="h-16 sm:h-20 rounded-xl bg-slate-900/20 border border-slate-900/40 opacity-20"
+                              ></div>
+                            ))}
+
+                            {Array.from({ length: totalDays }).map((_, i) => {
+                              const dayNum = i + 1;
+                              const dateStr = formatCellDate(dayNum);
+                              const isToday = dateStr === todayStr;
+                              const isSelected = dateStr === calSelectedDate;
+
+                              const dayReservas = reservasDelDia.filter((r) => {
+                                const meta = r.metadata || {};
+                                const cin = meta.check_in || "";
+                                const cout = meta.check_out || "";
+                                return dateStr === cin || dateStr === cout || (dateStr > cin && dateStr < cout);
+                              });
+
+                              return (
+                                <button
+                                  key={`day-${dayNum}`}
+                                  type="button"
+                                  onClick={() => setCalSelectedDate(dateStr)}
+                                  className={`h-16 sm:h-20 p-1.5 rounded-xl border text-left flex flex-col justify-between transition cursor-pointer overflow-hidden ${
+                                    isSelected
+                                      ? "bg-emerald-950/60 border-emerald-500 ring-2 ring-emerald-500/50 shadow-lg"
+                                      : isToday
+                                      ? "bg-slate-900 border-emerald-600/60"
+                                      : "bg-slate-900/50 border-slate-800/80 hover:bg-slate-850 hover:border-slate-700"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span
+                                      className={`text-xs font-black ${
+                                        isToday
+                                          ? "text-emerald-400 font-mono bg-emerald-950/80 px-1.5 py-0.2 rounded border border-emerald-500/40"
+                                          : isSelected
+                                          ? "text-white"
+                                          : "text-slate-400"
+                                      }`}
+                                    >
+                                      {dayNum}
+                                    </span>
+                                    {dayReservas.length > 0 && (
+                                      <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-emerald-500 text-slate-950">
+                                        {dayReservas.length}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-0.5 overflow-hidden">
+                                    {dayReservas.slice(0, 2).map((r, rIdx) => {
+                                      const meta = r.metadata || {};
+                                      const isCheckIn = dateStr === meta.check_in;
+                                      const isCheckOut = dateStr === meta.check_out;
+                                      const isSettled =
+                                        r.metadata?.cobrado_en_caja === true ||
+                                        r.estado === "completada" ||
+                                        r.estado === "pagado";
+
+                                      return (
+                                        <div
+                                          key={rIdx}
+                                          className={`text-[9px] font-bold px-1 py-0.2 rounded truncate leading-tight flex items-center gap-1 ${
+                                            isSettled
+                                              ? "bg-slate-800 text-slate-400"
+                                              : isCheckIn
+                                              ? "bg-emerald-500/30 text-emerald-300 border border-emerald-500/40"
+                                              : isCheckOut
+                                              ? "bg-rose-500/30 text-rose-300 border border-rose-500/40"
+                                              : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                          }`}
+                                          title={`${r.cliente_nombre || "Huésped"} - ${
+                                            meta.tipo_habitacion || "Alojamiento"
+                                          }`}
+                                        >
+                                          <span
+                                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                              isCheckIn ? "bg-emerald-400" : isCheckOut ? "bg-rose-400" : "bg-amber-400"
+                                            }`}
+                                          ></span>
+                                          <span className="truncate">
+                                            {isCheckIn ? "In: " : isCheckOut ? "Out: " : ""}
+                                            {r.cliente_nombre?.split(" ")[0] || "Huésped"}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                    {dayReservas.length > 2 && (
+                                      <div className="text-[8px] text-slate-400 font-bold px-1">
+                                        +{dayReservas.length - 2} más
+                                      </div>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Detalle del Día Seleccionado y Carga Directa a Caja */}
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                            <div className="flex items-center gap-2">
+                              <CalendarDays className="w-4 h-4 text-emerald-400" />
+                              <h4 className="text-sm font-black text-white">
+                                Huéspedes del {calSelectedDate}
+                              </h4>
+                            </div>
+                            <span className="text-xs font-bold text-slate-400">
+                              {selectedDayReservas.length} {selectedDayReservas.length === 1 ? "estadía" : "estadías"}
+                            </span>
+                          </div>
+
+                          {selectedDayReservas.length === 0 ? (
+                            <div className="p-4 text-center text-xs text-slate-500 border border-dashed border-slate-800/80 rounded-xl">
+                              No hay check-ins ni check-outs registrados para esta fecha.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-1">
+                              {selectedDayReservas.map((res: any) => {
+                                const meta = res.metadata || {};
+                                const isSettled =
+                                  res.metadata?.cobrado_en_caja === true ||
+                                  res.estado === "completada" ||
+                                  res.estado === "pagado";
+                                const isCheckInDay = calSelectedDate === meta.check_in;
+                                const isCheckOutDay = calSelectedDate === meta.check_out;
+
+                                return (
+                                  <div
+                                    key={res.id}
+                                    className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3 hover:border-emerald-500/50 transition"
+                                  >
+                                    <div className="space-y-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-black text-white truncate">
+                                          {res.cliente_nombre || "Huésped"}
+                                        </span>
+                                        <span
+                                          className={`text-[9px] font-black px-1.5 py-0.2 rounded-full uppercase ${
+                                            isCheckInDay
+                                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                              : isCheckOutDay
+                                              ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                              : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                          }`}
+                                        >
+                                          {isCheckInDay ? "Llegada" : isCheckOutDay ? "Salida" : "En Estadía"}
+                                        </span>
+                                      </div>
+
+                                      <p className="text-[11px] text-emerald-400 font-medium truncate flex items-center gap-1">
+                                        <Trees className="w-3 h-3 shrink-0" />
+                                        <span>{meta.tipo_habitacion || "Alojamiento"}</span>
+                                        {meta.check_in && meta.check_out && (
+                                          <span className="text-slate-400 text-[10px]">
+                                            ({meta.check_in} → {meta.check_out})
+                                          </span>
+                                        )}
+                                      </p>
+
+                                      <div className="text-[11px] font-mono text-white font-black">
+                                        ${Number(res.total || 0).toFixed(2)}
+                                      </div>
+                                    </div>
+
+                                    <div className="shrink-0">
+                                      {isSettled ? (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-1 rounded-xl">
+                                          <CheckCircle2 className="w-3.5 h-3.5" />
+                                          <span>Cobrado</span>
+                                        </span>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleLoadReservaToTicket(res)}
+                                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-1 shadow cursor-pointer"
+                                        >
+                                          <Zap className="w-3 h-3 text-amber-300" />
+                                          <span>Cobrar</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : reservasDelDia.length === 0 ? (
                   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800">
                     <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
                       <Trees className="w-7 h-7" />

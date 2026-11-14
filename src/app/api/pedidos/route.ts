@@ -1446,6 +1446,37 @@ export async function POST(req: NextRequest) {
       // CASO E: VERTICAL RESERVAS (Hostales, Cabañas, Hospedaje, Glamping)
       // =========================================================================
       else if (vertical === "reservas") {
+        const targetRoomName = tipo_habitacion ? String(tipo_habitacion).trim() : "";
+        const targetCheckIn = check_in ? String(check_in).trim() : "";
+        const targetCheckOut = check_out ? String(check_out).trim() : "";
+
+        // Verificación de disponibilidad atómica para evitar overbooking
+        if (targetRoomName && targetCheckIn && targetCheckOut) {
+          const { rows: conflictRows } = await client.query(
+            `SELECT id, cliente_nombre, metadata
+             FROM pedidos
+             WHERE (negocio_id = $1 OR negocio_id::text = $1)
+               AND (vertical = 'reservas' OR mesa = 'RESERVA')
+               AND estado NOT IN ('cancelada', 'cancelado')
+               AND TRIM(LOWER(metadata->>'tipo_habitacion')) = TRIM(LOWER($2))
+               AND (metadata->>'check_in') < $3
+               AND (metadata->>'check_out') > $4
+             LIMIT 1`,
+            [resolvedNegocioId, targetRoomName, targetCheckOut, targetCheckIn]
+          );
+
+          if (conflictRows.length > 0) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              {
+                ok: false,
+                error: `La habitación "${targetRoomName}" ya se encuentra reservada para las fechas seleccionadas (${targetCheckIn} al ${targetCheckOut}). Por favor elige otra habitación o cambia las fechas de estadía.`,
+              },
+              { status: 409 }
+            );
+          }
+        }
+
         const metadataReservas = {
           check_in: check_in || new Date().toISOString().split("T")[0],
           check_out: check_out || "",
