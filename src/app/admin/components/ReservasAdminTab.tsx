@@ -35,6 +35,7 @@ import {
   Camera,
   Image as ImageIcon,
 } from "lucide-react";
+import { io } from "socket.io-client";
 
 interface CabanaItem {
   id: string;
@@ -291,6 +292,38 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
     fetchReservas();
     fetchConfig();
     fetchCabanas();
+  }, [restaurant.id]);
+
+  // Sincronización en tiempo real vía Socket.IO
+  useEffect(() => {
+    let socket: any = null;
+    try {
+      socket = io({
+        path: "/api/socket",
+        transports: ["polling", "websocket"],
+        query: { negocio_id: restaurant.id },
+      });
+
+      socket.on("connect", () => {
+        socket.emit("join_negocio", restaurant.id);
+      });
+
+      socket.on("nueva_reserva", () => {
+        fetchReservas();
+      });
+
+      socket.on("reserva_actualizada", () => {
+        fetchReservas();
+      });
+    } catch (e) {
+      console.warn("Socket.IO no disponible en ReservasAdminTab:", e);
+    }
+
+    return () => {
+      if (socket) {
+        socket.disconnect();
+      }
+    };
   }, [restaurant.id]);
 
   // Guardar configuración (amenities, extras e insignias)
@@ -877,8 +910,18 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
                       </div>
                     )}
 
-                    {/* Botonera de Acción 1-Click WhatsApp */}
+                    {/* Botonera de Acción 1-Click WhatsApp & Cobro en Caja POS */}
                     <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800/60">
+                      <a
+                        href={`/caja?reservaId=${reserva.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition shadow-md shadow-purple-600/30"
+                      >
+                        <DollarSign className="w-3.5 h-3.5 text-amber-300" />
+                        <span>Cobrar en Caja POS (Check-out) →</span>
+                      </a>
+
                       <button
                         onClick={() => handleWhatsAppConfirmar(reserva)}
                         className="flex-1 min-w-[130px] px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center gap-1.5 transition"

@@ -695,6 +695,7 @@ export function AdminDashboard({
   } | null;
 }) {
   const isCitasVertical = resolveBusinessVertical(restaurant) === "citas";
+  const isReservasVertical = resolveBusinessVertical(restaurant) === "reservas";
   const [isMounted, setIsMounted] = useState(false);
   const [dismissedAnnouncement, setDismissedAnnouncement] = useState(false);
 
@@ -11229,8 +11230,123 @@ export function AdminDashboard({
                       </div>
                     </div>
 
+                    {/* Bitácora de Estadías y Observaciones de Huésped (Vertical Reservas / Cabañas / Hospedaje) */}
+                    {isReservasVertical && (
+                      <div className="bg-slate-950/60 border border-emerald-900/40 p-4 rounded-2xl space-y-3 text-xs">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-extrabold text-white flex items-center gap-2 text-sm">
+                            <Trees className="h-4 w-4 text-emerald-400" />
+                            <span>Bitácora de Estadías & Preferencias del Huésped</span>
+                            <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-mono font-bold">
+                              {meta.evolutionNotes?.length || 0}
+                            </span>
+                          </h4>
+                          {!showAddEvolutionNoteForm && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowAddEvolutionNoteForm(true);
+                                setNewEvolutionNoteAuthor("Recepción");
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition shadow-md shadow-emerald-600/20 cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>+ Nueva Observación</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {showAddEvolutionNoteForm && (
+                          <div className="bg-slate-900/90 border border-emerald-800/60 p-3.5 rounded-2xl space-y-3 animate-in fade-in">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-bold text-emerald-300 flex items-center gap-1">
+                                <Trees className="w-3.5 h-3.5" />
+                                Registrado por:
+                              </span>
+                              <input
+                                type="text"
+                                value={newEvolutionNoteAuthor}
+                                onChange={(e) => setNewEvolutionNoteAuthor(e.target.value)}
+                                placeholder="Recepción / Conserje"
+                                className="bg-slate-950 border border-emerald-800/60 rounded-xl px-2.5 py-1 text-xs text-emerald-200 outline-none w-48"
+                              />
+                            </div>
+                            <textarea
+                              rows={2}
+                              value={newEvolutionNoteText}
+                              onChange={(e) => setNewEvolutionNoteText(e.target.value)}
+                              placeholder="Ej: Alérgico a plumas (usar almohadas sintéticas), viaja con perro mediano educado, celebra aniversario..."
+                              className="w-full bg-slate-950 border border-emerald-800/60 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+                            />
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowAddEvolutionNoteForm(false);
+                                  setNewEvolutionNoteText("");
+                                }}
+                                className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition"
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingEvolutionNote || !newEvolutionNoteText.trim()}
+                                onClick={() => handleAddEvolutionNote(cust.id)}
+                                className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition disabled:opacity-50"
+                              >
+                                {savingEvolutionNote ? "Guardando..." : "Guardar Observación"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {(!meta.evolutionNotes || meta.evolutionNotes.length === 0) ? (
+                          <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-850 text-center text-slate-500 text-xs">
+                            Aún no hay observaciones registradas. Haz clic en <strong>+ Nueva Observación</strong> para documentar solicitudes o notas del huésped.
+                          </div>
+                        ) : (
+                          <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                            {meta.evolutionNotes.map((evo) => (
+                              <div
+                                key={evo.id}
+                                className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-850/40 space-y-1 hover:border-emerald-700/50 transition"
+                              >
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="font-bold text-emerald-300 flex items-center gap-1">
+                                    <Trees className="w-3 h-3 text-emerald-400" />
+                                    {evo.author || "Recepción"}
+                                  </span>
+                                  <span className="text-slate-400 font-mono text-[10px]">
+                                    {new Date(evo.date).toLocaleString("es-ES", {
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </span>
+                                </div>
+                                <p className="text-slate-300 text-xs whitespace-pre-wrap leading-relaxed">{evo.note}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Bitácora y Notas de Evolución Clínica (Vertical Citas & Servicios de Salud/Estética) */}
-                    {(isCitasVertical || (meta.evolutionNotes && meta.evolutionNotes.length > 0) || Boolean(meta.lastService) || bLabels.items === "Servicios" || bLabels.catalogTabTitle === "Servicios") && (
+                    {!isReservasVertical && (
+                      isCitasVertical ||
+                      (meta.evolutionNotes && meta.evolutionNotes.length > 0) ||
+                      Boolean(meta.lastService) ||
+                      bLabels.items === "Servicios" ||
+                      bLabels.catalogTabTitle === "Servicios" ||
+                      insights.matchingOrders.some((o) => {
+                        const tl = String(o.tableName || "").toLowerCase();
+                        return tl.includes("cita") || tl.includes("turno");
+                      })
+                    ) && (
                       <div className="bg-slate-950/60 border border-purple-900/40 p-4 rounded-2xl space-y-3 text-xs">
                         <div className="flex items-center justify-between">
                           <h4 className="font-extrabold text-white flex items-center gap-2 text-sm">
@@ -11367,79 +11483,106 @@ export function AdminDashboard({
                     )}
 
                     {/* Order History Timeline */}
-                    <div className="space-y-3">
-                      <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
-                        <History className="h-4 w-4 text-amber-400" />
-                        {isServiciosTecnicos
-                          ? `Historial de Visitas y Cotizaciones (${insights.matchingOrders.length})`
-                          : (isCitasVertical || bLabels.items === "Servicios" || bLabels.catalogTabTitle === "Servicios" || Boolean(meta.lastService))
-                          ? `Historial de Atenciones & Compras (${insights.matchingOrders.length})`
-                          : `Historial de Pedidos (${insights.matchingOrders.length})`}
-                      </h4>
-                      {insights.matchingOrders.length === 0 ? (
-                        <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-center text-slate-500 text-xs">
-                          {isCitasVertical || bLabels.items === "Servicios"
-                            ? `No se encontraron atenciones ni compras registradas para ${cust.name || cust.phone}.`
-                            : `No se encontraron pedidos registrados con el teléfono ${cust.phone}.`}
-                        </div>
-                      ) : (
-                        <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                          {insights.matchingOrders.map((ord) => {
-                            const rawTable = String(ord.tableName || "").trim();
-                            const cleanTable = rawTable.replace(/^Mesa\s*#?\s*/i, "").trim();
-                            const tLower = rawTable.toLowerCase();
-                            const isHealthServiceContext = isCitasVertical || bLabels.items === "Servicios" || tLower.includes("cita") || tLower.includes("turno");
+                    {(() => {
+                      const hasAnyCitaOrder = insights.matchingOrders.some((o) => {
+                        const tl = String(o.tableName || "").toLowerCase();
+                        return tl.includes("cita") || tl.includes("turno");
+                      });
+                      const isCustomerHealthContext = !isReservasVertical && (
+                        isCitasVertical ||
+                        bLabels.items === "Servicios" ||
+                        bLabels.catalogTabTitle === "Servicios" ||
+                        Boolean(meta.lastService) ||
+                        hasAnyCitaOrder
+                      );
 
-                            let canalBadge = "Atención Directa / Mostrador";
-                            if (tLower.includes("cita") || tLower.includes("turno")) {
-                              canalBadge = "Turno / Cita en Consultorio";
-                            } else if (tLower.includes("tactil") || tLower.includes("atención") || tLower.includes("atencion") || tLower.includes("directa")) {
-                              canalBadge = "Atención Directa / Mostrador";
-                            } else if (tLower.includes("llevar") || tLower.includes("retiro")) {
-                              canalBadge = isHealthServiceContext ? "Retiro de Productos" : "Para Llevar";
-                            } else if (tLower.includes("domicilio") || tLower.includes("delivery")) {
-                              canalBadge = "Envío a Domicilio";
-                            } else if (cleanTable) {
-                              canalBadge = isHealthServiceContext ? cleanTable : `Mesa #${cleanTable}`;
-                            } else {
-                              canalBadge = isHealthServiceContext ? "Atención" : "Mostrador";
-                            }
+                      return (
+                        <div className="space-y-3">
+                          <h4 className="font-extrabold text-white text-sm flex items-center gap-2">
+                            <History className="h-4 w-4 text-amber-400" />
+                            {isServiciosTecnicos
+                              ? `Historial de Visitas y Cotizaciones (${insights.matchingOrders.length})`
+                              : isReservasVertical
+                              ? `Historial de Estadías & Reservas (${insights.matchingOrders.length})`
+                              : isCustomerHealthContext
+                              ? `Historial de Atenciones & Compras (${insights.matchingOrders.length})`
+                              : `Historial de Pedidos (${insights.matchingOrders.length})`}
+                          </h4>
+                          {insights.matchingOrders.length === 0 ? (
+                            <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-center text-slate-500 text-xs">
+                              {isReservasVertical
+                                ? `No se encontraron estadías ni consumos registrados para ${cust.name || cust.phone}.`
+                                : isCustomerHealthContext
+                                ? `No se encontraron atenciones ni compras registradas para ${cust.name || cust.phone}.`
+                                : `No se encontraron pedidos registrados con el teléfono ${cust.phone}.`}
+                            </div>
+                          ) : (
+                            <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                              {insights.matchingOrders.map((ord) => {
+                                const rawTable = String(ord.tableName || "").trim();
+                                const cleanTable = rawTable.replace(/^(Mesa\s*#?\s*)+/gi, "").trim();
+                                const tLower = cleanTable.toLowerCase();
+                                const isLodgingOrder = isReservasVertical || tLower.includes("reserva") || tLower.includes("cabaña") || tLower.includes("cabana") || tLower.includes("hospedaje");
+                                const isHealthServiceContext = !isLodgingOrder && (isCustomerHealthContext || tLower.includes("cita") || tLower.includes("turno"));
 
-                            return (
-                              <div key={ord.id} className="bg-slate-950/70 border border-slate-850 p-3 rounded-xl flex items-center justify-between text-xs">
-                                <div>
-                                  <div className="font-bold text-white flex items-center gap-2">
-                                    <span>
-                                      {isHealthServiceContext
-                                        ? `Atención #${ord.orderNumber || ord.id.substring(0, 6)}`
-                                        : `Pedido #${ord.orderNumber || ord.id.substring(0, 6)}`}
-                                    </span>
-                                    <span
-                                      className={
-                                        isHealthServiceContext
-                                          ? "text-[10px] font-semibold text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded-full border border-purple-800/40 shadow-sm"
-                                          : "text-[10px] text-amber-400 font-normal"
-                                      }
-                                    >
-                                      {canalBadge}
-                                    </span>
+                                let canalBadge = "Atención Directa / Mostrador";
+                                if (isLodgingOrder) {
+                                  canalBadge = "Estadía en Cabaña / Hospedaje";
+                                } else if (tLower.includes("cita") || tLower.includes("turno")) {
+                                  canalBadge = "Turno / Cita en Consultorio";
+                                } else if (tLower.includes("tactil") || tLower.includes("atención") || tLower.includes("atencion") || tLower.includes("directa")) {
+                                  canalBadge = "Atención Directa / Mostrador";
+                                } else if (tLower.includes("llevar") || tLower.includes("retiro")) {
+                                  canalBadge = isHealthServiceContext ? "Retiro de Productos" : isLodgingOrder ? "Consumo en Estadía" : "Para Llevar";
+                                } else if (tLower.includes("domicilio") || tLower.includes("delivery")) {
+                                  canalBadge = "Envío a Domicilio";
+                                } else if (cleanTable) {
+                                  canalBadge = isHealthServiceContext || isLodgingOrder ? cleanTable : `Mesa #${cleanTable}`;
+                                } else {
+                                  canalBadge = isLodgingOrder ? "Hospedaje" : isHealthServiceContext ? "Atención" : "Mostrador";
+                                }
+
+                                return (
+                                  <div key={ord.id} className="bg-slate-950/70 border border-slate-850 p-3 rounded-xl flex items-center justify-between text-xs">
+                                    <div>
+                                      <div className="font-bold text-white flex items-center gap-2">
+                                        <span>
+                                          {isLodgingOrder
+                                            ? `Estadía #${ord.orderNumber || ord.id.substring(0, 6)}`
+                                            : isHealthServiceContext
+                                            ? `Atención #${ord.orderNumber || ord.id.substring(0, 6)}`
+                                            : `Pedido #${ord.orderNumber || ord.id.substring(0, 6)}`}
+                                        </span>
+                                        <span
+                                          className={
+                                            isLodgingOrder
+                                              ? "text-[10px] font-semibold text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800/40 shadow-sm"
+                                              : isHealthServiceContext
+                                              ? "text-[10px] font-semibold text-purple-300 bg-purple-950/60 px-2 py-0.5 rounded-full border border-purple-800/40 shadow-sm"
+                                              : "text-[10px] text-amber-400 font-normal"
+                                          }
+                                        >
+                                          {canalBadge}
+                                        </span>
+                                      </div>
+                                      <p className="text-[11px] text-slate-400 mt-0.5">
+                                        {(ord.items || []).map(it => `${it.quantity}x ${it.dishName}`).join(", ") || (isLodgingOrder ? "Sin detalle de habitación o consumos" : isHealthServiceContext ? "Sin detalle de servicios o productos" : "Sin detalle de platos")}
+                                      </p>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="font-black text-emerald-400 text-sm block">${ord.total.toFixed(2)}</span>
+                                      <span className="text-[10px] text-slate-500">
+                                        {new Date(ord.createdAt).toLocaleDateString("es-ES")}
+                                      </span>
+                                    </div>
                                   </div>
-                                  <p className="text-[11px] text-slate-400 mt-0.5">
-                                    {(ord.items || []).map(it => `${it.quantity}x ${it.dishName}`).join(", ") || (isHealthServiceContext ? "Sin detalle de servicios o productos" : "Sin detalle de platos")}
-                                  </p>
-                                </div>
-                                <div className="text-right">
-                                  <span className="font-black text-emerald-400 text-sm block">${ord.total.toFixed(2)}</span>
-                                  <span className="text-[10px] text-slate-500">
-                                    {new Date(ord.createdAt).toLocaleDateString("es-ES")}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
 
                     {/* WhatsApp Action Buttons */}
                     <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-800">

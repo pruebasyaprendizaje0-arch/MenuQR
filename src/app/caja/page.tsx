@@ -7,6 +7,7 @@ import { CajaClient } from "./CajaClient";
 import { getActiveCashShift } from "@/lib/caja-actions";
 import Link from "next/link";
 import { Store, ArrowLeft, Barcode } from "lucide-react";
+import { resolveBusinessVertical } from "@/lib/business-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +19,11 @@ export const metadata = {
 export default async function CajaPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ citaId?: string }>;
+  searchParams?: Promise<{ citaId?: string; reservaId?: string }>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const requestedCitaId = resolvedSearchParams?.citaId || null;
+  const requestedReservaId = resolvedSearchParams?.reservaId || null;
   const session = await getUserSession();
   const isSuperAdmin = await getSuperAdminSession();
 
@@ -506,6 +508,73 @@ export default async function CajaPage({
     }
   }
 
+  // Cargar reservas de hospedaje si el negocio es de la vertical 'reservas'
+  let initialReservaOrder: any = null;
+  let reservasDelDia: any[] = [];
+  if (restaurant) {
+    try {
+      const isReservasVertical = resolveBusinessVertical(restaurant) === "reservas";
+      if (isReservasVertical) {
+        const { rows: resRows } = await pool.query(
+          `SELECT id, negocio_id, mesa, estado, total::float, created_at, cliente_nombre, cliente_telefono, vertical, metadata
+           FROM pedidos
+           WHERE negocio_id = $1 
+             AND vertical = 'reservas'
+             AND estado NOT IN ('cancelada', 'cancelado')
+           ORDER BY created_at DESC
+           LIMIT 50`,
+          [restaurant.id]
+        );
+
+        const rIds = resRows.map((r: any) => r.id);
+        let resItemsMap: Record<string, any[]> = {};
+        if (rIds.length > 0) {
+          const { rows: itemRows } = await pool.query(
+            `SELECT id, pedido_id, nombre, cantidad, precio::float, notas FROM pedido_items WHERE pedido_id = ANY($1)`,
+            [rIds]
+          );
+          for (const it of itemRows) {
+            if (!resItemsMap[it.pedido_id]) resItemsMap[it.pedido_id] = [];
+            resItemsMap[it.pedido_id].push(it);
+          }
+        }
+
+        reservasDelDia = resRows.map((r: any) => {
+          let meta: any = {};
+          try {
+            meta = typeof r.metadata === "string" ? JSON.parse(r.metadata) : (r.metadata || {});
+          } catch {}
+          return {
+            id: String(r.id),
+            negocio_id: String(r.negocio_id),
+            mesa: r.mesa ? String(r.mesa) : "RESERVA",
+            estado: String(r.estado),
+            total: Number(r.total) || 0,
+            created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at || ""),
+            cliente_nombre: r.cliente_nombre ? String(r.cliente_nombre) : "",
+            cliente_telefono: r.cliente_telefono ? String(r.cliente_telefono) : "",
+            vertical: "reservas",
+            metadata: meta,
+            items: (resItemsMap[r.id] || []).map((it: any) => ({
+              id: String(it.id),
+              nombre: String(it.nombre || ""),
+              cantidad: Number(it.cantidad) || 1,
+              precio: Number(it.precio) || 0,
+              notas: it.notas ? String(it.notas) : null,
+            })),
+          };
+        });
+
+        if (requestedReservaId) {
+          const found = reservasDelDia.find((r) => r.id === requestedReservaId);
+          if (found) initialReservaOrder = found;
+        }
+      }
+    } catch (resErr) {
+      console.error("Error loading reservas in CajaPage:", resErr);
+    }
+  }
+
   const currentUser = {
     id: session?.userId || "admin",
     name: session?.email?.split("@")[0] || "Administrador",
@@ -517,6 +586,8 @@ export default async function CajaPage({
       <CajaClient
         initialCitaOrder={initialCitaOrder}
         initialCitasDelDia={citasDelDia}
+        initialReservaOrder={initialReservaOrder}
+        initialReservasDelDia={reservasDelDia}
         restaurant={{
           id: restaurant.id,
           name: restaurant.name,

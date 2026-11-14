@@ -20,6 +20,7 @@ import {
   Minus,
   Store,
   BedDouble,
+  Clock,
 } from "lucide-react";
 import { BusinessProfileView } from "@/components/public/BusinessProfileView";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
@@ -135,6 +136,35 @@ export function ReservasClient({ property }: { property: PropertyData }) {
       imageUrl: "",
     }
   );
+
+  // Filtro de categorías de alojamiento
+  const [roomCategoryFilter, setRoomCategoryFilter] = useState<string>("TODAS");
+
+  const roomCategories = useMemo(() => {
+    const cats = new Set<string>(["TODAS"]);
+    property.accommodations.forEach((acc) => {
+      const name = acc.name.toLowerCase();
+      if (name.includes("cabaña") || name.includes("cabana")) cats.add("Cabañas");
+      else if (name.includes("domo") || name.includes("glamping")) cats.add("Glamping & Domos");
+      else if (name.includes("suite") || name.includes("matrimonial")) cats.add("Suites");
+      else if (name.includes("familiar") || name.includes("casa")) cats.add("Familiares");
+      else cats.add("Habitaciones");
+    });
+    return Array.from(cats);
+  }, [property.accommodations]);
+
+  const filteredAccommodations = useMemo(() => {
+    if (roomCategoryFilter === "TODAS") return property.accommodations;
+    return property.accommodations.filter((acc) => {
+      const name = acc.name.toLowerCase();
+      if (roomCategoryFilter === "Cabañas") return name.includes("cabaña") || name.includes("cabana");
+      if (roomCategoryFilter === "Glamping & Domos") return name.includes("domo") || name.includes("glamping");
+      if (roomCategoryFilter === "Suites") return name.includes("suite") || name.includes("matrimonial");
+      if (roomCategoryFilter === "Familiares") return name.includes("familiar") || name.includes("casa");
+      if (roomCategoryFilter === "Habitaciones") return !name.includes("cabaña") && !name.includes("cabana") && !name.includes("domo") && !name.includes("glamping") && !name.includes("suite");
+      return true;
+    });
+  }, [property.accommodations, roomCategoryFilter]);
 
   // Extras seleccionados
   const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
@@ -352,12 +382,56 @@ export function ReservasClient({ property }: { property: PropertyData }) {
               </div>
             </div>
 
+            {/* Trust Badges Bar - Garantías de Reserva Directa */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-slate-300">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-bold text-[11px] leading-tight">Reserva Directa 24/7 sin Comisiones</span>
+              </div>
+              <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-slate-300">
+                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-bold text-[11px] leading-tight">Confirmación Inmediata WhatsApp</span>
+              </div>
+              <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-slate-300">
+                <Clock className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-bold text-[11px] leading-tight">Check-in 14:00 · Check-out 12:00</span>
+              </div>
+              <div className="flex items-center gap-2.5 p-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-slate-300">
+                <Trees className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-bold text-[11px] leading-tight">Entorno Privado & Naturaleza</span>
+              </div>
+            </div>
+
+            {/* Mini-Galería de Instalaciones y Vistas (Si existe) */}
+            {property.galleryImages && property.galleryImages.length > 0 && (
+              <div className="space-y-2.5 bg-slate-900/40 border border-slate-800/80 p-4 rounded-3xl">
+                <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+                  <span className="font-extrabold text-white flex items-center gap-1.5 text-xs">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                    Vistas & Espacios de la Propiedad
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-mono">{property.galleryImages.length} fotos</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {property.galleryImages.slice(0, 4).map((imgUrl, idx) => (
+                    <div key={idx} className="relative h-24 sm:h-28 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 group">
+                      <img
+                        src={imgUrl}
+                        alt={`Vista ${idx + 1}`}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Amenidades de la Propiedad */}
             <div className="flex flex-wrap gap-2">
               {property.amenities.map((am, i) => (
                 <span
                   key={i}
-                  className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 font-medium"
+                  className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 font-medium flex items-center gap-1"
                 >
                   {am}
                 </span>
@@ -490,20 +564,42 @@ export function ReservasClient({ property }: { property: PropertyData }) {
             </div>
 
             {/* Paso 2: Selector de Alojamiento / Cabaña */}
-            <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-xl">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 text-xs font-black flex items-center justify-center">
-                  2
-                </span>
-                <h3 className="text-base font-bold text-white">Selecciona tu Cabaña o Habitación</h3>
+            <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-emerald-500 text-slate-950 text-xs font-black flex items-center justify-center">
+                    2
+                  </span>
+                  <h3 className="text-base font-bold text-white">Selecciona tu Cabaña o Habitación</h3>
+                </div>
+
+                {/* Filtro por Categorías / Tipos de Hospedaje */}
+                {roomCategories.length > 2 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                    {roomCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setRoomCategoryFilter(cat)}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                          roomCategoryFilter === cat
+                            ? "bg-emerald-500 text-slate-950 shadow-md font-black"
+                            : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {property.accommodations.map((room) => (
+                {filteredAccommodations.map((room, idx) => (
                   <div
                     key={room.id}
                     onClick={() => setSelectedRoom(room)}
-                    className={`rounded-2xl border overflow-hidden cursor-pointer transition flex flex-col justify-between ${
+                    className={`relative rounded-2xl border overflow-hidden cursor-pointer transition flex flex-col justify-between ${
                       selectedRoom.id === room.id
                         ? "bg-emerald-500/10 border-emerald-500 shadow-xl shadow-emerald-500/10 scale-102"
                         : "bg-slate-950/60 border-slate-800/80 hover:border-slate-700"
@@ -518,6 +614,11 @@ export function ReservasClient({ property }: { property: PropertyData }) {
                             <BedDouble className="w-8 h-8 text-emerald-500/40" />
                             <span className="text-[11px] font-bold text-slate-400">{room.name}</span>
                           </div>
+                        )}
+                        {idx === 0 && (
+                          <span className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] shadow-md flex items-center gap-1">
+                            ⭐ Más Reservada
+                          </span>
                         )}
                         <span className="absolute bottom-2 right-2 px-3 py-1 rounded-xl bg-slate-950/80 backdrop-blur border border-slate-700 text-emerald-400 font-black text-xs">
                           ${room.pricePerNight.toFixed(2)} / noche
@@ -548,7 +649,7 @@ export function ReservasClient({ property }: { property: PropertyData }) {
                         type="button"
                         className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
                           selectedRoom.id === room.id
-                            ? "bg-emerald-500 text-slate-950 shadow"
+                            ? "bg-emerald-500 text-slate-950 shadow font-black"
                             : "bg-slate-800 text-slate-300 hover:bg-slate-700"
                         }`}
                       >
@@ -558,7 +659,7 @@ export function ReservasClient({ property }: { property: PropertyData }) {
                             <span>Seleccionada</span>
                           </>
                         ) : (
-                          <span>Elegir esta Cabaña</span>
+                          <span>Elegir este Alojamiento</span>
                         )}
                       </button>
                     </div>

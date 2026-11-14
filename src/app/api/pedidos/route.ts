@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
-import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado, emitNuevaCita } from "@/lib/socket-server";
+import { emitNuevoPedido, emitItemsAñadidos, emitPedidoActualizado, emitNuevaCita, emitNuevaReserva } from "@/lib/socket-server";
 import { prisma } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { deductStockUniversal } from "@/lib/stock-service";
@@ -1507,6 +1507,63 @@ export async function POST(req: NextRequest) {
 
         const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
         const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
+
+        // Sincronización automática de Huésped hacia Customer en Prisma (CRM Hospedaje)
+        if (cliente_telefono) {
+          try {
+            const rawPhone = String(cliente_telefono).trim();
+            const cleanPhone = rawPhone.replace(/\D/g, "");
+            const searchPhone = cleanPhone || rawPhone;
+
+            const existingCustomer = await prisma.customer.findFirst({
+              where: {
+                restaurantId: resolvedNegocioId,
+                phone: searchPhone,
+              },
+            });
+
+            if (!existingCustomer) {
+              await prisma.customer.create({
+                data: {
+                  restaurantId: resolvedNegocioId,
+                  name: cliente_nombre ? String(cliente_nombre).trim() : "Huésped Titular",
+                  phone: searchPhone,
+                  category: "NUEVO",
+                  totalOrders: 1,
+                  totalSpent: orderTotal,
+                  lastOrderAt: new Date(),
+                },
+              });
+            } else {
+              const newTotalOrders = (existingCustomer.totalOrders || 0) + 1;
+              const newTotalSpent = Number(existingCustomer.totalSpent || 0) + orderTotal;
+              const shouldPromote = newTotalOrders >= 2 && existingCustomer.category === "NUEVO";
+
+              await prisma.customer.update({
+                where: { id: existingCustomer.id },
+                data: {
+                  name: (!existingCustomer.name || existingCustomer.name === "Huésped Titular") && cliente_nombre ? String(cliente_nombre).trim() : existingCustomer.name,
+                  totalOrders: newTotalOrders,
+                  totalSpent: newTotalSpent,
+                  lastOrderAt: new Date(),
+                  category: shouldPromote ? "FRECUENTE" : existingCustomer.category,
+                },
+              });
+            }
+          } catch (crmErr) {
+            console.error("[POST /api/pedidos reservas] Error no bloqueante al sincronizar huésped en CRM:", crmErr);
+          }
+        }
+
+        // Notificación en tiempo real vía Socket.IO
+        try {
+          emitNuevaReserva(resolvedNegocioId, {
+            ...orderRows[0],
+            items: insertedItems,
+          });
+        } catch (sockErr) {
+          console.warn("[POST /api/pedidos reservas] Error emitiendo nueva_reserva por socket:", sockErr);
+        }
 
         // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
         void sendTelegramAlert({

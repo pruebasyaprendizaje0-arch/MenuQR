@@ -60,6 +60,7 @@ import {
   BookmarkCheck,
   LayoutGrid,
   Stethoscope,
+  Trees,
 } from "lucide-react";
 import { io } from "socket.io-client";
 import {
@@ -217,6 +218,8 @@ interface CajaClientProps {
   dishes?: TouchDishItem[];
   initialCitaOrder?: any | null;
   initialCitasDelDia?: any[] | null;
+  initialReservaOrder?: any | null;
+  initialReservasDelDia?: any[] | null;
 }
 
 export function CajaClient({
@@ -227,6 +230,8 @@ export function CajaClient({
   dishes = [],
   initialCitaOrder = null,
   initialCitasDelDia = null,
+  initialReservaOrder = null,
+  initialReservasDelDia = null,
 }: CajaClientProps) {
   // Cash shift / Turno de caja state
   const [activeShift, setActiveShift] = useState<SerializedCashShift | null>(initialShift);
@@ -290,9 +295,18 @@ export function CajaClient({
     return resolveBusinessVertical(restaurant) === "citas";
   }, [restaurant]);
 
+  // Detección canónica de vertical Reservas / Hospedaje / Cabañas
+  const isReservasVertical = useMemo(() => {
+    return resolveBusinessVertical(restaurant) === "reservas";
+  }, [restaurant]);
+
+  // Reservas de Hospedaje del Día (Vertical Reservas)
+  const [reservasDelDia, setReservasDelDia] = useState<any[]>(initialReservasDelDia || []);
+
   // Canales Operativos de POS (Opción 2 Split Screen)
   const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "CITAS" | "TACTIL" | "SCANNER">(() => {
     if (resolveBusinessVertical(restaurant) === "citas") return "CITAS";
+    if (resolveBusinessVertical(restaurant) === "reservas") return "RESERVAS";
     return isCatalogVertical ? "TACTIL" : "MESAS";
   });
 
@@ -513,6 +527,83 @@ export function CajaClient({
       socket.disconnect();
     };
   }, [isCitasVertical, restaurant.id]);
+
+  // Sincronización en tiempo real vía Socket.IO para Reservas de Hospedaje
+  useEffect(() => {
+    if (!isReservasVertical) return;
+    const socket = io({
+      path: "/api/socket",
+      transports: ["polling", "websocket"],
+      query: { negocio_id: restaurant.id },
+      reconnectionAttempts: 5,
+      timeout: 5000,
+    });
+    socket.emit("join_negocio", restaurant.id);
+
+    socket.on("nueva_reserva", (reserva: any) => {
+      setReservasDelDia((prev) => [reserva, ...prev.filter((r) => r.id !== reserva.id)]);
+    });
+
+    socket.on("reserva_actualizada", (reserva: any) => {
+      setReservasDelDia((prev) => {
+        if (reserva.estado === "cancelada" || reserva.estado === "cancelado") {
+          return prev.filter((r) => r.id !== reserva.id);
+        }
+        return prev.map((r) => (r.id === reserva.id ? { ...r, ...reserva } : r));
+      });
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [isReservasVertical, restaurant.id]);
+
+  // Si se entra con ?reservaId=... o se pasa initialReservaOrder
+  useEffect(() => {
+    if (initialReservaOrder) {
+      setActiveChannel("RESERVAS");
+      if (initialReservaOrder.cliente_nombre) {
+        setSaleCustomerName(initialReservaOrder.cliente_nombre);
+      }
+      if (initialReservaOrder.cliente_telefono) {
+        setSaleCustomerPhone(initialReservaOrder.cliente_telefono);
+      }
+      const meta = initialReservaOrder.metadata || {};
+      const roomName = meta.tipo_habitacion || "Alojamiento / Cabaña";
+      const noches = meta.noches || 1;
+      setSessionItems([
+        {
+          dishId: `reserva-${initialReservaOrder.id}`,
+          name: `Estadía: ${roomName} (${noches} noche/s)`,
+          price: Number(initialReservaOrder.total) || 0,
+          quantity: 1,
+          stock: null,
+          trackStock: false,
+        },
+      ]);
+    }
+  }, [initialReservaOrder]);
+
+  const handleLoadReservaToTicket = (reserva: any) => {
+    const meta = reserva.metadata || {};
+    const roomName = meta.tipo_habitacion || "Alojamiento / Cabaña";
+    const noches = meta.noches || 1;
+    if (reserva.cliente_nombre) setSaleCustomerName(reserva.cliente_nombre);
+    if (reserva.cliente_telefono) setSaleCustomerPhone(reserva.cliente_telefono);
+
+    setSessionItems([
+      {
+        dishId: `reserva-${reserva.id}`,
+        name: `Estadía: ${roomName} (${noches} noche/s)`,
+        price: Number(reserva.total) || 0,
+        quantity: 1,
+        stock: null,
+        trackStock: false,
+      },
+    ]);
+    setActiveChannel("TACTIL");
+    setMobileActiveView("TICKET");
+  };
 
   const configuredTables = useMemo(() => {
     if (!restaurant.tablesConfig) return ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
@@ -2442,7 +2533,25 @@ export function CajaClient({
                   </span>
                 </button>
 
-                {!isCatalogVertical && (
+                {isReservasVertical ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveChannel("RESERVAS")}
+                    className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                      activeChannel === "RESERVAS"
+                        ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 font-black scale-102"
+                        : "bg-slate-900/90 text-slate-300 hover:text-white border border-slate-800"
+                    }`}
+                  >
+                    <Trees className="w-4 h-4 text-emerald-400" />
+                    <span>Huéspedes & Check-out</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                      reservasDelDia.length > 0 ? "bg-emerald-400 text-slate-950 font-black animate-pulse shadow-sm" : "bg-slate-800 text-slate-400"
+                    }`}>
+                      {reservasDelDia.length}
+                    </span>
+                  </button>
+                ) : !isCatalogVertical && (
                   <button
                     type="button"
                     onClick={() => setActiveChannel("RESERVAS")}
@@ -2726,8 +2835,154 @@ export function CajaClient({
               </div>
             )}
 
+            {/* CANAL: RESERVAS DE HOSPEDAJE / CABAÑAS (Vertical Reservas) */}
+            {isReservasVertical && activeChannel === "RESERVAS" && (
+              <div className="space-y-4 flex-1 flex flex-col">
+                <div className="flex items-center justify-between gap-3 pb-2 border-b border-slate-800 flex-wrap">
+                  <div>
+                    <h3 className="font-black text-white text-base flex items-center gap-2">
+                      <Trees className="w-5 h-5 text-emerald-400" />
+                      <span>Huéspedes & Check-out de Estadías</span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Carga la estadía al ticket de caja para liquidar el check-out, sumar consumos (restaurante/frigobar) y emitir comprobante.
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-300 bg-emerald-950/80 border border-emerald-500/30 px-3 py-1 rounded-full">
+                    {reservasDelDia.length} {reservasDelDia.length === 1 ? "estadía registrada" : "estadías registradas"}
+                  </span>
+                </div>
+
+                {reservasDelDia.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800">
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                      <Trees className="w-7 h-7" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">No hay reservas de hospedaje registradas</h4>
+                      <p className="text-xs text-slate-400 max-w-sm mt-1">
+                        Las reservas de cabañas, glamping o habitaciones que envíen tus huéspedes aparecerán aquí en tiempo real para gestionar su check-in y cobro al check-out.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveChannel("TACTIL")}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 cursor-pointer"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Ir a Mostrador / Venta Rápida</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[520px] overflow-y-auto pr-1">
+                    {reservasDelDia.map((res: any) => {
+                      const isSelected = selectedActiveOrder?.id === res.id;
+                      const isSettled = res.metadata?.cobrado_en_caja === true || res.estado === "completada" || res.estado === "pagado";
+                      const meta = res.metadata || {};
+                      const roomName = meta.tipo_habitacion || "Alojamiento / Cabaña";
+                      const checkIn = meta.check_in || "Pendiente";
+                      const checkOut = meta.check_out || "Pendiente";
+                      const noches = meta.noches || 1;
+                      const adultos = meta.huespedes_adultos || 1;
+                      const ninos = meta.huespedes_ninos || 0;
+
+                      return (
+                        <div
+                          key={res.id}
+                          className={`p-4 rounded-2xl border transition-all space-y-3 flex flex-col justify-between ${
+                            isSelected
+                              ? "bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-500/30 shadow-xl"
+                              : isSettled
+                              ? "bg-slate-950/40 border-slate-800/60 opacity-75"
+                              : "bg-slate-950/80 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900/90"
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 font-mono">
+                                <CalendarDays className="w-3 h-3 text-emerald-400" />
+                                {checkIn} → {checkOut} ({noches} {noches === 1 ? "noche" : "noches"})
+                              </span>
+                              <span
+                                className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                  isSettled
+                                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                    : res.estado === "confirmada"
+                                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                                    : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                }`}
+                              >
+                                {isSettled ? "✓ Check-out Realizado" : res.estado || "Pendiente"}
+                              </span>
+                            </div>
+
+                            <div>
+                              <h4 className="text-sm font-black text-white flex items-center gap-1.5 truncate">
+                                <span>{res.cliente_nombre || "Huésped Titular"}</span>
+                              </h4>
+                              {res.cliente_telefono && (
+                                <p className="text-[11px] text-emerald-300 font-mono mt-0.5">
+                                  📞 {res.cliente_telefono}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800/80 text-xs space-y-1.5">
+                              <div className="flex items-center justify-between text-slate-300">
+                                <span className="text-[11px] text-slate-400">Unidad:</span>
+                                <span className="font-bold text-emerald-300 flex items-center gap-1">
+                                  <Trees className="w-3 h-3 text-emerald-400" />
+                                  {roomName}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                                <span>Huéspedes:</span>
+                                <span className="font-semibold text-slate-300">
+                                  {adultos} adulto{adultos > 1 ? "s" : ""}{ninos > 0 ? ` · ${ninos} niño${ninos > 1 ? "s" : ""}` : ""}
+                                </span>
+                              </div>
+                              {Array.isArray(meta.extras_seleccionados) && meta.extras_seleccionados.length > 0 && (
+                                <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800 line-clamp-1">
+                                  <span className="text-amber-300 font-semibold">Extras:</span> {meta.extras_seleccionados.join(", ")}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block font-semibold uppercase">Total Estadía</span>
+                              <span className="text-base font-black font-mono text-white">
+                                ${Number(res.total || 0).toFixed(2)}
+                              </span>
+                            </div>
+
+                            {isSettled ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 rounded-xl">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Cobrado</span>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleLoadReservaToTicket(res)}
+                                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/30 cursor-pointer"
+                              >
+                                <Zap className="w-3.5 h-3.5 text-amber-300" />
+                                <span>Check-out / Cobrar Estadía →</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* CANAL: RESERVAS DE MESAS (Solo para Restaurantes) */}
-            {!isCatalogVertical && activeChannel === "RESERVAS" && (
+            {!isReservasVertical && !isCatalogVertical && activeChannel === "RESERVAS" && (
               <div className="space-y-4 flex-1 flex flex-col">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-2">

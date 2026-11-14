@@ -169,3 +169,31 @@ export function emitCitaActualizada(negocio_id: string, cita: any): void {
     console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'cita_actualizada'`);
   }
 }
+
+/**
+ * Emite evento 'nueva_reserva' a la sala del negocio (Vertical Reservas & Hospedaje)
+ */
+export function emitNuevaReserva(negocio_id: string, reserva: any): void {
+  const io = getIO();
+  if (io) {
+    const room = `negocio_${negocio_id}`;
+    io.to(room).emit("nueva_reserva", reserva);
+    console.log(`[Socket.IO] 'nueva_reserva' emitido a la sala ${room}:`, reserva?.id || reserva);
+  } else {
+    console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'nueva_reserva'`);
+  }
+}
+
+/**
+ * Emite evento 'reserva_actualizada' a la sala del negocio (check-in, check-out o cobro en caja)
+ */
+export function emitReservaActualizada(negocio_id: string, reserva: any): void {
+  const io = getIO();
+  if (io) {
+    const room = `negocio_${negocio_id}`;
+    io.to(room).emit("reserva_actualizada", reserva);
+    console.log(`[Socket.IO] 'reserva_actualizada' emitido a la sala ${room}:`, reserva?.id || reserva);
+  } else {
+    console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'reserva_actualizada'`);
+  }
+}
