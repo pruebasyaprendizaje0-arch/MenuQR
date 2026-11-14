@@ -154,7 +154,7 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/reservas/[id] - Cancelar reserva
+// DELETE /api/reservas/[id] - Anular (soft cancel) o Borrar (hard delete) reserva
 export async function DELETE(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -163,34 +163,61 @@ export async function DELETE(
     await ensureDbTables();
 
     const { id } = await context.params;
+    const { searchParams } = new URL(req.url);
+    const hardDelete = searchParams.get("hard") === "true";
 
-    const { rows: updatedRows } = await pool.query(
-      `UPDATE pedidos
-       SET estado = 'cancelado',
-           motivo_cancelacion = 'Cancelado desde panel de reservas CRM',
-           cancelado_por = 'admin',
-           cancelado_at = NOW()
-       WHERE id = $1
-       RETURNING id, negocio_id, estado`,
+    const { rows: orderRows } = await pool.query(
+      `SELECT id, negocio_id FROM pedidos WHERE id = $1 LIMIT 1`,
       [id]
     );
 
-    if (updatedRows.length === 0) {
+    if (orderRows.length === 0) {
       return NextResponse.json({ ok: false, error: "Reserva no encontrada" }, { status: 404 });
     }
 
-    try {
-      emitReservaActualizada(updatedRows[0].negocio_id, { id, estado: "cancelado" });
-    } catch {}
+    const negocioId = orderRows[0].negocio_id;
 
-    return NextResponse.json({
-      ok: true,
-      message: "Reserva cancelada con éxito",
-    });
+    if (hardDelete) {
+      // 1. Borrado permanente de la base de datos
+      await pool.query(`DELETE FROM pedido_items WHERE pedido_id = $1`, [id]);
+      await pool.query(`DELETE FROM pedidos WHERE id = $1`, [id]);
+
+      try {
+        emitReservaActualizada(negocioId, { id, estado: "eliminado", deleted: true });
+      } catch {}
+
+      return NextResponse.json({
+        ok: true,
+        deleted: true,
+        message: "Reserva eliminada permanentemente de la base de datos.",
+      });
+    } else {
+      // 2. Anulación (Soft cancel: conserva histórico para auditoría y libera fechas)
+      const { rows: updatedRows } = await pool.query(
+        `UPDATE pedidos
+         SET estado = 'cancelado',
+             motivo_cancelacion = 'Anulado desde gestión de reservas',
+             cancelado_por = 'admin',
+             cancelado_at = NOW()
+         WHERE id = $1
+         RETURNING id, negocio_id, estado`,
+        [id]
+      );
+
+      try {
+        emitReservaActualizada(negocioId, { id, estado: "cancelado" });
+      } catch {}
+
+      return NextResponse.json({
+        ok: true,
+        anulada: true,
+        message: "Reserva anulada y fechas liberadas exitosamente.",
+      });
+    }
   } catch (err: any) {
     console.error("[DELETE /api/reservas/[id]] Error:", err);
     return NextResponse.json(
-      { ok: false, error: err.message || "Error al cancelar reserva" },
+      { ok: false, error: err.message || "Error al procesar eliminación o anulación" },
       { status: 500 }
     );
   }

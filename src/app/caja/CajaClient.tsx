@@ -310,13 +310,23 @@ export function CajaClient({
   const [calMonth, setCalMonth] = useState<Date>(() => new Date());
   const [calSelectedDate, setCalSelectedDate] = useState<string>(() => new Date().toISOString().split("T")[0]);
 
-  // Modal de Ajuste de Estadía / Noches en Caja POS
-  const [adjustStayReserva, setAdjustStayReserva] = useState<any | null>(null);
-  const [adjustStayCheckIn, setAdjustStayCheckIn] = useState<string>("");
-  const [adjustStayCheckOut, setAdjustStayCheckOut] = useState<string>("");
-  const [adjustStayNights, setAdjustStayNights] = useState<number>(1);
-  const [adjustStayTotal, setAdjustStayTotal] = useState<string>("");
-  const [isSavingStayAdjust, setIsSavingStayAdjust] = useState<boolean>(false);
+
+  // Centro de Comando / Panel Lateral de Folio de Hospedaje en Caja POS (Opción 2)
+  const [stayFolioOpen, setStayFolioOpen] = useState<boolean>(false);
+  const [stayFolioIsNew, setStayFolioIsNew] = useState<boolean>(false);
+  const [stayFolioReservaId, setStayFolioReservaId] = useState<string | null>(null);
+  const [stayFolioGuestName, setStayFolioGuestName] = useState<string>("");
+  const [stayFolioGuestPhone, setStayFolioGuestPhone] = useState<string>("");
+  const [stayFolioRoom, setStayFolioRoom] = useState<string>("");
+  const [stayFolioCheckIn, setStayFolioCheckIn] = useState<string>("");
+  const [stayFolioCheckOut, setStayFolioCheckOut] = useState<string>("");
+  const [stayFolioNights, setStayFolioNights] = useState<number>(1);
+  const [stayFolioAdults, setStayFolioAdults] = useState<number>(2);
+  const [stayFolioChildren, setStayFolioChildren] = useState<number>(0);
+  const [stayFolioTotal, setStayFolioTotal] = useState<string>("35.00");
+  const [stayFolioStatus, setStayFolioStatus] = useState<string>("nuevo");
+  const [stayFolioNotes, setStayFolioNotes] = useState<string>("");
+  const [isSavingStayFolio, setIsSavingStayFolio] = useState<boolean>(false);
 
   // Canales Operativos de POS (Opción 2 Split Screen)
   const [activeChannel, setActiveChannel] = useState<"MESAS" | "LLEVAR" | "DOMICILIO" | "RESERVAS" | "CITAS" | "TACTIL" | "SCANNER">(() => {
@@ -621,111 +631,259 @@ export function CajaClient({
     setMobileActiveView("TICKET");
   };
 
-  const handleOpenAdjustStay = (res: any) => {
-    setAdjustStayReserva(res);
+
+
+  // Lista de habitaciones/cabañas para el selector de folio
+  const lodgingAccommodations = useMemo(() => {
+    return dishes.filter((d) => {
+      const cat = d.category?.name?.toLowerCase() || "";
+      const n = d.name.toLowerCase();
+      return (
+        cat.includes("alojamiento") ||
+        cat.includes("cabaña") ||
+        cat.includes("habitaci") ||
+        cat.includes("glamping") ||
+        cat.includes("domo") ||
+        cat.includes("suite") ||
+        n.includes("cabaña") ||
+        n.includes("habitaci") ||
+        n.includes("glamping") ||
+        n.includes("domo") ||
+        n.includes("suite")
+      );
+    });
+  }, [dishes]);
+
+  // Abrir Folio en modo Creación (+ Nueva Reserva)
+  const handleOpenNewReservaDrawer = () => {
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const cin = today.toISOString().split("T")[0];
+    const cout = tomorrow.toISOString().split("T")[0];
+    const defaultRoom = lodgingAccommodations[0]?.name || "Habitación Matrimonial 8";
+    const defaultPrice = lodgingAccommodations[0]?.price || 35.0;
+
+    setStayFolioIsNew(true);
+    setStayFolioReservaId(null);
+    setStayFolioGuestName("");
+    setStayFolioGuestPhone("");
+    setStayFolioRoom(defaultRoom);
+    setStayFolioCheckIn(cin);
+    setStayFolioCheckOut(cout);
+    setStayFolioNights(1);
+    setStayFolioAdults(2);
+    setStayFolioChildren(0);
+    setStayFolioTotal(defaultPrice.toFixed(2));
+    setStayFolioStatus("nuevo");
+    setStayFolioNotes("");
+    setStayFolioOpen(true);
+  };
+
+  // Abrir Folio en modo Edición / Consulta
+  const handleOpenEditReservaDrawer = (res: any) => {
     const meta = res.metadata || {};
     const cin = meta.check_in || new Date().toISOString().split("T")[0];
     const cout = meta.check_out || "";
     const n = meta.noches || 1;
-    setAdjustStayCheckIn(cin);
-    setAdjustStayCheckOut(cout);
-    setAdjustStayNights(n);
-    setAdjustStayTotal(Number(res.total || 0).toFixed(2));
+
+    setStayFolioIsNew(false);
+    setStayFolioReservaId(res.id);
+    setStayFolioGuestName(res.cliente_nombre || "");
+    setStayFolioGuestPhone(res.cliente_telefono || "");
+    setStayFolioRoom(meta.tipo_habitacion || lodgingAccommodations[0]?.name || "Habitación");
+    setStayFolioCheckIn(cin);
+    setStayFolioCheckOut(cout);
+    setStayFolioNights(n);
+    setStayFolioAdults(meta.huespedes_adultos || 2);
+    setStayFolioChildren(meta.huespedes_ninos || 0);
+    setStayFolioTotal(Number(res.total || 0).toFixed(2));
+    setStayFolioStatus(res.estado || "nuevo");
+    setStayFolioNotes(meta.notas_hospedaje || "");
+    setStayFolioOpen(true);
   };
 
-  const handleAdjustStayDatesChange = (cin: string, cout: string) => {
-    setAdjustStayCheckIn(cin);
-    setAdjustStayCheckOut(cout);
+  // Ajustar fechas en el Folio
+  const handleFolioDatesChange = (cin: string, cout: string) => {
+    setStayFolioCheckIn(cin);
+    setStayFolioCheckOut(cout);
     if (cin && cout) {
       const d1 = new Date(cin);
       const d2 = new Date(cout);
       const diff = Math.ceil((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
       const n = diff > 0 ? diff : 1;
-      setAdjustStayNights(n);
-      const oldNights = adjustStayReserva?.metadata?.noches || 1;
-      const oldTotal = Number(adjustStayReserva?.total || 0);
-      const approxNightPrice = oldTotal > 0 && oldNights > 0 ? oldTotal / oldNights : 0;
-      if (approxNightPrice > 0) {
-        setAdjustStayTotal((approxNightPrice * n).toFixed(2));
-      }
+      setStayFolioNights(n);
+      const matched = lodgingAccommodations.find((a) => a.name.toLowerCase() === stayFolioRoom.toLowerCase());
+      const roomPrice = matched ? matched.price : (parseFloat(stayFolioTotal) / (stayFolioNights || 1)) || 35.0;
+      setStayFolioTotal((roomPrice * n).toFixed(2));
     }
   };
 
-  const handleAdjustStayDeltaNights = (delta: number) => {
-    const newN = Math.max(1, adjustStayNights + delta);
-    setAdjustStayNights(newN);
-    if (adjustStayCheckIn) {
-      const d = new Date(adjustStayCheckIn);
+  // Ajustar noches (+1 / -1) en el Folio
+  const handleFolioDeltaNights = (delta: number) => {
+    const newN = Math.max(1, stayFolioNights + delta);
+    setStayFolioNights(newN);
+    if (stayFolioCheckIn) {
+      const d = new Date(stayFolioCheckIn);
       d.setDate(d.getDate() + newN);
       const newOut = d.toISOString().split("T")[0];
-      setAdjustStayCheckOut(newOut);
-      const oldNights = adjustStayReserva?.metadata?.noches || 1;
-      const oldTotal = Number(adjustStayReserva?.total || 0);
-      const approxNightPrice = oldTotal > 0 && oldNights > 0 ? oldTotal / oldNights : 0;
-      if (approxNightPrice > 0) {
-        setAdjustStayTotal((approxNightPrice * newN).toFixed(2));
-      }
+      setStayFolioCheckOut(newOut);
+      const matched = lodgingAccommodations.find((a) => a.name.toLowerCase() === stayFolioRoom.toLowerCase());
+      const roomPrice = matched ? matched.price : (parseFloat(stayFolioTotal) / (stayFolioNights || 1)) || 35.0;
+      setStayFolioTotal((roomPrice * newN).toFixed(2));
     }
   };
 
-  const handleSaveStayAdjust = async (e: React.FormEvent) => {
+  // Guardar Folio (Crear o Actualizar)
+  const handleSaveStayFolio = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adjustStayReserva) return;
-    setIsSavingStayAdjust(true);
+    if (!stayFolioGuestName.trim() || !stayFolioCheckIn || !stayFolioCheckOut) {
+      alert("Por favor completa el nombre del huésped y las fechas de check-in y check-out.");
+      return;
+    }
+
+    setIsSavingStayFolio(true);
     try {
-      const res = await fetch(`/api/reservas/${adjustStayReserva.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          check_in: adjustStayCheckIn,
-          check_out: adjustStayCheckOut,
-          noches: adjustStayNights,
-          total: parseFloat(adjustStayTotal) || adjustStayReserva.total,
-        }),
+      if (stayFolioIsNew) {
+        // Crear nueva reserva en /api/pedidos
+        const payload = {
+          vertical: "reservas",
+          negocio_id: restaurant.id,
+          cliente_nombre: stayFolioGuestName.trim(),
+          cliente_telefono: stayFolioGuestPhone.trim() || null,
+          check_in: stayFolioCheckIn,
+          check_out: stayFolioCheckOut,
+          noches: stayFolioNights,
+          tipo_habitacion: stayFolioRoom || "Alojamiento",
+          huespedes_adultos: stayFolioAdults,
+          huespedes_ninos: stayFolioChildren,
+          total_reserva: parseFloat(stayFolioTotal) || 0,
+          notas_entrega: stayFolioNotes.trim(),
+        };
+
+        const res = await fetch("/api/pedidos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.ok && data.pedido) {
+          setReservasDelDia((prev) => [data.pedido, ...prev.filter((r) => r.id !== data.pedido.id)]);
+          setStayFolioOpen(false);
+        } else {
+          alert(data.error || "No se pudo registrar la reserva");
+        }
+      } else if (stayFolioReservaId) {
+        // Actualizar reserva existente vía PATCH /api/reservas/[id]
+        const res = await fetch(`/api/reservas/${stayFolioReservaId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cliente_nombre: stayFolioGuestName.trim(),
+            cliente_telefono: stayFolioGuestPhone.trim(),
+            check_in: stayFolioCheckIn,
+            check_out: stayFolioCheckOut,
+            noches: stayFolioNights,
+            tipo_habitacion: stayFolioRoom,
+            huespedes_adultos: stayFolioAdults,
+            huespedes_ninos: stayFolioChildren,
+            total: parseFloat(stayFolioTotal) || 0,
+            estado: stayFolioStatus,
+            notas_hospedaje: stayFolioNotes.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const updated = data.reserva;
+          setReservasDelDia((prev) =>
+            prev.map((r) => (r.id === stayFolioReservaId ? { ...r, ...updated } : r))
+          );
+          if (selectedActiveOrder && selectedActiveOrder.id === stayFolioReservaId) {
+            setSelectedActiveOrder(updated);
+            const meta = updated.metadata || {};
+            setSessionItems([
+              {
+                dishId: `reserva-${updated.id}`,
+                name: `Estadía: ${meta.tipo_habitacion || "Alojamiento"} (${stayFolioNights} ${stayFolioNights === 1 ? "noche" : "noches"})`,
+                price: Number(updated.total || 0),
+                quantity: 1,
+                stock: null,
+                trackStock: false,
+                modifiersNotes: `Check-in: ${stayFolioCheckIn} → Check-out: ${stayFolioCheckOut}`,
+              },
+            ]);
+          }
+          setStayFolioOpen(false);
+        } else {
+          alert(data.error || "No se pudo actualizar la estadía");
+        }
+      }
+    } catch (err) {
+      console.error("Error al guardar folio de estadía:", err);
+      alert("Error de conexión al procesar el folio.");
+    } finally {
+      setIsSavingStayFolio(false);
+    }
+  };
+
+  // Anular Folio (Soft cancel: libera fechas y conserva historial)
+  const handleAnularStayFolio = async () => {
+    if (!stayFolioReservaId) return;
+    if (!confirm(`¿Deseas ANULAR la reserva de "${stayFolioGuestName}"? La habitación quedará libre de inmediato para nuevas fechas.`)) return;
+    try {
+      const res = await fetch(`/api/reservas/${stayFolioReservaId}`, {
+        method: "DELETE",
       });
       const data = await res.json();
       if (data.ok) {
-        const updated = data.reserva || {
-          ...adjustStayReserva,
-          total: parseFloat(adjustStayTotal) || adjustStayReserva.total,
-          metadata: {
-            ...(adjustStayReserva.metadata || {}),
-            check_in: adjustStayCheckIn,
-            check_out: adjustStayCheckOut,
-            noches: adjustStayNights,
-          },
-        };
-
         setReservasDelDia((prev) =>
-          prev.map((r) => (r.id === adjustStayReserva.id ? { ...r, ...updated } : r))
+          prev.map((r) => (r.id === stayFolioReservaId ? { ...r, estado: "cancelado" } : r))
         );
-
-        if (selectedActiveOrder && selectedActiveOrder.id === adjustStayReserva.id) {
-          setSelectedActiveOrder(updated);
-          const meta = updated.metadata || {};
-          const roomName = meta.tipo_habitacion || "Alojamiento / Cabaña";
-          setSessionItems([
-            {
-              dishId: `reserva-${updated.id}`,
-              name: `Estadía: ${roomName} (${adjustStayNights} ${adjustStayNights === 1 ? "noche" : "noches"})`,
-              price: Number(updated.total || 0),
-              quantity: 1,
-              stock: null,
-              trackStock: false,
-              modifiersNotes: `Check-in: ${adjustStayCheckIn} → Check-out: ${adjustStayCheckOut}`,
-            },
-          ]);
+        if (selectedActiveOrder?.id === stayFolioReservaId) {
+          setSelectedActiveOrder(null);
+          setSessionItems([]);
         }
-
-        setAdjustStayReserva(null);
+        setStayFolioOpen(false);
       } else {
-        alert(data.error || "No se pudo actualizar la estadía");
+        alert(data.error || "Error al anular la reserva");
       }
     } catch (err) {
-      console.error("Error ajustando estadía:", err);
-      alert("Error de conexión al ajustar estadía.");
-    } finally {
-      setIsSavingStayAdjust(false);
+      console.error("Error anulando reserva:", err);
+    }
+  };
+
+  // Borrar Folio Definitivamente de BD (Hard delete)
+  const handleBorrarStayFolioPermanente = async () => {
+    if (!stayFolioReservaId) return;
+    if (!confirm(`⚠️ PELIGRO: ¿Eliminar PERMANENTEMENTE la reserva de "${stayFolioGuestName}" de la base de datos? Esta acción no se puede deshacer.`)) return;
+    try {
+      const res = await fetch(`/api/reservas/${stayFolioReservaId}?hard=true`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setReservasDelDia((prev) => prev.filter((r) => r.id !== stayFolioReservaId));
+        if (selectedActiveOrder?.id === stayFolioReservaId) {
+          setSelectedActiveOrder(null);
+          setSessionItems([]);
+        }
+        setStayFolioOpen(false);
+      } else {
+        alert(data.error || "Error al eliminar la reserva");
+      }
+    } catch (err) {
+      console.error("Error borrando reserva de la BD:", err);
+    }
+  };
+
+  // Cargar Folio directamente al Ticket de Caja
+  const handleLoadStayFolioDirectToTicket = () => {
+    if (!stayFolioReservaId) return;
+    const target = reservasDelDia.find((r) => r.id === stayFolioReservaId);
+    if (target) {
+      handleLoadReservaToTicket(target);
+      setStayFolioOpen(false);
     }
   };
 
@@ -3053,6 +3211,14 @@ export function CajaClient({
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenNewReservaDrawer}
+                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                      <span>+ Nueva Reserva</span>
+                    </button>
                     <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 p-1 rounded-xl">
                       <button
                         type="button"
@@ -3350,9 +3516,9 @@ export function CajaClient({
                                     <div className="shrink-0 flex items-center gap-1.5">
                                       <button
                                         type="button"
-                                        onClick={() => handleOpenAdjustStay(res)}
+                                        onClick={() => handleOpenEditReservaDrawer(res)}
                                         className="p-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition cursor-pointer"
-                                        title="Modificar estadía o noches"
+                                        title="Folio completo: Editar fechas, noches, anular o borrar"
                                       >
                                         <Edit2 className="w-3 h-3 text-amber-400" />
                                       </button>
@@ -3494,9 +3660,9 @@ export function CajaClient({
                               <div className="flex items-center gap-1.5">
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenAdjustStay(res)}
+                                  onClick={() => handleOpenEditReservaDrawer(res)}
                                   className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition cursor-pointer"
-                                  title="Modificar noches o fechas"
+                                  title="Folio completo: Editar fechas, noches, anular o borrar"
                                 >
                                   <Edit2 className="w-3.5 h-3.5 text-amber-400" />
                                 </button>
@@ -4152,12 +4318,12 @@ export function CajaClient({
               {isReservasVertical && selectedActiveOrder && (
                 <button
                   type="button"
-                  onClick={() => handleOpenAdjustStay(selectedActiveOrder)}
+                  onClick={() => handleOpenEditReservaDrawer(selectedActiveOrder)}
                   className="px-2.5 py-1 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition"
-                  title="Modificar noches o fechas"
+                  title="Folio completo: Editar fechas, noches, anular o borrar"
                 >
                   <Edit2 className="w-3 h-3 text-amber-300" />
-                  <span>Ajustar Estadía</span>
+                  <span>Folio / Editar</span>
                 </button>
               )}
               {selectedActiveOrder && (
@@ -5256,8 +5422,8 @@ export function CajaClient({
             </div>
           )}
 
-          {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA O PEDIDO PENDIENTE (Solo Restaurantes) */}
-          {!selectedActiveOrder && !isCatalogVertical && !isCitasVertical && mode === "VENTA" && sessionItems.length > 0 && (
+          {/* BOTÓN SECUNDARIO: ENVIAR A COCINA Y DEJAR MESA ABIERTA O PEDIDO PENDIENTE (Solo Restaurantes Gastronómicos) */}
+          {!selectedActiveOrder && !isCatalogVertical && !isCitasVertical && !isReservasVertical && mode === "VENTA" && sessionItems.length > 0 && (
             <button
               type="button"
               disabled={isPending}
@@ -6892,73 +7058,145 @@ export function CajaClient({
         </div>
       )}
       {/* =========================================================================
-          MODAL: AJUSTAR ESTADÍA / NOCHES EN CAJA POS (Vertical Reservas)
+          DRAWER / PANEL LATERAL: CENTRO DE COMANDO FOLIO DE HOSPEDAJE (Vertical Reservas)
          ========================================================================= */}
-      {adjustStayReserva && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-                  <Edit2 className="w-4 h-4 text-amber-400" />
-                  Ajustar Fechas / Noches en Caja
-                </h3>
+      {stayFolioOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex justify-end animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-slate-900 border-l border-slate-800 p-6 flex flex-col h-full shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-200">
+            {/* Header del Drawer */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Trees className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-base font-black text-white">
+                    {stayFolioIsNew ? "Nueva Reserva Directa" : "Folio de Estadía"}
+                  </h3>
+                  <span
+                    className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                      stayFolioStatus === "cancelado" || stayFolioStatus === "cancelada"
+                        ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                        : stayFolioStatus === "confirmada"
+                        ? "bg-sky-500/20 text-sky-300 border border-sky-500/30"
+                        : stayFolioStatus === "completada" || stayFolioStatus === "pagado"
+                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                        : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                    }`}
+                  >
+                    {stayFolioIsNew ? "Nueva" : stayFolioStatus}
+                  </span>
+                </div>
                 <p className="text-xs text-slate-400">
-                  {adjustStayReserva.cliente_nombre || "Huésped"} · {(adjustStayReserva as any).metadata?.tipo_habitacion || "Habitación"}
+                  {stayFolioIsNew
+                    ? "Registra una reserva presencial o telefónica directamente en recepción"
+                    : `Gestión y auditoría de reserva #${stayFolioReservaId?.slice(-6) || ""}`}
                 </p>
               </div>
+
               <button
                 type="button"
-                onClick={() => setAdjustStayReserva(null)}
-                className="text-slate-400 hover:text-white"
+                onClick={() => setStayFolioOpen(false)}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveStayAdjust} className="space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+            {/* Formulario del Folio */}
+            <form onSubmit={handleSaveStayFolio} className="flex-1 space-y-4 py-4 text-xs">
+              {/* Huésped */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-slate-300 mb-1">Check-In *</label>
+                  <label className="block font-bold text-slate-300 mb-1">Nombre Huésped Titular *</label>
                   <input
-                    type="date"
+                    type="text"
                     required
-                    value={adjustStayCheckIn}
-                    onChange={(e) => handleAdjustStayDatesChange(e.target.value, adjustStayCheckOut)}
+                    placeholder="Ej. Juan Pérez"
+                    value={stayFolioGuestName}
+                    onChange={(e) => setStayFolioGuestName(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-300 mb-1">Check-Out *</label>
+                  <label className="block font-bold text-slate-300 mb-1">Teléfono / WhatsApp</label>
+                  <input
+                    type="tel"
+                    placeholder="Ej. 0991234567"
+                    value={stayFolioGuestPhone}
+                    onChange={(e) => setStayFolioGuestPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Unidad / Habitación / Cabaña */}
+              <div>
+                <label className="block font-bold text-slate-300 mb-1">Unidad de Alojamiento *</label>
+                <select
+                  value={stayFolioRoom}
+                  onChange={(e) => {
+                    const selectedName = e.target.value;
+                    setStayFolioRoom(selectedName);
+                    const matched = lodgingAccommodations.find((a) => a.name.toLowerCase() === selectedName.toLowerCase());
+                    if (matched) {
+                      setStayFolioTotal((matched.price * stayFolioNights).toFixed(2));
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold outline-none focus:border-emerald-500"
+                >
+                  {lodgingAccommodations.map((acc) => (
+                    <option key={acc.id} value={acc.name}>
+                      {acc.name} — ${acc.price.toFixed(2)}/noche
+                    </option>
+                  ))}
+                  {!lodgingAccommodations.some((a) => a.name === stayFolioRoom) && stayFolioRoom && (
+                    <option value={stayFolioRoom}>{stayFolioRoom}</option>
+                  )}
+                </select>
+              </div>
+
+              {/* Check-In / Check-Out */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Check-In (Llegada) *</label>
                   <input
                     type="date"
                     required
-                    value={adjustStayCheckOut}
-                    onChange={(e) => handleAdjustStayDatesChange(adjustStayCheckIn, e.target.value)}
+                    value={stayFolioCheckIn}
+                    onChange={(e) => handleFolioDatesChange(e.target.value, stayFolioCheckOut)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Check-Out (Salida) *</label>
+                  <input
+                    type="date"
+                    required
+                    value={stayFolioCheckOut}
+                    onChange={(e) => handleFolioDatesChange(stayFolioCheckIn, e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
 
-              {/* Botones de Noches Rápidas */}
+              {/* Selector de Noches Rápidas */}
               <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[11px] font-bold text-slate-400 block">Estadía Total:</span>
-                  <span className="text-sm font-black text-white">
-                    {adjustStayNights} {adjustStayNights === 1 ? "noche" : "noches"}
+                  <span className="text-sm font-black text-emerald-400">
+                    {stayFolioNights} {stayFolioNights === 1 ? "noche" : "noches"}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => handleAdjustStayDeltaNights(-1)}
+                    onClick={() => handleFolioDeltaNights(-1)}
                     className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <span>- 1 noche</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleAdjustStayDeltaNights(1)}
+                    onClick={() => handleFolioDeltaNights(1)}
                     className="px-2.5 py-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <span>+ 1 noche</span>
@@ -6966,38 +7204,137 @@ export function CajaClient({
                 </div>
               </div>
 
+              {/* Adultos y Niños */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Adultos</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={stayFolioAdults}
+                    onChange={(e) => setStayFolioAdults(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Niños</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    value={stayFolioChildren}
+                    onChange={(e) => setStayFolioChildren(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Total Estadía ($) y Estado */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Total Estadía ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={stayFolioTotal}
+                    onChange={(e) => setStayFolioTotal(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono font-black text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Estado de Estadía</label>
+                  <select
+                    value={stayFolioStatus}
+                    onChange={(e) => setStayFolioStatus(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white font-bold outline-none focus:border-emerald-500"
+                  >
+                    <option value="nuevo">Nuevo / Solicitud</option>
+                    <option value="confirmada">Confirmada</option>
+                    <option value="en_estadia">Hospedado (Check-in)</option>
+                    <option value="completada">Completada / Check-out</option>
+                    <option value="cancelado">Cancelado / Anulado</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Observaciones / Notas */}
               <div>
-                <label className="block font-bold text-slate-300 mb-1">Total Estadía ($)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={adjustStayTotal}
-                  onChange={(e) => setAdjustStayTotal(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono font-bold outline-none focus:border-emerald-500"
+                <label className="block font-bold text-slate-300 mb-1">Observaciones / Notas Internas</label>
+                <textarea
+                  rows={2}
+                  placeholder="Ej. Llegan tarde en la noche, solicitar cuna adicional..."
+                  value={stayFolioNotes}
+                  onChange={(e) => setStayFolioNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setAdjustStayReserva(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingStayAdjust}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-600/30 transition disabled:opacity-50 cursor-pointer"
-                >
-                  {isSavingStayAdjust ? "Guardando..." : "Guardar & Actualizar Ticket"}
-                </button>
+              {/* BOTONERA DE ACCIONES (Guardar, Anular, Borrar, Cargar a Caja) */}
+              <div className="pt-4 border-t border-slate-800 space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={isSavingStayFolio}
+                    className="flex-1 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/30 transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {isSavingStayFolio ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Guardando Folio...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>{stayFolioIsNew ? "Guardar Reserva Directa" : "Guardar Cambios"}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {!stayFolioIsNew && (
+                    <button
+                      type="button"
+                      onClick={handleLoadStayFolioDirectToTicket}
+                      className="py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 transition cursor-pointer"
+                      title="Cargar esta estadía al ticket para cobrar consumos o liquidar check-out"
+                    >
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Cargar a Caja</span>
+                    </button>
+                  )}
+                </div>
+
+                {!stayFolioIsNew && (
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleAnularStayFolio}
+                      className="py-2.5 px-3 rounded-xl bg-amber-950/60 hover:bg-amber-900/80 text-amber-300 border border-amber-600/50 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      title="Libera las fechas de la habitación de inmediato pero conserva el registro con estado cancelado"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Anular Reserva</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleBorrarStayFolioPermanente}
+                      className="py-2.5 px-3 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-600/50 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      title="Elimina permanentemente de la base de datos"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Borrar de BD</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </form>
           </div>
         </div>
       )}
+
+
     </div>
   );
 }

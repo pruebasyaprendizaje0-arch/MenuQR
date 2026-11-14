@@ -393,9 +393,9 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
     }
   };
 
-  // Cancelar reserva
-  const handleCancelarReserva = async (reservaId: string) => {
-    if (!confirm("¿Seguro que deseas cancelar esta reserva de estadía?")) return;
+  // Anular reserva (Soft cancel: libera fechas y conserva historial)
+  const handleAnularReserva = async (reservaId: string) => {
+    if (!confirm("¿Deseas ANULAR esta reserva? La habitación quedará libre para nuevas fechas y se conservará el registro en el historial.")) return;
     try {
       const res = await fetch(`/api/reservas/${reservaId}`, {
         method: "DELETE",
@@ -404,12 +404,33 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
       if (data.ok) {
         fetchReservas();
       } else {
-        alert(data.error || "Error al cancelar la reserva.");
+        alert(data.error || "Error al anular la reserva.");
       }
     } catch (err) {
-      console.error("Error cancelando reserva:", err);
+      console.error("Error anulando reserva:", err);
     }
   };
+
+  // Borrar reserva definitivamente (Hard delete: elimina de la BD)
+  const handleBorrarReservaPermanente = async (reservaId: string) => {
+    if (!confirm("⚠️ ATENCIÓN: ¿Seguro que deseas ELIMINAR PERMANENTEMENTE esta reserva de la base de datos? Esta acción es irreversible.")) return;
+    try {
+      const res = await fetch(`/api/reservas/${reservaId}?hard=true`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.ok) {
+        fetchReservas();
+      } else {
+        alert(data.error || "Error al borrar la reserva.");
+      }
+    } catch (err) {
+      console.error("Error borrando reserva:", err);
+    }
+  };
+
+  // Cancelar reserva (compatibilidad)
+  const handleCancelarReserva = handleAnularReserva;
 
   // Abrir modal de edición de reserva
   const handleOpenEditReserva = (reserva: ReservaItem) => {
@@ -1059,10 +1080,21 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
                         <span>GPS & Llegada</span>
                       </button>
 
+                      {reserva.estado !== "cancelado" && (
+                        <button
+                          onClick={() => handleAnularReserva(reserva.id)}
+                          className="px-2.5 py-2 rounded-xl bg-amber-950/40 hover:bg-amber-900/40 border border-amber-900/40 text-amber-300 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                          title="Anular estadía (libera fechas)"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Anular</span>
+                        </button>
+                      )}
+
                       <button
-                        onClick={() => handleCancelarReserva(reserva.id)}
-                        className="p-2 rounded-xl bg-red-950/40 hover:bg-red-900/40 border border-red-900/40 text-red-400 transition"
-                        title="Cancelar reserva"
+                        onClick={() => handleBorrarReservaPermanente(reserva.id)}
+                        className="p-2 rounded-xl bg-red-950/40 hover:bg-red-900/40 border border-red-900/40 text-red-400 hover:text-red-300 transition cursor-pointer"
+                        title="Borrar definitivamente de la base de datos"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -2167,7 +2199,35 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
                   <span>Enviar por WhatsApp</span>
                 </button>
 
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (editingReserva) {
+                        handleAnularReserva(editingReserva.id);
+                        setEditingReserva(null);
+                      }
+                    }}
+                    className="px-3 py-2 rounded-xl bg-amber-950/50 hover:bg-amber-900/50 border border-amber-800/50 text-amber-300 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
+                    title="Anular estadía y liberar fechas"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Anular</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (editingReserva) {
+                        handleBorrarReservaPermanente(editingReserva.id);
+                        setEditingReserva(null);
+                      }
+                    }}
+                    className="p-2 rounded-xl bg-red-950/50 hover:bg-red-900/50 border border-red-800/50 text-red-400 hover:text-red-300 transition cursor-pointer"
+                    title="Borrar permanentemente de la BD"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setEditingReserva(null)}
