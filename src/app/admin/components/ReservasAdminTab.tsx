@@ -160,6 +160,18 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
   const [manualNotes, setManualNotes] = useState<string>("");
   const [isCreatingManual, setIsCreatingManual] = useState<boolean>(false);
 
+  // Modal Modificar Reserva (Fechas / Noches / Total)
+  const [editingReserva, setEditingReserva] = useState<ReservaItem | null>(null);
+  const [editResCheckIn, setEditResCheckIn] = useState<string>("");
+  const [editResCheckOut, setEditResCheckOut] = useState<string>("");
+  const [editResNights, setEditResNights] = useState<number>(1);
+  const [editResRoom, setEditResRoom] = useState<string>("");
+  const [editResAdults, setEditResAdults] = useState<number>(1);
+  const [editResChildren, setEditResChildren] = useState<number>(0);
+  const [editResTotal, setEditResTotal] = useState<string>("");
+  const [editResNotes, setEditResNotes] = useState<string>("");
+  const [isUpdatingReserva, setIsUpdatingReserva] = useState<boolean>(false);
+
   // Cargar reservas
   const fetchReservas = async () => {
     try {
@@ -396,6 +408,107 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
       }
     } catch (err) {
       console.error("Error cancelando reserva:", err);
+    }
+  };
+
+  // Abrir modal de edición de reserva
+  const handleOpenEditReserva = (reserva: ReservaItem) => {
+    setEditingReserva(reserva);
+    setEditResCheckIn(reserva.check_in || "");
+    setEditResCheckOut(reserva.check_out || "");
+    setEditResNights(reserva.noches || 1);
+    setEditResRoom(reserva.tipo_habitacion || "");
+    setEditResAdults(reserva.huespedes_adultos || 1);
+    setEditResChildren(reserva.huespedes_ninos || 0);
+    setEditResTotal(reserva.total.toFixed(2));
+    setEditResNotes(reserva.notas_hospedaje || "");
+  };
+
+  // Ajustar fechas al modificar inputs de fecha
+  const handleEditDatesChange = (cin: string, cout: string) => {
+    setEditResCheckIn(cin);
+    setEditResCheckOut(cout);
+    if (cin && cout) {
+      const d1 = new Date(cin);
+      const d2 = new Date(cout);
+      const diffDays = Math.ceil((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
+      const n = diffDays > 0 ? diffDays : 1;
+      setEditResNights(n);
+      const matched = cabanas.find(c => c.name.toLowerCase() === editResRoom.toLowerCase());
+      if (matched) {
+        const roomTotal = matched.price * n;
+        const extrasSum = (editingReserva?.extras || []).reduce((acc, ex) => acc + (ex.precio || ex.price || 0), 0);
+        setEditResTotal((roomTotal + extrasSum).toFixed(2));
+      }
+    }
+  };
+
+  // Ajustar noches con botones + / -
+  const handleAdjustNights = (delta: number) => {
+    const newNights = Math.max(1, editResNights + delta);
+    setEditResNights(newNights);
+    if (editResCheckIn) {
+      const d = new Date(editResCheckIn);
+      d.setDate(d.getDate() + newNights);
+      const newCheckOut = d.toISOString().split("T")[0];
+      setEditResCheckOut(newCheckOut);
+      const matched = cabanas.find(c => c.name.toLowerCase() === editResRoom.toLowerCase());
+      if (matched) {
+        const roomTotal = matched.price * newNights;
+        const extrasSum = (editingReserva?.extras || []).reduce((acc, ex) => acc + (ex.precio || ex.price || 0), 0);
+        setEditResTotal((roomTotal + extrasSum).toFixed(2));
+      }
+    }
+  };
+
+  // Guardar cambios de modificación
+  const handleSaveReservaModification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingReserva) return;
+    setIsUpdatingReserva(true);
+    try {
+      const res = await fetch(`/api/reservas/${editingReserva.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          check_in: editResCheckIn,
+          check_out: editResCheckOut,
+          noches: editResNights,
+          tipo_habitacion: editResRoom,
+          huespedes_adultos: editResAdults,
+          huespedes_ninos: editResChildren,
+          total: parseFloat(editResTotal) || editingReserva.total,
+          notas_hospedaje: editResNotes,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setReservas((prev) =>
+          prev.map((r) =>
+            r.id === editingReserva.id
+              ? {
+                  ...r,
+                  check_in: editResCheckIn,
+                  check_out: editResCheckOut,
+                  noches: editResNights,
+                  tipo_habitacion: editResRoom,
+                  huespedes_adultos: editResAdults,
+                  huespedes_ninos: editResChildren,
+                  total: parseFloat(editResTotal) || r.total,
+                  notas_hospedaje: editResNotes,
+                }
+              : r
+          )
+        );
+        setEditingReserva(null);
+      } else {
+        alert(data.error || "No se pudo actualizar la reserva");
+      }
+    } catch (err) {
+      console.error("Error al modificar reserva:", err);
+      alert("Error de conexión al modificar la reserva.");
+    } finally {
+      setIsUpdatingReserva(false);
     }
   };
 
@@ -928,6 +1041,14 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
                       >
                         <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Confirmar & Abono</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleOpenEditReserva(reserva)}
+                        className="flex-1 min-w-[130px] px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Modificar Estadía</span>
                       </button>
 
                       <button
@@ -1859,6 +1980,209 @@ export default function ReservasAdminTab({ restaurant, onNavigateToDishes }: Res
                 >
                   Agregar a la Lista
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL: MODIFICAR ESTADÍA / FECHAS / NOCHES
+         ========================================================================= */}
+      {editingReserva && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <Edit2 className="w-4 h-4 text-amber-400" />
+                  Modificar Estadía de Huésped
+                </h3>
+                <p className="text-xs text-slate-400">
+                  {editingReserva.cliente_nombre} · {editingReserva.cliente_telefono || "Sin teléfono"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingReserva(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReservaModification} className="space-y-4 text-xs">
+              {/* Fechas de Check-in y Check-out */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Fecha Check-In *</label>
+                  <input
+                    type="date"
+                    required
+                    value={editResCheckIn}
+                    onChange={(e) => handleEditDatesChange(e.target.value, editResCheckOut)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Fecha Check-Out *</label>
+                  <input
+                    type="date"
+                    required
+                    value={editResCheckOut}
+                    onChange={(e) => handleEditDatesChange(editResCheckIn, e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Botones de ajuste rápido de noches */}
+              <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-slate-400 block">Duración de la Estadía:</span>
+                  <span className="text-sm font-black text-white">
+                    {editResNights} {editResNights === 1 ? "noche" : "noches"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustNights(-1)}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>- 1 noche</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustNights(1)}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-600 text-white font-bold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>+ 1 noche</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Habitación y Total */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Unidad / Habitación</label>
+                  <select
+                    value={editResRoom}
+                    onChange={(e) => {
+                      const newRoom = e.target.value;
+                      setEditResRoom(newRoom);
+                      const matched = cabanas.find(c => c.name.toLowerCase() === newRoom.toLowerCase());
+                      if (matched) {
+                        const roomTotal = matched.price * editResNights;
+                        const extrasSum = (editingReserva?.extras || []).reduce((acc, ex) => acc + (ex.precio || ex.price || 0), 0);
+                        setEditResTotal((roomTotal + extrasSum).toFixed(2));
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {cabanas.length > 0 ? (
+                      cabanas.map((c) => (
+                        <option key={c.id} value={c.name}>
+                          {c.name} (${c.price.toFixed(2)}/noche)
+                        </option>
+                      ))
+                    ) : (
+                      <option value={editResRoom}>{editResRoom || "Alojamiento"}</option>
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Total Liquidación ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={editResTotal}
+                    onChange={(e) => setEditResTotal(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono font-bold outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Huéspedes */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Adultos</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editResAdults}
+                    onChange={(e) => setEditResAdults(parseInt(e.target.value, 10) || 1)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Niños</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editResChildren}
+                    onChange={(e) => setEditResChildren(parseInt(e.target.value, 10) || 0)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Notas */}
+              <div>
+                <label className="block font-bold text-slate-300 mb-1">Notas u Observaciones</label>
+                <textarea
+                  value={editResNotes}
+                  onChange={(e) => setEditResNotes(e.target.value)}
+                  placeholder="Ej: Modificado a solicitud del cliente por llamada..."
+                  rows={2}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!editingReserva?.cliente_telefono) {
+                      alert("Esta reserva no tiene teléfono registrado.");
+                      return;
+                    }
+                    let phoneClean = editingReserva.cliente_telefono.replace(/\D/g, "");
+                    if (phoneClean.startsWith("09") && phoneClean.length === 10) {
+                      phoneClean = "593" + phoneClean.slice(1);
+                    }
+                    const msg = `Hola *${editingReserva.cliente_nombre}*, te confirmamos la actualización de tu reserva en *${restaurant.name}* 🏡:\n\n` +
+                      `• *Alojamiento:* ${editResRoom}\n` +
+                      `• *Nuevas Fechas:* ${editResCheckIn} al ${editResCheckOut} (${editResNights} noche/s)\n` +
+                      `• *Huéspedes:* ${editResAdults} adulto(s)` + (editResChildren > 0 ? ` y ${editResChildren} niño(s)` : "") + `\n` +
+                      `• *Total Actualizado:* $${parseFloat(editResTotal || "0").toFixed(2)}\n\n` +
+                      `¡Será un gusto recibirte! 🌄`;
+                    window.open(`https://wa.me/${phoneClean}?text=${encodeURIComponent(msg)}`, "_blank");
+                  }}
+                  className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 transition text-xs cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Enviar por WhatsApp</span>
+                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingReserva(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isUpdatingReserva}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-600/30 transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {isUpdatingReserva ? "Guardando..." : "Guardar Modificación"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
