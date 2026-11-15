@@ -1455,7 +1455,7 @@ export async function POST(req: NextRequest) {
           const { rows: conflictRows } = await client.query(
             `SELECT id, cliente_nombre, metadata
              FROM pedidos
-             WHERE (negocio_id = $1 OR negocio_id::text = $1)
+             WHERE negocio_id::text = $1::text
                AND (vertical = 'reservas' OR mesa = 'RESERVA')
                AND estado NOT IN ('cancelada', 'cancelado')
                AND TRIM(LOWER(metadata->>'tipo_habitacion')) = TRIM(LOWER($2))

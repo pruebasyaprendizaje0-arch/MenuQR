@@ -479,7 +479,15 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
     };
 
     return <CtaloClient store={formattedStore} />;
-  } catch (error) {
+  } catch (error: any) {
+    if (
+      error?.digest?.startsWith("NEXT_REDIRECT") ||
+      error?.message?.includes("NEXT_REDIRECT") ||
+      error?.digest?.startsWith("NEXT_NOT_FOUND") ||
+      error?.message?.includes("NEXT_NOT_FOUND")
+    ) {
+      throw error;
+    }
     console.error("[CtaloSlugPage Error]:", error);
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center relative overflow-hidden">

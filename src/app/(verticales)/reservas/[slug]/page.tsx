@@ -291,7 +291,15 @@ export default async function ReservasSlugPage({ params: paramsPromise }: PagePr
     };
 
     return <ReservasClient property={formattedProperty} />;
-  } catch (err) {
+  } catch (err: any) {
+    if (
+      err?.digest?.startsWith("NEXT_REDIRECT") ||
+      err?.message?.includes("NEXT_REDIRECT") ||
+      err?.digest?.startsWith("NEXT_NOT_FOUND") ||
+      err?.message?.includes("NEXT_NOT_FOUND")
+    ) {
+      throw err;
+    }
     console.error("[ReservasSlugPage Error]:", err);
     const demoProperty = getMockDemoProperty();
     return <ReservasClient property={demoProperty} />;

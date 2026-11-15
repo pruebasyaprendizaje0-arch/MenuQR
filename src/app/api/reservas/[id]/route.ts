@@ -62,7 +62,7 @@ export async function PATCH(
       const { rows: conflictRows } = await pool.query(
         `SELECT id, cliente_nombre, metadata
          FROM pedidos
-         WHERE (negocio_id = $1 OR negocio_id::text = $1)
+         WHERE negocio_id::text = $1::text
            AND (vertical = 'reservas' OR mesa = 'RESERVA')
            AND estado NOT IN ('cancelada', 'cancelado')
            AND id != $2

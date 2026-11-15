@@ -24,6 +24,8 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 
+RUN apk add --no-cache curl
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
@@ -48,5 +50,8 @@ RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads /app/prisma
 USER nextjs
 
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://127.0.0.1:3000/api/health || exit 1
 
 CMD ["sh", "-c", "for i in 1 2 3 4 5; do if npx prisma migrate deploy; then break; fi; if [ \"$i\" -eq 5 ]; then echo \"Database migration failed after 5 attempts\"; exit 1; fi; sleep 3; done; exec node server.js"]

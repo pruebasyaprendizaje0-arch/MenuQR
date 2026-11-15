@@ -331,6 +331,14 @@ export default async function MenuQRDetailPage({ params: paramsPromise }: PagePr
       </>
     );
   } catch (err: any) {
+    if (
+      err?.digest?.startsWith("NEXT_REDIRECT") ||
+      err?.message?.includes("NEXT_REDIRECT") ||
+      err?.digest?.startsWith("NEXT_NOT_FOUND") ||
+      err?.message?.includes("NEXT_NOT_FOUND")
+    ) {
+      throw err;
+    }
     console.error("[MenuQRDetailPage Error]:", err);
     const demoData = getMockDemoRestaurant();
     return <MenuClient restaurant={demoData as any} />;

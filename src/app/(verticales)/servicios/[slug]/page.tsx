@@ -201,7 +201,15 @@ export default async function ServiciosSlugPage({ params: paramsPromise }: PageP
     };
 
     return <ServiciosClient technician={formattedTech} />;
-  } catch (err) {
+  } catch (err: any) {
+    if (
+      err?.digest?.startsWith("NEXT_REDIRECT") ||
+      err?.message?.includes("NEXT_REDIRECT") ||
+      err?.digest?.startsWith("NEXT_NOT_FOUND") ||
+      err?.message?.includes("NEXT_NOT_FOUND")
+    ) {
+      throw err;
+    }
     console.error("[ServiciosSlugPage Error]:", err);
     const demoTech = getMockDemoTechnician();
     return <ServiciosClient technician={demoTech} />;

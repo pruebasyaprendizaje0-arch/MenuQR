@@ -302,7 +302,15 @@ export default async function CitasSlugPage({ params: paramsPromise }: PageProps
     };
 
     return <CitasClient business={formattedBusiness} />;
-  } catch (err) {
+  } catch (err: any) {
+    if (
+      err?.digest?.startsWith("NEXT_REDIRECT") ||
+      err?.message?.includes("NEXT_REDIRECT") ||
+      err?.digest?.startsWith("NEXT_NOT_FOUND") ||
+      err?.message?.includes("NEXT_NOT_FOUND")
+    ) {
+      throw err;
+    }
     console.error("[CitasSlugPage Error]:", err);
     const demoClinic = getMockDemoClinic();
     return <CitasClient business={demoClinic} />;
