@@ -4,6 +4,8 @@
  * la latencia del servidor y la experiencia del usuario.
  */
 
+import { sanitizeInternalUrl } from "./http-client";
+
 export interface TelegramAlertPayload {
   mensaje: string;
   cliente?: string;
@@ -30,7 +32,7 @@ function resolveN8nWebhookUrl(): string | null {
     clean = clean.replace("/webhook-test/", "/webhook/");
   }
 
-  return clean;
+  return sanitizeInternalUrl(clean);
 }
 
 function maskWebhookUrl(url: string): string {

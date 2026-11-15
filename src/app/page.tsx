@@ -44,44 +44,60 @@ export const metadata: Metadata = {
   ],
 };
 
+// Helper de timeout defensivo para proteger el render de la portada contra saturación de base de datos
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+  ]);
+}
+
 export default async function InstitutionalLandingPage() {
-  // Obtener negocios para el directorio público
+  // Obtener negocios para el directorio público con timeout de 3.5s
   let restaurants: any[] = [];
   try {
-    restaurants = await prismaTenant.restaurant.findMany({
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        logoUrl: true,
-        specialty: true,
-        locality: true,
-        description: true,
-        themeColor: true,
-        latitude: true,
-        longitude: true,
-        parish: true,
-        sector: true,
-        businessType: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 24,
-    });
+    restaurants = await withTimeout(
+      prismaTenant.restaurant.findMany({
+        select: {
+          id: true,
+          slug: true,
+          name: true,
+          logoUrl: true,
+          specialty: true,
+          locality: true,
+          description: true,
+          themeColor: true,
+          latitude: true,
+          longitude: true,
+          parish: true,
+          sector: true,
+          businessType: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        take: 24,
+      }),
+      3500,
+      []
+    );
   } catch (error) {
     console.error("Error fetching businesses on root landing page:", error);
     restaurants = [];
   }
 
-  // Obtener productos destacados del marketplace
+  // Obtener productos destacados del marketplace con timeout de 3.5s
   let marketplaceData = { dishes: [] as any[], total: 0, restaurantCount: 0, storeCount: 0 };
   try {
-    const mRes = await getMarketplaceDishesAction({
-      type: "all",
-      onlySuggested: true,
-      limit: 8,
-    });
+    const mRes = await withTimeout(
+      getMarketplaceDishesAction({
+        type: "all",
+        onlySuggested: true,
+        limit: 8,
+      }),
+      3500,
+      { success: false, dishes: [], total: 0, restaurantCount: 0, storeCount: 0 }
+    );
     if (mRes.success) {
       marketplaceData = mRes;
     }
@@ -91,9 +107,13 @@ export default async function InstitutionalLandingPage() {
 
   let whatsappSupport = "";
   try {
-    const whatsappSupportSetting = await prismaControl.systemSetting.findUnique({
-      where: { key: "whatsapp_support" },
-    });
+    const whatsappSupportSetting = await withTimeout(
+      prismaControl.systemSetting.findUnique({
+        where: { key: "whatsapp_support" },
+      }),
+      2000,
+      null
+    );
     whatsappSupport =
       whatsappSupportSetting?.value ||
       process.env.NEXT_PUBLIC_WHATSAPP_SUPPORT ||

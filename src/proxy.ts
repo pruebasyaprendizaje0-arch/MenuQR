@@ -47,6 +47,11 @@ const STATIC_EXT_REGEX = /\.(ico|png|jpg|jpeg|svg|webp|gif|css|js|txt|xml|json|w
 export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
 
+  // 0. Bypass inmediato para endpoint de healthcheck (Coolify y Uptime Monitors)
+  if (pathname === "/api/health") {
+    return NextResponse.next();
+  }
+
   // 1. Omitir archivos estáticos, chunks internos o uploads persistentes
   if (
     STATIC_EXT_REGEX.test(pathname) ||

@@ -3,6 +3,8 @@
  * Despacho asíncrono no bloqueante (fire-and-forget) para proteger la latencia y rendimiento de Next.js.
  */
 
+import { sanitizeInternalUrl } from "./http-client";
+
 export interface AlertaSuperAdmin {
   mensaje: string;
   cliente?: string;
@@ -24,7 +26,7 @@ function resolveSuperAdminWebhookUrl(): string | null {
     clean = clean.replace("/webhook-test/", "/webhook/");
   }
 
-  return clean;
+  return sanitizeInternalUrl(clean);
 }
 
 export async function notificarSuperAdmin({
