@@ -19,7 +19,25 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const httpServer = createServer(async (req, res) => {
+    // Intercepción a nivel HTTP nativo para suprimir incondicionalmente x-powered-by
+    const originalSetHeader = res.setHeader.bind(res);
+    res.setHeader = function (name, value) {
+      if (typeof name === "string" && name.toLowerCase() === "x-powered-by") {
+        return this;
+      }
+      return originalSetHeader(name, value);
+    };
+
+    const originalWriteHead = res.writeHead.bind(res);
+    res.writeHead = function (statusCode, ...args) {
+      res.removeHeader("x-powered-by");
+      res.removeHeader("X-Powered-By");
+      return originalWriteHead(statusCode, ...args);
+    };
+
     try {
+      res.removeHeader("x-powered-by");
+      res.removeHeader("X-Powered-By");
       const parsedUrl = parse(req.url, true);
       await handle(req, res, parsedUrl);
     } catch (err) {

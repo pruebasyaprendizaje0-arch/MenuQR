@@ -44,12 +44,18 @@ const SYSTEM_PREFIXES = [
 // Extensiones de archivos estáticos que se ignoran
 const STATIC_EXT_REGEX = /\.(ico|png|jpg|jpeg|svg|webp|gif|css|js|txt|xml|json|woff|woff2|ttf|map)$/i;
 
+function cleanResponse(res: NextResponse): NextResponse {
+  res.headers.delete("x-powered-by");
+  res.headers.delete("X-Powered-By");
+  return res;
+}
+
 export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
 
   // 0. Bypass inmediato para endpoint de healthcheck (Coolify y Uptime Monitors)
   if (pathname === "/api/health") {
-    return NextResponse.next();
+    return cleanResponse(NextResponse.next());
   }
 
   // 1. Omitir archivos estáticos, chunks internos o uploads persistentes
@@ -59,14 +65,14 @@ export function proxy(request: NextRequest) {
     pathname.startsWith("/uploads") ||
     pathname.startsWith("/api/uploads")
   ) {
-    return NextResponse.next();
+    return cleanResponse(NextResponse.next());
   }
 
   // Si accidentalmente una URL relativa se resolvió como /ctalo/[slug]/uploads/... o similar, reescribir hacia /uploads/...
   if (pathname.includes("/uploads/")) {
     const uploadIndex = pathname.indexOf("/uploads/");
     const cleanUploadPath = pathname.substring(uploadIndex);
-    return NextResponse.rewrite(new URL(cleanUploadPath, request.url));
+    return cleanResponse(NextResponse.rewrite(new URL(cleanUploadPath, request.url)));
   }
 
   // 2. Perímetro de seguridad para /admin (redirección preventiva a login si no hay sesión)
@@ -75,16 +81,16 @@ export function proxy(request: NextRequest) {
     if (!sessionToken) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect", pathname);
-      return NextResponse.redirect(loginUrl);
+      return cleanResponse(NextResponse.redirect(loginUrl));
     }
-    return NextResponse.next();
+    return cleanResponse(NextResponse.next());
   }
 
   // 3. Rutas globales del sistema y submódulos operacionales (mesas, cocina, repartidor, rastreo)
   const isSystemRoute = SYSTEM_PREFIXES.some((prefix) => pathname.startsWith(prefix));
   const isOperationalSubmodule = /^\/[^/]+\/(mesas|cocina|repartidor|rastreo|menu)(\/.*)?$/.test(pathname);
   if (isSystemRoute || isOperationalSubmodule) {
-    return NextResponse.next();
+    return cleanResponse(NextResponse.next());
   }
 
   // 4. Detección de Host y Subdominio dinámico
@@ -142,7 +148,7 @@ export function proxy(request: NextRequest) {
       response.headers.set("x-subdomain", "menuqr");
       response.headers.set("x-vertical", "menuqr");
       response.headers.set("x-current-host", hostHeader);
-      return response;
+      return cleanResponse(response);
     }
 
     // Evitar duplicar el prefijo si ya viene con /verticalFolder
@@ -150,7 +156,7 @@ export function proxy(request: NextRequest) {
       const response = NextResponse.next();
       response.headers.set("x-subdomain", detectedSubdomain);
       response.headers.set("x-vertical", verticalFolder);
-      return response;
+      return cleanResponse(response);
     }
 
     // Si es la raíz del subdominio (ej: menuqr.ubicame.cc/ -> /menuqr)
@@ -169,11 +175,13 @@ export function proxy(request: NextRequest) {
     requestHeaders.set("x-pathname", pathname);
     requestHeaders.set("x-current-host", hostHeader);
 
-    return NextResponse.rewrite(rewriteUrl, {
-      request: {
-        headers: requestHeaders,
-      },
-    });
+    return cleanResponse(
+      NextResponse.rewrite(rewriteUrl, {
+        request: {
+          headers: requestHeaders,
+        },
+      })
+    );
   }
 
   // 6. Dominio principal (ubicame.cc o localhost)
@@ -181,7 +189,7 @@ export function proxy(request: NextRequest) {
   const defaultResponse = NextResponse.next();
   defaultResponse.headers.set("x-subdomain", "main");
   defaultResponse.headers.set("x-current-host", hostHeader);
-  return defaultResponse;
+  return cleanResponse(defaultResponse);
 }
 
 export const config = {

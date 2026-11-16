@@ -119,6 +119,38 @@ async function testNextRedirectHandling() {
   console.log("✅ [PASS] 7: Manejo limpio de NEXT_REDIRECT validado en las 5 páginas de verticales");
 }
 
+// 8. Verificación del triple candado contra la cabecera x-powered-by
+async function testPoweredByTripleLock() {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+
+  // Candado 1: Dockerfile copia next.config.mjs al runner
+  const dockerfilePath = path.join(process.cwd(), "Dockerfile");
+  const dockerfileContent = fs.readFileSync(dockerfilePath, "utf-8");
+  assert.ok(
+    dockerfileContent.includes("COPY --from=builder --chown=nextjs:nodejs /app/next.config.mjs ./next.config.mjs"),
+    "Dockerfile debe copiar next.config.mjs al runner stage"
+  );
+
+  // Candado 2: server.js intercepta res.setHeader para x-powered-by
+  const serverPath = path.join(process.cwd(), "server.js");
+  const serverContent = fs.readFileSync(serverPath, "utf-8");
+  assert.ok(
+    serverContent.includes('name.toLowerCase() === "x-powered-by"'),
+    "server.js debe filtrar x-powered-by en el servidor HTTP nativo"
+  );
+
+  // Candado 3: proxy.ts limpia la cabecera en las respuestas
+  const proxyPath = path.join(process.cwd(), "src/proxy.ts");
+  const proxyContent = fs.readFileSync(proxyPath, "utf-8");
+  assert.ok(
+    proxyContent.includes('res.headers.delete("x-powered-by")'),
+    "proxy.ts debe eliminar x-powered-by de las respuestas"
+  );
+
+  console.log("✅ [PASS] 8: Triple candado contra x-powered-by verificado en Dockerfile, server.js y proxy.ts");
+}
+
 async function runAll() {
   await testSafeFetch();
   await testHealthEndpoint();
@@ -126,8 +158,9 @@ async function runAll() {
   await testSecurityHeadersConfig();
   await testReservasSqlSafety();
   await testNextRedirectHandling();
+  await testPoweredByTripleLock();
   console.log("==================================================");
-  console.log("🎉 TODAS LAS PRUEBAS DE RESILIENCIA HTTP PASARON (7/7)");
+  console.log("🎉 TODAS LAS PRUEBAS DE RESILIENCIA HTTP PASARON (8/8)");
   console.log("==================================================");
 }
 
