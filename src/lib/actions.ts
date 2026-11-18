@@ -260,7 +260,7 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
     }
 
     const trialEndsAt = new Date();
-    trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
+    trialEndsAt.setDate(trialEndsAt.getDate() + 30);
 
     const user = await prismaControl.user.create({
       data: {
@@ -347,6 +347,7 @@ export async function registerUserAction(prevState: unknown, formData: FormData)
         whatsapp: "",
         locality,
         trialEndsAt,
+        leadStatus: "EN_DEMO",
         businessType,
         catalogMode,
         enableTableOrdering,
@@ -1752,10 +1753,22 @@ export async function superAdminLogoutAction() {
   }
 }
 
-export async function extendTrialAction(restaurantId: string, days: number) {
+export async function extendTrialAction(
+  restaurantId: string, 
+  days: number,
+  options?: {
+    setLeadStatusDemo?: boolean;
+    note?: string;
+  }
+) {
   const isSuperAdmin = await getSuperAdminSession();
   if (!isSuperAdmin) {
     return { error: "No autorizado. Acción reservada para SuperAdmin." };
+  }
+
+  const numDays = Math.round(Number(days));
+  if (isNaN(numDays) || numDays < 1 || numDays > 30) {
+    return { error: "Solo se puede extender o renovar entre 1 y 30 días por operación." };
   }
 
   const restaurant = await prisma.restaurant.findUnique({
@@ -1764,18 +1777,58 @@ export async function extendTrialAction(restaurantId: string, days: number) {
 
   if (!restaurant) return { error: "Restaurante no encontrado." };
 
-  const currentEnd = new Date(restaurant.trialEndsAt);
-  const baseDate = currentEnd > new Date() ? currentEnd : new Date();
-  baseDate.setDate(baseDate.getDate() + days);
+  const currentEnd = restaurant.trialEndsAt ? new Date(restaurant.trialEndsAt) : new Date();
+  const now = new Date();
+  const baseDate = currentEnd > now ? new Date(currentEnd) : new Date(now);
+  baseDate.setDate(baseDate.getDate() + numDays);
+
+  const shouldSetDemo = options?.setLeadStatusDemo ?? true;
+  const updateData: Record<string, any> = { 
+    trialEndsAt: baseDate,
+    isSuspended: false,
+  };
+  if (shouldSetDemo) {
+    updateData.leadStatus = "EN_DEMO";
+  }
 
   await prisma.restaurant.update({
     where: { id: restaurantId },
-    data: { trialEndsAt: baseDate }
+    data: updateData
   });
+
+  try {
+    const formattedDate = baseDate.toLocaleDateString("es-EC", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+    await prismaControl.crmNote.create({
+      data: {
+        restaurantId,
+        author: "SuperAdmin",
+        content: options?.note || `Demo extendida / renovada por +${numDays} días (vigente hasta: ${formattedDate}).`,
+      }
+    });
+  } catch (crmErr) {
+    console.warn("No se pudo registrar la nota CRM para la extensión de demo:", crmErr);
+  }
 
   revalidatePath("/super-admin");
   revalidatePath(`/${restaurant.slug}`);
-  return { success: true };
+  return { 
+    success: true, 
+    newTrialEndsAt: baseDate.toISOString(),
+    leadStatus: shouldSetDemo ? "EN_DEMO" : restaurant.leadStatus,
+    daysAdded: numDays,
+  };
+}
+
+export async function renewRestaurantDemoAction(restaurantId: string, days: number = 30) {
+  const safeDays = Math.min(Math.max(1, Math.round(Number(days) || 30)), 30);
+  return extendTrialAction(restaurantId, safeDays, {
+    setLeadStatusDemo: true,
+    note: `Renovación formal de categoría DEMO por +${safeDays} días renovables.`
+  });
 }
 
 export async function deleteRestaurantAction(restaurantId: string) {
@@ -1913,6 +1966,10 @@ export async function superAdminCreateRestaurantAction(data: {
       businessSubType: vertical.toUpperCase(),
     });
 
+    const defaultTrial = new Date();
+    defaultTrial.setDate(defaultTrial.getDate() + 30);
+    const trialEndsAt = (data as any).trialEndsAt ? new Date((data as any).trialEndsAt) : defaultTrial;
+
     await prismaTenant.restaurant.create({
       data: {
         userId: assignedUserId,
@@ -1925,6 +1982,8 @@ export async function superAdminCreateRestaurantAction(data: {
         parish: data.parroquia || null,
         sector: data.sector || null,
         plan: data.plan || "FREE",
+        leadStatus: (data as any).leadStatus || "EN_DEMO",
+        trialEndsAt,
         businessType,
         catalogMode,
         customLabels,
@@ -3508,13 +3567,46 @@ export async function updateRestaurantLeadStatusAction(
       dataToUpdate.nextFollowUpAt = nextFollowUpAt ? new Date(nextFollowUpAt) : null;
     }
 
-    await prismaTenant.restaurant.update({
+    let updatedTrialEndsAt: string | undefined = undefined;
+
+    // Si se califica como EN_DEMO y la fecha de prueba está vencida o vacía, activamos automáticamente 30 días de demo
+    if (leadStatus === "EN_DEMO") {
+      const current = await prismaTenant.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { trialEndsAt: true, slug: true }
+      });
+      if (current && (!current.trialEndsAt || new Date(current.trialEndsAt) <= new Date())) {
+        const newTrial = new Date();
+        newTrial.setDate(newTrial.getDate() + 30);
+        dataToUpdate.trialEndsAt = newTrial;
+        dataToUpdate.isSuspended = false;
+        updatedTrialEndsAt = newTrial.toISOString();
+
+        try {
+          const dateStr = newTrial.toLocaleDateString("es-EC", { year: "numeric", month: "short", day: "numeric" });
+          await prismaControl.crmNote.create({
+            data: {
+              restaurantId,
+              author: "SuperAdmin",
+              content: `Calificado como DEMO ACTIVA. Se activaron 30 días de prueba iniciales (vigente hasta: ${dateStr}).`,
+            }
+          });
+        } catch (noteErr) {
+          console.warn("No se pudo registrar nota al calificar como EN_DEMO:", noteErr);
+        }
+      }
+    }
+
+    const updated = await prismaTenant.restaurant.update({
       where: { id: restaurantId },
       data: dataToUpdate,
     });
 
     revalidatePath("/super-admin");
-    return { success: true };
+    if (updated?.slug) {
+      revalidatePath(`/${updated.slug}`);
+    }
+    return { success: true, updatedTrialEndsAt };
   } catch (error: any) {
     console.error("Error in updateRestaurantLeadStatusAction:", error);
     return { error: error?.message || "Error al actualizar etapa CRM del negocio." };

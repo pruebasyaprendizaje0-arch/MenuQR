@@ -123,6 +123,7 @@ import {
   Image as ImageIcon,
   SlidersHorizontal,
   Clock,
+  FileArchive,
   X,
   Stethoscope,
 } from "lucide-react";
@@ -143,6 +144,7 @@ import { generateTableToken, buildTableQrUrl } from "@/lib/table-token";
 import DatilConfigTab from "./DatilConfigTab";
 import { printThermalTicket } from "@/lib/thermal-printer";
 import { checkDatilInvoiceStatusAction } from "@/lib/datil-actions";
+import { TenantBackupModal } from "./TenantBackupModal";
 
 type SeasonRate = {
   id: string;
@@ -1331,6 +1333,7 @@ export function AdminDashboard({
   const [manualPaymentMethod, setManualPaymentMethod] = useState<"transferencia" | "deuna">("transferencia");
   const [manualPaymentReference, setManualPaymentReference] = useState("");
   const [manualPaymentReceiptUrl, setManualPaymentReceiptUrl] = useState("");
+  const [isTenantBackupModalOpen, setIsTenantBackupModalOpen] = useState(false);
   const handleSubscribePremium = (e: React.FormEvent) => {
     e.preventDefault();
     alert("El pago con tarjeta está deshabilitado. Usa transferencia o Deuna.");
@@ -3599,6 +3602,29 @@ export function AdminDashboard({
             <div>
               <h2 className="text-2xl font-bold text-white">Configuración del {bLabels.businessTabTitle}</h2>
               <p className="text-slate-400 text-sm">Edita la información de tu marca, colores del tema, recargos y WhatsApp para {bLabels.kitchen.toLowerCase()}.</p>
+            </div>
+
+            {/* Tarjeta de Respaldo y Restauración ZIP */}
+            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4 backdrop-blur-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <FileArchive className="h-5 w-5 text-amber-400" />
+                    Copia de Seguridad y Restauración por Lotes (ZIP)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Descarga toda tu Landing Page, Catálogo y Fotos en un paquete ZIP protegido para respaldar en tu PC o restaurar en caso de daño.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsTenantBackupModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/10 transition shrink-0 cursor-pointer"
+                >
+                  <FileArchive className="h-4 w-4" />
+                  Gestionar Respaldo ZIP
+                </button>
+              </div>
             </div>
 
             {/* Charge Surcharge Configuration Form */}
@@ -6644,6 +6670,15 @@ export function AdminDashboard({
                 >
                   <FileSpreadsheet className="h-4 w-4" />
                   {bLabels.importExcelButton}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsTenantBackupModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all duration-200 shadow-sm cursor-pointer"
+                  title="Exportar o restaurar copia completa ZIP (landing, catálogo y fotos)"
+                >
+                  <FileArchive className="h-4 w-4 text-amber-400" />
+                  Respaldo ZIP / Lotes
                 </button>
                 <button
                   disabled={categoriesList.length === 0}
@@ -12365,6 +12400,15 @@ export function AdminDashboard({
         )}
       </div>
     </div>
+
+    {/* MODAL DE RESPALDO Y RESTAURACIÓN ZIP (TENANT) */}
+    <TenantBackupModal
+      isOpen={isTenantBackupModalOpen}
+      onClose={() => setIsTenantBackupModalOpen(false)}
+      restaurantId={restaurant.id}
+      restaurantName={restaurant.name}
+      restaurantSlug={restaurant.slug}
+    />
   </div>
   );
 }

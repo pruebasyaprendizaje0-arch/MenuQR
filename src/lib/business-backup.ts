@@ -797,7 +797,7 @@ export async function generateBusinessBackupZip(
       },
       campaigns: { orderBy: { order: "asc" }, include: { dishes: true } },
       ruletaConfig: true,
-      whatsAppTemplates: { orderBy: { order: "asc" } },
+      whatsappTemplates: { orderBy: { order: "asc" } },
       seasonRates: { orderBy: { startDate: "asc" } },
       coupons: { orderBy: { createdAt: "desc" } },
       datilConfig: true,
@@ -942,7 +942,7 @@ export async function generateBusinessBackupZip(
       modifierGroups: modifierGroupsCount,
       modifierOptions: modifierOptionsCount,
       campaigns: restaurant.campaigns.length,
-      whatsappTemplates: restaurant.whatsAppTemplates?.length || 0,
+      whatsappTemplates: (restaurant.whatsappTemplates || (restaurant as any).whatsAppTemplates)?.length || 0,
       seasonRates: restaurant.seasonRates.length,
       coupons: restaurant.coupons.length,
       hasRuletaConfig: Boolean(restaurant.ruletaConfig),
@@ -1123,7 +1123,7 @@ export async function generateBusinessBackupZip(
         expiracionHoras: restaurant.ruletaConfig.expiracionHoras,
       }
       : null,
-    whatsappTemplates: (restaurant.whatsAppTemplates || []).map((t: any) => ({
+    whatsappTemplates: ((restaurant.whatsappTemplates || (restaurant as any).whatsAppTemplates) || []).map((t: any) => ({
       key: t.key,
       title: t.title,
       trigger: t.trigger,

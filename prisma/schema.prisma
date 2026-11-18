@@ -149,7 +149,7 @@ model Restaurant {
   serviceOnTable Boolean    @default(true)
   serviceOnTakeout Boolean   @default(false)
   trialEndsAt    DateTime   @default(now())
-  leadStatus     String     @default("LEAD_NUEVO") // LEAD_NUEVO, CONTACTADO, EN_DEMO, NEGOCIACION, CLIENTE_PRO, EXPIRADO_INACTIVO, PERDIDO
+  leadStatus     String     @default("EN_DEMO") // LEAD_NUEVO, CONTACTADO, EN_DEMO, NEGOCIACION, CLIENTE_PRO, EXPIRADO_INACTIVO, PERDIDO
   nextFollowUpAt DateTime?
   
   // Campos Multi-Negocio y Catálogo

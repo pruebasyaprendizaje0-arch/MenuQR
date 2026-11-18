@@ -159,6 +159,8 @@ export default async function AdminPage(props: {
   if (!restaurant) {
     const cleanSlug = `restaurante-${session.userId.substring(0, 6)}-${Date.now().toString(36)}`;
     try {
+      const defaultTrial = new Date();
+      defaultTrial.setDate(defaultTrial.getDate() + 30);
       restaurant = await prisma.restaurant.create({
         data: {
           userId: session.userId,
@@ -167,6 +169,8 @@ export default async function AdminPage(props: {
           whatsapp: "",
           themeColor: "#ef4444",
           plan: "FREE",
+          leadStatus: "EN_DEMO",
+          trialEndsAt: defaultTrial,
         },
         include: {
           categories: {

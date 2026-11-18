@@ -53,7 +53,7 @@ export async function createGoogleBusinessAction(prevState: unknown, formData: F
   }
 
   const trialEndsAt = new Date();
-  trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
+  trialEndsAt.setDate(trialEndsAt.getDate() + 30);
 
   let businessType: "RESTAURANT" | "RETAIL" | "SERVICES" | "GENERAL_CATALOG" = "RESTAURANT";
   if (businessTypeInput === "RETAIL" || businessTypeInput === "GENERAL_CATALOG" || businessTypeInput === "CATALOG") {
@@ -140,6 +140,7 @@ export async function createGoogleBusinessAction(prevState: unknown, formData: F
       whatsapp: "",
       locality,
       trialEndsAt,
+      leadStatus: "EN_DEMO",
       businessType,
       catalogMode,
       enableTableOrdering,

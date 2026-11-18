@@ -267,7 +267,7 @@ async function runRealBackupTestSuite() {
             ],
             campaigns: [],
             ruletaConfig: null,
-            whatsAppTemplates: [],
+            whatsappTemplates: [],
             seasonRates: [],
             coupons: [],
             datilConfig: {

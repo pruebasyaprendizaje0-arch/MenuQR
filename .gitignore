@@ -21,6 +21,8 @@
 *.pem
 *.key
 *.cert
+*.disk-backup.ts
+*.txt
 
 # debug
 npm-debug.log*

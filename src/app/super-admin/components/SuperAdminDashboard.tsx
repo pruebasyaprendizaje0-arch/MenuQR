@@ -408,6 +408,14 @@ export function SuperAdminDashboard({
 
   // CRM Note Modal state
   const [noteTarget, setNoteTarget] = useState<{ restaurant?: Restaurant; lead?: ProspectLead } | null>(null);
+
+  // Demo Management Modal State
+  const [demoModalTarget, setDemoModalTarget] = useState<Restaurant | null>(null);
+  const [demoDaysToAdd, setDemoDaysToAdd] = useState<number>(30);
+  const [demoSetStatusActive, setDemoSetStatusActive] = useState<boolean>(true);
+  const [isSubmittingDemo, setIsSubmittingDemo] = useState<boolean>(false);
+  const [demoActionMsg, setDemoActionMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showOnlyDemo, setShowOnlyDemo] = useState<boolean>(false);
   const [newNoteContent, setNewNoteContent] = useState("");
   const [nextFollowUpDate, setNextFollowUpDate] = useState("");
   const [noteLoading, setNoteLoading] = useState(false);
@@ -493,7 +501,13 @@ export function SuperAdminDashboard({
     return counts;
   }, [restaurantList]);
 
+  const demoCount = useMemo(() => restaurantList.filter(r => (r.leadStatus || "LEAD_NUEVO") === "EN_DEMO").length, [restaurantList]);
+
   const filteredRestaurants = restaurantList.filter((r) => {
+    if (showOnlyDemo && (r.leadStatus || "LEAD_NUEVO") !== "EN_DEMO") {
+      return false;
+    }
+
     const vertical = resolveBusinessVertical(r);
     if (selectedVertical !== "all" && vertical !== selectedVertical) {
       return false;
@@ -667,7 +681,56 @@ export function SuperAdminDashboard({
       const res = await extendTrialAction(id, days);
       if (res?.success) {
         alert("Período de prueba extendido con éxito.");
+        if (res.newTrialEndsAt) {
+          setRestaurantList(prev => prev.map(r => r.id === id ? { ...r, trialEndsAt: res.newTrialEndsAt! } : r));
+        }
       }
+    }
+  };
+
+  const handleConfirmDemoExtension = async (targetRestaurant: Restaurant, days: number, setLeadStatus: boolean) => {
+    setIsSubmittingDemo(true);
+    setDemoActionMsg(null);
+    try {
+      const res = await extendTrialAction(targetRestaurant.id, days, {
+        setLeadStatusDemo: setLeadStatus,
+        note: `Demo extendida / renovada por +${days} días desde SuperAdmin.`
+      });
+
+      if (res?.error) {
+        setDemoActionMsg({ type: "error", text: res.error });
+        setIsSubmittingDemo(false);
+        return;
+      }
+
+      const newDateStr = res.newTrialEndsAt || new Date().toISOString();
+      const updatedStatus = res.leadStatus || (setLeadStatus ? "EN_DEMO" : targetRestaurant.leadStatus);
+
+      setRestaurantList(prev => prev.map(r => {
+        if (r.id === targetRestaurant.id) {
+          return {
+            ...r,
+            trialEndsAt: newDateStr,
+            leadStatus: updatedStatus,
+            isSuspended: false,
+          };
+        }
+        return r;
+      }));
+
+      setDemoActionMsg({
+        type: "success",
+        text: `¡Período demo renovado con éxito! +${days} días añadidos a "${targetRestaurant.name}".`
+      });
+
+      setTimeout(() => {
+        setDemoModalTarget(null);
+        setDemoActionMsg(null);
+      }, 1000);
+    } catch (err: any) {
+      setDemoActionMsg({ type: "error", text: err?.message || "Error al procesar la renovación de demo." });
+    } finally {
+      setIsSubmittingDemo(false);
     }
   };
 
@@ -1707,6 +1770,19 @@ export function SuperAdminDashboard({
                     <FileArchive className="h-4 w-4 text-amber-400" />
                     Importar ZIP
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowOnlyDemo(prev => !prev)}
+                    className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition duration-200 shrink-0 ${
+                      showOnlyDemo
+                        ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300 shadow-sm"
+                        : "bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                    title="Filtrar únicamente negocios en categoría DEMO"
+                  >
+                    <Sparkles className="h-4 w-4 text-emerald-400" />
+                    <span>Demos ({demoCount})</span>
+                  </button>
                 </div>
               </div>
 
@@ -1886,6 +1962,8 @@ export function SuperAdminDashboard({
                                     if (resAction?.error) {
                                       alert(resAction.error);
                                       setRestaurantList(prev => prev.map(r => r.id === res.id ? { ...r, leadStatus: oldStatus } : r));
+                                    } else if (resAction?.updatedTrialEndsAt) {
+                                      setRestaurantList(prev => prev.map(r => r.id === res.id ? { ...r, leadStatus: newStatus, trialEndsAt: resAction.updatedTrialEndsAt! } : r));
                                     }
                                   }}
                                   className={`text-xs rounded-xl px-2.5 py-1 font-bold border focus:outline-none cursor-pointer transition-colors ${stageInfo.color}`}
@@ -1896,6 +1974,23 @@ export function SuperAdminDashboard({
                                     </option>
                                   ))}
                                 </select>
+                                {(res.leadStatus || "LEAD_NUEVO") === "EN_DEMO" && (
+                                  <div className="mt-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDemoModalTarget(res);
+                                        setDemoDaysToAdd(30);
+                                        setDemoActionMsg(null);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 hover:bg-emerald-900/80 transition shadow-sm cursor-pointer"
+                                      title="Añadir días o renovar Demo (hasta 30 días)"
+                                    >
+                                      <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+                                      <span>Renovar (+30d)</span>
+                                    </button>
+                                  </div>
+                                )}
                               </td>
 
                               {/* SALUD DEL MENÚ (HEALTH SCORE) */}
@@ -1989,12 +2084,25 @@ export function SuperAdminDashboard({
                                     <option value="PRO">PRO ($15/mes)</option>
                                     <option value="ELITE">⭐ ELITE ($20/mes)</option>
                                   </select>
-                                  <div className="text-[11px] text-slate-400">
+                                  <div className="text-[11px] text-slate-400 flex items-center justify-between gap-1">
                                     {isExpired ? (
                                       <span className="text-red-400 font-semibold">Expirada</span>
                                     ) : (
                                       <span className="text-emerald-400 font-semibold">{daysRemaining} días rest.</span>
                                     )}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDemoModalTarget(res);
+                                        setDemoDaysToAdd(30);
+                                        setDemoActionMsg(null);
+                                      }}
+                                      className="inline-flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer ml-1"
+                                      title="Extender o renovar período demo hasta 30 días"
+                                    >
+                                      <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                                      <span>+Días</span>
+                                    </button>
                                   </div>
                                 </div>
                               </td>
@@ -2131,6 +2239,19 @@ export function SuperAdminDashboard({
                                 >
                                   <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
                                   Asistir
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    setDemoModalTarget(res);
+                                    setDemoDaysToAdd(30);
+                                    setDemoActionMsg(null);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-emerald-400 bg-emerald-950/30 border border-emerald-900/40 hover:bg-emerald-950/60 font-bold transition text-xs"
+                                  title="Calificar como Demo o extender días (hasta 30)"
+                                >
+                                  <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+                                  Demo
                                 </button>
 
                                 {/* Botón Pausar / Reactivar por Mora */}
@@ -2808,6 +2929,22 @@ export function SuperAdminDashboard({
                                 </div>
                               </div>
 
+                              {stage.id === "EN_DEMO" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDemoModalTarget(res);
+                                    setDemoDaysToAdd(30);
+                                    setDemoActionMsg(null);
+                                  }}
+                                  className="w-full inline-flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg text-[10px] font-bold bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 hover:bg-emerald-900/80 transition"
+                                  title="Extender o renovar período demo hasta 30 días"
+                                >
+                                  <Sparkles className="h-3 w-3 text-emerald-400" />
+                                  <span>Renovar Demo (+30d)</span>
+                                </button>
+                              )}
+
                               {/* Stage Selector */}
                               <div className="pt-2 border-t border-slate-900 flex items-center justify-between gap-2">
                                 <select
@@ -2820,6 +2957,8 @@ export function SuperAdminDashboard({
                                     if (resAction?.error) {
                                       alert(resAction.error);
                                       setRestaurantList(prev => prev.map(r => r.id === res.id ? { ...r, leadStatus: oldStatus } : r));
+                                    } else if (resAction?.updatedTrialEndsAt) {
+                                      setRestaurantList(prev => prev.map(r => r.id === res.id ? { ...r, leadStatus: newStatus, trialEndsAt: resAction.updatedTrialEndsAt! } : r));
                                     }
                                   }}
                                   className="bg-slate-900 border border-slate-800 text-[10px] rounded-lg px-2 py-1 text-slate-300 font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
@@ -4196,6 +4335,180 @@ export function SuperAdminDashboard({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE GESTIÓN Y RENOVACIÓN DE DEMO */}
+      {demoModalTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="h-10 w-10 bg-emerald-600/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 shadow-inner">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Gestión de Período Demo</h3>
+                  <p className="text-[11px] text-slate-400">Califica como demo y renueva hasta 30 días de prueba</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setDemoModalTarget(null);
+                  setDemoActionMsg(null);
+                }}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Target Info */}
+            <div className="bg-slate-950 border border-slate-800/80 p-3.5 rounded-2xl space-y-2">
+              <div className="flex items-start justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Negocio</span>
+                  <p className="text-sm font-bold text-white">{demoModalTarget.name}</p>
+                  <p className="text-xs text-slate-400">/{demoModalTarget.slug} • {demoModalTarget.userName || "Sin nombre"}</p>
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                  demoModalTarget.leadStatus === "EN_DEMO"
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    : "bg-slate-800 text-slate-300 border-slate-700"
+                }`}>
+                  {demoModalTarget.leadStatus === "EN_DEMO" ? "✨ Categoría DEMO" : (demoModalTarget.leadStatus || "LEAD_NUEVO")}
+                </span>
+              </div>
+
+              {(() => {
+                const trialDate = new Date(demoModalTarget.trialEndsAt);
+                const isExp = trialDate < new Date();
+                const daysLeft = Math.max(0, Math.ceil((trialDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+                return (
+                  <div className="pt-2 border-t border-slate-900 flex items-center justify-between text-xs">
+                    <span className="text-slate-400">Vigencia actual:</span>
+                    <span className={isExp ? "text-red-400 font-bold" : "text-emerald-400 font-semibold"}>
+                      {isExp ? "Expirada" : `${daysLeft} días restantes`} ({trialDate.toLocaleDateString("es-EC")})
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Feedback Messages */}
+            {demoActionMsg && (
+              <div className={`p-3 rounded-xl border text-xs font-semibold ${
+                demoActionMsg.type === "success" 
+                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" 
+                  : "bg-red-500/10 border-red-500/30 text-red-400"
+              }`}>
+                {demoActionMsg.text}
+              </div>
+            )}
+
+            {/* Selector de Días y Presets */}
+            <div className="space-y-3">
+              <label className="block text-xs font-bold text-slate-200">
+                Días a añadir / renovar (máximo 30 días):
+              </label>
+
+              {/* Botones de Acceso Rápido */}
+              <div className="grid grid-cols-3 gap-2">
+                {[7, 15, 30].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDemoDaysToAdd(d)}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                      demoDaysToAdd === d
+                        ? "bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700"
+                    }`}
+                  >
+                    +{d} Días {d === 30 ? "⭐" : ""}
+                  </button>
+                ))}
+              </div>
+
+              {/* Input Numérico Personalizado */}
+              <div className="flex items-center gap-3 pt-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={demoDaysToAdd}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (isNaN(val)) setDemoDaysToAdd(1);
+                    else setDemoDaysToAdd(Math.min(30, Math.max(1, val)));
+                  }}
+                  className="w-24 bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-3 py-2 text-white text-sm font-bold text-center focus:outline-none"
+                />
+                <span className="text-xs text-slate-400">días adicionales (1 a 30 renovables)</span>
+              </div>
+
+              {/* Previsualización de Nueva Fecha */}
+              {(() => {
+                const currentEnd = new Date(demoModalTarget.trialEndsAt);
+                const now = new Date();
+                const base = currentEnd > now ? currentEnd : now;
+                const projected = new Date(base);
+                projected.setDate(projected.getDate() + (demoDaysToAdd || 1));
+                return (
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-300 flex items-center justify-between">
+                    <span className="text-slate-400">Nueva fecha de vencimiento:</span>
+                    <span className="font-bold text-amber-300">
+                      {projected.toLocaleDateString("es-EC", { day: "numeric", month: "long", year: "numeric" })}
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Checkbox Calificar como EN_DEMO */}
+              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={demoSetStatusActive}
+                  onChange={(e) => setDemoSetStatusActive(e.target.checked)}
+                  className="rounded bg-slate-950 border-slate-800 text-emerald-500 focus:ring-0 h-4 w-4 cursor-pointer"
+                />
+                <span className="text-xs text-slate-300">
+                  Asegurar categoría <strong className="text-emerald-400 font-bold">Demos Activas (EN_DEMO)</strong>
+                </span>
+              </label>
+            </div>
+
+            {/* Botones de Pie de Modal */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setDemoModalTarget(null);
+                  setDemoActionMsg(null);
+                }}
+                disabled={isSubmittingDemo}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition disabled:opacity-50 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirmDemoExtension(demoModalTarget, demoDaysToAdd, demoSetStatusActive)}
+                disabled={isSubmittingDemo}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-900/30 transition disabled:opacity-50 cursor-pointer"
+              >
+                {isSubmittingDemo ? (
+                  <span>Procesando...</span>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    <span>Confirmar y Renovar (+{demoDaysToAdd}d)</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
