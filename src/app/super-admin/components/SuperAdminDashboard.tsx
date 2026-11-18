@@ -82,11 +82,13 @@ import {
   Barcode,
   BarChart3,
   Megaphone,
-  Server
+  Server,
+  FileArchive
 } from "lucide-react";
 import { SuperAdminAnalyticsTab } from "./SuperAdminAnalyticsTab";
 import { SuperAdminAnnouncementsTab } from "./SuperAdminAnnouncementsTab";
 import { SuperAdminOpsTab } from "./SuperAdminOpsTab";
+import { BusinessBackupModal } from "./BusinessBackupModal";
 import { ecuadorData, parishData } from "@/lib/ecuador";
 import { resolveBusinessVertical, BusinessVertical } from "@/lib/business-labels";
 
@@ -351,6 +353,7 @@ export function SuperAdminDashboard({
   useEffect(() => {
     setRestaurantList(restaurants);
   }, [restaurants]);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [eliteTaskList, setEliteTaskList] = useState<EliteTask[]>(eliteTasks);
   const [isCreateEliteTaskModalOpen, setIsCreateEliteTaskModalOpen] = useState(false);
   const [newEliteTaskData, setNewEliteTaskData] = useState({
@@ -1695,6 +1698,15 @@ export function SuperAdminDashboard({
                     <Plus className="h-4 w-4" />
                     Crear Nuevo Negocio
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsBackupModalOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-slate-200 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 transition duration-200 shrink-0"
+                    title="Importar y restaurar negocio completo desde paquete ZIP"
+                  >
+                    <FileArchive className="h-4 w-4 text-amber-400" />
+                    Importar ZIP
+                  </button>
                 </div>
               </div>
 
@@ -2146,6 +2158,18 @@ export function SuperAdminDashboard({
                                 >
                                   <UserCheck className="h-3.5 w-3.5 text-blue-300" />
                                   Adjudicar
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    window.location.href = `/api/superadmin/backup/export?restaurantId=${res.id}`;
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-amber-400 bg-amber-950/20 border border-amber-900/30 hover:bg-amber-950/40 font-bold transition"
+                                  title="Exportar respaldo completo en ZIP (datos.json, fotos, Excel)"
+                                >
+                                  <FileArchive className="h-3.5 w-3.5" />
+                                  Exportar ZIP
                                 </button>
 
                                 <button
@@ -4175,6 +4199,20 @@ export function SuperAdminDashboard({
           </div>
         </div>
       )}
+
+      {/* MODAL DE RESPALDO Y RESTAURACIÓN ZIP (SUPERADMIN) */}
+      <BusinessBackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        restaurants={restaurantList.map((r) => ({
+          id: r.id,
+          name: r.name,
+          slug: r.slug,
+        }))}
+        onRestoredSuccess={() => {
+          window.location.reload();
+        }}
+      />
     </div>
   );
 }
