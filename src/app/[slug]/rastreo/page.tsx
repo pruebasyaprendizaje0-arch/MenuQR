@@ -146,6 +146,8 @@ function TrackingContent({ slug }: { slug: string }) {
         return 1;
       case "PREPARING":
         return 1;
+      case "READY":
+        return 2;
       case "IN_TRANSIT":
         return 2;
       case "DELIVERED":
@@ -292,7 +294,8 @@ function TrackingContent({ slug }: { slug: string }) {
                         <span className="text-xs uppercase font-extrabold tracking-widest text-slate-400">Estado del Pedido</span>
                         <h3 className="text-2xl font-black text-white mt-1">
                           {order.status === "PENDING" && "🍳 Pedido Recibido - Entrando a Cocina"}
-                          {order.status === "PREPARING" && "🍳 En Cocina - Preparando tus alimentos"}
+                          {order.status === "PREPARING" && "👨‍🍳 En Cocina - Preparando tus alimentos"}
+                          {order.status === "READY" && "✅ ¡Tu pedido está listo! - Listo para servir o retirar"}
                           {order.status === "IN_TRANSIT" && "🛵 En Transporte - ¡Repartidor en camino!"}
                           {(order.status === "DELIVERED" || order.status === "COMPLETED") && "🎉 ¡Entregado con éxito!"}
                         </h3>

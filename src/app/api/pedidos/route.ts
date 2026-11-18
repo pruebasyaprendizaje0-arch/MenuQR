@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { deductStockUniversal } from "@/lib/stock-service";
 import { sendTelegramAlert } from "@/lib/telegram-alert";
 import { notificarSuperAdmin } from "@/lib/telegramAdmin";
-import { syncSinglePedidoToPrisma } from "@/lib/order-sync";
+import { syncSinglePedidoToPrisma, reconcileUndispatchedOrders } from "@/lib/order-sync";
+import { verifyKdsDispatchToken } from "@/lib/jwt";
 
 export const dynamic = "force-dynamic";
 
@@ -151,6 +152,11 @@ export async function GET(req: NextRequest) {
           }
         }
       } catch {}
+    }
+
+    // Reconciliador pasivo: asegura que pedidos web pendientes se sincronicen a KDS
+    for (const vNegId of validNegocioIds) {
+      void reconcileUndispatchedOrders(vNegId);
     }
 
     const targetIdsArray = Array.from(validNegocioIds);
@@ -411,6 +417,33 @@ export async function POST(req: NextRequest) {
 
     const resolvedNegocioId = negocioDbId;
 
+    // VALIDACIÓN TEMPRANA DE IDENTIDAD Y AUTORIDAD:
+    // Si la petición trae un ID de pedido explícito (order_id o id), se exige estrictamente un dispatch_token válido.
+    // Si no lo trae o es inválido, se rechaza inmediatamente con 4xx SIN insertar nada y SIN caer al flujo nativo.
+    const explicitOrderId = body.order_id || body.id;
+    const dispatchToken = body.dispatch_token;
+
+    if (explicitOrderId) {
+      if (!dispatchToken || typeof dispatchToken !== "string") {
+        return NextResponse.json(
+          { ok: false, error: "Token de autorización requerido cuando se proporciona ID de pedido." },
+          { status: 400 }
+        );
+      }
+
+      const verifiedToken = verifyKdsDispatchToken(dispatchToken);
+      if (
+        !verifiedToken ||
+        verifiedToken.orderId !== explicitOrderId ||
+        (verifiedToken.restaurantId !== resolvedNegocioId && verifiedToken.restaurantId !== restaurantPrismaId)
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "Token de despacho inválido o no autorizado." },
+          { status: 403 }
+        );
+      }
+    }
+
     const client = await pool.connect();
 
     try {
@@ -420,7 +453,7 @@ export async function POST(req: NextRequest) {
       let responseOrder: ResponseOrder | null = null;
       let whatsappMessageText = "";
       let orderTotal = 0;
-      const insertedItems: InsertedOrderItem[] = [];
+      let insertedItems: InsertedOrderItem[] = [];
 
       // =========================================================================
       // CASO A: VERTICAL MENUQR (Restaurantes, Bares, Cafeterías - Mesa Abierta o Delivery)
@@ -452,6 +485,7 @@ export async function POST(req: NextRequest) {
         const rawMesa = mesa ? String(mesa).trim() : (isDeliveryReq ? "DELIVERY" : (isLlevarReq ? "LLEVAR" : "1"));
         const cleanMesa = rawMesa.replace(/^(mesa\s*#?|#)/i, "").trim();
         const mesaStr = isDeliveryReq ? "DELIVERY" : (isLlevarReq ? "LLEVAR" : (cleanMesa || "1"));
+        const channelLabel = isDeliveryReq ? "Domicilio" : isLlevarReq ? "Para Llevar" : `Mesa ${mesaStr}`;
 
         if (!Array.isArray(items) || items.length === 0) {
           await client.query("ROLLBACK");
@@ -556,8 +590,8 @@ export async function POST(req: NextRequest) {
         };
 
         // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
-        // Canales como Domicilio y Para Llevar SIEMPRE generan comandas independientes
-        const isNonTableChannel = isDeliveryReq || isLlevarReq;
+        // Canales como Domicilio, Para Llevar o Despacho con ID explícito SIEMPRE generan comandas independientes
+        const isNonTableChannel = isDeliveryReq || isLlevarReq || Boolean(explicitOrderId);
         const mesaVariants = getMesaVariants(rawMesa);
         const searchIds = Array.from(new Set([resolvedNegocioId, restaurantPrismaId].filter(Boolean)));
         const { rows: existingOrders } = isNonTableChannel
@@ -722,37 +756,130 @@ export async function POST(req: NextRequest) {
             notas_entrega: notas_entrega || null,
           };
 
-          const { rows: newOrderRows } = await client.query(
-            `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
-             VALUES ($1, $2, $3, 'nuevo', $4, $5, $6, 'menuqr', $7)
-             RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
-            [
-              resolvedNegocioId,
-              mesaStr,
-              finalCamareroId,
-              orderTotal,
-              cliente_nombre ? String(cliente_nombre).trim() : null,
-              cliente_telefono ? String(cliente_telefono).trim() : null,
-              JSON.stringify(metaObj),
-            ]
-          );
+          let authoritativeOrder: any = null;
 
-          createdOrderId = newOrderRows[0].id;
+          if (explicitOrderId) {
+            // Cargar comanda autoritativa desde Prisma Order
+            authoritativeOrder = await prisma.order.findUnique({
+              where: { id: explicitOrderId },
+              include: { items: true },
+            });
 
-          for (const item of items) {
-            const cantidad = parseInt(item.cantidad) || 1;
-            const precio = parseFloat(item.precio) || 0;
+            if (!authoritativeOrder || (authoritativeOrder.restaurantId !== resolvedNegocioId && authoritativeOrder.restaurantId !== restaurantPrismaId)) {
+              await client.query("ROLLBACK");
+              return NextResponse.json(
+                { ok: false, error: "Orden autoritativa no encontrada para el restaurante especificado." },
+                { status: 404 }
+              );
+            }
 
-            const { rows: itemRows } = await client.query(
-              `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-               VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
-               RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-              [createdOrderId, item.nombre, cantidad, precio, item.notas || null]
+            // Totales siempre autoritativos del servidor
+            orderTotal = authoritativeOrder.total;
+          }
+
+          let isConflictRetry = false;
+          let newOrderRows: any[] = [];
+
+          if (explicitOrderId && authoritativeOrder) {
+            // Inserción atómica con ON CONFLICT DO NOTHING
+            const insertRes = await client.query(
+              `INSERT INTO pedidos (id, negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+               VALUES ($1::uuid, $2, $3, $4, 'nuevo', $5, $6, $7, 'menuqr', $8)
+               ON CONFLICT (id) DO NOTHING
+               RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
+              [
+                explicitOrderId,
+                resolvedNegocioId,
+                mesaStr,
+                finalCamareroId,
+                orderTotal,
+                cliente_nombre ? String(cliente_nombre).trim() : null,
+                cliente_telefono ? String(cliente_telefono).trim() : null,
+                JSON.stringify(metaObj),
+              ]
             );
-            insertedItems.push(itemRows[0]);
+
+            if (insertRes.rows.length === 0) {
+              // Conflicto de idempotencia detectado: el pedido ya existe en pedidos
+              isConflictRetry = true;
+              const { rows: existingRows } = await client.query(
+                `SELECT id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata
+                 FROM pedidos WHERE id = $1::uuid`,
+                [explicitOrderId]
+              );
+              newOrderRows = existingRows;
+              createdOrderId = explicitOrderId;
+
+              // Cargar ítems ya existentes sin duplicar
+              const { rows: existingItems } = await client.query(
+                `SELECT id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item
+                 FROM pedido_items WHERE pedido_id = $1::uuid`,
+                [explicitOrderId]
+              );
+              insertedItems = existingItems;
+            } else {
+              newOrderRows = insertRes.rows;
+              createdOrderId = newOrderRows[0].id;
+
+              // Insertar ítems desde la orden autoritativa (con notas y precios de servidor)
+              for (const it of authoritativeOrder.items) {
+                const cantidad = it.quantity || 1;
+                const precio = it.price || 0;
+                const notasItem = it.notes || null;
+
+                const { rows: itemRows } = await client.query(
+                  `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+                   VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
+                   RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
+                  [createdOrderId, it.dishName, cantidad, precio, notasItem]
+                );
+                insertedItems.push(itemRows[0]);
+              }
+            }
+          } else {
+            // Flujo normal nativo (Catálogo o comanda sin orden previa)
+            const insertRes = await client.query(
+              `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+               VALUES ($1, $2, $3, 'nuevo', $4, $5, $6, 'menuqr', $7)
+               RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
+              [
+                resolvedNegocioId,
+                mesaStr,
+                finalCamareroId,
+                orderTotal,
+                cliente_nombre ? String(cliente_nombre).trim() : null,
+                cliente_telefono ? String(cliente_telefono).trim() : null,
+                JSON.stringify(metaObj),
+              ]
+            );
+            newOrderRows = insertRes.rows;
+            createdOrderId = newOrderRows[0].id;
+
+            for (const item of items) {
+              const cantidad = parseInt(item.cantidad) || 1;
+              const precio = parseFloat(item.precio) || 0;
+
+              const { rows: itemRows } = await client.query(
+                `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+                 VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
+                 RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
+                [createdOrderId, item.nombre, cantidad, precio, item.notas || null]
+              );
+              insertedItems.push(itemRows[0]);
+            }
           }
 
           await client.query("COMMIT");
+
+          // Si el pedido provenía de Prisma Order, marcar kdsDispatched: true
+          if (authoritativeOrder) {
+            try {
+              await prisma.order.update({
+                where: { id: createdOrderId },
+                data: { kdsDispatched: true },
+              });
+            } catch {}
+          }
 
           let camareroNombre = "Sin camarero";
           if (finalCamareroId) {
@@ -769,22 +896,26 @@ export async function POST(req: NextRequest) {
             items: insertedItems,
           };
 
-          // Notificar vía Socket.IO en tiempo real
-          emitNuevoPedido(resolvedNegocioId, responseOrder);
-          void syncSinglePedidoToPrisma(createdOrderId, resolvedNegocioId);
+          // Notificar vía Socket.IO y Telegram SOLO SI NO ES REINTENTO DUPLICADO
+          if (!isConflictRetry) {
+            emitNuevoPedido(resolvedNegocioId, responseOrder);
+            if (!authoritativeOrder) {
+              void syncSinglePedidoToPrisma(createdOrderId, resolvedNegocioId);
+            }
 
-          const channelLabel = isDeliveryReq 
-            ? "🛵 Domicilio" 
-            : isLlevarReq 
-            ? "🛍️ Para Llevar" 
-            : (mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr);
+            const channelLabel = isDeliveryReq 
+              ? "🛵 Domicilio" 
+              : isLlevarReq 
+              ? "🛍️ Para Llevar" 
+              : (mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr);
 
-          // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
-          void sendTelegramAlert({
-            mensaje: `🍽️ Nuevo pedido [${channelLabel}] (${businessName}) por $${orderTotal.toFixed(2)} (${insertedItems.length} platos): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
-            cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente",
-            negocio: businessName,
-          });
+            // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
+            void sendTelegramAlert({
+              mensaje: `🍽️ Nuevo pedido [${channelLabel}] (${businessName}) por $${orderTotal.toFixed(2)} (${insertedItems.length} platos): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
+              cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente",
+              negocio: businessName,
+            });
+          }
 
           whatsappMessageText = `*🍽️ Nuevo Pedido - MenuQR Pro*\n` +
             `*Restaurante:* ${businessName}\n` +
@@ -807,6 +938,7 @@ export async function POST(req: NextRequest) {
             items: insertedItems,
             whatsapp_url: waUrl,
             vertical: "menuqr",
+            is_retry: isConflictRetry,
           });
         }
       }

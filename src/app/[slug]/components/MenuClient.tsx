@@ -1,8 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { createOrderAction, updateLogoDirectAction, updateCoverDirectAction, validateCouponAction } from "@/lib/actions";
+import {
+  PendingCheckoutAttempt,
+  savePendingAttemptToStorage,
+  loadPendingAttemptFromStorage,
+  clearPendingAttemptFromStorage,
+  processCheckoutAttemptResult,
+  executeKdsDispatch,
+  KdsDispatchPayload,
+} from "@/lib/checkout-recovery";
 import { SmartLogo, SmartCover } from "@/components/SmartImage";
 import { isRestaurantOpen, parseWeeklySchedule, WeeklySchedule } from "@/lib/schedule";
 import { parseDishImages, getPrimaryDishImage } from "@/lib/dish-images";
@@ -429,8 +438,152 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   const [ruletaContext, setRuletaContext] = useState<{ isPostCheckout?: boolean; orderNumber?: string | number } | null>(null);
   const [orderSuccessInfo, setOrderSuccessInfo] = useState<{ orderNumber: string | number } | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const isSubmittingOrderRef = useRef(false);
+  const activeCheckoutKeysRef = useRef<{ orderId: string; secret: string } | null>(null);
+  const pendingAttemptRef = useRef<PendingCheckoutAttempt | null>(null);
+  const [isRestoringAttempt, setIsRestoringAttempt] = useState(true);
+  const [isCheckingPreviousOrder, setIsCheckingPreviousOrder] = useState(false);
+  const [checkoutBlockedMessage, setCheckoutBlockedMessage] = useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+
+  // Restauración atómica y efecto de recuperación de compra pendiente desde sessionStorage
+  const businessStorageKey = restaurant.slug || restaurant.id;
+
+  // Recuperador activo de compra incierta restaurada
+  const runPendingAttemptRecovery = useCallback(async (attempt: PendingCheckoutAttempt) => {
+    if (!attempt || !attempt.actionPayload) {
+      setIsRestoringAttempt(false);
+      return;
+    }
+    setIsCheckingPreviousOrder(true);
+    isSubmittingOrderRef.current = true;
+    try {
+      const recoveryResult = await createOrderAction(attempt.actionPayload);
+      const resolution = processCheckoutAttemptResult(recoveryResult);
+
+      if (resolution.type === "RESOLVED_SUCCESS") {
+        if (!recoveryResult.dispatchToken) {
+          // Token ausente: despacho no confirmado. Conserva snapshot, claves y sessionStorage, muestra aviso y deja habilitado reintento.
+          alert("Tu pedido está registrado, pero falta confirmar su envío a cocina. Reintenta la comprobación; no hagas otro pedido");
+          setIsCheckingPreviousOrder(false);
+          setIsSubmittingOrder(false);
+          isSubmittingOrderRef.current = false;
+          setIsRestoringAttempt(false);
+          return;
+        }
+
+        const kdsPayload: KdsDispatchPayload = {
+          order_id: recoveryResult.orderId,
+          dispatch_token: recoveryResult.dispatchToken,
+          negocio_id: restaurant.id,
+          slug: restaurant.slug,
+          mesa: attempt.kdsTargetMesa,
+          tipo_entrega: attempt.kdsTargetTipoEntrega,
+          metodo_entrega: attempt.kdsMetodoEntrega,
+          skip_stock_deduction: true,
+          items: (attempt.itemsData || []).map((i: any) => ({
+            dishId: i.dishId || i.id,
+            id: i.dishId || i.id,
+            nombre: i.dishName || i.nombre || i.name,
+            cantidad: i.quantity || i.cantidad || 1,
+            precio: i.price ?? i.precio ?? 0,
+            notas: i.notes || i.modifiersNotes || null,
+          })),
+          cliente_nombre: attempt.customerName,
+          cliente_telefono: attempt.customerPhone,
+          cliente_direccion: attempt.fullCustomerAddress,
+          costo_envio: attempt.deliveryCost,
+          total: attempt.total,
+        };
+
+        const kdsDispatchRes = await executeKdsDispatch(fetch, attempt.clientSecret, kdsPayload);
+
+        if (!kdsDispatchRes.confirmed) {
+          // Ante error HTTP, respuesta inválida o excepción, conserva el intento original y sus claves
+          alert("Tu pedido está registrado, pero falta confirmar su envío a cocina. Reintenta la comprobación; no hagas otro pedido");
+          setIsCheckingPreviousOrder(false);
+          setIsSubmittingOrder(false);
+          isSubmittingOrderRef.current = false;
+          setIsRestoringAttempt(false);
+          return;
+        }
+
+        if (kdsDispatchRes.pedido && attempt.isTableOrder) {
+          setLiveTableOrder(kdsDispatchRes.pedido);
+        }
+
+        // CONFIRMACIÓN SATISFACTORIA:
+        // Solo ahora se limpia el intento persistido, sus claves y snapshot
+        if (typeof window !== "undefined" && window.sessionStorage) {
+          clearPendingAttemptFromStorage(window.sessionStorage, restaurant.slug || restaurant.id);
+        }
+        pendingAttemptRef.current = null;
+        activeCheckoutKeysRef.current = null;
+        setCart([]);
+        setOrderSuccessInfo({ orderNumber: recoveryResult.orderNumber || 1 });
+        setIsCheckingPreviousOrder(false);
+        setIsSubmittingOrder(false);
+        isSubmittingOrderRef.current = false;
+        setIsRestoringAttempt(false);
+        return;
+      }
+
+      if (resolution.type === "BLOCKED_NEEDS_RESOLUTION") {
+        setCheckoutBlockedMessage(resolution.userMessage);
+        setIsCheckingPreviousOrder(false);
+        setIsSubmittingOrder(false);
+        isSubmittingOrderRef.current = false;
+        setIsRestoringAttempt(false);
+        return;
+      }
+
+      if (resolution.type === "ORDER_WAS_CANCELLED") {
+        if (typeof window !== "undefined" && window.sessionStorage) {
+          clearPendingAttemptFromStorage(window.sessionStorage, restaurant.slug || restaurant.id);
+        }
+        pendingAttemptRef.current = null;
+        activeCheckoutKeysRef.current = null;
+        alert(resolution.userMessage);
+        setIsCheckingPreviousOrder(false);
+        setIsSubmittingOrder(false);
+        isSubmittingOrderRef.current = false;
+        setIsRestoringAttempt(false);
+        return;
+      }
+
+      // RETRY_SAME_ATTEMPT: error de red o transitorio
+      // Se conserva el snapshot intacto y se rehabilita la acción con botón de reintento
+      setIsCheckingPreviousOrder(false);
+      setIsSubmittingOrder(false);
+      isSubmittingOrderRef.current = false;
+      setIsRestoringAttempt(false);
+    } catch (err: any) {
+      processCheckoutAttemptResult(err);
+      setIsCheckingPreviousOrder(false);
+      setIsSubmittingOrder(false);
+      isSubmittingOrderRef.current = false;
+      setIsRestoringAttempt(false);
+    }
+  }, [restaurant.id, restaurant.slug]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      const restored = loadPendingAttemptFromStorage(window.sessionStorage, businessStorageKey);
+      if (restored) {
+        pendingAttemptRef.current = restored;
+        activeCheckoutKeysRef.current = {
+          orderId: restored.orderId,
+          secret: restored.clientSecret,
+        };
+        // EFECTO ACTIVO DE RECUPERACIÓN TRAS RECARGA:
+        // Inicia automáticamente la comprobación y recuperación sin duplicar compras
+        runPendingAttemptRecovery(restored);
+        return;
+      }
+    }
+    setIsRestoringAttempt(false);
+  }, [businessStorageKey, runPendingAttemptRecovery]);
 
   // Opción 3: Estado de Mesa Abierta Sincronizada Comensal ↔ Mesero
   const [openTableSession, setOpenTableSession] = useState<{
@@ -1050,6 +1203,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       quantity?: number;
     }
   ) => {
+    if (!pendingAttemptRef.current) {
+      activeCheckoutKeysRef.current = null;
+    }
     // Si el plato tiene grupos de modificadores y no vienen pre-seleccionados, abrir modal
     if (dish.modifierGroups && dish.modifierGroups.length > 0 && !overrides) {
       openModifierModal(dish);
@@ -1187,6 +1343,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   };
 
   const removeFromCart = (itemKeyOrDishId: string) => {
+    if (!pendingAttemptRef.current) {
+      activeCheckoutKeysRef.current = null;
+    }
     setCart((prevCart) => {
       const existing = prevCart.find((item) => (item.itemKey || item.dish.id) === itemKeyOrDishId);
       if (existing && existing.quantity > 1) {
@@ -1201,6 +1360,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   };
 
   const deleteFromCart = (itemKeyOrDishId: string) => {
+    if (!pendingAttemptRef.current) {
+      activeCheckoutKeysRef.current = null;
+    }
     setCart((prevCart) => prevCart.filter((item) => (item.itemKey || item.dish.id) !== itemKeyOrDishId));
   };
 
@@ -1254,7 +1416,15 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   };
 
   const handleSendOrder = async (selectedMethod: "cash" | "deuna" | "payphone" | "qr") => {
-    if (cart.length === 0) return;
+    if (isSubmittingOrderRef.current || isRestoringAttempt) return;
+    if (checkoutBlockedMessage) {
+      alert(checkoutBlockedMessage);
+      return;
+    }
+    if (cart.length === 0 && !pendingAttemptRef.current) return;
+
+    isSubmittingOrderRef.current = true;
+    setIsSubmittingOrder(true);
 
     const isTableOrder = Boolean(selectedTable && selectedTable !== "" && selectedTable !== "Llevar" && selectedTable !== "Domicilio");
     const isDeliveryOrder = selectedTable === "Domicilio";
@@ -1419,9 +1589,80 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       }
     }
 
+    const targetMesa = isDeliveryOrder
+      ? "DELIVERY"
+      : isTableOrder
+      ? selectedTable
+      : "LLEVAR";
+    const targetTipoEntrega = isDeliveryOrder
+      ? "DOMICILIO"
+      : isTableOrder
+      ? "SALON"
+      : "RETIRO";
+    const targetMetodoEntrega = isDeliveryOrder ? "domicilio" : isTableOrder ? "salon" : "retiro";
+
     let result: any;
-    try {
-      result = await createOrderAction({
+    let clientOrderId: string;
+    let clientSecret: string;
+    let effectiveTargetMesa = targetMesa;
+    let effectiveTargetTipoEntrega = targetTipoEntrega;
+    let effectiveMetodoEntrega = targetMetodoEntrega;
+    let effectiveKdsItems = itemsData;
+    let effectiveCustomerName = customerName.trim();
+    let effectiveCustomerPhone: string | null = customerPhone.trim() || null;
+    let effectiveCustomerAddress: string | null = fullCustomerAddress || null;
+    let effectiveDeliveryCost = deliveryCost || 0;
+    let effectiveTotal = total;
+    let effectiveIsTableOrder = isTableOrder;
+
+    // COMPROBACIÓN DE COMPRA INCIERTA:
+    // Si hay un intento previo no resuelto (respuesta perdida o error de red),
+    // recuperamos PRIMERO ese intento con su contenido original snapshot, impidiendo crear una segunda compra.
+    const pendingAttempt = pendingAttemptRef.current;
+    if (pendingAttempt) {
+      await runPendingAttemptRecovery(pendingAttempt);
+      return;
+    }
+      // Intento nuevo: generar llaves y registrar snapshot del intento en sessionStorage ANTES del envío
+      const generateSecureUUID = (): string => {
+        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+          return crypto.randomUUID();
+        }
+        if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+          const bytes = new Uint8Array(16);
+          crypto.getRandomValues(bytes);
+          bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+          bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant 10
+          const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+          return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+        }
+        throw new Error("Entorno sin soporte para aleatoriedad criptográfica segura.");
+      };
+
+      const generateSecureSecret = (): string => {
+        if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+          const bytes = new Uint8Array(32);
+          crypto.getRandomValues(bytes);
+          return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+        }
+        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+          return `${crypto.randomUUID()}-${crypto.randomUUID()}`.replace(/-/g, "");
+        }
+        throw new Error("Entorno sin soporte para aleatoriedad criptográfica segura.");
+      };
+
+      if (!activeCheckoutKeysRef.current) {
+        activeCheckoutKeysRef.current = {
+          orderId: generateSecureUUID(),
+          secret: generateSecureSecret(),
+        };
+      }
+      clientOrderId = activeCheckoutKeysRef.current.orderId;
+      clientSecret = activeCheckoutKeysRef.current.secret;
+
+      const actionPayload = {
+        orderId: clientOrderId,
+        clientSecret: clientSecret,
         restaurantId: restaurant.id,
         tableName: selectedTable || "Llevar",
         customerName: customerName.trim() || undefined,
@@ -1441,20 +1682,78 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         paymentMethod: normalizedMethod,
         paymentDetails: paymentDetailsStr,
         items: itemsData,
-      });
-    } catch (actionErr: any) {
-      console.warn("[MenuClient] Error ejecutando Server Action:", actionErr);
-      alert("Hemos actualizado el sistema con una nueva versión. La página se actualizará para procesar tu pedido.");
-      window.location.reload();
-      return;
-    }
+      };
 
-    if (result.error) {
-      alert(result.error);
-      await refreshLiveStock(true);
-      setIsSubmittingOrder(false);
-      return;
-    }
+      const newAttempt: PendingCheckoutAttempt = {
+        orderId: clientOrderId,
+        clientSecret: clientSecret,
+        actionPayload,
+        itemsData,
+        kdsTargetMesa: targetMesa,
+        kdsTargetTipoEntrega: targetTipoEntrega,
+        kdsMetodoEntrega: targetMetodoEntrega,
+        fullCustomerAddress: fullCustomerAddress || null,
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim() || "",
+        deliveryCost: deliveryCost || 0,
+        total: total,
+        isTableOrder,
+        isDeliveryOrder,
+        savedAt: new Date().toISOString(),
+      };
+
+      // PERSISTIR EN MEMORIA Y EN SESSIONSTORAGE ANTES DE ENVIAR
+      pendingAttemptRef.current = newAttempt;
+      if (typeof window !== "undefined" && window.sessionStorage) {
+        savePendingAttemptToStorage(window.sessionStorage, businessStorageKey, newAttempt);
+      }
+
+      try {
+        result = await createOrderAction(actionPayload);
+      } catch (actionErr: any) {
+        isSubmittingOrderRef.current = false;
+        setIsSubmittingOrder(false);
+        const resolution = processCheckoutAttemptResult(actionErr);
+        alert(resolution.userMessage);
+        return;
+      }
+
+      const resolution = processCheckoutAttemptResult(result);
+      if (resolution.type === "BLOCKED_NEEDS_RESOLUTION") {
+        isSubmittingOrderRef.current = false;
+        setIsSubmittingOrder(false);
+        setCheckoutBlockedMessage(resolution.userMessage);
+        alert(resolution.userMessage);
+        return;
+      }
+      if (resolution.type === "RETRY_SAME_ATTEMPT") {
+        isSubmittingOrderRef.current = false;
+        setIsSubmittingOrder(false);
+        alert(resolution.userMessage);
+        return;
+      }
+      if (resolution.type === "ORDER_WAS_CANCELLED") {
+        isSubmittingOrderRef.current = false;
+        setIsSubmittingOrder(false);
+        if (typeof window !== "undefined" && window.sessionStorage) {
+          clearPendingAttemptFromStorage(window.sessionStorage, businessStorageKey);
+        }
+        pendingAttemptRef.current = null;
+        activeCheckoutKeysRef.current = null;
+        alert(resolution.userMessage);
+        return;
+      }
+      if (resolution.type === "DEFINITIVE_REJECTION") {
+        isSubmittingOrderRef.current = false;
+        setIsSubmittingOrder(false);
+        if (typeof window !== "undefined" && window.sessionStorage) {
+          clearPendingAttemptFromStorage(window.sessionStorage, businessStorageKey);
+        }
+        pendingAttemptRef.current = null;
+        alert(resolution.userMessage);
+        await refreshLiveStock(true);
+        return;
+      }
 
     // Actualización optimista inmediata del stock para que este y otros clientes vean el producto agotado o reducido
     setLiveStockMap((prev) => {
@@ -1542,53 +1841,65 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     } catch {}
 
     // Sincronizar el pedido con el KDS de cocina y Caja POS en PostgreSQL (Mesas, Domicilio o Para Llevar)
-    const targetMesa = isDeliveryOrder
-      ? "DELIVERY"
-      : isTableOrder
-      ? selectedTable
-      : "LLEVAR";
-    const targetTipoEntrega = isDeliveryOrder
-      ? "DOMICILIO"
-      : isTableOrder
-      ? "SALON"
-      : "RETIRO";
+    if (!result.dispatchToken) {
+      // Token ausente en el envío inicial: trata como despacho no confirmado
+      alert("Tu pedido está registrado, pero falta confirmar su envío a cocina. Reintenta la comprobación; no hagas otro pedido");
+      isSubmittingOrderRef.current = false;
+      setIsSubmittingOrder(false);
+      setIsCheckingPreviousOrder(false);
+      return;
+    }
 
-    try {
-      const kdsRes = await fetch("/api/pedidos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          negocio_id: restaurant.id,
-          slug: restaurant.slug,
-          mesa: targetMesa,
-          tipo_entrega: targetTipoEntrega,
-          metodo_entrega: isDeliveryOrder ? "domicilio" : isTableOrder ? "salon" : "retiro",
-          skip_stock_deduction: true, // createOrderAction ya dedució atómicamente el stock
-          items: cart.map((i) => ({
-            dishId: i.dish.id,
-            id: i.dish.id,
-            nombre: i.dish.name,
-            cantidad: i.quantity,
-            precio: i.unitPrice ?? i.dish.price,
-            notas: i.modifiersNotes || null,
-          })),
-          cliente_nombre: customerName.trim(),
-          cliente_telefono: customerPhone.trim() || null,
-          cliente_direccion: fullCustomerAddress || null,
-          costo_envio: deliveryCost || 0,
-          total: total,
-        }),
-      });
-      const kdsData = await kdsRes.json();
-      if (kdsRes.ok && kdsData.ok && kdsData.pedido) {
-        if (isTableOrder) {
-          setLiveTableOrder(kdsData.pedido);
-        }
-      } else if (!kdsRes.ok || !kdsData.ok) {
-        console.warn("Aviso KDS /api/pedidos:", kdsData?.error);
-      }
-    } catch (kdsErr) {
-      console.warn("Error enviando a KDS /api/pedidos:", kdsErr);
+    const kdsPayload: KdsDispatchPayload = {
+      order_id: result.orderId,
+      dispatch_token: result.dispatchToken,
+      negocio_id: restaurant.id,
+      slug: restaurant.slug,
+      mesa: effectiveTargetMesa,
+      tipo_entrega: effectiveTargetTipoEntrega,
+      metodo_entrega: effectiveMetodoEntrega,
+      skip_stock_deduction: true, // createOrderAction ya dedujo atómicamente el stock
+      items: effectiveKdsItems.map((i: any) => ({
+        dishId: i.dishId || i.id,
+        id: i.dishId || i.id,
+        nombre: i.dishName || i.nombre || i.name,
+        cantidad: i.quantity || i.cantidad || 1,
+        precio: i.price ?? i.precio ?? 0,
+        notas: i.notes || i.modifiersNotes || null,
+      })),
+      cliente_nombre: effectiveCustomerName,
+      cliente_telefono: effectiveCustomerPhone,
+      cliente_direccion: effectiveCustomerAddress,
+      costo_envio: effectiveDeliveryCost,
+      total: effectiveTotal,
+    };
+
+    const kdsDispatchRes = await executeKdsDispatch(fetch, clientSecret, kdsPayload);
+
+    if (!kdsDispatchRes.confirmed) {
+      // ANTE ERROR HTTP, RESPUESTA INVÁLIDA O EXCEPCIÓN:
+      // Conserva el intento original, sus claves y snapshot; no abre WhatsApp ni limpia carrito/storage.
+      alert("Tu pedido está registrado, pero falta confirmar su envío a cocina. Reintenta la comprobación; no hagas otro pedido");
+      isSubmittingOrderRef.current = false;
+      setIsSubmittingOrder(false);
+      setIsCheckingPreviousOrder(false);
+      return;
+    }
+
+    if (effectiveIsTableOrder && kdsDispatchRes.pedido) {
+      setLiveTableOrder(kdsDispatchRes.pedido);
+    }
+
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      window.sessionStorage.setItem(
+        `active_order_${restaurant.slug}`,
+        JSON.stringify({
+          orderId: result.orderId,
+          orderNumber: result.orderNumber,
+          clientSecret: clientSecret,
+          savedAt: new Date().toISOString(),
+        })
+      );
     }
 
     if (isTableOrder) {
@@ -1728,7 +2039,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     let formattedPhone = rawPhone.replace(/\D/g, "");
     if (!formattedPhone) {
       alert("¡Tu pedido se ha guardado exitosamente! No obstante, este comercio aún no ha configurado un número de WhatsApp para el envío directo del mensaje.");
+      if (typeof window !== "undefined" && window.sessionStorage) {
+        clearPendingAttemptFromStorage(window.sessionStorage, businessStorageKey);
+      }
       setCart([]);
+      activeCheckoutKeysRef.current = null;
+      pendingAttemptRef.current = null;
+      setCheckoutBlockedMessage(null);
+      isSubmittingOrderRef.current = false;
+      setIsSubmittingOrder(false);
+      setIsCheckingPreviousOrder(false);
       setIsCheckoutOpen(false);
       return;
     }
@@ -1746,9 +2066,17 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     window.open(whatsappUrl, "_blank");
     
     // Vaciar solo los items del carrito para permitir pedir rondas extras
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      clearPendingAttemptFromStorage(window.sessionStorage, businessStorageKey);
+    }
     setCart([]);
-    setIsCheckoutOpen(false);
+    activeCheckoutKeysRef.current = null;
+    pendingAttemptRef.current = null;
+    setCheckoutBlockedMessage(null);
+    isSubmittingOrderRef.current = false;
     setIsSubmittingOrder(false);
+    setIsCheckingPreviousOrder(false);
+    setIsCheckoutOpen(false);
 
     if (isTableOrder) {
       setExtraRoundSuccessToast(true);
@@ -4707,14 +5035,40 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               );
             })()}
 
+            {pendingAttemptRef.current && !checkoutBlockedMessage && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-500 text-xs mb-3 flex items-center gap-2">
+                <span>⏳ Hay una compra previa en verificación. Al confirmar, se comprobará el pedido anterior con sus datos originales para evitar cobros duplicados.</span>
+              </div>
+            )}
+            {checkoutBlockedMessage && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-500 text-xs mb-3 flex items-center gap-2">
+                <span>{checkoutBlockedMessage}</span>
+              </div>
+            )}
+
             {/* Confirm button */}
             <button
               onClick={() => handleSendOrder(paymentMethod)}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200"
+              disabled={isSubmittingOrder || isCheckingPreviousOrder || isRestoringAttempt || Boolean(checkoutBlockedMessage)}
+              className={`w-full flex items-center justify-center gap-2 py-4 rounded-xl text-xs font-black uppercase text-white shadow-lg transition-transform active:scale-95 duration-200 ${
+                isSubmittingOrder || isCheckingPreviousOrder || isRestoringAttempt || Boolean(checkoutBlockedMessage)
+                  ? "opacity-75 cursor-not-allowed"
+                  : ""
+              }`}
               style={{ backgroundColor: restaurant.themeColor }}
             >
               <Send className="h-4 w-4" />
-              {openTableSession && Boolean(selectedTable && selectedTable !== "" && selectedTable !== "Llevar" && selectedTable !== "Domicilio")
+              {isRestoringAttempt
+                ? "⏳ Restaurando sesión..."
+                : checkoutBlockedMessage
+                ? "⚠️ Verificación requerida"
+                : isCheckingPreviousOrder
+                ? "⏳ Comprobando pedido anterior..."
+                : isSubmittingOrder
+                ? "Enviando pedido..."
+                : pendingAttemptRef.current
+                ? "🔄 Reintentar Comprobación de Pedido Anterior"
+                : openTableSession && Boolean(selectedTable && selectedTable !== "" && selectedTable !== "Llevar" && selectedTable !== "Domicilio")
                 ? "➕ Enviar Ronda Extra a Cocina"
                 : "Confirmar y Enviar Pedido"}
             </button>

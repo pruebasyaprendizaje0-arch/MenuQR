@@ -317,6 +317,8 @@ model Order {
   paymentMethod    String
   paymentDetails   String?
   isTest           Boolean     @default(false)
+  claimHash        String?     // Hash criptográfico de la capacidad de reclamo del cliente
+  kdsDispatched    Boolean     @default(false) // Indica si la comanda fue despachada hacia KDS (pedidos)
   cashShiftId      String?
   cashShift        CashShift?  @relation(fields: [cashShiftId], references: [id], onDelete: SetNull)
 
@@ -341,6 +343,7 @@ model Order {
   @@index([restaurantId, createdAt])
   @@index([restaurantId, status])
   @@index([restaurantId, isTest])
+  @@index([restaurantId, kdsDispatched])
   @@index([cashShiftId])
   @@index([status])
 }
@@ -353,6 +356,7 @@ model OrderItem {
   dishName  String
   price     Float
   quantity  Int
+  notes     String?
 
   @@index([orderId])
 }

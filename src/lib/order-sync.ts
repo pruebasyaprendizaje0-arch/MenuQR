@@ -11,7 +11,8 @@ export function mapPedidoEstadoToPrismaStatus(estado: string | null | undefined)
   if (norm === "cancelado" || norm === "cancelled") return "CANCELLED";
   if (norm === "entregado" || norm === "delivered") return "DELIVERED";
   if (norm === "en_camino" || norm === "in_transit") return "IN_TRANSIT";
-  if (norm === "preparando" || norm === "preparing" || norm === "listo") return "PREPARING";
+  if (norm === "en_cocina" || norm === "preparando" || norm === "preparing") return "PREPARING";
+  if (norm === "listo" || norm === "ready") return "READY";
   return "PENDING";
 }
 
@@ -76,7 +77,7 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     let meta: any = {};
     try {
       meta = typeof p.metadata === "string" ? JSON.parse(p.metadata) : (p.metadata || {});
-    } catch {}
+    } catch { }
 
     const itemsSubtotal = itemsToSave.reduce(
       (acc: number, it: any) => acc + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
@@ -104,7 +105,7 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
 
     const existing = await prisma.order.findUnique({
       where: { id: p.id },
-      select: { id: true, status: true, total: true },
+      include: { items: true },
     });
 
     if (!existing) {
@@ -130,25 +131,125 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
               dishName: it.nombre || "Producto",
               price: Number(it.precio) || 0,
               quantity: parseInt(it.cantidad) || 1,
+              notes: it.notas || null,
             })),
           },
         },
       });
     } else {
-      await prisma.order.update({
-        where: { id: p.id },
-        data: {
-          status: pStatus,
-          subtotal: subtotalFinal,
-          iva: ivaFinal,
-          serviceCharge: serviceFinal,
-          deliveryCost: deliveryCost,
-          total: pTotal,
-          tableName: pTable,
-          customerName: p.cliente_nombre?.trim() || null,
-          isTest: isTestOrder,
-        },
-      });
+      // Mapear cantidades agregadas por clave canónica desde pedido_items
+      const makeLineKey = (name: string, price: number, notes?: string | null) =>
+        `${(name || "").trim()}__${Number(price || 0).toFixed(2)}__${(notes || "").trim()}`;
+
+      const targetItemsMap = new Map<string, { name: string; price: number; quantity: number; notes: string | null }>();
+      for (const it of itemsToSave) {
+        const k = makeLineKey(it.nombre, it.precio, it.notas);
+        const qty = parseInt(it.cantidad) || 1;
+        const curr = targetItemsMap.get(k);
+        if (curr) {
+          curr.quantity += qty;
+        } else {
+          targetItemsMap.set(k, {
+            name: it.nombre || "Producto",
+            price: Number(it.precio) || 0,
+            quantity: qty,
+            notes: it.notas || null,
+          });
+        }
+      }
+
+      // Mapear ítems existentes en Prisma Order
+      const existingItemByKey = new Map<string, typeof existing.items[0]>();
+      const existingQtyMap = new Map<string, number>();
+      for (const e of existing.items) {
+        const k = makeLineKey(e.dishName, e.price, e.notes);
+        existingItemByKey.set(k, e);
+        existingQtyMap.set(k, (existingQtyMap.get(k) || 0) + e.quantity);
+      }
+
+      // Detectar mutaciones en ítems (tanto platos nuevos como aumento de cantidad de líneas existentes)
+      let itemsMutated = false;
+      const itemsToCreate: Array<{ dishName: string; price: number; quantity: number; notes: string | null }> = [];
+      const itemsToUpdate: Array<{ id: string; quantity: number }> = [];
+
+      for (const [k, target] of targetItemsMap.entries()) {
+        const existQty = existingQtyMap.get(k) || 0;
+        if (existQty === 0) {
+          itemsMutated = true;
+          itemsToCreate.push({
+            dishName: target.name,
+            price: target.price,
+            quantity: target.quantity,
+            notes: target.notes,
+          });
+        } else if (target.quantity > existQty) {
+          itemsMutated = true;
+          const existItem = existingItemByKey.get(k);
+          if (existItem) {
+            itemsToUpdate.push({ id: existItem.id, quantity: target.quantity });
+          }
+        }
+      }
+
+      if (!itemsMutated) {
+        // Si no hay platos añadidos ni aumento de cantidades, actualizar ÚNICAMENTE estado y mesa
+        await prisma.order.update({
+          where: { id: p.id },
+          data: {
+            status: pStatus,
+            tableName: pTable,
+          },
+        });
+      } else {
+        // Si hay adiciones o aumentos de cantidad, actualizar OrderItem y recalcular totales
+        for (const up of itemsToUpdate) {
+          await prisma.orderItem.update({
+            where: { id: up.id },
+            data: { quantity: up.quantity },
+          });
+        }
+
+        const preservedTip = existing.tip || 0;
+        const preservedDiscount = existing.discountAmount || 0;
+        const preservedDelivery = existing.deliveryCost || 0;
+
+        const newItemsSubtotal = itemsToSave.reduce(
+          (sum: number, it: any) => sum + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
+          0
+        );
+        const subtotalAfterCoupon = Math.max(0, newItemsSubtotal - preservedDiscount);
+
+        const roundMoney = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
+
+        const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
+          ? roundMoney(subtotalAfterCoupon * (rest.ivaPercent / 100))
+          : 0;
+        const calcService = (rest.servicePercent > 0 && !serviceIncluded)
+          ? roundMoney(subtotalAfterCoupon * (rest.servicePercent / 100))
+          : 0;
+
+        const updatedTotal = roundMoney(subtotalAfterCoupon + calcIva + calcService + preservedDelivery + preservedTip);
+
+        await prisma.order.update({
+          where: { id: p.id },
+          data: {
+            status: pStatus,
+            subtotal: newItemsSubtotal,
+            iva: calcIva,
+            serviceCharge: calcService,
+            total: updatedTotal,
+            tableName: pTable,
+            items: itemsToCreate.length > 0 ? {
+              create: itemsToCreate.map((it) => ({
+                dishName: it.dishName,
+                price: it.price,
+                quantity: it.quantity,
+                notes: it.notes,
+              })),
+            } : undefined,
+          },
+        });
+      }
     }
   } catch (err) {
     console.error("[syncSinglePedidoToPrisma] Error:", err);
@@ -227,7 +328,7 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
       let meta: any = {};
       try {
         meta = typeof p.metadata === "string" ? JSON.parse(p.metadata) : (p.metadata || {});
-      } catch {}
+      } catch { }
 
       const rawItems = Array.isArray(p.items) ? p.items : [];
       const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
@@ -308,6 +409,100 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
     return syncedCount;
   } catch (err) {
     console.error("[syncPedidosToPrismaOrders] Error:", err);
+    return 0;
+  }
+}
+
+/**
+ * Reconciliador pasivo: recupera pedidos web de los últimos 30 minutos marcados explícitamente como
+ * pendientes de despacho hacia el KDS (pedidos), estrictamente para el negocio consultado y no cancelados.
+ *
+ * DOCUMENTACIÓN OPERATIVA:
+ * Esta reconciliación en segundo plano inserta la orden directamente en PostgreSQL (pedidos / pedido_items),
+ * pero NO emite avisos sonoros en el navegador ni notificaciones push a Telegram. La confirmación visual y
+ * operativa de estos pedidos recuperados en la pantalla de cocina queda pendiente de comprobarse en la prueba
+ * real de cocina en el entorno integrado.
+ */
+export async function reconcileUndispatchedOrders(restaurantId: string): Promise<number> {
+  if (!restaurantId) return 0;
+  try {
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const pendingOrders = await prisma.order.findMany({
+      where: {
+        restaurantId,
+        claimHash: { not: null },
+        kdsDispatched: false,
+        status: { not: "CANCELLED" },
+        createdAt: { gte: thirtyMinutesAgo },
+      },
+      include: { items: true },
+      take: 10,
+    });
+
+    if (!pendingOrders || pendingOrders.length === 0) return 0;
+
+    let reconciledCount = 0;
+    for (const ord of pendingOrders) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const metaObj = {
+          tipo_pedido: ord.tableName === "Domicilio" ? "delivery" : ord.tableName === "Llevar" ? "llevar" : "mesa",
+          tipo_entrega: ord.tableName === "Domicilio" ? "DOMICILIO" : ord.tableName === "Llevar" ? "RETIRO" : "SALON",
+          cliente_direccion: ord.customerAddress || null,
+          costo_envio: ord.deliveryCost || 0,
+          subtotal: ord.subtotal,
+          iva: ord.iva,
+          service_charge: ord.serviceCharge,
+          notas_entrega: null,
+          reconciled: true,
+        };
+
+        const insertRes = await client.query(
+          `INSERT INTO pedidos (id, negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
+           VALUES ($1::uuid, $2, $3, NULL, 'nuevo', $4, $5, $6, 'menuqr', $7)
+           ON CONFLICT (id) DO NOTHING
+           RETURNING id`,
+          [
+            ord.id,
+            ord.restaurantId,
+            ord.tableName,
+            ord.total,
+            ord.customerName,
+            ord.customerPhone,
+            JSON.stringify(metaObj),
+          ]
+        );
+
+        if (insertRes.rows.length > 0) {
+          for (const it of ord.items) {
+            await client.query(
+              `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+               VALUES ($1, $2, $3, $4, $5, false, 'nuevo')`,
+              [ord.id, it.dishName, it.quantity, it.price, it.notes || null]
+            );
+          }
+        }
+
+        await client.query("COMMIT");
+
+        await prisma.order.update({
+          where: { id: ord.id },
+          data: { kdsDispatched: true },
+        });
+
+        reconciledCount++;
+      } catch (e) {
+        await client.query("ROLLBACK");
+        console.error("[reconcileUndispatchedOrders] Error en orden:", ord.id, e);
+      } finally {
+        client.release();
+      }
+    }
+
+    return reconciledCount;
+  } catch (err) {
+    console.error("[reconcileUndispatchedOrders] Error general:", err);
     return 0;
   }
 }

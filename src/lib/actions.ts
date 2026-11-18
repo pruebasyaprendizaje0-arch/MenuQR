@@ -7,7 +7,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { join } from "path";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
+import { signKdsDispatchToken } from "@/lib/jwt";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { recordSlugChange, sanitizeSlug } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
@@ -2438,6 +2439,8 @@ export async function updateSystemSettingAction(key: string, value: string) {
 }
 
 export async function createOrderAction(data: {
+  orderId?: string;
+  clientSecret?: string;
   restaurantId: string;
   tableName: string;
   customerName?: string;
@@ -2471,19 +2474,137 @@ export async function createOrderAction(data: {
     notes?: string;
   }[];
 }) {
+  let finalTotal = 0;
+  let verifiedOrderItems: Array<{ dishName: string; price: number; quantity: number; notes?: string | null }> = [];
+
+  const areOrderItemsCanonicallyIdentical = (
+    reqItems: Array<{ dishName: string; price: number; quantity: number; notes?: string | null }>,
+    existItems: Array<{ dishName: string; price: number; quantity: number; notes?: string | null }>
+  ): boolean => {
+    if (!reqItems || !existItems) return false;
+    if (reqItems.length !== existItems.length) return false;
+    const sortKey = (it: { dishName: string; price: number; notes?: string | null }) =>
+      `${(it.dishName || "").trim()}__${Number(it.price || 0).toFixed(2)}__${(it.notes || "").trim()}`;
+
+    const sortedReq = [...reqItems].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+    const sortedExist = [...existItems].sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+
+    for (let i = 0; i < sortedReq.length; i++) {
+      const r = sortedReq[i];
+      const e = sortedExist[i];
+      if (r.dishName.trim() !== e.dishName.trim()) return false;
+      if (Math.abs(Number(r.price) - Number(e.price)) > 0.01) return false;
+      if (r.quantity !== e.quantity) return false;
+      if ((r.notes || "").trim() !== ((e as any).notes || "").trim()) return false;
+    }
+    return true;
+  };
+
   try {
     if (!data.restaurantId || typeof data.restaurantId !== "string") {
-      return { error: "ID de restaurante inválido." };
+      return { error: "ID de restaurante inválido.", errorCode: "INVALID_INPUT" };
     }
 
     if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
-      return { error: "El pedido debe contener al menos un producto." };
+      return { error: "El pedido debe contener al menos un producto.", errorCode: "INVALID_INPUT" };
     }
 
     const rawMethod = (data.paymentMethod || "").trim().toLowerCase();
     const validMethods = ["cash", "efectivo", "qr", "deuna", "payphone", "transferencia", "transfer", "tarjeta", "card"];
     if (!rawMethod || !validMethods.includes(rawMethod)) {
-      return { error: "Método de pago no válido." };
+      return { error: "Método de pago no válido.", errorCode: "INVALID_INPUT" };
+    }
+
+    const computedClaimHash = data.clientSecret
+      ? createHash("sha256").update(data.clientSecret).digest("hex")
+      : null;
+
+    // COMPROBACIÓN TEMPRANA DE IDEMPOTENCIA / RECUPERACIÓN:
+    // Si viene un orderId de una compra incierta y ya existe en la base de datos,
+    // debemos recuperarlo antes de fallar por stock agotado (que fue consumido por esta misma orden)
+    // o por cupón de un solo uso (que fue canjeado por esta misma orden).
+    if (data.orderId && typeof data.orderId === "string") {
+      const existingEarly = await prisma.order.findUnique({
+        where: { id: data.orderId },
+        include: { items: true },
+      });
+      if (existingEarly) {
+        if (existingEarly.restaurantId !== data.restaurantId) {
+          return { error: "Acceso no autorizado al pedido especificado.", errorCode: "UNAUTHORIZED" };
+        }
+        if (existingEarly.status === "CANCELLED") {
+          return {
+            error: "No se puede recuperar ni despachar un pedido que ha sido cancelado.",
+            errorCode: "ORDER_CANCELLED",
+            orderNumber: existingEarly.orderNumber || undefined,
+          };
+        }
+        const existingClaim = existingEarly.claimHash;
+        if (!data.clientSecret || !computedClaimHash || !existingClaim || existingClaim !== computedClaimHash) {
+          return {
+            error: "Credencial de capacidad (clientSecret/claimHash) obligatoria y coincidente requerida para recuperar el pedido.",
+            errorCode: "AUTH_CONFLICT",
+          };
+        }
+        // Si el cliente envió el total, verificar coincidencia con tolerancia de redondeo
+        if (typeof data.total === "number" && Math.abs(existingEarly.total - data.total) > 0.02) {
+          return {
+            error: "Conflicto de idempotencia: el total no coincide con el pedido previamente creado.",
+            errorCode: "IDEMPOTENCY_CONFLICT",
+          };
+        }
+        // Si los ítems en la petición traen dishName, comparar canónicamente
+        const candidateItems = data.items.map((it) => {
+          let price = typeof it.price === "number" ? it.price : 0;
+          const modifierDetails: string[] = [];
+          if (Array.isArray(it.modifiers)) {
+            for (const mod of it.modifiers) {
+              const extra = Math.max(0, Number(mod.extraPrice) || 0);
+              price += extra;
+              const groupPrefix = mod.groupName ? `${mod.groupName}: ` : "";
+              const priceSuffix = extra > 0 ? ` (+$${extra.toFixed(2)})` : "";
+              modifierDetails.push(`${groupPrefix}${mod.optionName}${priceSuffix}`);
+            }
+          }
+          if (it.notes && it.notes.trim()) {
+            modifierDetails.push(`Nota: ${it.notes.trim()}`);
+          }
+          const baseName = (it.dishName || "").trim();
+          const fullName = modifierDetails.length > 0 && baseName
+            ? `${baseName} [${modifierDetails.join(" · ")}]`
+            : baseName;
+          return {
+            dishName: fullName,
+            price,
+            quantity: it.quantity,
+            notes: modifierDetails.length > 0 ? modifierDetails.join(" · ") : (it.notes || null),
+          };
+        });
+
+        if (candidateItems.every((it) => Boolean(it.dishName))) {
+          if (!areOrderItemsCanonicallyIdentical(candidateItems, existingEarly.items)) {
+            return {
+              error: "Conflicto de idempotencia: los productos, cantidades o notas cambiaron para la misma clave de pedido.",
+              errorCode: "IDEMPOTENCY_CONFLICT",
+            };
+          }
+        }
+
+        const dispatchToken = signKdsDispatchToken({
+          orderId: existingEarly.id,
+          restaurantId: existingEarly.restaurantId,
+          total: existingEarly.total,
+          orderNumber: existingEarly.orderNumber || 1,
+          purpose: "kds_dispatch",
+        });
+        return {
+          success: true,
+          orderId: existingEarly.id,
+          orderNumber: existingEarly.orderNumber || 1,
+          dispatchToken,
+          isRetry: true,
+        };
+      }
     }
 
     const restaurant = await prisma.restaurant.findUnique({
@@ -2496,13 +2617,13 @@ export async function createOrderAction(data: {
     });
 
     if (!restaurant) {
-      return { error: "Restaurante no encontrado." };
+      return { error: "Restaurante no encontrado.", errorCode: "INVALID_INPUT" };
     }
 
     // Map & lookup dishes by dishId
     const dishIds = Array.from(new Set(data.items.map((i) => i.dishId).filter(Boolean)));
     if (dishIds.length === 0) {
-      return { error: "Los productos del pedido deben incluir un ID de plato válido." };
+      return { error: "Los productos del pedido deben incluir un ID de plato válido.", errorCode: "INVALID_INPUT" };
     }
 
     const dbDishes = await prisma.dish.findMany({
@@ -2514,7 +2635,7 @@ export async function createOrderAction(data: {
     const dishMap = new Map(dbDishes.map((d) => [d.id, d]));
 
     let calculatedSubtotal = 0;
-    const verifiedOrderItems: { dishName: string; price: number; quantity: number }[] = [];
+    verifiedOrderItems = [];
 
     for (const item of data.items) {
       if (
@@ -2529,32 +2650,34 @@ export async function createOrderAction(data: {
 
       const dbDish = dishMap.get(item.dishId);
       if (!dbDish) {
-        return { error: `Uno o más productos del pedido no existen.` };
+        return { error: `Uno o más productos del pedido no existen.`, errorCode: "INVALID_INPUT" };
       }
 
       // Multi-tenant protection (PASO 15)
       if (dbDish.restaurantId !== data.restaurantId) {
-        return { error: `El producto "${dbDish.name}" no pertenece a este restaurante.` };
+        return { error: `El producto "${dbDish.name}" no pertenece a este restaurante.`, errorCode: "INVALID_INPUT" };
       }
 
       // Availability check (PASO 3)
       if (!dbDish.isAvailable) {
-        return { error: `El producto "${dbDish.name}" no está disponible actualmente.` };
+        return { error: `El producto "${dbDish.name}" no está disponible actualmente.`, errorCode: "INVALID_INPUT" };
       }
 
       // Stock check estricto para platos: no se puede pedir si no está configurado o si no hay stock
       if (dbDish.stock === null || dbDish.stock === undefined) {
         return {
           error: `No se puede procesar el pedido: El producto "${dbDish.name}" no tiene el stock configurado en el sistema.`,
+          errorCode: "INVALID_INPUT",
         };
       }
       const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
       if (availableStock <= 0 || !dbDish.isAvailable) {
-        return { error: `El producto "${dbDish.name}" se encuentra agotado.` };
+        return { error: `El producto "${dbDish.name}" se encuentra agotado.`, errorCode: "INVALID_INPUT" };
       }
       if (item.quantity > availableStock) {
         return {
           error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
+          errorCode: "INVALID_INPUT",
         };
       }
 
@@ -2585,6 +2708,7 @@ export async function createOrderAction(data: {
         dishName: fullDishName,
         price: serverPrice,
         quantity: item.quantity,
+        notes: modifierDetails.length > 0 ? modifierDetails.join(" · ") : null,
       });
     }
 
@@ -2603,16 +2727,17 @@ export async function createOrderAction(data: {
 
       if (coupon && coupon.isActive) {
         if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
-          return { error: "El cupón ha expirado." };
+          return { error: "El cupón ha expirado.", errorCode: "INVALID_INPUT" };
         }
 
         if (coupon.maxUses !== null && coupon.usedCount >= coupon.maxUses) {
-          return { error: "El cupón ha alcanzado su límite máximo de usos." };
+          return { error: "El cupón ha alcanzado su límite máximo de usos.", errorCode: "INVALID_INPUT" };
         }
 
         if (calculatedSubtotal < coupon.minOrder) {
           return {
             error: `Este cupón requiere un consumo mínimo de $${coupon.minOrder.toFixed(2)}. Tu subtotal real es $${calculatedSubtotal.toFixed(2)}.`,
+            errorCode: "INVALID_INPUT",
           };
         }
 
@@ -2634,10 +2759,10 @@ export async function createOrderAction(data: {
 
         if (ruletaGiro) {
           if (ruletaGiro.estado === "CANJEADO") {
-            return { error: `Este cupón de la ruleta (${cleanCode}) ya fue canjeado.` };
+            return { error: `Este cupón de la ruleta (${cleanCode}) ya fue canjeado.`, errorCode: "INVALID_INPUT" };
           }
           if (ruletaGiro.estado === "EXPIRADO" || new Date() > new Date(ruletaGiro.fechaExpiracion)) {
-            return { error: "Este cupón de la ruleta ha expirado." };
+            return { error: "Este cupón de la ruleta ha expirado.", errorCode: "INVALID_INPUT" };
           }
 
           verifiedCouponCode = ruletaGiro.codigoCupon;
@@ -2657,7 +2782,7 @@ export async function createOrderAction(data: {
           }
           calculatedDiscount = Math.min(calculatedSubtotal, calculatedDiscount);
         } else {
-          return { error: "El cupón ingresado no existe o está inactivo." };
+          return { error: "El cupón ingresado no existe o está inactivo.", errorCode: "INVALID_INPUT" };
         }
       }
     }
@@ -2719,7 +2844,7 @@ export async function createOrderAction(data: {
             if (selectedRate) {
               const minOrder = typeof selectedRate.minOrder === "number" ? selectedRate.minOrder : (typeof selectedRate.minPurchase === "number" ? selectedRate.minPurchase : 0);
               if (calculatedSubtotal < minOrder) {
-                return { error: `Para la zona de envío seleccionada, el consumo mínimo es de $${minOrder.toFixed(2)}.` };
+                return { error: `Para la zona de envío seleccionada, el consumo mínimo es de $${minOrder.toFixed(2)}.`, errorCode: "INVALID_INPUT" };
               }
               calculatedDeliveryCost = typeof selectedRate.price === "number" ? selectedRate.price : 0;
             } else {
@@ -2753,7 +2878,7 @@ export async function createOrderAction(data: {
     const finalDelivery = round(calculatedDeliveryCost);
     const finalTip = round(calculatedTip);
 
-    const finalTotal = round(
+    finalTotal = round(
       finalSubtotal - finalDiscount + finalSeasonBonus + finalIva + finalService + finalDelivery + finalTip
     );
 
@@ -2768,6 +2893,9 @@ export async function createOrderAction(data: {
 
       const newOrder = await tx.order.create({
         data: {
+          id: data.orderId || undefined,
+          claimHash: computedClaimHash || null,
+          kdsDispatched: false,
           restaurantId: data.restaurantId,
           tableName: rawTableName,
           customerName: data.customerName?.slice(0, 200) || null,
@@ -2791,6 +2919,7 @@ export async function createOrderAction(data: {
               dishName: item.dishName,
               price: item.price,
               quantity: item.quantity,
+              notes: item.notes || null,
             })),
           },
         },
@@ -2971,14 +3100,75 @@ export async function createOrderAction(data: {
       // Safe fallback when executed outside Next request context
     }
 
+    const dispatchToken = signKdsDispatchToken({
+      orderId: order.id,
+      restaurantId: order.restaurantId,
+      total: order.total,
+      orderNumber: order.orderNumber || 1,
+      purpose: "kds_dispatch",
+    });
+
     return {
       success: true,
       orderId: order.id,
-      orderNumber: order.orderNumber || 1
+      orderNumber: order.orderNumber || 1,
+      dispatchToken,
     };
   } catch (error: any) {
+    const errorTarget = error?.meta?.target;
+    // P2002 debe aceptar ÚNICAMENTE la constraint exacta de identidad de Order (Order_pkey o campo id).
+    // Falla de forma cerrada si target es ausente, si contiene campos adicionales o si es otra constraint.
+    const isExactOrderIdentityConstraint =
+      (Array.isArray(errorTarget) && errorTarget.length === 1 && (errorTarget[0] === "id" || errorTarget[0] === "Order_pkey")) ||
+      (typeof errorTarget === "string" && (errorTarget === "id" || errorTarget === "Order_pkey"));
+
+    if (error?.code === "P2002" && data.orderId && isExactOrderIdentityConstraint) {
+      try {
+        const existing = await prisma.order.findUnique({
+          where: { id: data.orderId },
+          include: { items: true },
+        });
+        if (existing) {
+          if (existing.restaurantId !== data.restaurantId) {
+            return { error: "Acceso no autorizado al pedido especificado.", errorCode: "UNAUTHORIZED" };
+          }
+          if (existing.status === "CANCELLED") {
+            return { error: "No se puede recuperar ni despachar un pedido que ha sido cancelado.", errorCode: "ORDER_CANCELLED" };
+          }
+          const computedClaimHash = data.clientSecret
+            ? createHash("sha256").update(data.clientSecret).digest("hex")
+            : null;
+          const existingClaim = existing.claimHash;
+          if (!data.clientSecret || !computedClaimHash || !existingClaim || existingClaim !== computedClaimHash) {
+            return { error: "Credencial de capacidad (clientSecret/claimHash) obligatoria y coincidente requerida para recuperar el pedido.", errorCode: "AUTH_CONFLICT" };
+          }
+          if (Math.abs(existing.total - finalTotal) > 0.02) {
+            return { error: "Conflicto de concurrencia: el total no coincide.", errorCode: "IDEMPOTENCY_CONFLICT" };
+          }
+          if (!areOrderItemsCanonicallyIdentical(verifiedOrderItems, existing.items)) {
+            return { error: "Conflicto de concurrencia: los productos o notas del pedido concurrente no coinciden con la solicitud.", errorCode: "IDEMPOTENCY_CONFLICT" };
+          }
+          const dispatchToken = signKdsDispatchToken({
+            orderId: existing.id,
+            restaurantId: existing.restaurantId,
+            total: existing.total,
+            orderNumber: existing.orderNumber || 1,
+            purpose: "kds_dispatch",
+          });
+          return {
+            success: true,
+            orderId: existing.id,
+            orderNumber: existing.orderNumber || 1,
+            dispatchToken,
+            isRetry: true,
+          };
+        }
+      } catch (raceErr) {
+        console.error("Error en recuperación de carrera P2002:", raceErr);
+      }
+    }
     console.error("Error creating order:", error);
-    return { error: error?.message || "No se pudo guardar el pedido." };
+    return { error: error?.message || "No se pudo guardar el pedido.", errorCode: "TRANSITIONAL_ERROR" };
   }
 }
 

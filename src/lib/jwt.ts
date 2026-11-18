@@ -68,3 +68,28 @@ export function verifyToken(token: string): UserSessionPayload | null {
     return null;
   }
 }
+
+export interface KdsDispatchTokenPayload {
+  orderId: string;
+  restaurantId: string;
+  total: number;
+  orderNumber: number;
+  purpose: "kds_dispatch";
+}
+
+export function signKdsDispatchToken(payload: KdsDispatchTokenPayload): string {
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: "5m" });
+}
+
+export function verifyKdsDispatchToken(token: string): KdsDispatchTokenPayload | null {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret()) as KdsDispatchTokenPayload;
+    if (decoded && decoded.purpose === "kds_dispatch") {
+      return decoded;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
