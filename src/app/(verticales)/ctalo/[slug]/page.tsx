@@ -8,6 +8,7 @@ import { headers } from "next/headers";
 import { getBusinessLabels, resolveBusinessVertical } from "@/lib/business-labels";
 import Link from "next/link";
 import { ShoppingBag, ArrowLeft, Store } from "lucide-react";
+import { getMockDemoStore } from "@/lib/demo-data";
 
 export const dynamic = "force-dynamic";
 
@@ -60,105 +61,6 @@ export async function generateMetadata({ params: paramsPromise }: PageProps): Pr
 
   return {
     title: "Catálogo E-Commerce | Ubícame Pro",
-  };
-}
-
-// Datos demo EXCLUSIVOS si se solicita /ctalo/demo de forma explícita
-function getMockDemoStore() {
-  return {
-    id: "demo-boutique-id",
-    name: "Aura Boutique & Calzado Urbano",
-    slug: "demo",
-    whatsapp: "593999999999",
-    logoUrl: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=200&auto=format&fit=crop&q=80",
-    coverUrl: "https://images.unsplash.com/photo-1441984904996-e0b6ba687e04?w=1200&auto=format&fit=crop&q=80",
-    address: "Mall del Sol, Nivel 2, Local 45, Guayaquil",
-    description: "Colección exclusiva de moda femenina, calzado en cuero genuino, joyas en plata 925 y accesorios de temporada.",
-    galleryImages: [
-      "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1000&auto=format&fit=crop&q=80",
-      "https://images.unsplash.com/photo-1441984904996-e0b6ba687e04?w=1000&auto=format&fit=crop&q=80",
-      "https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=1000&auto=format&fit=crop&q=80",
-      "https://images.unsplash.com/photo-1555529669-e69e7aa0ba9a?w=1000&auto=format&fit=crop&q=80",
-    ],
-    deliveryCost: 3.5,
-    categories: [
-      {
-        id: "cat-calzado",
-        name: "👟 Calzado & Sneakers",
-        imageAspectRatio: "DEFAULT",
-        products: [
-          {
-            id: "prod-1",
-            name: "Sneakers Urbanos Blancos Suela Chunky",
-            description: "Calzado de cuero sintético premium transpirable, plantilla ortopédica acolchada y suela antideslizante de alta duración.",
-            price: 49.99,
-            imageUrl: "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=600&auto=format&fit=crop&q=80",
-            tallas: ["36", "37", "38", "39", "40"],
-            colores: ["Blanco Puro", "Blanco con Detalles Oro", "Beige Arena"],
-            stock: 12,
-            isNew: true,
-          },
-          {
-            id: "prod-2",
-            name: "Botines de Cuero Chelsea Dark",
-            description: "Botines clásicos con elásticos laterales, forro térmico suave y tacón bajo cuadrado de 4 cm muy cómodo.",
-            price: 68.0,
-            imageUrl: "https://images.unsplash.com/photo-1520639888713-7851133b1ed0?w=600&auto=format&fit=crop&q=80",
-            tallas: ["37", "38", "39", "40", "41"],
-            colores: ["Negro Mate", "Café Chocolate", "Vino"],
-            stock: 8,
-            isNew: false,
-          },
-        ],
-      },
-      {
-        id: "cat-ropa",
-        name: "👗 Ropa & Prendas",
-        imageAspectRatio: "DEFAULT",
-        products: [
-          {
-            id: "prod-3",
-            name: "Vestido Midi Plisado Seda Fría",
-            description: "Corte evasé con escote en V, cinto ajustable a la cintura y falda fluida con forro interno que no transparenta.",
-            price: 39.5,
-            imageUrl: "https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?w=600&auto=format&fit=crop&q=80",
-            tallas: ["S", "M", "L", "XL"],
-            colores: ["Verde Esmeralda", "Terracota", "Negro Clásico", "Azul Noche"],
-            stock: 15,
-            isNew: true,
-          },
-          {
-            id: "prod-4",
-            name: "Blazer Oversize Sastrería Chic",
-            description: "Chaqueta estructurada con hombreras suaves, solapa invertida y botones dorados grabados.",
-            price: 45.0,
-            imageUrl: "https://images.unsplash.com/photo-1591047139829-d91aecb6caea?w=600&auto=format&fit=crop&q=80",
-            tallas: ["S", "M", "L"],
-            colores: ["Beige Camel", "Blanco Marfil", "Negro", "Lila Pastel"],
-            stock: 6,
-            isNew: false,
-          },
-        ],
-      },
-      {
-        id: "cat-joyas",
-        name: "💍 Joyería & Accesorios",
-        imageAspectRatio: "DEFAULT",
-        products: [
-          {
-            id: "prod-5",
-            name: "Juego de Aretes y Collar Perlas Barrocas",
-            description: "Bañado en oro de 18k hipoalergénico con perlas de agua dulce cultivadas. Incluye estuche de regalo.",
-            price: 28.0,
-            imageUrl: "https://images.unsplash.com/photo-1599643478518-a784e5dc4c8f?w=600&auto=format&fit=crop&q=80",
-            tallas: ["Única"],
-            colores: ["Oro 18k", "Plata 925"],
-            stock: 20,
-            isNew: true,
-          },
-        ],
-      },
-    ],
   };
 }
 

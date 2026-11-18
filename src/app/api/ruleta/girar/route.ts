@@ -55,6 +55,32 @@ export async function POST(request: NextRequest) {
 
     // 1. Obtener restaurante
     const cleanSlug = slug.toLowerCase().trim();
+
+    if (cleanSlug === "demo") {
+      const demoPrizes = [
+        { id: "1", label: "10% de Descuento", tipo: "porcentaje", index: 0 },
+        { id: "2", label: "Bebida Gratis", tipo: "regalo", index: 1 },
+        { id: "3", label: "Postre Gratis", tipo: "regalo", index: 2 },
+        { id: "4", label: "Papas Rústicas Gratis", tipo: "regalo", index: 3 },
+        { id: "5", label: "$5.00 de Descuento", tipo: "monto", index: 4 },
+      ];
+      const win = demoPrizes[Math.floor(Math.random() * demoPrizes.length)];
+      const code = "DEMO-" + Math.random().toString(36).substring(2, 7).toUpperCase();
+      const expires = new Date(Date.now() + 24 * 3600 * 1000);
+      return NextResponse.json({
+        success: true,
+        giroId: "demo-giro-" + Date.now(),
+        codigoCupon: code,
+        premioLabel: win.label,
+        premioTipo: win.tipo,
+        premioId: win.id,
+        sectorIndex: win.index,
+        fechaExpiracion: expires.toISOString(),
+        restaurantName: "La Parrilla Criolla & Bar (Demo)",
+        restaurantWhatsapp: "593999999999",
+      });
+    }
+
     const slugCheck = await findRestaurantBySlugOrHistory(cleanSlug);
     const targetSlug = slugCheck.targetSlug || cleanSlug;
 

@@ -94,7 +94,7 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
       ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100
       : 0;
-    const calcService = (rest.servicePercent > 0 && !serviceIncluded)
+    const calcService = (isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
       ? Math.round(itemsSubtotal * (rest.servicePercent / 100) * 100) / 100
       : 0;
     const deliveryCost = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
@@ -224,7 +224,7 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
         const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
           ? roundMoney(subtotalAfterCoupon * (rest.ivaPercent / 100))
           : 0;
-        const calcService = (rest.servicePercent > 0 && !serviceIncluded)
+        const calcService = (isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
           ? roundMoney(subtotalAfterCoupon * (rest.servicePercent / 100))
           : 0;
 
@@ -349,7 +349,7 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
       const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
         ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100
         : 0;
-      const calcService = (rest.servicePercent > 0 && !serviceIncluded)
+      const calcService = (isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
         ? Math.round(itemsSubtotal * (rest.servicePercent / 100) * 100) / 100
         : 0;
       const deliveryCost = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;

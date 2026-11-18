@@ -213,12 +213,12 @@ export function CtaloClient({ store }: { store: StoreData }) {
         console.error("Error parsing deliveryRates:", e);
       }
     }
-    const baseCost = store.deliveryCost > 0 ? store.deliveryCost : 1.50;
+    const baseCost = Math.max(typeof store.deliveryCost === "number" ? store.deliveryCost : 1.50, 1.50);
     return [
-      { id: "km-1", label: "Hasta 2 KM", price: baseCost, minOrder: 0 },
-      { id: "km-2", label: "De 2 a 5 KM", price: 2.50, minOrder: 0 },
-      { id: "km-3", label: "De 5 a 10 KM", price: 4.00, minOrder: 0 },
-      { id: "km-4", label: "Más de 10 KM", price: 6.00, minOrder: 0 },
+      { id: "km-1", label: "Hasta 2 KM", price: Number(baseCost.toFixed(2)), minOrder: 0 },
+      { id: "km-2", label: "De 2 a 5 KM", price: Number((baseCost + 1.00).toFixed(2)), minOrder: 0 },
+      { id: "km-3", label: "De 5 a 10 KM", price: Number((baseCost + 2.50).toFixed(2)), minOrder: 0 },
+      { id: "km-4", label: "Más de 10 KM", price: Number((baseCost + 4.50).toFixed(2)), minOrder: 0 },
     ];
   }, [store.deliveryRates, store.deliveryCost]);
 
@@ -1096,26 +1096,26 @@ export function CtaloClient({ store }: { store: StoreData }) {
                         </p>
                       )}
 
-                      {/* Previsualización de Variantes (Solo si tiene variantes habilitadas) */}
-                      {product.hasVariants ? (
+                      {/* Previsualización de Variantes (Tallas y Colores) */}
+                      {(product.hasVariants || (product.tallas && product.tallas.length > 0) || (product.attribute1Options && product.attribute1Options.length > 0)) ? (
                         <div className="space-y-1.5 text-[11px] text-slate-400 border-t border-slate-800/80 pt-3">
-                          {product.attribute1Options && product.attribute1Options.length > 0 && (
+                          {((product.attribute1Options && product.attribute1Options.length > 0) || (product.tallas && product.tallas.length > 0)) && (
                             <div className="flex items-center gap-1.5">
                               <span className="font-semibold text-slate-300">
-                                {product.attribute1Name || "Presentación"}:
+                                {product.attribute1Name || (product.tallas && product.tallas.length > 0 ? "Talla" : "Presentación")}:
                               </span>
                               <span className="text-amber-400/90 truncate">
-                                {product.attribute1Options.join(", ")}
+                                {(product.attribute1Options && product.attribute1Options.length > 0 ? product.attribute1Options : product.tallas || []).join(", ")}
                               </span>
                             </div>
                           )}
-                          {product.attribute2Name && product.attribute2Options && product.attribute2Options.length > 0 && (
+                          {((product.attribute2Options && product.attribute2Options.length > 0) || (product.colores && product.colores.length > 0)) && (
                             <div className="flex items-center gap-1.5">
                               <span className="font-semibold text-slate-300">
-                                {product.attribute2Name}:
+                                {product.attribute2Name || "Color"}:
                               </span>
                               <span className="text-slate-400 truncate">
-                                {product.attribute2Options.join(", ")}
+                                {(product.attribute2Options && product.attribute2Options.length > 0 ? product.attribute2Options : product.colores || []).join(", ")}
                               </span>
                             </div>
                           )}
@@ -1143,13 +1143,20 @@ export function CtaloClient({ store }: { store: StoreData }) {
                         );
                       }
 
-                      if (product.hasVariants) {
+                      const hasVariants = Boolean(
+                        product.hasVariants ||
+                        (product.tallas && product.tallas.length > 0) ||
+                        (product.colores && product.colores.length > 0) ||
+                        (product.attribute1Options && product.attribute1Options.length > 0)
+                      );
+
+                      if (hasVariants) {
                         return (
                           <button
                             onClick={() => handleOpenProduct(product)}
                             className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 font-bold text-xs transition-all flex items-center justify-center gap-2 group-hover:shadow-md cursor-pointer"
                           >
-                            <span>Elegir {product.attribute1Name || "Opción"}</span>
+                            <span>Elegir {product.attribute1Name || (product.tallas && product.tallas.length > 0 ? "Talla" : "Opción")}</span>
                             <ChevronRight className="w-4 h-4" />
                           </button>
                         );

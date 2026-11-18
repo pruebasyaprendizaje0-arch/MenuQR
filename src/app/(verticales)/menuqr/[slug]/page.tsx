@@ -8,6 +8,7 @@ import { findRestaurantBySlugOrHistory } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
 import type { Metadata } from "next";
 import { generateRestaurantJsonLd, getBaseUrl } from "@/lib/seo";
+import { getMockDemoRestaurant } from "@/lib/demo-data";
 
 export const dynamic = "force-dynamic";
 
@@ -106,120 +107,6 @@ function toIso(val: any): string {
   } catch {
     return new Date().toISOString();
   }
-}
-
-// Menú Demo precargado en caso de solicitar /menuqr/demo sin que exista en BD
-function getMockDemoRestaurant() {
-  return {
-    id: "demo-restaurant-id",
-    userId: "demo-user",
-    name: "La Parrilla Criolla & Bar (Demo)",
-    slug: "demo",
-    whatsapp: "593999999999",
-    whatsappNumber: "593999999999",
-    themeColor: "#ef4444",
-    logoUrl: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=200&auto=format&fit=crop&q=80",
-    coverUrl: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&auto=format&fit=crop&q=80",
-    address: "Av. República de El Salvador y Moscú, Quito",
-    description: "Cortes madurados a la brasa, hamburguesas ahumadas, cervezas artesanales y cócteles de autor.",
-    locality: "Quito Norte",
-    specialty: "Carnes a la Parrilla y Hamburguesas",
-    plan: "PRO",
-    tablesConfig: "1,2,3,4,5,6,7,8,9,10,Terraza 1,Terraza 2",
-    ivaPercent: 15.0,
-    servicePercent: 10.0,
-    deliveryCost: 2.5,
-    deliveryEnabled: true,
-    ivaOnTable: true,
-    ivaOnTakeout: true,
-    serviceOnTable: true,
-    serviceOnTakeout: true,
-    trialEndsAt: new Date(Date.now() + 86400000 * 365).toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    isOwner: false,
-    isRuletaActiva: true,
-    categories: [
-      {
-        id: "cat-1",
-        name: "🍔 Hamburguesas de Autor",
-        order: 1,
-        imageAspectRatio: "DEFAULT",
-        restaurantId: "demo-restaurant-id",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        dishes: [
-          {
-            id: "dish-1",
-            name: "Smash Burger Trufada",
-            description: "Doble carne angus 180g, queso cheddar fundido, cebolla caramelizada, tocineta crocante y mayo de trufas negras.",
-            price: 9.5,
-            imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600&auto=format&fit=crop&q=80",
-            isAvailable: true,
-            isSuggested: true,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            id: "dish-2",
-            name: "Bacon Cheeseburger Monster",
-            description: "Carne a la parrilla, queso colby jack, salsa BBQ ahumada artesanal, aros de cebolla y pan brioche horneado a diario.",
-            price: 8.75,
-            imageUrl: "https://images.unsplash.com/photo-1586190848861-99aa4a171e90?w=600&auto=format&fit=crop&q=80",
-            isAvailable: true,
-            isSuggested: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-      },
-      {
-        id: "cat-2",
-        name: "🥩 Cortes a la Brasa",
-        order: 2,
-        imageAspectRatio: "DEFAULT",
-        restaurantId: "demo-restaurant-id",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        dishes: [
-          {
-            id: "dish-3",
-            name: "Bife de Chorizo 400g",
-            description: "Corte premium certificado, papas rústicas al romero, ensalada de la huerta y chimichurri criollo.",
-            price: 18.5,
-            imageUrl: "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&auto=format&fit=crop&q=80",
-            isAvailable: true,
-            isSuggested: true,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-      },
-      {
-        id: "cat-3",
-        name: "🍺 Cervezas Artesanales & Bebidas",
-        order: 3,
-        imageAspectRatio: "DEFAULT",
-        restaurantId: "demo-restaurant-id",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        dishes: [
-          {
-            id: "dish-4",
-            name: "Cerveza IPA Tropical 473ml",
-            description: "Aromas a maracuyá y mango, amargor balanceado y cuerpo sedoso.",
-            price: 4.5,
-            imageUrl: "https://images.unsplash.com/photo-1608270199042-4f910ea0f055?w=600&auto=format&fit=crop&q=80",
-            isAvailable: true,
-            isSuggested: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-      },
-    ],
-    seasonRates: [],
-  };
 }
 
 export default async function MenuQRDetailPage({ params: paramsPromise }: PageProps) {

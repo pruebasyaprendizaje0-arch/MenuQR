@@ -975,6 +975,18 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         console.warn("Error leyendo sesión de mesa abierta:", e);
       }
 
+      // Si no vino en URL ni en sesión abierta, restaurar última mesa seleccionada en navegación (sessionStorage)
+      if (!parsedTable.tableName) {
+        try {
+          const sessionTable = sessionStorage.getItem(`menuqr_active_table_${restaurant.slug}`);
+          if (sessionTable) {
+            setSelectedTable((prev) => prev || sessionTable);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
       // Restaurar datos de contacto guardados (Nombre y WhatsApp para agilizar checkout y CRM)
       try {
         const savedCustomer = localStorage.getItem("menuqr_saved_customer");
@@ -1006,6 +1018,17 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       }
     }
   }, [restaurant.slug]);
+
+  // Persistir última selección de mesa en sessionStorage para que no se pierda al recargar
+  useEffect(() => {
+    if (typeof window !== "undefined" && selectedTable) {
+      try {
+        sessionStorage.setItem(`menuqr_active_table_${restaurant.slug}`, selectedTable);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [selectedTable, restaurant.slug]);
 
   // Sincronización en tiempo real y polling bidireccional (Comensal ↔ Mesero)
   useEffect(() => {
@@ -1448,7 +1471,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       : 0;
 
     const iva = (ivaPercent > 0 && !ivaIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100) : 0;
-    const serviceCharge = (servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
+    // Normativa Ecuador: El 10% de Servicio aplica ÚNICAMENTE en salón / mesa. En Para Llevar y Delivery es estrictamente $0.00.
+    const serviceCharge = (isTableOrder && servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
     const tip = subtotalAfterCoupon * (tipPercentage / 100);
     const deliveryCost = isDeliveryOrder ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
     const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
@@ -1988,7 +2012,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       }
     }
 
-    if (restaurant.servicePercent > 0) {
+    if (isTableOrder && restaurant.servicePercent > 0) {
       if (serviceIncluded) {
         message += `*Servicio (${restaurant.servicePercent}%):* Incluido en el precio\n`;
       } else {
@@ -4161,8 +4185,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               const checkoutSubtotal = cartTotal;
               const checkoutCouponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
               const checkoutSubtotalAfterCoupon = Math.max(0, checkoutSubtotal - checkoutCouponDiscount);
+              const checkoutIsTable = Boolean(selectedTable && selectedTable !== "" && selectedTable !== "Llevar" && selectedTable !== "Domicilio");
               const checkoutIva = (restaurant.ivaPercent > 0 && !restaurant.ivaOnTable) ? (checkoutSubtotalAfterCoupon * (restaurant.ivaPercent / 100)) : 0;
-              const checkoutService = (restaurant.servicePercent > 0 && !restaurant.serviceOnTable) ? (checkoutSubtotalAfterCoupon * (restaurant.servicePercent / 100)) : 0;
+              const checkoutService = (checkoutIsTable && restaurant.servicePercent > 0 && !restaurant.serviceOnTable) ? (checkoutSubtotalAfterCoupon * (restaurant.servicePercent / 100)) : 0;
               const checkoutTip = checkoutSubtotalAfterCoupon * (tipPercentage / 100);
               const checkoutDelivery = selectedTable === "Domicilio" ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
               const currentTotal = checkoutSubtotalAfterCoupon + checkoutIva + checkoutService + checkoutTip + checkoutDelivery;
@@ -4963,7 +4988,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 : 0;
 
               const iva = (ivaPercent > 0 && !ivaIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100) : 0;
-              const serviceCharge = (servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
+              const serviceCharge = (isTableOrder && servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
               const tip = subtotalAfterCoupon * (tipPercentage / 100);
               const deliveryCost = isDelivery ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
               const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
@@ -5006,7 +5031,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                     </div>
                   )}
 
-                  {servicePercent > 0 && (
+                  {isTableOrder && servicePercent > 0 && (
                     <div className="flex justify-between text-slate-400">
                       <span>Servicio ({servicePercent}%):</span>
                       <span className="font-bold text-slate-350">

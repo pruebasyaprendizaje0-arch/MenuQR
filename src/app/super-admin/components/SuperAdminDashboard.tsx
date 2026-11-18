@@ -542,10 +542,17 @@ export function SuperAdminDashboard({
   );
 
 
-  // Reminders Due Today or Overdue
+  // Reminders: Separar estrictamente "De Hoy" vs "Atrasados / Vencidos"
   const todayStr = new Date().toISOString().split("T")[0];
-  const remindersCount = restaurantList.filter(r => r.nextFollowUpAt && r.nextFollowUpAt.split("T")[0] <= todayStr).length +
-    leads.filter(l => l.nextFollowUpAt && l.nextFollowUpAt.split("T")[0] <= todayStr).length;
+  const todayRestaurants = restaurantList.filter(r => r.nextFollowUpAt && r.nextFollowUpAt.split("T")[0] === todayStr);
+  const overdueRestaurants = restaurantList.filter(r => r.nextFollowUpAt && r.nextFollowUpAt.split("T")[0] < todayStr);
+
+  const todayLeads = leads.filter(l => l.nextFollowUpAt && l.nextFollowUpAt.split("T")[0] === todayStr);
+  const overdueLeads = leads.filter(l => l.nextFollowUpAt && l.nextFollowUpAt.split("T")[0] < todayStr);
+
+  const todayRemindersCount = todayRestaurants.length + todayLeads.length;
+  const overdueRemindersCount = overdueRestaurants.length + overdueLeads.length;
+  const remindersCount = todayRemindersCount + overdueRemindersCount;
 
   // Calculos de Cobranzas & MRR
   const now = new Date();
@@ -1095,10 +1102,15 @@ export function SuperAdminDashboard({
             }`}
           >
             <Bell className="h-4 w-4" />
-            Recordatorios de Hoy
-            {remindersCount > 0 && (
-              <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                {remindersCount}
+            <span>Recordatorios</span>
+            {todayRemindersCount > 0 && (
+              <span className="bg-emerald-500 text-slate-950 text-[10px] px-1.5 py-0.5 rounded-full font-black">
+                {todayRemindersCount} de hoy
+              </span>
+            )}
+            {overdueRemindersCount > 0 && (
+              <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                {overdueRemindersCount} atrasados
               </span>
             )}
           </button>
@@ -3104,86 +3116,181 @@ export function SuperAdminDashboard({
           </div>
         )}
 
-        {/* TAB 4: RECORDATORIOS DE HOY */}
+        {/* TAB 4: RECORDATORIOS Y SEGUIMIENTOS */}
         {activeTab === "reminders" && (
-          <div className="space-y-6">
+          <div className="space-y-8">
             <div>
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <Bell className="h-5 w-5 text-emerald-400" />
-                Seguimientos y Recordatorios Programados
+                Seguimientos y Recordatorios
               </h2>
-              <p className="text-xs text-slate-400 mt-1">Clientes o prospectos que requieren una llamada o contacto el día de hoy.</p>
+              <p className="text-xs text-slate-400 mt-1">Gestión de contactos programados: separa los contactos agendados para hoy de los pendientes atrasados.</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {restaurantList.filter(r => r.nextFollowUpAt && r.nextFollowUpAt.split("T")[0] <= todayStr).map((res) => (
-                <div key={res.id} className="bg-slate-900/60 border border-amber-500/30 p-5 rounded-2xl flex justify-between items-center gap-4">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                      Restaurante Registrado
-                    </span>
-                    <h3 className="font-bold text-white text-sm">{res.name}</h3>
-                    <p className="text-xs text-slate-300 flex items-center gap-1.5">
-                      <User className="h-3.5 w-3.5 text-slate-500" /> {res.userName} | <Smartphone className="h-3.5 w-3.5 text-slate-500" /> {res.whatsappNumber}
-                    </p>
-                    <p className="text-xs text-amber-400 font-semibold flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5" /> Fecha de contacto: {new Date(res.nextFollowUpAt!).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      onClick={() => sendWhatsAppMessage(res.whatsappNumber, "custom", res.userName || res.name)}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1"
-                    >
-                      <Send className="h-3.5 w-3.5" /> WhatsApp
-                    </button>
-                    <button
-                      onClick={() => setNoteTarget({ restaurant: res })}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
-                    >
-                      Bitácora
-                    </button>
-                  </div>
-                </div>
-              ))}
+            {/* SECCIÓN 1: AGENDADOS PARA HOY */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 border-b border-emerald-500/20 pb-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <h3 className="text-sm font-extrabold text-emerald-400 uppercase tracking-wider">
+                  ⏰ Agendados Para Hoy ({todayRemindersCount})
+                </h3>
+              </div>
 
-              {leads.filter(l => l.nextFollowUpAt && l.nextFollowUpAt.split("T")[0] <= todayStr).map((lead) => (
-                <div key={lead.id} className="bg-slate-900/60 border border-blue-500/30 p-5 rounded-2xl flex justify-between items-center gap-4">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
-                      Prospecto Comercial
-                    </span>
-                    <h3 className="font-bold text-white text-sm">{lead.name}</h3>
-                    <p className="text-xs text-slate-300 flex items-center gap-1.5">
-                      <User className="h-3.5 w-3.5 text-slate-500" /> {lead.ownerName || "Sin nombre"} | <Smartphone className="h-3.5 w-3.5 text-slate-500" /> {lead.phone}
-                    </p>
-                    <p className="text-xs text-amber-400 font-semibold flex items-center gap-1">
-                      <Clock className="h-3.5 w-3.5" /> Fecha de contacto: {new Date(lead.nextFollowUpAt!).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button
-                      onClick={() => sendWhatsAppMessage(lead.phone, "welcome", lead.ownerName || lead.name)}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1"
-                    >
-                      <Send className="h-3.5 w-3.5" /> WhatsApp
-                    </button>
-                    <button
-                      onClick={() => setNoteTarget({ lead })}
-                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
-                    >
-                      Bitácora
-                    </button>
-                  </div>
+              {todayRemindersCount === 0 ? (
+                <div className="py-6 px-4 text-center text-slate-500 bg-slate-900/30 border border-slate-800 rounded-2xl text-xs">
+                  ✨ No tienes contactos agendados específicamente para el día de hoy.
                 </div>
-              ))}
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {todayRestaurants.map((res) => (
+                    <div key={res.id} className="bg-slate-900/80 border border-emerald-500/40 p-5 rounded-2xl flex justify-between items-center gap-4 shadow-lg shadow-emerald-500/5">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                          Restaurante • Hoy
+                        </span>
+                        <h4 className="font-bold text-white text-sm">{res.name}</h4>
+                        <p className="text-xs text-slate-300 flex items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 text-slate-500" /> {res.userName} | <Smartphone className="h-3.5 w-3.5 text-slate-500" /> {res.whatsappNumber}
+                        </p>
+                        <p className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" /> Agenda: Hoy ({new Date(res.nextFollowUpAt!).toLocaleDateString()})
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => sendWhatsAppMessage(res.whatsappNumber, "custom", res.userName || res.name)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1"
+                        >
+                          <Send className="h-3.5 w-3.5" /> WhatsApp
+                        </button>
+                        <button
+                          onClick={() => setNoteTarget({ restaurant: res })}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+                        >
+                          Bitácora
+                        </button>
+                      </div>
+                    </div>
+                  ))}
 
-              {remindersCount === 0 && (
-                <div className="col-span-full py-12 text-center text-slate-500 border border-dashed border-slate-800 rounded-3xl">
-                  🎉 ¡Excelente! No tienes recordatorios de seguimiento pendientes para hoy.
+                  {todayLeads.map((lead) => (
+                    <div key={lead.id} className="bg-slate-900/80 border border-emerald-500/40 p-5 rounded-2xl flex justify-between items-center gap-4 shadow-lg shadow-emerald-500/5">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                          Prospecto • Hoy
+                        </span>
+                        <h4 className="font-bold text-white text-sm">{lead.name}</h4>
+                        <p className="text-xs text-slate-300 flex items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 text-slate-500" /> {lead.ownerName || "Sin nombre"} | <Smartphone className="h-3.5 w-3.5 text-slate-500" /> {lead.phone}
+                        </p>
+                        <p className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" /> Agenda: Hoy ({new Date(lead.nextFollowUpAt!).toLocaleDateString()})
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => sendWhatsAppMessage(lead.phone, "welcome", lead.ownerName || lead.name)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1"
+                        >
+                          <Send className="h-3.5 w-3.5" /> WhatsApp
+                        </button>
+                        <button
+                          onClick={() => setNoteTarget({ lead })}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+                        >
+                          Bitácora
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
+
+            {/* SECCIÓN 2: ATRASADOS / VENCIDOS */}
+            {overdueRemindersCount > 0 && (
+              <div className="space-y-3 pt-4 border-t border-slate-800">
+                <div className="flex items-center gap-2 border-b border-red-500/20 pb-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <h3 className="text-sm font-extrabold text-red-400 uppercase tracking-wider">
+                    ⚠️ Atrasados de Fechas Anteriores ({overdueRemindersCount})
+                  </h3>
+                  <span className="text-[11px] text-slate-500 font-normal">
+                    (Contactos agendados en días previos que no se marcaron como contactados)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {overdueRestaurants.map((res) => (
+                    <div key={res.id} className="bg-slate-900/60 border border-red-500/30 p-5 rounded-2xl flex justify-between items-center gap-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                          Restaurante • Atrasado
+                        </span>
+                        <h4 className="font-bold text-white text-sm">{res.name}</h4>
+                        <p className="text-xs text-slate-300 flex items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 text-slate-500" /> {res.userName} | <Smartphone className="h-3.5 w-3.5 text-slate-500" /> {res.whatsappNumber}
+                        </p>
+                        <p className="text-xs text-red-400 font-semibold flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" /> Estaba agendado para: {new Date(res.nextFollowUpAt!).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => sendWhatsAppMessage(res.whatsappNumber, "custom", res.userName || res.name)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1"
+                        >
+                          <Send className="h-3.5 w-3.5" /> WhatsApp
+                        </button>
+                        <button
+                          onClick={() => setNoteTarget({ restaurant: res })}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+                        >
+                          Bitácora
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {overdueLeads.map((lead) => (
+                    <div key={lead.id} className="bg-slate-900/60 border border-red-500/30 p-5 rounded-2xl flex justify-between items-center gap-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold uppercase text-red-400 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">
+                          Prospecto • Atrasado
+                        </span>
+                        <h4 className="font-bold text-white text-sm">{lead.name}</h4>
+                        <p className="text-xs text-slate-300 flex items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 text-slate-500" /> {lead.ownerName || "Sin nombre"} | <Smartphone className="h-3.5 w-3.5 text-slate-500" /> {lead.phone}
+                        </p>
+                        <p className="text-xs text-red-400 font-semibold flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" /> Estaba agendado para: {new Date(lead.nextFollowUpAt!).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => sendWhatsAppMessage(lead.phone, "welcome", lead.ownerName || lead.name)}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1"
+                        >
+                          <Send className="h-3.5 w-3.5" /> WhatsApp
+                        </button>
+                        <button
+                          onClick={() => setNoteTarget({ lead })}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+                        >
+                          Bitácora
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {remindersCount === 0 && (
+              <div className="py-12 text-center text-slate-500 border border-dashed border-slate-800 rounded-3xl">
+                🎉 ¡Excelente! No tienes ningún recordatorio pendiente ni atrasado.
+              </div>
+            )}
           </div>
         )}
 

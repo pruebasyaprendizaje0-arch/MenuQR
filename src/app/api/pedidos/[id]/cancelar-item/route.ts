@@ -175,7 +175,7 @@ export async function POST(
     const calcIva = (restConfig.ivaPercent > 0 && !ivaIncluded)
       ? Math.round(remainingSubtotal * (restConfig.ivaPercent / 100) * 100) / 100
       : 0;
-    const calcService = (restConfig.servicePercent > 0 && !serviceIncluded)
+    const calcService = (isTable && restConfig.servicePercent > 0 && !serviceIncluded)
       ? Math.round(remainingSubtotal * (restConfig.servicePercent / 100) * 100) / 100
       : 0;
     const newTotal = activeRemainingItems.length > 0

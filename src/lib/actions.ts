@@ -2880,13 +2880,15 @@ export async function createOrderAction(data: {
       ? baseForTax * (ivaPercent / 100)
       : 0;
 
-    // SERVICIO is added to checkout ONLY IF servicePercent > 0 AND Service is NOT included in prices
-    const calculatedService = (servicePercent > 0 && !serviceIncluded)
-      ? baseForTax * (servicePercent / 100)
-      : 0;
-
     // Delivery cost (PASO 8)
     const rawTableName = (data.tableName || "Mesa Sin Número").trim();
+    const isTableOrder = !rawTableName.toLowerCase().includes("domicilio") && !rawTableName.toLowerCase().includes("llevar");
+
+    // SERVICIO is added to checkout ONLY IF in table/local modality, servicePercent > 0 AND Service is NOT included in prices
+    // Normativa Ecuador: En Para Llevar y Delivery el servicio es estrictamente $0.00
+    const calculatedService = (isTableOrder && servicePercent > 0 && !serviceIncluded)
+      ? baseForTax * (servicePercent / 100)
+      : 0;
     let calculatedDeliveryCost = 0;
     if (rawTableName === "Domicilio") {
       if (restaurant.deliveryRates) {

@@ -8,6 +8,7 @@ import { parseDishImages } from "@/lib/dish-images";
 import { notFound } from "next/navigation";
 import { SmartLogo } from "@/components/SmartImage";
 import { FloatingWhatsAppButton } from "@/components/public/FloatingWhatsAppButton";
+import { getMockDemoDish } from "@/lib/demo-data";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,23 @@ const getDishWithRestaurant = cache(async (restaurantSlug: string, dishSlug: str
   try {
     cleanDishSlug = decodeURIComponent(dishSlug).trim().toLowerCase();
   } catch {}
+
+  if (cleanRestSlug === "demo") {
+    const mock = getMockDemoDish(dishSlug);
+    return {
+      ...mock.dish,
+      restaurant: mock.restaurant,
+      category: {
+        id: "cat-1",
+        name: "🍔 Hamburguesas de Autor",
+        imageAspectRatio: "DEFAULT",
+        order: 1,
+        restaurantId: "demo-restaurant-id",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    };
+  }
 
   const restaurant = await prismaTenant.restaurant.findUnique({
     where: { 

@@ -24,7 +24,8 @@ function calcCharges(subtotal: number, config: {
   const ivaAmount = (config.ivaPercent > 0 && !ivaIncluded)
     ? Math.round(subtotal * (config.ivaPercent / 100) * 100) / 100
     : 0;
-  const serviceAmount = (config.servicePercent > 0 && !serviceIncluded)
+  // Normativa Ecuador: El 10% de Servicio aplica ÚNICAMENTE en salón / mesa. En Para Llevar y Delivery es estrictamente $0.00.
+  const serviceAmount = (isTable && config.servicePercent > 0 && !serviceIncluded)
     ? Math.round(subtotal * (config.servicePercent / 100) * 100) / 100
     : 0;
   const totalAmount = Math.round((subtotal + ivaAmount + serviceAmount + deliveryFee) * 100) / 100;
@@ -67,14 +68,14 @@ assert.strictEqual(mesaAcumulada.service_charge, 3.0); // 10% de $30 = $3.00
 assert.strictEqual(mesaAcumulada.total, 37.5); // 30 + 4.5 + 3 = $37.50
 console.log("✅ [PASS] 2: Platos adicionales en mesa recalculan impuestos sobre subtotal acumulado ($37.50)");
 
-// 3. Pedido a domicilio con costo de envío ($2.50)
+// 3. Pedido a domicilio con costo de envío ($2.50) (Sin 10% de Servicio por normativa Ecuador)
 const deliveryOrder = calcCharges(20.0, configUsuario, "delivery", 2.5);
 assert.strictEqual(deliveryOrder.subtotal, 20.0);
 assert.strictEqual(deliveryOrder.iva, 3.0);
-assert.strictEqual(deliveryOrder.service_charge, 2.0);
+assert.strictEqual(deliveryOrder.service_charge, 0); // Servicio es estrictamente $0.00 en Domicilio
 assert.strictEqual(deliveryOrder.costo_envio, 2.5);
-assert.strictEqual(deliveryOrder.total, 27.5); // 20 + 3 + 2 + 2.5 = $27.50
-console.log("✅ [PASS] 3: Domicilio suma subtotal + IVA + servicio + tarifa de envío por km ($27.50)");
+assert.strictEqual(deliveryOrder.total, 25.5); // 20 + 3 (IVA) + 0 (Servicio) + 2.5 (Envío) = $25.50
+console.log("✅ [PASS] 3: Domicilio suma subtotal + IVA + envío sin recargo de servicio ($25.50)");
 
 // 4. Modo IVA Incluido y Servicio Incluido
 const configIncluido = {
@@ -123,7 +124,8 @@ function calcUnifiedCharges(subtotal: number, config: {
   const ivaAmount = (config.ivaPercent > 0 && !ivaIncluded)
     ? Math.round(subtotal * (config.ivaPercent / 100) * 100) / 100
     : 0;
-  const serviceAmount = (config.servicePercent > 0 && !serviceIncluded)
+  // Normativa Ecuador: El 10% de Servicio aplica ÚNICAMENTE en salón / mesa. En Para Llevar y Delivery es estrictamente $0.00.
+  const serviceAmount = (isTable && config.servicePercent > 0 && !serviceIncluded)
     ? Math.round(subtotal * (config.servicePercent / 100) * 100) / 100
     : 0;
   return {
@@ -146,9 +148,9 @@ const configLegadaConIvaTakeoutTrue = {
 const lasagnaLlevar = calcUnifiedCharges(14.90, configLegadaConIvaTakeoutTrue, "llevar");
 assert.strictEqual(lasagnaLlevar.subtotal, 14.90);
 assert.strictEqual(lasagnaLlevar.iva, 2.24); // 15% de $14.90 = $2.24
-assert.strictEqual(lasagnaLlevar.service, 1.49); // 10% de $14.90 = $1.49
-assert.strictEqual(lasagnaLlevar.total, 18.63); // $14.90 + $2.24 + $1.49 = $18.63
-console.log("✅ [PASS] 6: Lasagna en Para Llevar suma exactamente $18.63 ($14.90 + $2.24 IVA + $1.49 Servicio)");
+assert.strictEqual(lasagnaLlevar.service, 0); // 10% de Servicio es estrictamente $0.00 en Para Llevar
+assert.strictEqual(lasagnaLlevar.total, 17.14); // $14.90 + $2.24 IVA = $17.14
+console.log("✅ [PASS] 6: Lasagna en Para Llevar suma exactamente $17.14 ($14.90 + $2.24 IVA + $0.00 Servicio)");
 
 // 7. Caso del usuario: Almuerzo Ejecutivo ($3.50) en Para Llevar con IVA y Servicio INCLUIDOS
 // El restaurante tiene IVA Incluido (ivaOnTable = true) y Servicio Incluido (serviceOnTable = true).

@@ -9,6 +9,7 @@ import { trackAnalyticsEvent } from "@/lib/analytics";
 import type { Metadata } from "next";
 import { generateRestaurantJsonLd, getBaseUrl } from "@/lib/seo";
 import { resolveBusinessVertical } from "@/lib/business-labels";
+import { getMockDemoRestaurant } from "@/lib/demo-data";
 
 export const dynamic = "force-dynamic";
 
@@ -166,6 +167,12 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
 
   if (IGNORED_STATIC_SLUGS.includes(slug)) {
     return null;
+  }
+
+  // Soporte directo para menú interactivo de muestra
+  if (slug === "demo") {
+    const demoData = getMockDemoRestaurant();
+    return <MenuClient restaurant={demoData as any} />;
   }
 
   const prismaStartTime = performance.now();

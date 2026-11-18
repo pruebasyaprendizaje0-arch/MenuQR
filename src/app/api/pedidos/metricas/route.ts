@@ -40,8 +40,6 @@ export async function GET(req: NextRequest) {
         });
         if (rest) authorized = true;
       }
-    } else if (activeRestCookie && activeRestCookie === negocioId) {
-      authorized = true;
     }
 
     if (!authorized) {

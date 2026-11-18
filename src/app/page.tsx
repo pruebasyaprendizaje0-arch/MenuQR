@@ -25,6 +25,7 @@ import { LandingSearch } from "./components/LandingSearch";
 import { MarketplaceShowcase } from "./components/MarketplaceShowcase";
 import { getMarketplaceDishesAction } from "@/lib/suggested-dishes-actions";
 import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,11 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
 }
 
 export default async function InstitutionalLandingPage() {
+  const [userSession, isSuperAdmin] = await Promise.all([
+    getUserSession(),
+    getSuperAdminSession(),
+  ]);
+
   // Obtener negocios para el directorio público con timeout de 3.5s
   let restaurants: any[] = [];
   try {
@@ -215,19 +221,39 @@ export default async function InstitutionalLandingPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-900 transition-all"
-            >
-              Iniciar Sesión
-            </Link>
-            <Link
-              href="/registro"
-              className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
-            >
-              <span>Registrar Negocio</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+            {isSuperAdmin ? (
+              <Link
+                href="/super-admin"
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-red-600 via-amber-600 to-yellow-500 hover:opacity-90 shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2"
+              >
+                <span>👑 Consola SuperAdmin</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            ) : userSession ? (
+              <Link
+                href="/admin"
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
+              >
+                <span>💼 Ir a mi Panel</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-900 transition-all"
+                >
+                  Iniciar Sesión
+                </Link>
+                <Link
+                  href="/registro"
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
+                >
+                  <span>Registrar Negocio</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>

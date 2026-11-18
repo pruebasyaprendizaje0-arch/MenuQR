@@ -61,11 +61,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Si tiene PIN configurado, validar igualdad
+    // Si tiene PIN configurado, validar igualdad estricta (sin PIN maestro universal)
     const pinIngresado = String(pin || "").trim();
     const pinAlmacenado = String(camarero.pin).trim();
 
-    if (pinIngresado === pinAlmacenado || pinIngresado === "1234") {
+    if (pinIngresado === pinAlmacenado) {
       return NextResponse.json({
         ok: true,
         valido: true,

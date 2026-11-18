@@ -1692,9 +1692,13 @@ export function CajaClient({
       ? meta.iva
       : (!ivaIncluded && ivaRate > 0 ? Math.round(baseAmount * (ivaRate / 100) * 100) / 100 : 0);
 
+    const isTableSale = selectedActiveOrder
+      ? !String((selectedActiveOrder as any).mesa || "").toLowerCase().includes("delivery") && !String((selectedActiveOrder as any).mesa || "").toLowerCase().includes("llevar")
+      : false;
+
     const service = typeof meta?.service_charge === "number" && meta.service_charge > 0
       ? meta.service_charge
-      : (!serviceIncluded && serviceRate > 0 ? Math.round(baseAmount * (serviceRate / 100) * 100) / 100 : 0);
+      : (isTableSale && !serviceIncluded && serviceRate > 0 ? Math.round(baseAmount * (serviceRate / 100) * 100) / 100 : 0);
 
     const effectiveDelivery = selectedActiveOrder
       ? selectedOrderDeliveryCost
@@ -3099,7 +3103,8 @@ export function CajaClient({
                       const ivaRate = restaurant.ivaPercent ?? 15;
                       const serviceRate = restaurant.servicePercent ?? 10;
                       const addIva = restaurant.ivaOnTable === false ? orderItemsSum * (ivaRate / 100) : 0;
-                      const addService = restaurant.serviceOnTable === false ? orderItemsSum * (serviceRate / 100) : 0;
+                      // Normativa Ecuador: El 10% de Servicio es estrictamente $0.00 en Para Llevar y Delivery
+                      const addService = 0;
                       const computedOrderCardTotal = Math.round((orderItemsSum + addIva + addService) * 100) / 100;
                       const displayTotal = order.total > 0 && order.total >= computedOrderCardTotal ? order.total : computedOrderCardTotal;
 

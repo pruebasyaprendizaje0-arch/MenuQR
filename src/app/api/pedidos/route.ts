@@ -162,12 +162,10 @@ export async function GET(req: NextRequest) {
     const targetIdsArray = Array.from(validNegocioIds);
 
     if (targetIdsArray.length === 0) {
-      // Fallback al primer negocio disponible
-      const { rows: firstNegocio } = await pool.query("SELECT id FROM negocios LIMIT 1");
-      if (firstNegocio.length === 0) {
-        return NextResponse.json({ ok: true, pedidos: [] });
-      }
-      targetIdsArray.push(firstNegocio[0].id);
+      return NextResponse.json(
+        { ok: false, error: "negocio_id o slug es requerido para consultar pedidos." },
+        { status: 400 }
+      );
     }
 
     let query = `
@@ -576,7 +574,8 @@ export async function POST(req: NextRequest) {
           const ivaAmount = (restConfig.ivaPercent > 0 && !ivaIncluded)
             ? Math.round(subtotal * (restConfig.ivaPercent / 100) * 100) / 100
             : 0;
-          const serviceAmount = (restConfig.servicePercent > 0 && !serviceIncluded)
+          // Normativa Ecuador: El 10% de Servicio aplica ÚNICAMENTE en salón / mesa. En Para Llevar y Delivery es estrictamente $0.00.
+          const serviceAmount = (isTable && restConfig.servicePercent > 0 && !serviceIncluded)
             ? Math.round(subtotal * (restConfig.servicePercent / 100) * 100) / 100
             : 0;
           const totalAmount = Math.round((subtotal + ivaAmount + serviceAmount + deliveryFee) * 100) / 100;
