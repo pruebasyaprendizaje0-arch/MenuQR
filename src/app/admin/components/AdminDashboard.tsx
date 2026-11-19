@@ -9453,14 +9453,17 @@ export function AdminDashboard({
                                     <option value="PREPARING" className="bg-slate-900 text-blue-300">📅 Visita Agendada</option>
                                     <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🚗 En Camino / Revisión</option>
                                     <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Trabajo Terminado</option>
+                                    <option value="COMPLETED" className="bg-slate-900 text-emerald-400">🎉 Cobrado / Completado</option>
                                     <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelada</option>
                                   </>
                                 ) : (
                                   <>
                                     <option value="PENDING" className="bg-slate-900 text-yellow-300">⏳ Pendiente</option>
                                     <option value="PREPARING" className="bg-slate-900 text-blue-300">🍳 En Cocina / Empaque</option>
+                                    <option value="READY" className="bg-slate-900 text-purple-300">🔔 Listo para Servir</option>
                                     <option value="IN_TRANSIT" className="bg-slate-900 text-amber-300">🛵 En Transporte</option>
                                     <option value="DELIVERED" className="bg-slate-900 text-emerald-300">✅ Entregado</option>
+                                    <option value="COMPLETED" className="bg-slate-900 text-emerald-400">🎉 Cobrado / Completado</option>
                                     <option value="CANCELLED" className="bg-slate-900 text-red-300">❌ Cancelado</option>
                                   </>
                                 )}

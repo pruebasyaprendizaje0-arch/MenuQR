@@ -734,12 +734,22 @@ export async function settleOrderInCashShiftAction(
     // 1. Marcar como pagado o completada en la tabla relacional de pedidos
     if (data.orderId) {
       const { rows: orderRows } = await pool.query(
-        `SELECT id, vertical, mesa, metadata, total::float, cliente_telefono, cliente_nombre FROM pedidos WHERE id = $1 AND negocio_id = $2 LIMIT 1`,
+        `SELECT id, vertical, mesa, estado, metadata, total::float, cliente_telefono, cliente_nombre FROM pedidos WHERE id = $1 AND negocio_id = $2 LIMIT 1`,
         [data.orderId, restaurantId]
       );
 
       if (orderRows.length > 0) {
         const orderRecord = orderRows[0];
+
+        // Protección de idempotencia: si el pedido ya fue pagado previamente, no duplicar cobros ni arqueo
+        if (orderRecord.estado === "pagado" && !data.partialPayment?.isPartial) {
+          return {
+            success: true,
+            orderId: data.orderId,
+            message: "Este pedido ya se encuentra cobrado y registrado en caja.",
+          };
+        }
+
         let meta: any = {};
         try {
           meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});

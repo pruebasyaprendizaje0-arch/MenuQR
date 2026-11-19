@@ -318,6 +318,11 @@ export default async function CajaPage({
         expectedCash: Number(shift.expectedCash) || 0,
         actualCash: shift.actualCash !== null ? Number(shift.actualCash) : null,
         difference: shift.difference !== null ? Number(shift.difference) : null,
+        totalSales: Number(shift.totalSales) || 0,
+        totalCash: Number(shift.totalCash) || 0,
+        totalDeuna: Number(shift.totalDeuna) || 0,
+        totalTransfer: Number(shift.totalTransfer) || 0,
+        totalCard: Number(shift.totalCard) || 0,
         notes: shift.notes || null,
         movements: (shift.movements || []).map((m: any) => ({
           id: m.id,

@@ -1255,6 +1255,25 @@ export function CajaClient({
     setInvoiceEmail("");
   };
 
+  // Descartar modal de éxito y restaurar caja operativa limpia sin congelamiento
+  const handleDismissSuccessModal = () => {
+    setSuccessInfo(null);
+    setSelectedActiveOrder(null);
+    setSelectedReservationForOrder(null);
+    setSessionItems([]);
+    setCashReceivedInput("");
+    setInvoiceCustomerType("FINAL");
+    setInvoiceDoc("");
+    setInvoiceName("");
+    setInvoiceEmail("");
+    setInvoiceAddress("");
+    setMobileActiveView("OPERATIONS");
+    try {
+      void fetchActiveOrders();
+      void fetchReservations();
+    } catch {}
+  };
+
   const openModifierModalForDish = (dish: TouchDishItem) => {
     setCustomizingDish(dish);
     setCustomizingQty(1);
@@ -2220,13 +2239,13 @@ export function CajaClient({
 
     // Generar tags de auditoría para los canales digitales verificados
     const verificationTags: string[] = [];
-    if (activeShift.totalDeuna > 0) {
+    if (Number(activeShift.totalDeuna) > 0) {
       verificationTags.push(isDeunaVerified ? "[DeUna: ✓ Verificado en App]" : "[DeUna: Pendiente]");
     }
-    if (activeShift.totalTransfer > 0) {
+    if (Number(activeShift.totalTransfer) > 0) {
       verificationTags.push(isTransferVerified ? "[Bancos: ✓ Verificado en Cuenta]" : "[Bancos: Pendiente]");
     }
-    if (activeShift.totalCard > 0) {
+    if (Number(activeShift.totalCard) > 0) {
       verificationTags.push(isCardVerified ? "[POS Tarjeta: ✓ Lote Verificado]" : "[POS Tarjeta: Pendiente]");
     }
 
@@ -2464,6 +2483,8 @@ export function CajaClient({
           setSelectedActiveOrder(null);
           setSelectedReservationForOrder(null);
           setSessionItems([]);
+          setCashReceivedInput("");
+          setMobileActiveView("OPERATIONS");
           setInvoiceCustomerType("FINAL");
           setInvoiceDoc("");
           setInvoiceName("");
@@ -2671,7 +2692,7 @@ export function CajaClient({
                 <span className="text-slate-300 font-bold">{activeShift.openedByName}</span>
                 <span className="text-slate-500 hidden md:inline">|</span>
                 <span className="text-slate-400 hidden md:inline text-[11px]">
-                  Fondo: <strong className="text-emerald-400">${activeShift.initialCash.toFixed(2)}</strong> | Esp: <strong className="text-white">${activeShift.expectedCash.toFixed(2)}</strong>
+                  Fondo: <strong className="text-emerald-400">${(Number(activeShift.initialCash) || 0).toFixed(2)}</strong> | Esp: <strong className="text-white">${(Number(activeShift.expectedCash) || 0).toFixed(2)}</strong>
                 </span>
                 <button
                   type="button"
@@ -6017,7 +6038,7 @@ export function CajaClient({
 
             <button
               type="button"
-              onClick={() => setSuccessInfo(null)}
+              onClick={handleDismissSuccessModal}
               className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
             >
               Continuar
@@ -6086,9 +6107,17 @@ export function CajaClient({
           .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
         const parsedCash = parseFloat(actualCashInput);
         const hasEnteredCash = !isNaN(parsedCash) && actualCashInput.trim() !== "";
-        const cashDiff = hasEnteredCash ? Math.round((parsedCash - activeShift.expectedCash) * 100) / 100 : 0;
-        const totalDigital = Math.round((activeShift.totalDeuna + activeShift.totalTransfer + activeShift.totalCard) * 100) / 100;
-        const totalGlobalExpected = Math.round((activeShift.expectedCash + totalDigital) * 100) / 100;
+        const expectedCashVal = Number(activeShift.expectedCash) || 0;
+        const totalDeunaVal = Number(activeShift.totalDeuna) || 0;
+        const totalTransferVal = Number(activeShift.totalTransfer) || 0;
+        const totalCardVal = Number(activeShift.totalCard) || 0;
+        const totalSalesVal = Number(activeShift.totalSales) || 0;
+        const initialCashVal = Number(activeShift.initialCash) || 0;
+        const totalCashVal = Number(activeShift.totalCash) || 0;
+
+        const cashDiff = hasEnteredCash ? Math.round((parsedCash - expectedCashVal) * 100) / 100 : 0;
+        const totalDigital = Math.round((totalDeunaVal + totalTransferVal + totalCardVal) * 100) / 100;
+        const totalGlobalExpected = Math.round((expectedCashVal + totalDigital) * 100) / 100;
         const totalGlobalDeclared = Math.round(((hasEnteredCash ? parsedCash : 0) + totalDigital) * 100) / 100;
 
         return (
@@ -6131,7 +6160,7 @@ export function CajaClient({
                       <span>1. Físico en Cajón</span>
                     </div>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">
-                      ${activeShift.expectedCash.toFixed(2)}
+                      ${expectedCashVal.toFixed(2)}
                     </span>
                   </div>
 
@@ -6139,11 +6168,11 @@ export function CajaClient({
                   <div className="text-[11px] text-slate-400 space-y-1 font-mono">
                     <div className="flex justify-between">
                       <span className="text-slate-500">Fondo Inicial:</span>
-                      <span className="text-slate-300">${activeShift.initialCash.toFixed(2)}</span>
+                      <span className="text-slate-300">${initialCashVal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">(+) Ventas Efec.:</span>
-                      <span className="text-emerald-400 font-semibold">+${activeShift.totalCash.toFixed(2)}</span>
+                      <span className="text-emerald-400 font-semibold">+${totalCashVal.toFixed(2)}</span>
                     </div>
                     {shiftCashIn > 0 && (
                       <div className="flex justify-between text-emerald-400">
@@ -6159,18 +6188,18 @@ export function CajaClient({
                     )}
                     <div className="flex justify-between pt-1 border-t border-slate-800 font-bold text-white">
                       <span>Debe haber:</span>
-                      <span className="text-emerald-400 text-sm">${activeShift.expectedCash.toFixed(2)}</span>
+                      <span className="text-emerald-400 text-sm">${expectedCashVal.toFixed(2)}</span>
                     </div>
                   </div>
 
                   {/* Botón Cuadre Rápido */}
                   <button
                     type="button"
-                    onClick={() => setActualCashInput(activeShift.expectedCash.toFixed(2))}
+                    onClick={() => setActualCashInput(expectedCashVal.toFixed(2))}
                     className="w-full py-1.5 px-2 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-[10px] rounded-lg transition flex items-center justify-center gap-1.5"
                   >
                     <Zap className="w-3 h-3 text-emerald-400" />
-                    <span>Cuadrar Exacto (${activeShift.expectedCash.toFixed(2)})</span>
+                    <span>Cuadrar Exacto (${expectedCashVal.toFixed(2)})</span>
                   </button>
 
                   {/* Input Efectivo Contado */}
@@ -6228,7 +6257,7 @@ export function CajaClient({
                       <span>2. DeUna QR</span>
                     </div>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono">
-                      ${activeShift.totalDeuna.toFixed(2)}
+                      ${totalDeunaVal.toFixed(2)}
                     </span>
                   </div>
 
@@ -6239,7 +6268,7 @@ export function CajaClient({
                   <div className="py-2.5 px-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-center space-y-0.5">
                     <p className="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Debe reflejar en App DeUna</p>
                     <p className="text-2xl font-black font-mono text-purple-200">
-                      ${activeShift.totalDeuna.toFixed(2)}
+                      ${totalDeunaVal.toFixed(2)}
                     </p>
                   </div>
 
@@ -6289,7 +6318,7 @@ export function CajaClient({
                       <span>3. Transferencias</span>
                     </div>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
-                      ${activeShift.totalTransfer.toFixed(2)}
+                      ${totalTransferVal.toFixed(2)}
                     </span>
                   </div>
 
@@ -6300,7 +6329,7 @@ export function CajaClient({
                   <div className="py-2.5 px-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-center space-y-0.5">
                     <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">Debe haber en Bancos</p>
                     <p className="text-2xl font-black font-mono text-cyan-200">
-                      ${activeShift.totalTransfer.toFixed(2)}
+                      ${totalTransferVal.toFixed(2)}
                     </p>
                   </div>
 
@@ -6338,7 +6367,7 @@ export function CajaClient({
               </div>
 
               {/* CANAL 4: TARJETA / POS (SI APLICA) */}
-              {activeShift.totalCard > 0 && (
+              {totalCardVal > 0 && (
                 <div className="flex flex-wrap items-center justify-between p-3 rounded-2xl bg-slate-950 border border-slate-800 gap-3">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
@@ -6346,7 +6375,7 @@ export function CajaClient({
                     </div>
                     <div>
                       <p className="text-xs font-bold text-white">
-                        4. Tarjetas / Terminal POS: <span className="font-mono text-amber-300">${activeShift.totalCard.toFixed(2)}</span>
+                        4. Tarjetas / Terminal POS: <span className="font-mono text-amber-300">${totalCardVal.toFixed(2)}</span>
                       </p>
                       <p className="text-[10px] text-slate-400">Verifica el total de vouchers y cierre de lote en la máquina POS Datafast</p>
                     </div>
@@ -6371,7 +6400,7 @@ export function CajaClient({
                 <div className="flex items-center gap-4">
                   <div>
                     <span className="text-[10px] text-slate-500 uppercase block font-bold">Ventas Totales</span>
-                    <span className="text-sm font-black font-mono text-white">${activeShift.totalSales.toFixed(2)}</span>
+                    <span className="text-sm font-black font-mono text-white">${totalSalesVal.toFixed(2)}</span>
                   </div>
                   <div className="h-6 w-px bg-slate-800" />
                   <div>

@@ -337,8 +337,10 @@ export default function OrderTicketModal({
             >
               <option value="PENDING">⏳ Pendiente</option>
               <option value="PREPARING">🍳 En Preparación / Empaque</option>
+              <option value="READY">🔔 Listo para Servir</option>
               <option value="IN_TRANSIT">🛵 En Transporte / Camino</option>
-              <option value="DELIVERED">✅ Entregado / Completado</option>
+              <option value="DELIVERED">✅ Entregado</option>
+              <option value="COMPLETED">🎉 Cobrado / Completado</option>
               <option value="CANCELLED">❌ Cancelado</option>
             </select>
           </div>
