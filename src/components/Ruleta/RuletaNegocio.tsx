@@ -60,7 +60,23 @@ const TIPO_EMOJIS: Record<string, string> = {
   producto: "🍔",
   monto: "💵",
   sorpresa: "🎁",
+  porcentaje: "🏷️",
+  regalo: "🎁",
+  nada: "🍀",
 };
+
+function getSectorEmoji(sec: SectorItem): string {
+  const labelLower = (sec.label || "").toLowerCase();
+  if (labelLower.includes("bebida") || labelLower.includes("cerveza") || labelLower.includes("jugo")) return "🍹";
+  if (labelLower.includes("postre") || labelLower.includes("dulce") || labelLower.includes("helado")) return "🍰";
+  if (labelLower.includes("papa")) return "🍟";
+  if (labelLower.includes("burger") || labelLower.includes("hamburguesa") || labelLower.includes("almuerzo")) return "🍔";
+  if (labelLower.includes("2x1")) return "🥟";
+  if (labelLower.includes("$") || labelLower.includes("monto")) return "💵";
+  if (labelLower.includes("%") || labelLower.includes("descuento") || labelLower.includes("off")) return "🏷️";
+  if (labelLower.includes("sigue") || labelLower.includes("suerte") || labelLower.includes("gracias")) return "🍀";
+  return TIPO_EMOJIS[sec.tipo] || "🎁";
+}
 
 export default function RuletaNegocio({
   slug,
@@ -730,20 +746,16 @@ export default function RuletaNegocio({
                 return (
                   <div
                     key={sec.id || idx}
-                    className="absolute top-1/2 left-1/2"
+                    className="absolute top-1/2 left-1/2 w-24 sm:w-32 h-[50%] origin-bottom pointer-events-none flex flex-col items-center justify-start pt-2 sm:pt-3"
                     style={{
-                      transform: `translate(-50%, -50%) rotate(${angle}deg) translateY(-60%)`,
-                      transformOrigin: "center",
+                      transform: `translate(-50%, -100%) rotate(${angle}deg)`,
                     }}
                   >
-                    <div
-                      className="flex flex-col items-center"
-                      style={{ transform: `rotate(${-angle}deg)` }}
-                    >
-                      <span className="text-xl sm:text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)] leading-none mb-0.5">
-                        {TIPO_EMOJIS[sec.tipo] || "🎁"}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full bg-slate-950/85 backdrop-blur text-[10px] sm:text-xs font-black text-white tracking-tight border border-white/20 shadow-md whitespace-nowrap max-w-[90px] sm:max-w-[115px] truncate text-center">
+                    <span className="text-lg sm:text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] leading-none mb-1 select-none">
+                      {getSectorEmoji(sec)}
+                    </span>
+                    <div className="px-1.5 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur-sm border border-white/25 shadow-md max-w-[76px] sm:max-w-[96px]">
+                      <span className="text-[9.5px] sm:text-[11px] font-black text-white tracking-tight leading-tight block text-center line-clamp-2 select-none">
                         {sec.label}
                       </span>
                     </div>

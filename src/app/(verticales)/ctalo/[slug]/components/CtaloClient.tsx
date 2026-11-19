@@ -689,7 +689,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
           precio: it.price,
           talla: it.talla || undefined,
           color: it.color || undefined,
-          notas: it.variantLabel || undefined,
+          notas: (!it.talla && !it.color && it.variantLabel) ? it.variantLabel : undefined,
         })),
       };
 

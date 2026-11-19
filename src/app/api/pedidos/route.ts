@@ -8,6 +8,8 @@ import { sendTelegramAlert } from "@/lib/telegram-alert";
 import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 import { syncSinglePedidoToPrisma, reconcileUndispatchedOrders } from "@/lib/order-sync";
 import { verifyKdsDispatchToken } from "@/lib/jwt";
+import { getUserSession, getSuperAdminSession } from "@/lib/auth";
+import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -168,6 +170,43 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // 1. Control estricto de privacidad y roles (Evita fuga de pedidos a visitantes anónimos)
+    const userSession = await getUserSession();
+    const isSuperAdmin = await getSuperAdminSession();
+    let isAuthorizedStaff = Boolean(isSuperAdmin);
+
+    if (!isAuthorizedStaff && userSession?.userId) {
+      if (userSession.restaurantId && validNegocioIds.has(userSession.restaurantId)) {
+        isAuthorizedStaff = true;
+      } else {
+        const owned = await prisma.restaurant.findFirst({
+          where: {
+            userId: userSession.userId,
+            id: { in: targetIdsArray },
+          },
+          select: { id: true },
+        });
+        if (owned) isAuthorizedStaff = true;
+      }
+    }
+
+    if (!isAuthorizedStaff && userSession) {
+      const cookieStore = await cookies();
+      const activeRestId = cookieStore.get("active_restaurant_id")?.value;
+      if (activeRestId && validNegocioIds.has(activeRestId)) {
+        isAuthorizedStaff = true;
+      }
+    }
+
+    // Si un visitante anónimo intenta consultar la lista general de pedidos del comercio:
+    // Está TERMINANTEMENTE PROHIBIDO para resguardar la privacidad de clientes y datos financieros.
+    if (!isAuthorizedStaff && !mesa) {
+      return NextResponse.json(
+        { ok: false, error: "Acceso no autorizado. Inicie sesión en el panel para consultar los pedidos del negocio." },
+        { status: 401 }
+      );
+    }
+
     let query = `
       SELECT 
         p.id,
@@ -229,7 +268,20 @@ export async function GET(req: NextRequest) {
 
     const { rows: pedidos } = await pool.query(query, params);
 
-    return NextResponse.json({ ok: true, pedidos });
+    // Si la consulta proviene de un comensal público sincronizando su mesa:
+    // Omitir terminantemente teléfonos de clientes y datos sensibles para resguardar la privacidad
+    const sanitizedPedidos = pedidos.map((p) => {
+      if (!isAuthorizedStaff) {
+        return {
+          ...p,
+          cliente_telefono: null, // Nunca exponer números telefónicos a terceros
+          cliente_nombre: p.cliente_nombre ? p.cliente_nombre.split(" ")[0] : "Comensal",
+        };
+      }
+      return p;
+    });
+
+    return NextResponse.json({ ok: true, pedidos: sanitizedPedidos });
   } catch (err: unknown) {
     console.error("[GET /api/pedidos] Error:", err);
     const msg = err instanceof Error ? err.message : "Error al obtener pedidos";
@@ -1025,11 +1077,17 @@ export async function POST(req: NextRequest) {
         for (const item of items) {
           const qty = parseInt(item.cantidad) || 1;
           const pr = parseFloat(item.precio) || 0;
-          const variantDesc = [
-            item.talla ? `Talla: ${item.talla}` : null,
-            item.color ? `Color: ${item.color}` : null,
-            item.notas ? item.notas : null,
-          ].filter(Boolean).join(" | ");
+          
+          // Construir descripción de variante una sola vez sin duplicar
+          let variantDesc = "";
+          if (item.talla || item.color) {
+            const parts: string[] = [];
+            if (item.talla) parts.push(`Talla: ${item.talla}`);
+            if (item.color) parts.push(`Color: ${item.color}`);
+            variantDesc = parts.join(" · ");
+          } else if (item.notas) {
+            variantDesc = String(item.notas).trim();
+          }
 
           const { rows: itemRows } = await client.query(
             `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
@@ -1081,13 +1139,17 @@ export async function POST(req: NextRequest) {
                 isTest: false,
                 items: {
                   create: items.map((it: any) => {
-                    const variantDesc = [
-                      it.talla ? `Talla: ${it.talla}` : null,
-                      it.color ? `Color: ${it.color}` : null,
-                      it.notas ? it.notas : null,
-                    ].filter(Boolean).join(" | ");
+                    let itemDesc = "";
+                    if (it.talla || it.color) {
+                      const parts: string[] = [];
+                      if (it.talla) parts.push(`Talla: ${it.talla}`);
+                      if (it.color) parts.push(`Color: ${it.color}`);
+                      itemDesc = parts.join(" · ");
+                    } else if (it.notas) {
+                      itemDesc = String(it.notas).trim();
+                    }
                     return {
-                      dishName: it.nombre + (variantDesc ? ` (${variantDesc})` : ""),
+                      dishName: it.nombre + (itemDesc ? ` (${itemDesc})` : ""),
                       price: parseFloat(it.precio) || 0,
                       quantity: parseInt(it.cantidad) || 1,
                     };

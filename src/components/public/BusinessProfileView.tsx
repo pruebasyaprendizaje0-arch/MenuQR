@@ -25,6 +25,7 @@ import { GalleryCarousel } from "@/components/public/GalleryCarousel";
 import { BusinessCompactFooter } from "@/components/footer/BusinessCompactFooter";
 import { BusinessCampaignSection } from "@/components/public/BusinessCampaignSection";
 import { BusinessCampaignData } from "@/lib/campaign-types";
+import { formatWhatsappPhone } from "@/components/public/FloatingWhatsAppButton";
 
 export interface BusinessProfileProps {
   id: string;
@@ -149,7 +150,7 @@ export function BusinessProfileView({
   };
 
   const effectiveThemeColor = themeColor || "#ef4444";
-  const effectiveWhatsapp = (whatsappNumber || whatsapp || "").replace(/\D/g, "");
+  const effectiveWhatsapp = formatWhatsappPhone(whatsappNumber || whatsapp || "");
 
   // Status check for open / closed
   const scheduleStatus = isRestaurantOpen({
