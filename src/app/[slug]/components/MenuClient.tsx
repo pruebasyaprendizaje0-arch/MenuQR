@@ -1423,10 +1423,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         }
 
         const locationText = placeName
-          ? `${placeName}\n📍 GPS: ${gpsLink}`
-          : `📍 Ubicación GPS: ${gpsLink}`;
+          ? `${placeName}\nGPS: ${gpsLink}`
+          : `Ubicación GPS: ${gpsLink}`;
 
-        setDeliveryAddress((prev) => (prev && !prev.includes(gpsLink) ? `${placeName || "Ubicación detectada"}\n📍 GPS: ${gpsLink}\n${prev}` : locationText));
+        setDeliveryAddress((prev) => (prev && !prev.includes(gpsLink) ? `${placeName || "Ubicación detectada"}\nGPS: ${gpsLink}\n${prev}` : locationText));
         setIsGettingLocation(false);
       },
       (err) => {
@@ -1960,13 +1960,13 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     cart.forEach((item) => {
       message += `• *${item.quantity}x* ${item.dish.name} ($${formatPrice(item.unitPrice ?? item.dish.price)} c/u)\n`;
       if (item.modifiersNotes) {
-        message += `  └ 💬 _${item.modifiersNotes}_\n`;
+        message += `  └ Nota: _${item.modifiersNotes}_\n`;
       }
     });
 
     message += `-----------------------------------\n`;
     if (selectedTable === "Domicilio") {
-      message += `*Método de Entrega:* Envío a Domicilio 🛵\n`;
+      message += `*Modalidad:* Envío a Domicilio\n`;
       if (customerName.trim()) {
         message += `*Cliente / Alias:* ${customerName.trim()}\n`;
       }
@@ -1978,16 +1978,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         message += `*Referencia:* ${deliveryReference.trim()}\n`;
       }
     } else if (isTableOrder) {
-      message += `*Mesa:* #${selectedTable} 🪑\n`;
-      message += `*Comensal:* ${customerName.trim()} 👤\n`;
+      message += `*Mesa:* #${selectedTable}\n`;
+      message += `*Comensal:* ${customerName.trim()}\n`;
       if (isExtraRound) {
-        message += `*Tipo de Comanda:* ➕ Ronda Adicional en Mesa Abierta\n`;
+        message += `*Tipo de Comanda:* Ronda Adicional en Mesa Abierta\n`;
       }
       if (customerPhone.trim()) {
         message += `*WhatsApp / Teléfono:* ${customerPhone.trim()}\n`;
       }
     } else {
-      message += `*Modalidad:* Para llevar / Retirar 🛍️\n`;
+      message += `*Modalidad:* Para llevar / Retiro\n`;
       if (customerName.trim()) {
         message += `*Cliente / Alias:* ${customerName.trim()}\n`;
       }
@@ -2027,19 +2027,19 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
     let paymentMethodText = "Efectivo / Contra entrega en local";
     if (selectedMethod === "deuna" || selectedMethod === "qr") {
-      paymentMethodText = "Deuna (Banco Pichincha) - Adjunto comprobante 📲";
+      paymentMethodText = "Deuna (Banco Pichincha) - Adjunto comprobante";
     } else if (selectedMethod === "payphone") {
-      paymentMethodText = "Payphone (Tarjeta / Saldo) - Adjunto comprobante 💳";
+      paymentMethodText = "Payphone (Tarjeta / Saldo) - Adjunto comprobante";
     } else {
       if (cashBillAmount === "exact") {
-        paymentMethodText = "Efectivo (Monto exacto, sin cambio) 💵";
+        paymentMethodText = "Efectivo (Monto exacto, sin cambio)";
       } else {
         const val = cashBillAmount === "custom" ? parseFloat(customCashAmount) : parseFloat(cashBillAmount);
         if (!isNaN(val) && val > total) {
           const change = val - total;
-          paymentMethodText = `Efectivo (Paga con: $${val.toFixed(2)} | Cambio a llevar: $${change.toFixed(2)}) 💵`;
+          paymentMethodText = `Efectivo (Paga con: $${val.toFixed(2)} | Cambio a llevar: $${change.toFixed(2)})`;
         } else {
-          paymentMethodText = "Efectivo contra entrega 💵";
+          paymentMethodText = "Efectivo contra entrega";
         }
       }
     }

@@ -753,7 +753,7 @@ export async function POST(req: NextRequest) {
           });
 
           // Generar mensaje WhatsApp para comensal
-          whatsappMessageText = `*🍽️ Platos adicionales en Mesa ${mesaStr}*\n` +
+          whatsappMessageText = `*Platos adicionales en Mesa ${mesaStr}*\n` +
             `*Local:* ${businessName}\n` +
             `*Comensal:* ${cliente_nombre || "Cliente"}\n\n` +
             `*Platos añadidos:*\n` +
@@ -955,9 +955,9 @@ export async function POST(req: NextRequest) {
             }
 
             const channelLabel = isDeliveryReq 
-              ? "🛵 Domicilio" 
+              ? "Domicilio" 
               : isLlevarReq 
-              ? "🛍️ Para Llevar" 
+              ? "Para Llevar" 
               : (mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr);
 
             // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
@@ -968,9 +968,9 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          whatsappMessageText = `*🍽️ Nuevo Pedido - MenuQR Pro*\n` +
+          whatsappMessageText = `*Nuevo Pedido - MenuQR Pro*\n` +
             `*Restaurante:* ${businessName}\n` +
-            `*Destino:* ${channelLabel}\n` +
+            `*Modalidad:* ${channelLabel}\n` +
             `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
             (cliente_telefono ? `*Teléfono:* ${cliente_telefono}\n` : "") +
             (cliente_direccion ? `*Dirección:* ${cliente_direccion}\n` : "") +
