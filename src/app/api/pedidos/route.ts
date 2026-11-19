@@ -770,6 +770,11 @@ export async function POST(req: NextRequest) {
             nuevos_items: insertedItems,
             whatsapp_url: waUrl,
             vertical: "menuqr",
+            subtotal: updatedCharges.subtotal,
+            iva: updatedCharges.iva,
+            service_charge: updatedCharges.service_charge,
+            costo_envio: updatedCharges.costo_envio,
+            total: updatedCharges.total,
           });
         } else {
           // --- NUEVO PEDIDO RESTAURANTE ---
@@ -826,6 +831,10 @@ export async function POST(req: NextRequest) {
 
             // Totales siempre autoritativos del servidor
             orderTotal = authoritativeOrder.total;
+            metaObj.subtotal = typeof authoritativeOrder.subtotal === "number" ? authoritativeOrder.subtotal : metaObj.subtotal;
+            metaObj.iva = typeof authoritativeOrder.iva === "number" ? authoritativeOrder.iva : metaObj.iva;
+            metaObj.service_charge = typeof authoritativeOrder.serviceCharge === "number" ? authoritativeOrder.serviceCharge : metaObj.service_charge;
+            metaObj.costo_envio = typeof authoritativeOrder.deliveryCost === "number" ? authoritativeOrder.deliveryCost : metaObj.costo_envio;
           }
 
           let isConflictRetry = false;
@@ -990,6 +999,11 @@ export async function POST(req: NextRequest) {
             whatsapp_url: waUrl,
             vertical: "menuqr",
             is_retry: isConflictRetry,
+            subtotal: metaObj.subtotal,
+            iva: metaObj.iva,
+            service_charge: metaObj.service_charge,
+            costo_envio: metaObj.costo_envio,
+            total: orderTotal,
           });
         }
       }

@@ -33,6 +33,15 @@ export interface ActionResultLike {
   orderId?: string;
   orderNumber?: number;
   dispatchToken?: string;
+  subtotal?: number;
+  discountAmount?: number;
+  seasonRateAmount?: number;
+  seasonRateName?: string | null;
+  iva?: number;
+  serviceCharge?: number;
+  deliveryCost?: number;
+  tip?: number;
+  total?: number;
   error?: string;
   errorCode?: CheckoutErrorCode | string;
 }
@@ -222,6 +231,13 @@ export interface KdsDispatchResult {
   status?: number;
   pedido?: any;
   error?: string;
+  savedAmounts?: {
+    subtotal?: number;
+    iva?: number;
+    serviceCharge?: number;
+    deliveryCost?: number;
+    total?: number;
+  };
 }
 
 /**
@@ -275,6 +291,13 @@ export async function executeKdsDispatch(
       confirmed: true,
       status: res.status,
       pedido: data.pedido,
+      savedAmounts: data.subtotal !== undefined || data.total !== undefined ? {
+        subtotal: typeof data.subtotal === "number" ? data.subtotal : undefined,
+        iva: typeof data.iva === "number" ? data.iva : undefined,
+        serviceCharge: typeof data.service_charge === "number" ? data.service_charge : (typeof data.serviceCharge === "number" ? data.serviceCharge : undefined),
+        deliveryCost: typeof data.costo_envio === "number" ? data.costo_envio : (typeof data.deliveryCost === "number" ? data.deliveryCost : undefined),
+        total: typeof data.total === "number" ? data.total : undefined,
+      } : undefined,
     };
   } catch (err: any) {
     return {

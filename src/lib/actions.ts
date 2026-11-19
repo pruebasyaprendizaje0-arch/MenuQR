@@ -2678,6 +2678,15 @@ export async function createOrderAction(data: {
           orderNumber: existingEarly.orderNumber || 1,
           dispatchToken,
           isRetry: true,
+          subtotal: existingEarly.subtotal,
+          discountAmount: existingEarly.discountAmount,
+          seasonRateAmount: existingEarly.seasonRateAmount,
+          seasonRateName: existingEarly.seasonRateName,
+          iva: existingEarly.iva,
+          serviceCharge: existingEarly.serviceCharge,
+          deliveryCost: existingEarly.deliveryCost,
+          tip: existingEarly.tip,
+          total: existingEarly.total,
         };
       }
     }
@@ -3190,6 +3199,15 @@ export async function createOrderAction(data: {
       orderId: order.id,
       orderNumber: order.orderNumber || 1,
       dispatchToken,
+      subtotal: finalSubtotal,
+      discountAmount: finalDiscount,
+      seasonRateAmount: finalSeasonBonus,
+      seasonRateName: calculatedSeasonName,
+      iva: finalIva,
+      serviceCharge: finalService,
+      deliveryCost: finalDelivery,
+      tip: finalTip,
+      total: finalTotal,
     };
   } catch (error: any) {
     const errorTarget = error?.meta?.target;

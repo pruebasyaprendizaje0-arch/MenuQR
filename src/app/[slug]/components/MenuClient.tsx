@@ -1457,9 +1457,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const ivaIncluded = restaurant.ivaOnTable ?? false;
     const serviceIncluded = restaurant.serviceOnTable ?? false;
 
-    const subtotal = cartTotal;
-    const couponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
-    const subtotalAfterCoupon = Math.max(0, subtotal - couponDiscount);
+    const roundMoney = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
+
+    const subtotal = roundMoney(cartTotal);
+    const couponDiscount = appliedCoupon ? roundMoney(appliedCoupon.discountAmount) : 0;
+    const subtotalAfterCoupon = Math.max(0, roundMoney(subtotal - couponDiscount));
 
     const targetDate = reservationDate || new Date().toISOString().split("T")[0];
     const activeRate = (restaurant.seasonRates || []).find(
@@ -1467,15 +1469,15 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     );
 
     const seasonBonusAmount = activeRate 
-      ? (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
+      ? roundMoney((subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus) 
       : 0;
 
-    const iva = (ivaPercent > 0 && !ivaIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100) : 0;
+    const iva = (ivaPercent > 0 && !ivaIncluded) ? roundMoney((subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100)) : 0;
     // Normativa Ecuador: El 10% de Servicio aplica ÚNICAMENTE en salón / mesa. En Para Llevar y Delivery es estrictamente $0.00.
-    const serviceCharge = (isTableOrder && servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
-    const tip = subtotalAfterCoupon * (tipPercentage / 100);
-    const deliveryCost = isDeliveryOrder ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
-    const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
+    const serviceCharge = (isTableOrder && servicePercent > 0 && !serviceIncluded) ? roundMoney((subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100)) : 0;
+    const tip = roundMoney(subtotalAfterCoupon * (tipPercentage / 100));
+    const deliveryCost = isDeliveryOrder ? (selectedKmRate ? roundMoney(selectedKmRate.price) : roundMoney(restaurant.deliveryCost)) : 0;
+    const total = roundMoney(subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost);
 
     // Check schedule & blocked dates
     const scheduleCheck = isRestaurantOpen(restaurant, isDeliveryOrder ? "delivery" : "local");
@@ -1995,20 +1997,30 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         message += `*WhatsApp / Teléfono:* ${customerPhone.trim()}\n`;
       }
     }
-    if (appliedCoupon) {
-      message += `*Cupón Aplicado:* ${appliedCoupon.code} (-$${couponDiscount.toFixed(2)})\n`;
-    }
-    message += `*Subtotal Base:* $${subtotal.toFixed(2)}\n`;
+    // Usar importes finales autoritativos devueltos y guardados por el servidor
+    const savedSubtotal = typeof (result as any)?.subtotal === "number" ? (result as any).subtotal : (typeof kdsDispatchRes?.savedAmounts?.subtotal === "number" ? kdsDispatchRes.savedAmounts.subtotal : subtotal);
+    const savedDiscount = typeof (result as any)?.discountAmount === "number" ? (result as any).discountAmount : couponDiscount;
+    const savedSeasonBonus = typeof (result as any)?.seasonRateAmount === "number" ? (result as any).seasonRateAmount : seasonBonusAmount;
+    const savedIva = typeof (result as any)?.iva === "number" ? (result as any).iva : (typeof kdsDispatchRes?.savedAmounts?.iva === "number" ? kdsDispatchRes.savedAmounts.iva : iva);
+    const savedService = typeof (result as any)?.serviceCharge === "number" ? (result as any).serviceCharge : (typeof kdsDispatchRes?.savedAmounts?.serviceCharge === "number" ? kdsDispatchRes.savedAmounts.serviceCharge : serviceCharge);
+    const savedDelivery = typeof (result as any)?.deliveryCost === "number" ? (result as any).deliveryCost : (typeof kdsDispatchRes?.savedAmounts?.deliveryCost === "number" ? kdsDispatchRes.savedAmounts.deliveryCost : deliveryCost);
+    const savedTip = typeof (result as any)?.tip === "number" ? (result as any).tip : tip;
+    const savedTotal = typeof (result as any)?.total === "number" ? (result as any).total : (typeof kdsDispatchRes?.savedAmounts?.total === "number" ? kdsDispatchRes.savedAmounts.total : total);
 
-    if (activeRate && seasonBonusAmount !== 0) {
-      message += `*Ajuste ${activeRate.isHoliday ? "Festivo" : "Temporada"} (${activeRate.name}):* ${seasonBonusAmount > 0 ? "+" : ""}$${seasonBonusAmount.toFixed(2)}\n`;
+    if (appliedCoupon && savedDiscount > 0) {
+      message += `*Cupón Aplicado:* ${appliedCoupon.code} (-$${savedDiscount.toFixed(2)})\n`;
+    }
+    message += `*Subtotal Base:* $${savedSubtotal.toFixed(2)}\n`;
+
+    if (activeRate && savedSeasonBonus !== 0) {
+      message += `*Ajuste ${activeRate.isHoliday ? "Festivo" : "Temporada"} (${activeRate.name}):* ${savedSeasonBonus > 0 ? "+" : ""}$${savedSeasonBonus.toFixed(2)}\n`;
     }
 
     if (restaurant.ivaPercent > 0) {
       if (ivaIncluded) {
         message += `*IVA (${restaurant.ivaPercent}%):* Incluido en el precio\n`;
       } else {
-        message += `*IVA (${restaurant.ivaPercent}%):* $${iva.toFixed(2)}\n`;
+        message += `*IVA (${restaurant.ivaPercent}%):* $${savedIva.toFixed(2)}\n`;
       }
     }
 
@@ -2016,14 +2028,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       if (serviceIncluded) {
         message += `*Servicio (${restaurant.servicePercent}%):* Incluido en el precio\n`;
       } else {
-        message += `*Servicio (${restaurant.servicePercent}%):* $${serviceCharge.toFixed(2)}\n`;
+        message += `*Servicio (${restaurant.servicePercent}%):* $${savedService.toFixed(2)}\n`;
       }
     }
-    if (selectedTable === "Domicilio" && deliveryCost > 0) {
-      message += `*Costo de Envío (${selectedKmRate?.label || "Domicilio"}):* $${deliveryCost.toFixed(2)}\n`;
+    if (selectedTable === "Domicilio" && savedDelivery > 0) {
+      message += `*Costo de Envío (${selectedKmRate?.label || "Domicilio"}):* $${savedDelivery.toFixed(2)}\n`;
     }
-    message += `*Propina:* $${tip.toFixed(2)}\n`;
-    message += `*Total a Pagar:* $${total.toFixed(2)}\n`;
+    if (savedTip > 0) {
+      message += `*Propina:* $${savedTip.toFixed(2)}\n`;
+    }
+    message += `*Total a Pagar:* $${savedTotal.toFixed(2)}\n`;
 
     let paymentMethodText = "Efectivo / Contra entrega en local";
     if (selectedMethod === "deuna" || selectedMethod === "qr") {
@@ -2035,8 +2049,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         paymentMethodText = "Efectivo (Monto exacto, sin cambio)";
       } else {
         const val = cashBillAmount === "custom" ? parseFloat(customCashAmount) : parseFloat(cashBillAmount);
-        if (!isNaN(val) && val > total) {
-          const change = val - total;
+        if (!isNaN(val) && val > savedTotal) {
+          const change = val - savedTotal;
           paymentMethodText = `Efectivo (Paga con: $${val.toFixed(2)} | Cambio a llevar: $${change.toFixed(2)})`;
         } else {
           paymentMethodText = "Efectivo contra entrega";
@@ -4974,9 +4988,11 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               const ivaIncluded = restaurant.ivaOnTable ?? false;
               const serviceIncluded = restaurant.serviceOnTable ?? false;
 
-              const subtotal = cartTotal;
-              const couponDiscount = appliedCoupon ? appliedCoupon.discountAmount : 0;
-              const subtotalAfterCoupon = Math.max(0, subtotal - couponDiscount);
+              const roundMoney = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
+
+              const subtotal = roundMoney(cartTotal);
+              const couponDiscount = appliedCoupon ? roundMoney(appliedCoupon.discountAmount) : 0;
+              const subtotalAfterCoupon = Math.max(0, roundMoney(subtotal - couponDiscount));
 
               const targetDate = reservationDate || new Date().toISOString().split("T")[0];
               const activeRate = (restaurant.seasonRates || []).find(
@@ -4984,14 +5000,14 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               );
 
               const seasonBonusAmount = activeRate 
-                ? (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus 
+                ? roundMoney((subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus) 
                 : 0;
 
-              const iva = (ivaPercent > 0 && !ivaIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100) : 0;
-              const serviceCharge = (isTableOrder && servicePercent > 0 && !serviceIncluded) ? (subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100) : 0;
-              const tip = subtotalAfterCoupon * (tipPercentage / 100);
-              const deliveryCost = isDelivery ? (selectedKmRate ? selectedKmRate.price : restaurant.deliveryCost) : 0;
-              const total = subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost;
+              const iva = (ivaPercent > 0 && !ivaIncluded) ? roundMoney((subtotalAfterCoupon + seasonBonusAmount) * (ivaPercent / 100)) : 0;
+              const serviceCharge = (isTableOrder && servicePercent > 0 && !serviceIncluded) ? roundMoney((subtotalAfterCoupon + seasonBonusAmount) * (servicePercent / 100)) : 0;
+              const tip = roundMoney(subtotalAfterCoupon * (tipPercentage / 100));
+              const deliveryCost = isDelivery ? (selectedKmRate ? roundMoney(selectedKmRate.price) : roundMoney(restaurant.deliveryCost)) : 0;
+              const total = roundMoney(subtotalAfterCoupon + seasonBonusAmount + iva + serviceCharge + tip + deliveryCost);
 
               return (
                 <div className="bg-slate-950/60 border border-slate-850 p-4 rounded-2xl space-y-2.5 text-xs" style={{ fontFamily: 'var(--font-outfit)' }}>
