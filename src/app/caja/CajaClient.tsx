@@ -1707,15 +1707,25 @@ export function CajaClient({
     const ivaRate = restaurant.ivaPercent ?? 15;
     const serviceRate = restaurant.servicePercent ?? 10;
 
-    const iva = typeof meta?.iva === "number" && meta.iva > 0
+    const isOrderItemsModified = Boolean(
+      selectedActiveOrder &&
+      sessionItems.length > 0 &&
+      Math.abs(
+        itemsSubtotal -
+          (selectedActiveOrder.items || []).reduce(
+            (acc, it) => acc + (Number(it.precio) || 0) * (Number(it.cantidad) || 1),
+            0
+          )
+      ) > 0.01
+    );
+
+    const iva = (!isOrderItemsModified && typeof meta?.iva === "number" && meta.iva > 0)
       ? meta.iva
       : (!ivaIncluded && ivaRate > 0 ? Math.round(baseAmount * (ivaRate / 100) * 100) / 100 : 0);
 
-    const isTableSale = selectedActiveOrder
-      ? !String((selectedActiveOrder as any).mesa || "").toLowerCase().includes("delivery") && !String((selectedActiveOrder as any).mesa || "").toLowerCase().includes("llevar")
-      : false;
+    const isTableSale = isTable;
 
-    const service = typeof meta?.service_charge === "number" && meta.service_charge > 0
+    const service = (!isOrderItemsModified && typeof meta?.service_charge === "number" && meta.service_charge > 0)
       ? meta.service_charge
       : (isTableSale && !serviceIncluded && serviceRate > 0 ? Math.round(baseAmount * (serviceRate / 100) * 100) / 100 : 0);
 
@@ -1731,7 +1741,7 @@ export function CajaClient({
       ivaRate,
       serviceRate,
     };
-  }, [selectedActiveOrder, saleModality, restaurant, itemsSubtotal, selectedOrderDeliveryCost, saleDeliveryCost]);
+  }, [selectedActiveOrder, saleModality, restaurant, itemsSubtotal, selectedOrderDeliveryCost, saleDeliveryCost, sessionItems]);
 
   const appliedDepositDiscount = useMemo(() => {
     return selectedReservationForOrder ? Math.max(0, Number(selectedReservationForOrder.depositAmount) || 0) : 0;

@@ -606,19 +606,30 @@ export async function processCajaSaleAction(
       return { orderId: order.id, orderNumber: order.orderNumber, total: finalTotal, updatedDishes, isTestSale };
     });
 
-    // Sincronizar venta de Caja POS a la tabla de PostgreSQL pedidos para visibilidad inmediata en módulo mesero
+    // Sincronizar venta de Caja POS a la tabla de PostgreSQL pedidos para visibilidad inmediata en módulo mesero y cocina
     try {
       await ensureDbTables();
+      const finalTableName = data.tableName?.trim() || "Caja POS";
+      const metadataPayload = {
+        tipo_pedido: "caja_pos",
+        paymentMethod: data.paymentMethod,
+        subtotal,
+        iva: safeIva,
+        service_charge: safeService,
+        costo_envio: safeDelivery,
+      };
+
       await pool.query(
         `INSERT INTO pedidos (id, negocio_id, mesa, estado, total, es_prueba, vertical, metadata)
-         VALUES ($1, $2, 'Caja POS', 'pagado', $3, $4, 'menuqr', $5)
-         ON CONFLICT (id) DO UPDATE SET estado = 'pagado', total = $3`,
+         VALUES ($1, $2, $3, 'pagado', $4, $5, 'menuqr', $6)
+         ON CONFLICT (id) DO UPDATE SET estado = 'pagado', total = $4, mesa = $3, metadata = $6`,
         [
           result.orderId,
           restaurantId,
+          finalTableName,
           result.total,
           result.isTestSale,
-          JSON.stringify({ tipo_pedido: "caja_pos", paymentMethod: data.paymentMethod }),
+          JSON.stringify(metadataPayload),
         ]
       );
       for (const it of data.items) {
@@ -628,6 +639,38 @@ export async function processCajaSaleAction(
           [result.orderId, it.name, it.quantity, it.price]
         );
       }
+
+      // Si la venta directa corresponde a una mesa, cerrar cualquier TableSession abierta
+      if (
+        finalTableName &&
+        !finalTableName.toLowerCase().includes("domicilio") &&
+        !finalTableName.toLowerCase().includes("llevar") &&
+        !finalTableName.toLowerCase().includes("caja pos")
+      ) {
+        try {
+          const rawMesa = finalTableName.replace(/^Mesa\s*#?/i, "").trim();
+          await prisma.tableSession.updateMany({
+            where: {
+              restaurantId,
+              tableName: { in: [finalTableName, rawMesa] },
+              status: { in: ["OPEN", "PARTIALLY_PAID"] },
+            },
+            data: { status: "CLOSED", paidAmount: finalTotal },
+          });
+        } catch (tableSessErr) {
+          console.warn("No se pudo cerrar TableSession en venta directa:", tableSessErr);
+        }
+      }
+
+      // Emitir evento Socket.IO para actualizar pantallas de meseros y KDS
+      try {
+        emitPedidoActualizado(restaurantId, {
+          id: result.orderId,
+          mesa: finalTableName,
+          estado: "pagado",
+          solicita_mesero: false,
+        });
+      } catch {}
 
       if (data.reservationId) {
         try {

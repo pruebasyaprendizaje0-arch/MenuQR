@@ -199,6 +199,39 @@ export async function getActiveNotificationsForRestaurant(
 ): Promise<CleanInAppNotification[]> {
   const now = new Date();
 
+  // Validar vigencia real del restaurante para evitar contradicciones entre avisos viejos y demo vigente
+  const restaurant = await prisma.restaurant.findUnique({
+    where: { id: restaurantId },
+    select: { trialEndsAt: true, isSuspended: true, plan: true },
+  });
+
+  const isDemoOrPlanActive = Boolean(
+    restaurant &&
+    !restaurant.isSuspended &&
+    restaurant.trialEndsAt &&
+    new Date(restaurant.trialEndsAt) > now
+  );
+
+  const diffDays = isDemoOrPlanActive && restaurant?.trialEndsAt
+    ? Math.ceil((new Date(restaurant.trialEndsAt).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
+
+  if (isDemoOrPlanActive) {
+    // Si la demo o plan está activo, auto-descartar de la base de datos alertas obsoletas de suspensión o de vencimiento pasado
+    try {
+      await prisma.inAppNotification.updateMany({
+        where: {
+          restaurantId,
+          type: { in: ["SUSPENDED", "WARNING_EXPIRING"] },
+          dismissedAt: null,
+        },
+        data: {
+          dismissedAt: now,
+        },
+      });
+    } catch {}
+  }
+
   // 1. Notificaciones directas
   const directNotifications = await prisma.inAppNotification.findMany({
     where: {
@@ -210,6 +243,15 @@ export async function getActiveNotificationsForRestaurant(
       ],
     },
     orderBy: { createdAt: "desc" },
+  });
+
+  // Filtrar en memoria cualquier notificación de suspensión o vencimiento si el restaurante está activo
+  const filteredDirect = directNotifications.filter((d) => {
+    if (isDemoOrPlanActive) {
+      if (d.type === "SUSPENDED") return false;
+      if (d.type === "WARNING_EXPIRING" && diffDays > 5) return false;
+    }
+    return true;
   });
 
   // 2. Anuncios globales vigentes
@@ -240,7 +282,7 @@ export async function getActiveNotificationsForRestaurant(
   );
 
   // Mapear a formato unificado
-  const cleanedDirect: CleanInAppNotification[] = directNotifications.map((d) => ({
+  const cleanedDirect: CleanInAppNotification[] = filteredDirect.map((d) => ({
     id: d.id,
     restaurantId: d.restaurantId,
     type: d.type,

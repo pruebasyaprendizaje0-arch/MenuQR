@@ -1796,6 +1796,22 @@ export async function extendTrialAction(
     data: updateData
   });
 
+  // Limpiar automáticamente notificaciones obsoletas de suspensión o vencimiento pasado
+  try {
+    await prisma.inAppNotification.updateMany({
+      where: {
+        restaurantId,
+        type: { in: ["SUSPENDED", "WARNING_EXPIRING"] },
+        dismissedAt: null,
+      },
+      data: {
+        dismissedAt: new Date(),
+      },
+    });
+  } catch (notifErr) {
+    console.warn("No se pudieron descartar notificaciones obsoletas de expiración:", notifErr);
+  }
+
   try {
     const formattedDate = baseDate.toLocaleDateString("es-EC", {
       year: "numeric",
