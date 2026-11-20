@@ -109,12 +109,29 @@ export function CocinaClient({
       } catch {
         setIsKitchenUnlocked(false);
       }
+    } else {
+      // Auto-adquirir token de sesión de cocina cuando el negocio no requiere PIN
+      fetch("/api/cocina/validar-pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: initialSlug }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.ok && d.token) {
+            try {
+              sessionStorage.setItem(`menuqr_staff_token_${initialSlug}`, d.token);
+            } catch {}
+          }
+        })
+        .catch(() => {});
     }
   }, [kitchenPinRequired, initialSlug]);
 
   const handleLockKitchen = () => {
     try {
       sessionStorage.removeItem(`menuqr_cocina_unlocked_${initialSlug}`);
+      sessionStorage.removeItem(`menuqr_staff_token_${initialSlug}`);
     } catch {}
     setIsKitchenUnlocked(false);
   };

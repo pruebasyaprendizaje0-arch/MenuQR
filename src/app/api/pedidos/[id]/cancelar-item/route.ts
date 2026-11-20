@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { prisma } from "@/lib/db";
+import { verifyOrderStaffAuth } from "@/lib/order-auth";
 import {
   emitPedidoActualizado,
   emitPedidoCancelado,
@@ -53,6 +54,15 @@ export async function POST(
     }
 
     const item = itemRows[0];
+
+    // Control de Autorización Estricta en el Servidor
+    const auth = await verifyOrderStaffAuth(req, item.negocio_id);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { ok: false, error: auth.error || "No autorizado para cancelar platos en este negocio." },
+        { status: auth.status || 401 }
+      );
+    }
 
     if (item.estado_item === "cancelado") {
       return NextResponse.json(

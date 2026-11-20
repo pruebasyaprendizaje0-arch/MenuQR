@@ -93,3 +93,30 @@ export function verifyKdsDispatchToken(token: string): KdsDispatchTokenPayload |
   }
 }
 
+export type StaffRole = "COCINA" | "MESERO" | "CAJERO" | "ADMIN" | "SUPERADMIN";
+
+export interface StaffSessionPayload {
+  role: StaffRole;
+  negocioId: string;
+  staffId?: string;
+  staffNombre?: string;
+  purpose: "staff_session";
+}
+
+export function signStaffToken(payload: Omit<StaffSessionPayload, "purpose">): string {
+  return jwt.sign({ ...payload, purpose: "staff_session" }, getJwtSecret(), { expiresIn: "24h" });
+}
+
+export function verifyStaffToken(token: string): StaffSessionPayload | null {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret()) as StaffSessionPayload;
+    if (decoded && decoded.purpose === "staff_session") {
+      return decoded;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+

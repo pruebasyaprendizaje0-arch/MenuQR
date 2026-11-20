@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { emitPedidoActualizado, emitPedidoCancelado } from "@/lib/socket-server";
 import { syncSinglePedidoToPrisma } from "@/lib/order-sync";
+import {
+  verifyOrderStaffAuth,
+  checkRoleCanTransitionOrder,
+  checkRoleCanDeleteOrder,
+} from "@/lib/order-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +44,40 @@ export async function PUT(
           error: `Estado inválido. Debe ser uno de: ${validStates.join(", ")}`,
         },
         { status: 400 }
+      );
+    }
+
+    // 1. Verificar existencia del pedido y obtener negocio_id
+    const { rows: existingRows } = await pool.query(
+      "SELECT id, negocio_id, mesa, estado FROM pedidos WHERE id = $1",
+      [id]
+    );
+
+    if (existingRows.length === 0) {
+      return NextResponse.json(
+        { ok: false, error: "Pedido no encontrado" },
+        { status: 404 }
+      );
+    }
+
+    const existingOrder = existingRows[0];
+
+    // 2. Control de Autorización Estricta en el Servidor (Multi-Tenant y Credenciales Requeridas)
+    const auth = await verifyOrderStaffAuth(req, existingOrder.negocio_id);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { ok: false, error: auth.error || "No autorizado para modificar pedidos de este negocio." },
+        { status: auth.status || 401 }
+      );
+    }
+
+    // 3. Matriz de Permisos por Rol:
+    // Cocina SOLO puede avanzar a 'en_cocina' o 'listo'. No puede cobrar ('pagado', 'por_pagar') ni cancelar.
+    const transitionCheck = checkRoleCanTransitionOrder(auth.role!, estado);
+    if (!transitionCheck.allowed) {
+      return NextResponse.json(
+        { ok: false, error: transitionCheck.error },
+        { status: 403 }
       );
     }
 
@@ -168,6 +207,36 @@ export async function DELETE(
     const { searchParams } = new URL(req.url);
     const motivo = body?.motivo || searchParams.get("motivo") || "Anulado por usuario";
     const cancelado_por = (body?.cancelado_por || searchParams.get("cancelado_por") || "mesero") as "cocina" | "mesero";
+
+    // 1. Verificar existencia del pedido y obtener negocio_id
+    const { rows: existingRows } = await pool.query(
+      "SELECT id, negocio_id, mesa, estado FROM pedidos WHERE id = $1",
+      [id]
+    );
+
+    if (existingRows.length === 0) {
+      return NextResponse.json({ ok: false, error: "Pedido no encontrado" }, { status: 404 });
+    }
+
+    const existingOrder = existingRows[0];
+
+    // 2. Control de Autorización Estricta en el Servidor
+    const auth = await verifyOrderStaffAuth(req, existingOrder.negocio_id);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { ok: false, error: auth.error || "No autorizado para anular pedidos de este negocio." },
+        { status: auth.status || 401 }
+      );
+    }
+
+    // 3. Matriz de Permisos: Cocina NO puede anular pedidos completos
+    const deleteCheck = checkRoleCanDeleteOrder(auth.role!);
+    if (!deleteCheck.allowed) {
+      return NextResponse.json(
+        { ok: false, error: deleteCheck.error },
+        { status: 403 }
+      );
+    }
 
     // Marcar pedido como cancelado
     const { rows } = await pool.query(

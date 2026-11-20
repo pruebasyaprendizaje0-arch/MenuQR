@@ -75,6 +75,9 @@ export function CocinaPinLockScreen({
         kitchenAudio.playEnCocina();
         try {
           sessionStorage.setItem(`menuqr_cocina_unlocked_${slug}`, "true");
+          if (data.token) {
+            sessionStorage.setItem(`menuqr_staff_token_${slug}`, data.token);
+          }
         } catch {}
         onUnlock();
       } else {

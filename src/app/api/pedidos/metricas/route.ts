@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
-import { getUserSession, getSuperAdminSession } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { cookies } from "next/headers";
+import { verifyOrderStaffAuth } from "@/lib/order-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,30 +19,19 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Control de Acceso Estricto: SuperAdmin, Propietario del negocio o Terminal autorizada
-    const isSuperAdmin = await getSuperAdminSession();
-    const session = await getUserSession();
-    const cookieStore = await cookies();
-    const activeRestCookie = cookieStore.get("active_restaurant_id")?.value;
-
-    let authorized = false;
-    if (isSuperAdmin) {
-      authorized = true;
-    } else if (session?.userId) {
-      if (session.restaurantId === negocioId) {
-        authorized = true;
-      } else {
-        const rest = await prisma.restaurant.findFirst({
-          where: { id: negocioId, userId: session.userId },
-          select: { id: true },
-        });
-        if (rest) authorized = true;
-      }
+    // Control de Acceso Estricto: SuperAdmin, Propietario del negocio o Personal autorizado
+    const auth = await verifyOrderStaffAuth(req, negocioId);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { ok: false, error: auth.error || "No autorizado para consultar métricas financieras de este negocio." },
+        { status: auth.status || 403 }
+      );
     }
 
-    if (!authorized) {
+    // El rol de Cocina no debe acceder a métricas financieras de facturación/caja
+    if (auth.role === "COCINA") {
       return NextResponse.json(
-        { ok: false, error: "No autorizado para consultar métricas financieras de este negocio." },
+        { ok: false, error: "El rol de Cocina no tiene permisos para consultar métricas financieras." },
         { status: 403 }
       );
     }

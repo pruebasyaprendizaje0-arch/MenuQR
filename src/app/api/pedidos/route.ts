@@ -9,6 +9,7 @@ import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 import { syncSinglePedidoToPrisma, reconcileUndispatchedOrders } from "@/lib/order-sync";
 import { verifyKdsDispatchToken } from "@/lib/jwt";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
+import { verifyOrderStaffAuth } from "@/lib/order-auth";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -170,40 +171,28 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 1. Control estricto de privacidad y roles (Evita fuga de pedidos a visitantes anónimos)
-    const userSession = await getUserSession();
-    const isSuperAdmin = await getSuperAdminSession();
-    let isAuthorizedStaff = Boolean(isSuperAdmin);
+    // 1. Control estricto de privacidad, roles y multi-tenant en el servidor
+    // Cualquier consulta de pedidos por negocio_id / slug exige credenciales verificadas en el servidor
+    // (Dueño, SuperAdmin, Mesero con PIN o Cocina KDS). Visitantes anónimos no pueden consultar la lista de pedidos.
+    let isAuthorized = false;
+    let authError = "Acceso no autorizado. Inicie sesión en el panel o autentique su terminal para consultar pedidos.";
+    let authStatus = 401;
 
-    if (!isAuthorizedStaff && userSession?.userId) {
-      if (userSession.restaurantId && validNegocioIds.has(userSession.restaurantId)) {
-        isAuthorizedStaff = true;
+    for (const vNegId of targetIdsArray) {
+      const auth = await verifyOrderStaffAuth(req, vNegId);
+      if (auth.authorized) {
+        isAuthorized = true;
+        break;
       } else {
-        const owned = await prisma.restaurant.findFirst({
-          where: {
-            userId: userSession.userId,
-            id: { in: targetIdsArray },
-          },
-          select: { id: true },
-        });
-        if (owned) isAuthorizedStaff = true;
+        authError = auth.error || authError;
+        if (auth.status) authStatus = auth.status;
       }
     }
 
-    if (!isAuthorizedStaff && userSession) {
-      const cookieStore = await cookies();
-      const activeRestId = cookieStore.get("active_restaurant_id")?.value;
-      if (activeRestId && validNegocioIds.has(activeRestId)) {
-        isAuthorizedStaff = true;
-      }
-    }
-
-    // Si un visitante anónimo intenta consultar la lista general de pedidos del comercio:
-    // Está TERMINANTEMENTE PROHIBIDO para resguardar la privacidad de clientes y datos financieros.
-    if (!isAuthorizedStaff && !mesa) {
+    if (!isAuthorized) {
       return NextResponse.json(
-        { ok: false, error: "Acceso no autorizado. Inicie sesión en el panel para consultar los pedidos del negocio." },
-        { status: 401 }
+        { ok: false, error: authError },
+        { status: authStatus }
       );
     }
 
@@ -271,7 +260,7 @@ export async function GET(req: NextRequest) {
     // Si la consulta proviene de un comensal público sincronizando su mesa:
     // Omitir terminantemente teléfonos de clientes y datos sensibles para resguardar la privacidad
     const sanitizedPedidos = pedidos.map((p) => {
-      if (!isAuthorizedStaff) {
+      if (!isAuthorized) {
         return {
           ...p,
           cliente_telefono: null, // Nunca exponer números telefónicos a terceros

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { verifyPinHash } from "@/lib/security-pins";
+import { signStaffToken } from "@/lib/jwt";
 import {
   extractClientIp,
   verifyDoubleRateLimit,
@@ -87,12 +88,39 @@ export async function POST(req: NextRequest) {
     if (pinValido) {
       // Éxito: restablecer contadores de intentos fallidos
       clearDoubleRateLimit(entityKey, clientIp);
-      return NextResponse.json({
+
+      const token = signStaffToken({
+        role: "MESERO",
+        negocioId: camarero.negocio_id,
+        staffId: camarero.id,
+        staffNombre: camarero.nombre,
+      });
+
+      const res = NextResponse.json({
         ok: true,
         valido: true,
+        token,
         camarero: { id: camarero.id, nombre: camarero.nombre },
         message: "PIN verificado exitosamente",
       });
+
+      res.cookies.set("staff_session", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        sameSite: "lax",
+        maxAge: 24 * 3600,
+      });
+
+      res.cookies.set("mesero_session", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        sameSite: "lax",
+        maxAge: 24 * 3600,
+      });
+
+      return res;
     } else {
       // Fallo: registrar intento fallido y aplicar bloqueo si se excede el umbral
       const failResult = recordDoubleFailedAttempt(entityKey, clientIp, MESERO_PIN_LIMIT);

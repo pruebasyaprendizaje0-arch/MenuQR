@@ -90,6 +90,11 @@ export function MesasPinLockScreen({
       if (data.ok && data.valido) {
         // Tono de éxito
         kitchenAudio.playEnCocina();
+        if (data.token) {
+          try {
+            sessionStorage.setItem(`menuqr_staff_token_${negocioId || selectedCamarero.id}`, data.token);
+          } catch {}
+        }
         onLoginSuccess({
           id: selectedCamarero.id,
           nombre: selectedCamarero.nombre,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { verifyPinHash } from "@/lib/security-pins";
+import { signStaffToken } from "@/lib/jwt";
 import {
   extractClientIp,
   verifyDoubleRateLimit,
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 
 // POST /api/cocina/validar-pin
 // Valida el PIN de seguridad (hash bcrypt) para acceder a la Pantalla de Cocina KDS con rate limiting
+// y emite una credencial de sesión de personal (token firmado) con rol COCINA limitado al negocio.
 export async function POST(req: NextRequest) {
   try {
     const clientIp = extractClientIp(req);
@@ -50,14 +52,38 @@ export async function POST(req: NextRequest) {
     const kitchenPinHash = typeof customObj.kitchenPinHash === "string" ? customObj.kitchenPinHash.trim() : "";
     const kitchenPinRequired = Boolean(customObj.kitchenPinRequired && kitchenPinHash);
 
-    // Si no se requiere PIN configurado, es acceso libre concedido
+    // Si no se requiere PIN configurado, es acceso libre concedido y se emite credencial de personal
     if (!kitchenPinRequired || !kitchenPinHash) {
-      return NextResponse.json({
+      const token = signStaffToken({
+        role: "COCINA",
+        negocioId: restaurant.id,
+      });
+
+      const res = NextResponse.json({
         ok: true,
         valido: true,
         required: false,
+        token,
         message: "Acceso libre concedido a Cocina KDS",
       });
+
+      res.cookies.set("staff_session", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        sameSite: "lax",
+        maxAge: 24 * 3600,
+      });
+
+      res.cookies.set(`cocina_session_${slug}`, token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        sameSite: "lax",
+        maxAge: 24 * 3600,
+      });
+
+      return res;
     }
 
     // Rate Limiting anti fuerza bruta (por negocio de cocina + por IP de origen)
@@ -81,12 +107,37 @@ export async function POST(req: NextRequest) {
 
     if (pinValido) {
       clearDoubleRateLimit(entityKey, clientIp);
-      return NextResponse.json({
+
+      const token = signStaffToken({
+        role: "COCINA",
+        negocioId: restaurant.id,
+      });
+
+      const res = NextResponse.json({
         ok: true,
         valido: true,
         required: true,
+        token,
         message: "PIN de Cocina verificado con éxito",
       });
+
+      res.cookies.set("staff_session", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        sameSite: "lax",
+        maxAge: 24 * 3600,
+      });
+
+      res.cookies.set(`cocina_session_${slug}`, token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        sameSite: "lax",
+        maxAge: 24 * 3600,
+      });
+
+      return res;
     } else {
       const failResult = recordDoubleFailedAttempt(entityKey, clientIp, COCINA_PIN_LIMIT);
       const remainingMsg = failResult.remainingAttempts > 0
