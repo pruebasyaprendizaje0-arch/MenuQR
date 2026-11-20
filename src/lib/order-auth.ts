@@ -227,7 +227,8 @@ export interface TableAuthContext {
 }
 
 /**
- * Extrae el token de sesión de mesa desde encabezados, parámetros URL o cookies
+ * Extrae el token de sesión de mesa exclusivamente desde encabezados o cookies httpOnly.
+ * Por política de seguridad estricta, NUNCA se admiten credenciales en parámetros de la URL.
  */
 export function extractTableToken(req?: NextRequest): string | undefined {
   if (!req) return undefined;
@@ -242,12 +243,6 @@ export function extractTableToken(req?: NextRequest): string | undefined {
     if (decoded) return candidate;
   }
 
-  try {
-    const { searchParams } = new URL(req.url);
-    const queryToken = searchParams.get("table_token") || searchParams.get("table_session_token");
-    if (queryToken?.trim()) return queryToken.trim();
-  } catch {}
-
   const cookieToken = req.cookies.get("table_session")?.value || req.cookies.get("menuqr_table_session")?.value;
   if (cookieToken) return cookieToken;
 
@@ -259,13 +254,14 @@ export function extractTableToken(req?: NextRequest): string | undefined {
 
 /**
  * Valida de forma criptográfica y estricta en el servidor que la petición provenga
- * de un comensal con sesión activa autorizada en la mesa correspondiente.
+ * de un comensal con sesión activa autorizada en la mesa y comanda correspondiente.
  * 
  * Garantías de Seguridad:
  * - El token fue firmado por el servidor con JWT_SECRET (imposible de falsificar desde JS cliente o con el salt público del QR).
  * - Está restringido al negocio correspondiente (no permite saltar de un restaurante a otro).
  * - Está restringido a la mesa correspondiente (un token de Mesa #2 no puede consultar la cuenta de Mesa #5).
- * - No expone datos de otras mesas ni de sesiones anteriores cerradas.
+ * - Está vinculado a la comanda exacta (orderId), impidiendo acceder a comandas de grupos posteriores en la misma mesa.
+ * - Rechaza terminantemente credenciales en la URL.
  */
 export async function verifyTableSessionAuth(
   req: NextRequest,
@@ -306,6 +302,15 @@ export async function verifyTableSessionAuth(
       authorized: false,
       error: "El token de sesión no corresponde a la mesa consultada.",
       status: 403,
+    };
+  }
+
+  // 3. Vinculación estricta a comanda exacta
+  if (!decoded.orderId) {
+    return {
+      authorized: false,
+      error: "Token de mesa no contiene comanda válida vinculada.",
+      status: 401,
     };
   }
 

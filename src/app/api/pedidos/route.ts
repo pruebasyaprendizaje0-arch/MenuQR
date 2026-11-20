@@ -7,9 +7,9 @@ import { deductStockUniversal } from "@/lib/stock-service";
 import { sendTelegramAlert } from "@/lib/telegram-alert";
 import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 import { syncSinglePedidoToPrisma, reconcileUndispatchedOrders } from "@/lib/order-sync";
-import { verifyKdsDispatchToken, signTableSessionToken } from "@/lib/jwt";
+import { verifyKdsDispatchToken, signTableSessionToken, verifyTableSessionToken } from "@/lib/jwt";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
-import { verifyOrderStaffAuth, verifyTableSessionAuth, TableAuthContext } from "@/lib/order-auth";
+import { verifyOrderStaffAuth, verifyTableSessionAuth, extractTableToken, TableAuthContext } from "@/lib/order-auth";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -252,15 +252,17 @@ export async function GET(req: NextRequest) {
     const params: (string | number | boolean | string[])[] = [targetIdsArray];
 
     if (isAuthorizedTable) {
-      // Para comensal con sesión de mesa activa: devolver estrictamente la comanda activa de su mesa
-      // o la comanda cerrada correspondiente a su sesión para notificar el pago
-      const mesaVariants = getMesaVariants(mesa!);
-      params.push(mesaVariants);
-      query += ` AND LOWER(TRIM(p.mesa)) = ANY($${params.length}::text[])`;
-
-      const orderIdParam = tableAuthContext?.orderId || "00000000-0000-0000-0000-000000000000";
+      // Para comensal con sesión de mesa activa: vincular estrictamente a su comanda exacta (orderId)
+      // Nunca devolver la comanda más reciente de la mesa si corresponde a otro grupo.
+      const orderIdParam = tableAuthContext?.orderId;
+      if (!orderIdParam) {
+        return NextResponse.json(
+          { ok: false, error: "Token de mesa no contiene comanda válida vinculada." },
+          { status: 401 }
+        );
+      }
       params.push(orderIdParam);
-      query += ` AND (p.estado NOT IN ('pagado', 'cancelado') OR p.id::text = $${params.length}::text)`;
+      query += ` AND p.id::text = $${params.length}::text`;
     } else {
       if (soloActivos) {
         params.push("pagado");
@@ -291,20 +293,67 @@ export async function GET(req: NextRequest) {
 
     const { rows: pedidos } = await pool.query(query, params);
 
-    // Si la consulta proviene de un comensal con sesión de mesa activa:
-    // Omitir terminantemente teléfonos de clientes y anonimizar datos personales para resguardar la privacidad
-    const sanitizedPedidos = pedidos.map((p) => {
-      if (!isAuthorizedStaff) {
-        return {
-          ...p,
-          cliente_telefono: null, // Nunca exponer números telefónicos a terceros
-          cliente_nombre: p.cliente_nombre ? p.cliente_nombre.split(" ")[0] : "Comensal",
-        };
+    // Si la consulta proviene de un comensal con sesión de mesa:
+    if (isAuthorizedTable) {
+      if (pedidos.length === 0) {
+        // La comanda vinculada no existe o no pertenece a este restaurante
+        const res = NextResponse.json({
+          ok: true,
+          active: false,
+          sesion_cerrada: true,
+          pedidos: [],
+        });
+        res.cookies.delete("table_session");
+        res.cookies.set("table_session", "", {
+          path: "/",
+          maxAge: 0,
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+        });
+        return res;
       }
-      return p;
-    });
 
-    return NextResponse.json({ ok: true, pedidos: sanitizedPedidos });
+      const tableOrder = pedidos[0];
+      const isClosed = tableOrder.estado === "pagado" || tableOrder.estado === "cancelado";
+
+      const sanitizedTableOrder = {
+        ...tableOrder,
+        cliente_telefono: null, // Nunca exponer números telefónicos a terceros
+        cliente_nombre: tableOrder.cliente_nombre ? tableOrder.cliente_nombre.split(" ")[0] : "Comensal",
+      };
+
+      if (isClosed) {
+        // La sesión de mesa está cerrada (cobrada o cancelada por el restaurante):
+        // Invalidar el acceso a la cuenta en vivo y eliminar la cookie httpOnly
+        const res = NextResponse.json({
+          ok: true,
+          active: false,
+          sesion_cerrada: true,
+          estado: tableOrder.estado,
+          pedidos: [sanitizedTableOrder],
+        });
+        res.cookies.delete("table_session");
+        res.cookies.set("table_session", "", {
+          path: "/",
+          maxAge: 0,
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+        });
+        return res;
+      }
+
+      return NextResponse.json({
+        ok: true,
+        active: true,
+        sesion_cerrada: false,
+        pedidos: [sanitizedTableOrder],
+      });
+    }
+
+    // Consulta de Personal Autorizado (Cocina, Mesero, Admin, Superadmin)
+    return NextResponse.json({ ok: true, pedidos });
   } catch (err: unknown) {
     console.error("[GET /api/pedidos] Error:", err);
     const msg = err instanceof Error ? err.message : "Error al obtener pedidos";
@@ -680,8 +729,42 @@ export async function POST(req: NextRequest) {
             );
 
         if (existingOrders.length > 0 && !isNonTableChannel) {
-          // --- MESA ABIERTA: Añadir items al pedido existente ---
+          // --- MESA ABIERTA: Verificar autorización previa antes de añadir items o emitir credenciales ---
           const currentOrder = existingOrders[0];
+
+          let isCallerAuthorizedForTable = false;
+          // 1. Personal del restaurante autorizado (Mesero, Cocina, Admin, Superadmin)
+          const staffAuth = await verifyOrderStaffAuth(req, resolvedNegocioId);
+          if (staffAuth.authorized) {
+            isCallerAuthorizedForTable = true;
+          } else {
+            // 2. Comensal con sesión de mesa activa vinculada a esta comanda exacta
+            const tableToken = extractTableToken(req);
+            if (tableToken) {
+              const decoded = verifyTableSessionToken(tableToken);
+              const cleanMesaStr = (m: string) => String(m || "").replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase();
+              if (
+                decoded &&
+                decoded.negocioId === resolvedNegocioId &&
+                cleanMesaStr(decoded.mesa) === cleanMesaStr(rawMesa) &&
+                decoded.orderId === currentOrder.id
+              ) {
+                isCallerAuthorizedForTable = true;
+              }
+            }
+          }
+
+          if (!isCallerAuthorizedForTable) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "La mesa ya tiene una comanda activa. Para añadir platos a esta comanda debe contar con la sesión activa de la mesa o solicitarlo al mesero.",
+              },
+              { status: 403 }
+            );
+          }
+
           createdOrderId = currentOrder.id;
 
           for (const item of items) {

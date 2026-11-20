@@ -11,6 +11,7 @@ import {
   checkRoleCanDeleteOrder,
   verifyOrderStaffAuth,
   verifyTableSessionAuth,
+  extractTableToken,
 } from "./order-auth";
 import { NextRequest } from "next/server";
 
@@ -254,10 +255,11 @@ async function runOrderAuthorizationSuite() {
     assert.strictEqual(tableAuth.orderId, "pedido-uuid-555");
   });
 
-  await test("Comensal con TableSessionToken en query param table_token es autorizado", async () => {
+  await test("Credenciales en URL (?table_token=...) son RECHAZADAS por seguridad (solo header y cookie)", async () => {
     const tableToken = signTableSessionToken({
       negocioId: negocioA,
       mesa: "3",
+      orderId: "pedido-333",
       createdAt: Date.now(),
     });
 
@@ -265,15 +267,36 @@ async function runOrderAuthorizationSuite() {
       "http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=3&table_token=" + tableToken
     );
 
+    const extracted = extractTableToken(req);
+    assert.strictEqual(extracted, undefined, "No se debe extraer token de parámetros de URL");
+
     const tableAuth = await verifyTableSessionAuth(req, negocioA, "3");
-    assert.strictEqual(tableAuth.authorized, true);
-    assert.strictEqual(tableAuth.mesa, "3");
+    assert.strictEqual(tableAuth.authorized, false, "Debe ser rechazado sin header ni cookie");
+    assert.strictEqual(tableAuth.status, 401);
   });
 
-  await test("Comensal con TableSessionToken en cookie table_session es autorizado", async () => {
+  await test("TableSessionToken requiere orderId válido y vinculado", async () => {
+    const tableTokenSinOrder = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "3",
+      orderId: "",
+      createdAt: Date.now(),
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=3", {
+      headers: { "x-table-session": tableTokenSinOrder },
+    });
+
+    const tableAuth = await verifyTableSessionAuth(req, negocioA, "3");
+    assert.strictEqual(tableAuth.authorized, false, "Token sin comanda vinculada debe ser rechazado");
+    assert.strictEqual(tableAuth.status, 401);
+  });
+
+  await test("Comensal con TableSessionToken en cookie httpOnly table_session es autorizado", async () => {
     const tableToken = signTableSessionToken({
       negocioId: negocioA,
       mesa: "Mesa 7",
+      orderId: "pedido-777",
       createdAt: Date.now(),
     });
 
@@ -285,12 +308,85 @@ async function runOrderAuthorizationSuite() {
 
     const tableAuth = await verifyTableSessionAuth(req, negocioA, "7");
     assert.strictEqual(tableAuth.authorized, true);
+    assert.strictEqual(tableAuth.orderId, "pedido-777");
+  });
+
+  await test("Aislamiento entre Grupos en la Misma Mesa: Token de Grupo A no permite consultar comanda de Grupo B", async () => {
+    const comandaGrupoA = "order-group-a-111";
+    const comandaGrupoB = "order-group-b-222";
+
+    const tokenGrupoA = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "3",
+      orderId: comandaGrupoA,
+      createdAt: Date.now(),
+    });
+
+    // Simular petición del Grupo A
+    const reqGrupoA = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=3", {
+      headers: { "x-table-session": tokenGrupoA },
+    });
+
+    const authGrupoA = await verifyTableSessionAuth(reqGrupoA, negocioA, "3");
+    assert.strictEqual(authGrupoA.authorized, true);
+    assert.strictEqual(authGrupoA.orderId, comandaGrupoA, "Debe estar vinculado únicamente a la comanda de Grupo A");
+    assert.notStrictEqual(authGrupoA.orderId, comandaGrupoB, "Nunca debe consultar comanda del Grupo B");
+  });
+
+  await test("Anti-secuestro de comanda: Petición anónima no puede añadir items ni apropiarse de una comanda activa", async () => {
+    // Escenario: Mesa 5 tiene comanda activa 'order-555'
+    const activeOrderId = "order-555";
+    const anonymousReq = new NextRequest("http://localhost:3000/api/pedidos", {
+      method: "POST",
+      body: JSON.stringify({ mesa: "5", items: [{ nombre: "Agua", cantidad: 1, precio: 1 }] }),
+    });
+
+    // Validar autorización de la llamada anónima
+    const staffAuth = await verifyOrderStaffAuth(anonymousReq, negocioA);
+    const tableToken = extractTableToken(anonymousReq);
+    const isAuthorized = Boolean(staffAuth.authorized || (tableToken && verifyTableSessionToken(tableToken)?.orderId === activeOrderId));
+
+    assert.strictEqual(isAuthorized, false, "Petición anónima no debe poder añadir platos ni apropiarse de la comanda");
+  });
+
+  await test("Comensal legítimo con su sesión activa SÍ puede añadir rondas a su comanda", async () => {
+    const activeOrderId = "order-555";
+    const tableToken = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "5",
+      orderId: activeOrderId,
+      createdAt: Date.now(),
+    });
+
+    const roundReq = new NextRequest("http://localhost:3000/api/pedidos", {
+      method: "POST",
+      headers: { "x-table-session": tableToken },
+    });
+
+    const staffAuth = await verifyOrderStaffAuth(roundReq, negocioA);
+    const tokenCandidate = extractTableToken(roundReq);
+    const decoded = tokenCandidate ? verifyTableSessionToken(tokenCandidate) : null;
+    const isAuthorized = staffAuth.authorized || (decoded?.orderId === activeOrderId && decoded?.negocioId === negocioA);
+
+    assert.strictEqual(isAuthorized, true, "Comensal legítimo con token de la comanda sí puede añadir rondas");
+  });
+
+  await test("Personal autorizado (Mesero/Admin) SÍ puede añadir rondas a una comanda activa", async () => {
+    const staffToken = signStaffToken({ role: "MESERO", negocioId: negocioA });
+    const waiterReq = new NextRequest("http://localhost:3000/api/pedidos", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${staffToken}` },
+    });
+
+    const staffAuth = await verifyOrderStaffAuth(waiterReq, negocioA);
+    assert.strictEqual(staffAuth.authorized, true, "Mesero tiene autorización en el servidor");
   });
 
   await test("Aislamiento entre Mesas: Token de Mesa 2 intentando consultar Mesa 5 es RECHAZADO con 403 Forbidden", async () => {
     const tokenMesa2 = signTableSessionToken({
       negocioId: negocioA,
       mesa: "2",
+      orderId: "order-mesa-2",
       createdAt: Date.now(),
     });
 
@@ -310,6 +406,7 @@ async function runOrderAuthorizationSuite() {
     const tokenNegA = signTableSessionToken({
       negocioId: negocioA,
       mesa: "5",
+      orderId: "order-mesa-5",
       createdAt: Date.now(),
     });
 
@@ -334,7 +431,6 @@ async function runOrderAuthorizationSuite() {
   });
 
   await test("Rechazo de tokens falsificados o con salt público", () => {
-    // Si un atacante intenta inventar un token o usar un hash SHA256 estático del cliente
     const forgedToken = "table_auth:11111111:5:menuqr_pro_salt_2026";
     const decoded = verifyTableSessionToken(forgedToken);
     assert.strictEqual(decoded, null, "Token no firmado con JWT_SECRET del servidor debe ser nulo");

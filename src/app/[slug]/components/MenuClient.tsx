@@ -1048,44 +1048,19 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const fetchLiveTable = async () => {
       if (typeof document !== "undefined" && document.hidden) return;
       try {
-        let currentToken = openTableSession?.tableSessionToken;
+        const currentToken = openTableSession?.tableSessionToken;
 
-        // Si tenemos sesión de mesa abierta en el navegador pero aún sin token firmado (ej. pedidos previos),
-        // intentar auto-handshake seguro con el servidor
-        if (!currentToken && openTableSession?.tableName) {
-          try {
-            const hRes = await fetch("/api/pedidos/mesa-session", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                slug: restaurant.slug,
-                mesa: activeMesa,
-                customerName: openTableSession.customerName || customerName,
-                customerPhone: openTableSession.customerPhone || customerPhone,
-              }),
-            });
-            const hData = await hRes.json();
-            if (hData.ok && hData.table_session_token) {
-              currentToken = hData.table_session_token;
-              setOpenTableSession((prev) => (prev ? { ...prev, tableSessionToken: currentToken } : null));
-              try {
-                const stored = localStorage.getItem(`menuqr_open_table_${restaurant.slug}`);
-                if (stored) {
-                  const parsed = JSON.parse(stored);
-                  parsed.tableSessionToken = currentToken;
-                  localStorage.setItem(`menuqr_open_table_${restaurant.slug}`, JSON.stringify(parsed));
-                }
-              } catch {}
-            }
-          } catch {}
+        // Por seguridad, las credenciales solo viajan mediante encabezados y cookies httpOnly (nunca en la URL)
+        const fetchHeaders: Record<string, string> = {};
+        if (currentToken) {
+          fetchHeaders["x-table-session"] = currentToken;
         }
 
-        const queryToken = currentToken ? `&table_token=${encodeURIComponent(currentToken)}` : "";
         const res = await fetch(
-          `/api/pedidos?negocio_id=${restaurant.id}&slug=${encodeURIComponent(restaurant.slug)}&mesa=${encodeURIComponent(activeMesa)}&activos=false${queryToken}`,
+          `/api/pedidos?negocio_id=${restaurant.id}&slug=${encodeURIComponent(restaurant.slug)}&mesa=${encodeURIComponent(activeMesa)}&activos=false`,
           {
             cache: "no-store",
-            headers: currentToken ? { "x-table-session": currentToken } : undefined,
+            headers: Object.keys(fetchHeaders).length > 0 ? fetchHeaders : undefined,
           }
         );
         const data = await res.json();
