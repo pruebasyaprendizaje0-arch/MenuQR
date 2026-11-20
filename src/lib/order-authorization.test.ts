@@ -2,12 +2,15 @@ import assert from "node:assert";
 import {
   signStaffToken,
   verifyStaffToken,
+  signTableSessionToken,
+  verifyTableSessionToken,
   StaffRole,
 } from "./jwt";
 import {
   checkRoleCanTransitionOrder,
   checkRoleCanDeleteOrder,
   verifyOrderStaffAuth,
+  verifyTableSessionAuth,
 } from "./order-auth";
 import { NextRequest } from "next/server";
 
@@ -210,6 +213,133 @@ async function runOrderAuthorizationSuite() {
     assert.strictEqual(auth.role, "COCINA");
     assert.strictEqual(auth.negocioId, negocioA);
   });
+
+  // 4. Sesiones Activas de Mesa para Comensales (Resolución de Regresión y Privacidad Estricta)
+  await test("Generación y verificación de TableSessionToken criptográfico en servidor", () => {
+    const tableToken = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "5",
+      orderId: "pedido-uuid-555",
+      customerName: "Frank",
+      createdAt: Date.now(),
+    });
+
+    assert(typeof tableToken === "string" && tableToken.length > 30, "Token de mesa debe ser JWT válido");
+    const decoded = verifyTableSessionToken(tableToken);
+    assert(decoded !== null, "Token debe ser verificado con éxito");
+    assert.strictEqual(decoded.negocioId, negocioA);
+    assert.strictEqual(decoded.mesa, "5");
+    assert.strictEqual(decoded.orderId, "pedido-uuid-555");
+    assert.strictEqual(decoded.customerName, "Frank");
+    assert.strictEqual(decoded.purpose, "table_session");
+  });
+
+  await test("Comensal con TableSessionToken en Header x-table-session actualiza su cuenta en vivo (200)", async () => {
+    const tableToken = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "5",
+      orderId: "pedido-uuid-555",
+      createdAt: Date.now(),
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=5", {
+      headers: {
+        "x-table-session": tableToken,
+      },
+    });
+
+    const tableAuth = await verifyTableSessionAuth(req, negocioA, "5");
+    assert.strictEqual(tableAuth.authorized, true, "Comensal con token válido para Mesa 5 debe ser autorizado");
+    assert.strictEqual(tableAuth.mesa, "5");
+    assert.strictEqual(tableAuth.orderId, "pedido-uuid-555");
+  });
+
+  await test("Comensal con TableSessionToken en query param table_token es autorizado", async () => {
+    const tableToken = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "3",
+      createdAt: Date.now(),
+    });
+
+    const req = new NextRequest(
+      "http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=3&table_token=" + tableToken
+    );
+
+    const tableAuth = await verifyTableSessionAuth(req, negocioA, "3");
+    assert.strictEqual(tableAuth.authorized, true);
+    assert.strictEqual(tableAuth.mesa, "3");
+  });
+
+  await test("Comensal con TableSessionToken en cookie table_session es autorizado", async () => {
+    const tableToken = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "Mesa 7",
+      createdAt: Date.now(),
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=7", {
+      headers: {
+        cookie: `table_session=${tableToken}`,
+      },
+    });
+
+    const tableAuth = await verifyTableSessionAuth(req, negocioA, "7");
+    assert.strictEqual(tableAuth.authorized, true);
+  });
+
+  await test("Aislamiento entre Mesas: Token de Mesa 2 intentando consultar Mesa 5 es RECHAZADO con 403 Forbidden", async () => {
+    const tokenMesa2 = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "2",
+      createdAt: Date.now(),
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=5", {
+      headers: {
+        "x-table-session": tokenMesa2,
+      },
+    });
+
+    const tableAuth = await verifyTableSessionAuth(req, negocioA, "5");
+    assert.strictEqual(tableAuth.authorized, false, "Token de mesa 2 no debe acceder a mesa 5");
+    assert.strictEqual(tableAuth.status, 403, "Debe ser 403 Forbidden");
+    assert(tableAuth.error?.includes("no corresponde a la mesa"), "Error explicativo de mesa");
+  });
+
+  await test("Aislamiento Multi-Tenant: Token de Mesa de Negocio A intentando consultar Negocio B es RECHAZADO con 403", async () => {
+    const tokenNegA = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "5",
+      createdAt: Date.now(),
+    });
+
+    const req = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioB + "&mesa=5", {
+      headers: {
+        "x-table-session": tokenNegA,
+      },
+    });
+
+    const tableAuth = await verifyTableSessionAuth(req, negocioB, "5");
+    assert.strictEqual(tableAuth.authorized, false);
+    assert.strictEqual(tableAuth.status, 403);
+    assert(tableAuth.error?.includes("negocio ajeno"));
+  });
+
+  await test("Petición a ?mesa=5 sin token de mesa ni credenciales de staff es RECHAZADA con 401 Unauthorized", async () => {
+    const req = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=5");
+    const tableAuth = await verifyTableSessionAuth(req, negocioA, "5");
+
+    assert.strictEqual(tableAuth.authorized, false, "Sin credenciales no puede ver mesa");
+    assert.strictEqual(tableAuth.status, 401);
+  });
+
+  await test("Rechazo de tokens falsificados o con salt público", () => {
+    // Si un atacante intenta inventar un token o usar un hash SHA256 estático del cliente
+    const forgedToken = "table_auth:11111111:5:menuqr_pro_salt_2026";
+    const decoded = verifyTableSessionToken(forgedToken);
+    assert.strictEqual(decoded, null, "Token no firmado con JWT_SECRET del servidor debe ser nulo");
+  });
+
 
   console.log(`\n🎉 TODAS LAS PRUEBAS DE AUTORIZACIÓN DE PEDIDOS PASARON EXITOSAMENTE (${passed}/${total})\n`);
 }

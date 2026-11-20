@@ -7,9 +7,9 @@ import { deductStockUniversal } from "@/lib/stock-service";
 import { sendTelegramAlert } from "@/lib/telegram-alert";
 import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 import { syncSinglePedidoToPrisma, reconcileUndispatchedOrders } from "@/lib/order-sync";
-import { verifyKdsDispatchToken } from "@/lib/jwt";
+import { verifyKdsDispatchToken, signTableSessionToken } from "@/lib/jwt";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
-import { verifyOrderStaffAuth } from "@/lib/order-auth";
+import { verifyOrderStaffAuth, verifyTableSessionAuth, TableAuthContext } from "@/lib/order-auth";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -172,16 +172,17 @@ export async function GET(req: NextRequest) {
     }
 
     // 1. Control estricto de privacidad, roles y multi-tenant en el servidor
-    // Cualquier consulta de pedidos por negocio_id / slug exige credenciales verificadas en el servidor
-    // (Dueño, SuperAdmin, Mesero con PIN o Cocina KDS). Visitantes anónimos no pueden consultar la lista de pedidos.
-    let isAuthorized = false;
+    // Se admiten dos vías de autorización validadas en el servidor:
+    // A) Personal Autorizado (Dueño, SuperAdmin, Mesero con PIN o Cocina KDS)
+    // B) Comensal con Sesión de Mesa Activa Criptográfica (firmada por servidor en POST /api/pedidos o handshake)
+    let isAuthorizedStaff = false;
     let authError = "Acceso no autorizado. Inicie sesión en el panel o autentique su terminal para consultar pedidos.";
     let authStatus = 401;
 
     for (const vNegId of targetIdsArray) {
       const auth = await verifyOrderStaffAuth(req, vNegId);
       if (auth.authorized) {
-        isAuthorized = true;
+        isAuthorizedStaff = true;
         break;
       } else {
         authError = auth.error || authError;
@@ -189,7 +190,24 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    if (!isAuthorized) {
+    let isAuthorizedTable = false;
+    let tableAuthContext: TableAuthContext | null = null;
+
+    if (!isAuthorizedStaff && mesa) {
+      for (const vNegId of targetIdsArray) {
+        const tableAuth = await verifyTableSessionAuth(req, vNegId, mesa);
+        if (tableAuth.authorized) {
+          isAuthorizedTable = true;
+          tableAuthContext = tableAuth;
+          break;
+        } else if (tableAuth.status === 403) {
+          authError = tableAuth.error || authError;
+          authStatus = 403;
+        }
+      }
+    }
+
+    if (!isAuthorizedStaff && !isAuthorizedTable) {
       return NextResponse.json(
         { ok: false, error: authError },
         { status: authStatus }
@@ -233,21 +251,33 @@ export async function GET(req: NextRequest) {
 
     const params: (string | number | boolean | string[])[] = [targetIdsArray];
 
-    if (soloActivos) {
-      params.push("pagado");
-      params.push("cancelado");
-      query += ` AND p.estado NOT IN ($${params.length - 1}, $${params.length})`;
-    }
-
-    if (mesa) {
-      const mesaVariants = getMesaVariants(mesa);
+    if (isAuthorizedTable) {
+      // Para comensal con sesión de mesa activa: devolver estrictamente la comanda activa de su mesa
+      // o la comanda cerrada correspondiente a su sesión para notificar el pago
+      const mesaVariants = getMesaVariants(mesa!);
       params.push(mesaVariants);
       query += ` AND LOWER(TRIM(p.mesa)) = ANY($${params.length}::text[])`;
-    }
 
-    if (vertical) {
-      params.push(vertical);
-      query += ` AND p.vertical = $${params.length}`;
+      const orderIdParam = tableAuthContext?.orderId || "00000000-0000-0000-0000-000000000000";
+      params.push(orderIdParam);
+      query += ` AND (p.estado NOT IN ('pagado', 'cancelado') OR p.id::text = $${params.length}::text)`;
+    } else {
+      if (soloActivos) {
+        params.push("pagado");
+        params.push("cancelado");
+        query += ` AND p.estado NOT IN ($${params.length - 1}, $${params.length})`;
+      }
+
+      if (mesa) {
+        const mesaVariants = getMesaVariants(mesa);
+        params.push(mesaVariants);
+        query += ` AND LOWER(TRIM(p.mesa)) = ANY($${params.length}::text[])`;
+      }
+
+      if (vertical) {
+        params.push(vertical);
+        query += ` AND p.vertical = $${params.length}`;
+      }
     }
 
     query += `
@@ -255,12 +285,16 @@ export async function GET(req: NextRequest) {
       ORDER BY p.created_at DESC
     `;
 
+    if (isAuthorizedTable) {
+      query += ` LIMIT 1`;
+    }
+
     const { rows: pedidos } = await pool.query(query, params);
 
-    // Si la consulta proviene de un comensal público sincronizando su mesa:
-    // Omitir terminantemente teléfonos de clientes y datos sensibles para resguardar la privacidad
+    // Si la consulta proviene de un comensal con sesión de mesa activa:
+    // Omitir terminantemente teléfonos de clientes y anonimizar datos personales para resguardar la privacidad
     const sanitizedPedidos = pedidos.map((p) => {
-      if (!isAuthorized) {
+      if (!isAuthorizedStaff) {
         return {
           ...p,
           cliente_telefono: null, // Nunca exponer números telefónicos a terceros
@@ -752,19 +786,44 @@ export async function POST(req: NextRequest) {
           const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
           const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
 
-          return NextResponse.json({
+          let tableSessionToken: string | undefined;
+          if (mesaStr && mesaStr !== "Llevar" && mesaStr !== "Delivery") {
+            const mesaStrClean = mesaStr.replace(/^(mesa\s*#?|#)/i, "").trim();
+            tableSessionToken = signTableSessionToken({
+              negocioId: (responseOrder as any)?.negocio_id || resolvedNegocioId,
+              mesa: mesaStrClean,
+              orderId: responseOrder?.id,
+              customerName: cliente_nombre ? String(cliente_nombre).trim() : undefined,
+              createdAt: Date.now(),
+            });
+          }
+
+          const res = NextResponse.json({
             ok: true,
             tipo: "items_añadidos",
             pedido: responseOrder,
             nuevos_items: insertedItems,
             whatsapp_url: waUrl,
             vertical: "menuqr",
+            table_session_token: tableSessionToken,
             subtotal: updatedCharges.subtotal,
             iva: updatedCharges.iva,
             service_charge: updatedCharges.service_charge,
             costo_envio: updatedCharges.costo_envio,
             total: updatedCharges.total,
           });
+
+          if (tableSessionToken) {
+            res.cookies.set("table_session", tableSessionToken, {
+              httpOnly: true,
+              secure: process.env.NODE_ENV === "production",
+              path: "/",
+              sameSite: "lax",
+              maxAge: 12 * 3600,
+            });
+          }
+
+          return res;
         } else {
           // --- NUEVO PEDIDO RESTAURANTE ---
           let itemsTotal = 0;
@@ -980,13 +1039,26 @@ export async function POST(req: NextRequest) {
           const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
           const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
 
-          return NextResponse.json({
+          let tableSessionToken: string | undefined;
+          if (mesaStr && mesaStr !== "Llevar" && mesaStr !== "Delivery") {
+            const mesaStrClean = mesaStr.replace(/^(mesa\s*#?|#)/i, "").trim();
+            tableSessionToken = signTableSessionToken({
+              negocioId: (responseOrder as any)?.negocio_id || resolvedNegocioId,
+              mesa: mesaStrClean,
+              orderId: responseOrder?.id,
+              customerName: cliente_nombre ? String(cliente_nombre).trim() : undefined,
+              createdAt: Date.now(),
+            });
+          }
+
+          const res = NextResponse.json({
             ok: true,
             tipo: "nuevo_pedido",
             pedido: responseOrder,
             items: insertedItems,
             whatsapp_url: waUrl,
             vertical: "menuqr",
+            table_session_token: tableSessionToken,
             is_retry: isConflictRetry,
             subtotal: metaObj.subtotal,
             iva: metaObj.iva,
@@ -994,6 +1066,18 @@ export async function POST(req: NextRequest) {
             costo_envio: metaObj.costo_envio,
             total: orderTotal,
           });
+
+          if (tableSessionToken) {
+            res.cookies.set("table_session", tableSessionToken, {
+              httpOnly: true,
+              secure: process.env.NODE_ENV === "production",
+              path: "/",
+              sameSite: "lax",
+              maxAge: 12 * 3600,
+            });
+          }
+
+          return res;
         }
       }
 

@@ -592,6 +592,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     customerPhone?: string;
     startedAt: string;
     isVerified?: boolean;
+    tableSessionToken?: string;
   } | null>(null);
   const [isTableVerified, setIsTableVerified] = useState<boolean>(false);
   const [liveTableOrder, setLiveTableOrder] = useState<any | null>(null);
@@ -1047,9 +1048,45 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const fetchLiveTable = async () => {
       if (typeof document !== "undefined" && document.hidden) return;
       try {
+        let currentToken = openTableSession?.tableSessionToken;
+
+        // Si tenemos sesión de mesa abierta en el navegador pero aún sin token firmado (ej. pedidos previos),
+        // intentar auto-handshake seguro con el servidor
+        if (!currentToken && openTableSession?.tableName) {
+          try {
+            const hRes = await fetch("/api/pedidos/mesa-session", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                slug: restaurant.slug,
+                mesa: activeMesa,
+                customerName: openTableSession.customerName || customerName,
+                customerPhone: openTableSession.customerPhone || customerPhone,
+              }),
+            });
+            const hData = await hRes.json();
+            if (hData.ok && hData.table_session_token) {
+              currentToken = hData.table_session_token;
+              setOpenTableSession((prev) => (prev ? { ...prev, tableSessionToken: currentToken } : null));
+              try {
+                const stored = localStorage.getItem(`menuqr_open_table_${restaurant.slug}`);
+                if (stored) {
+                  const parsed = JSON.parse(stored);
+                  parsed.tableSessionToken = currentToken;
+                  localStorage.setItem(`menuqr_open_table_${restaurant.slug}`, JSON.stringify(parsed));
+                }
+              } catch {}
+            }
+          } catch {}
+        }
+
+        const queryToken = currentToken ? `&table_token=${encodeURIComponent(currentToken)}` : "";
         const res = await fetch(
-          `/api/pedidos?negocio_id=${restaurant.id}&slug=${encodeURIComponent(restaurant.slug)}&mesa=${encodeURIComponent(activeMesa)}&activos=false`,
-          { cache: "no-store" }
+          `/api/pedidos?negocio_id=${restaurant.id}&slug=${encodeURIComponent(restaurant.slug)}&mesa=${encodeURIComponent(activeMesa)}&activos=false${queryToken}`,
+          {
+            cache: "no-store",
+            headers: currentToken ? { "x-table-session": currentToken } : undefined,
+          }
         );
         const data = await res.json();
         if (isPollingMounted && data.ok && Array.isArray(data.pedidos)) {
@@ -1936,6 +1973,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         customerPhone: customerPhone.trim() || undefined,
         startedAt: openTableSession?.startedAt || new Date().toISOString(),
         isVerified: isTableVerified || openTableSession?.isVerified || false,
+        tableSessionToken: result.table_session_token || result.tableSessionToken || openTableSession?.tableSessionToken,
       };
       try {
         localStorage.setItem(`menuqr_open_table_${restaurant.slug}`, JSON.stringify(sessionData));

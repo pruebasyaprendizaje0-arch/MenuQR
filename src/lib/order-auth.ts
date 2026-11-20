@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { cookies, headers } from "next/headers";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
-import { verifyStaffToken, StaffRole } from "@/lib/jwt";
+import { verifyStaffToken, verifyTableSessionToken, StaffRole, TableSessionPayload } from "@/lib/jwt";
 import { prisma } from "@/lib/db";
 import { pool } from "@/lib/db-pool";
 
@@ -215,3 +215,106 @@ export function checkRoleCanDeleteOrder(
   }
   return { allowed: true };
 }
+
+export interface TableAuthContext {
+  authorized: boolean;
+  negocioId?: string;
+  mesa?: string;
+  orderId?: string;
+  customerName?: string;
+  error?: string;
+  status?: number;
+}
+
+/**
+ * Extrae el token de sesión de mesa desde encabezados, parámetros URL o cookies
+ */
+export function extractTableToken(req?: NextRequest): string | undefined {
+  if (!req) return undefined;
+
+  const headerToken = req.headers.get("x-table-session");
+  if (headerToken?.trim()) return headerToken.trim();
+
+  const authHeader = req.headers.get("authorization") || "";
+  if (authHeader.startsWith("Bearer ")) {
+    const candidate = authHeader.substring(7).trim();
+    const decoded = verifyTableSessionToken(candidate);
+    if (decoded) return candidate;
+  }
+
+  try {
+    const { searchParams } = new URL(req.url);
+    const queryToken = searchParams.get("table_token") || searchParams.get("table_session_token");
+    if (queryToken?.trim()) return queryToken.trim();
+  } catch {}
+
+  const cookieToken = req.cookies.get("table_session")?.value || req.cookies.get("menuqr_table_session")?.value;
+  if (cookieToken) return cookieToken;
+
+  const tableCookie = req.cookies.getAll().find((c) => c.name.startsWith("table_session_"));
+  if (tableCookie) return tableCookie.value;
+
+  return undefined;
+}
+
+/**
+ * Valida de forma criptográfica y estricta en el servidor que la petición provenga
+ * de un comensal con sesión activa autorizada en la mesa correspondiente.
+ * 
+ * Garantías de Seguridad:
+ * - El token fue firmado por el servidor con JWT_SECRET (imposible de falsificar desde JS cliente o con el salt público del QR).
+ * - Está restringido al negocio correspondiente (no permite saltar de un restaurante a otro).
+ * - Está restringido a la mesa correspondiente (un token de Mesa #2 no puede consultar la cuenta de Mesa #5).
+ * - No expone datos de otras mesas ni de sesiones anteriores cerradas.
+ */
+export async function verifyTableSessionAuth(
+  req: NextRequest,
+  targetNegocioId: string,
+  targetMesa: string
+): Promise<TableAuthContext> {
+  const token = extractTableToken(req);
+  if (!token) {
+    return {
+      authorized: false,
+      error: "Acceso no autorizado a la cuenta de mesa. Se requiere una sesión activa validada en el servidor.",
+      status: 401,
+    };
+  }
+
+  const decoded = verifyTableSessionToken(token);
+  if (!decoded) {
+    return {
+      authorized: false,
+      error: "Token de sesión de mesa inválido, expirado o adulterado.",
+      status: 401,
+    };
+  }
+
+  // 1. Control multi-tenant estricto de negocio
+  if (decoded.negocioId !== targetNegocioId) {
+    return {
+      authorized: false,
+      error: "No autorizado para consultar la cuenta de un negocio ajeno.",
+      status: 403,
+    };
+  }
+
+  // 2. Control de aislamiento de mesa
+  const cleanMesa = (m: string) => String(m || "").replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase();
+  if (cleanMesa(decoded.mesa) !== cleanMesa(targetMesa)) {
+    return {
+      authorized: false,
+      error: "El token de sesión no corresponde a la mesa consultada.",
+      status: 403,
+    };
+  }
+
+  return {
+    authorized: true,
+    negocioId: decoded.negocioId,
+    mesa: decoded.mesa,
+    orderId: decoded.orderId,
+    customerName: decoded.customerName,
+  };
+}
+

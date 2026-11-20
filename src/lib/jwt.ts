@@ -119,4 +119,30 @@ export function verifyStaffToken(token: string): StaffSessionPayload | null {
   }
 }
 
+export interface TableSessionPayload {
+  purpose: "table_session";
+  negocioId: string;
+  mesa: string;
+  orderId?: string;
+  customerName?: string;
+  createdAt: number;
+}
+
+export function signTableSessionToken(payload: Omit<TableSessionPayload, "purpose">): string {
+  return jwt.sign({ ...payload, purpose: "table_session" }, getJwtSecret(), { expiresIn: "12h" });
+}
+
+export function verifyTableSessionToken(token: string): TableSessionPayload | null {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret()) as TableSessionPayload;
+    if (decoded && decoded.purpose === "table_session") {
+      return decoded;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+
 
