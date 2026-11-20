@@ -543,28 +543,32 @@ export async function POST(req: NextRequest) {
     // Si la petición trae un ID de pedido explícito (order_id o id), se exige estrictamente un dispatch_token válido.
     // Si no lo trae o es inválido, se rechaza inmediatamente con 4xx SIN insertar nada y SIN caer al flujo nativo.
     const explicitOrderId = body.order_id || body.id;
+    const targetPedidoId = body.pedido_id || body.target_pedido_id || body.parent_order_id;
     const dispatchToken = body.dispatch_token;
     const isRoundReq = Boolean(body.is_round);
     const roundAttemptId = body.round_attempt_id ? String(body.round_attempt_id).trim() : "";
 
     if (explicitOrderId) {
-      if (!dispatchToken || typeof dispatchToken !== "string") {
-        return NextResponse.json(
-          { ok: false, error: "Token de autorización requerido cuando se proporciona ID de pedido." },
-          { status: 400 }
-        );
-      }
+      const staffAuth = await verifyOrderStaffAuth(req, resolvedNegocioId);
+      if (!staffAuth.authorized) {
+        if (!dispatchToken || typeof dispatchToken !== "string") {
+          return NextResponse.json(
+            { ok: false, error: "Token de autorización requerido cuando se proporciona ID de pedido." },
+            { status: 400 }
+          );
+        }
 
-      const verifiedToken = verifyKdsDispatchToken(dispatchToken);
-      if (
-        !verifiedToken ||
-        verifiedToken.orderId !== explicitOrderId ||
-        (verifiedToken.restaurantId !== resolvedNegocioId && verifiedToken.restaurantId !== restaurantPrismaId)
-      ) {
-        return NextResponse.json(
-          { ok: false, error: "Token de despacho inválido o no autorizado." },
-          { status: 403 }
-        );
+        const verifiedToken = verifyKdsDispatchToken(dispatchToken);
+        if (
+          !verifiedToken ||
+          verifiedToken.orderId !== explicitOrderId ||
+          (verifiedToken.restaurantId !== resolvedNegocioId && verifiedToken.restaurantId !== restaurantPrismaId)
+        ) {
+          return NextResponse.json(
+            { ok: false, error: "Token de despacho inválido o no autorizado." },
+            { status: 403 }
+          );
+        }
       }
     }
 
@@ -715,22 +719,35 @@ export async function POST(req: NextRequest) {
         };
 
         // Cada comensal o grupo abre su propia comanda independiente en la mesa (mesas compartidas).
-        // Las rondas se añaden y acumulan de forma estricta según el ID de comanda autorizada.
-        const isNonTableChannel = true;
-        const mesaVariants = getMesaVariants(rawMesa);
-        const searchIds = Array.from(new Set([resolvedNegocioId, restaurantPrismaId].filter(Boolean)));
-        const { rows: existingOrders } = isNonTableChannel
-          ? { rows: [] }
-          : await pool.query(
-              `SELECT * FROM pedidos 
-           WHERE (negocio_id = ANY($1::uuid[])${businessSlug ? " OR negocio_id IN (SELECT id FROM negocios WHERE slug = $3)" : ""})
-             AND LOWER(TRIM(mesa)) = ANY($2::text[])
-             AND estado NOT IN ('pagado', 'cancelado')
-           ORDER BY created_at DESC LIMIT 1`,
-              businessSlug ? [searchIds, mesaVariants, businessSlug] : [searchIds, mesaVariants]
-            );
+        // Las rondas se añaden y acumulan de forma estricta según el ID de comanda autorizada (targetPedidoId o explicitOrderId).
+        const targetComandaId = targetPedidoId || (isRoundReq ? explicitOrderId : null);
+        let existingOrders: any[] = [];
 
-        if (existingOrders.length > 0 && !isNonTableChannel) {
+        if (targetComandaId) {
+          const searchIds = Array.from(new Set([resolvedNegocioId, restaurantPrismaId].filter(Boolean)));
+          const { rows } = await pool.query(
+            `SELECT * FROM pedidos 
+             WHERE id::text = $1::text
+               AND (negocio_id = ANY($2::uuid[])${businessSlug ? " OR negocio_id IN (SELECT id FROM negocios WHERE slug = $3)" : ""})
+               AND estado NOT IN ('pagado', 'cancelado')
+             LIMIT 1`,
+            businessSlug ? [targetComandaId, searchIds, businessSlug] : [targetComandaId, searchIds]
+          );
+
+          if (rows.length === 0) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "La comanda especificada no existe, no pertenece a este negocio o ya ha sido pagada/cancelada.",
+              },
+              { status: 404 }
+            );
+          }
+          existingOrders = rows;
+        }
+
+        if (existingOrders.length > 0) {
           // --- MESA ABIERTA: Verificar autorización previa antes de añadir items o emitir credenciales ---
           const currentOrder = existingOrders[0];
 

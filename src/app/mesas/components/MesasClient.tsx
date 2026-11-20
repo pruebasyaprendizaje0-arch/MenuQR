@@ -52,6 +52,7 @@ interface PedidoItem {
 
 interface Pedido {
   id: string;
+  order_number?: number;
   negocio_id: string;
   mesa: string;
   estado: "nuevo" | "en_cocina" | "listo" | "por_pagar" | "pagado" | "cancelado";
@@ -132,6 +133,8 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
   // Mesa seleccionada para modal
   const [activeMesaNumber, setActiveMesaNumber] = useState<number | null>(null);
+  // Comanda/cuenta seleccionada dentro de la mesa activa (para mesas con múltiples cuentas)
+  const [selectedPedidoId, setSelectedPedidoId] = useState<string | null>(null);
 
   // Catálogo drawer para añadir productos
   const [showCatalogDrawer, setShowCatalogDrawer] = useState(false);
@@ -494,13 +497,22 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       .then((d) => d.ok && setMetricas(d.metricas || []));
   };
 
-  const getPedidoForMesa = (numMesa: number) => {
-    return pedidos.find(
-      (p) => String(p.mesa) === String(numMesa) && p.estado !== "pagado" && p.estado !== "cancelado"
-    );
+  const getPedidosForMesa = (numMesa: number): Pedido[] => {
+    return pedidos.filter((p) => {
+      const cleanP = String(p.mesa || "").replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase();
+      return cleanP === String(numMesa).trim().toLowerCase() && p.estado !== "pagado" && p.estado !== "cancelado";
+    });
   };
 
-  const activePedido = activeMesaNumber ? getPedidoForMesa(activeMesaNumber) : null;
+  const getPedidoForMesa = (numMesa: number) => {
+    const mesaPeds = getPedidosForMesa(numMesa);
+    return mesaPeds.length > 0 ? mesaPeds[0] : null;
+  };
+
+  const activeMesaPedidos = activeMesaNumber !== null ? getPedidosForMesa(activeMesaNumber) : [];
+  const activePedido = activeMesaNumber !== null
+    ? (activeMesaPedidos.find((p) => p.id === selectedPedidoId) || activeMesaPedidos[0] || null)
+    : null;
 
   // Manejar confirmación de cancelación de plato individual (Mesero)
   const handleConfirmCancelItem = async () => {
@@ -540,6 +552,17 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
               : p
           );
         });
+
+        if (data.pedido_cancelado && activeMesaNumber !== null) {
+          const remaining = getPedidosForMesa(activeMesaNumber).filter((p) => p.id !== itemToCancel.pedidoId);
+          if (remaining.length > 0) {
+            setSelectedPedidoId(remaining[0].id);
+          } else {
+            setActiveMesaNumber(null);
+            setSelectedPedidoId(null);
+          }
+        }
+
         setItemToCancel(null);
         refreshMetricas();
       } else {
@@ -575,9 +598,20 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
 
       const data = await res.json();
       if (data.ok) {
-        setPedidos((prev) => prev.filter((p) => p.id !== orderToCancel.pedidoId));
+        const canceledId = orderToCancel.pedidoId;
+        setPedidos((prev) => prev.filter((p) => p.id !== canceledId));
         setOrderToCancel(null);
-        setActiveMesaNumber(null);
+
+        // Si quedan otras comandas activas en esta mesa, mantener la mesa abierta seleccionando la siguiente
+        if (activeMesaNumber !== null) {
+          const remaining = getPedidosForMesa(activeMesaNumber).filter((p) => p.id !== canceledId);
+          if (remaining.length > 0) {
+            setSelectedPedidoId(remaining[0].id);
+          } else {
+            setActiveMesaNumber(null);
+            setSelectedPedidoId(null);
+          }
+        }
         refreshMetricas();
       } else {
         alert(data.error || "No se pudo anular la comanda");
@@ -616,18 +650,23 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
         body: JSON.stringify({ estado: "pagado", solicita_mesero: false }),
       });
       if (res.ok) {
-        setPedidos((prev) =>
-          prev.filter(
-            (p) =>
-              p.id !== pedidoId &&
-              (activeMesaNumber === null || String(p.mesa) !== String(activeMesaNumber))
-          )
-        );
-        setActiveMesaNumber(null);
+        // Actualizar pedidos: remover únicamente la comanda pagada
+        setPedidos((prev) => prev.filter((p) => p.id !== pedidoId));
+
+        // Si quedan otras comandas activas en esta mesa, mantener la mesa abierta seleccionando la siguiente
+        if (activeMesaNumber !== null) {
+          const remaining = getPedidosForMesa(activeMesaNumber).filter((p) => p.id !== pedidoId);
+          if (remaining.length > 0) {
+            setSelectedPedidoId(remaining[0].id);
+          } else {
+            setActiveMesaNumber(null);
+            setSelectedPedidoId(null);
+          }
+        }
         refreshMetricas();
       }
     } catch (e) {
-      console.error("Error liberando mesa:", e);
+      console.error("Error liberando comanda:", e);
     }
   };
 
@@ -788,6 +827,8 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
   const submitAddItemsToMesa = async () => {
     if (!activeMesaNumber || !negocioInfo?.id) return;
 
+    const targetPedidoId = activePedido?.id || undefined;
+
     const itemsToSend = Object.values(cartToAdd).map((item) => ({
       dishId: item.producto.id,
       id: item.producto.id,
@@ -810,6 +851,8 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
           negocio_id: negocioInfo.id,
           slug: negocioInfo.slug,
           mesa: String(activeMesaNumber),
+          pedido_id: targetPedidoId,
+          is_round: Boolean(targetPedidoId),
           camarero_id: activeCamarero?.id || selectedCamareroId || undefined,
           items: itemsToSend,
         }),
@@ -832,10 +875,11 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
             }
             return [...prev, data.pedido];
           });
+          setSelectedPedidoId(data.pedido.id);
         }
         refreshMetricas();
       } else {
-        alert(data.error || "Error al añadir productos a la mesa.");
+        alert(data.error || "Error al añadir productos a la comanda.");
       }
     } catch (e) {
       console.error("Error enviando productos a mesa:", e);
@@ -1154,12 +1198,19 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 sm:gap-5">
           {listaMesas.map((num) => {
-            const pedido = getPedidoForMesa(num);
-            const isOcupada = Boolean(pedido && pedido.estado !== "por_pagar");
-            const isPorPagar = Boolean(pedido && pedido.estado === "por_pagar");
-            const isLibre = !pedido;
-            const isListoEnCocina = pedido?.estado === "listo";
-            const isLlamaMesero = Boolean(pedido?.solicita_mesero);
+            const mesaPedidos = getPedidosForMesa(num);
+            const numCuentas = mesaPedidos.length;
+            const pedido = mesaPedidos[0] || null;
+            const isLibre = numCuentas === 0;
+            const hasLlamaMesero = mesaPedidos.some((p) => Boolean(p.solicita_mesero));
+            const hasListoEnCocina = mesaPedidos.some((p) => p.estado === "listo");
+            const allPorPagar = numCuentas > 0 && mesaPedidos.every((p) => p.estado === "por_pagar");
+            const anyPorPagar = mesaPedidos.some((p) => p.estado === "por_pagar");
+            const isPorPagar = allPorPagar || anyPorPagar;
+            const isOcupada = numCuentas > 0 && !allPorPagar;
+            const isListoEnCocina = hasListoEnCocina;
+            const isLlamaMesero = hasLlamaMesero;
+            const mesaTotalSum = mesaPedidos.reduce((acc, p) => acc + (Number(p.total) || 0), 0);
 
             return (
               <button
@@ -1167,6 +1218,11 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                 type="button"
                 onClick={() => {
                   setActiveMesaNumber(num);
+                  if (mesaPedidos.length > 0) {
+                    setSelectedPedidoId(mesaPedidos[0].id);
+                  } else {
+                    setSelectedPedidoId(null);
+                  }
                   setCartToAdd({});
                   setShowCatalogDrawer(false);
                   setCatalogSearch("");
@@ -1272,6 +1328,11 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                           ¡LISTO!
                         </span>
                       )}
+                      {numCuentas > 1 && (
+                        <span className="bg-sky-500/20 text-sky-300 border border-sky-500/40 font-black text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
+                          {numCuentas} cuentas
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1283,7 +1344,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                         Disponible
                       </span>
                     )}
-                    {pedido && isOcupada && (
+                    {numCuentas === 1 && pedido && (
                       <div className="space-y-0.5">
                         {pedido.cliente_nombre && (
                           <span className="text-[11px] font-bold text-slate-200 truncate block">
@@ -1291,12 +1352,14 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                           </span>
                         )}
                         <div className="flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span className="text-xs uppercase font-extrabold tracking-wider text-emerald-400">
+                          <span className={`w-1.5 h-1.5 rounded-full ${pedido.estado === "por_pagar" ? "bg-amber-400 animate-ping" : "bg-emerald-400 animate-pulse"}`} />
+                          <span className={`text-xs uppercase font-extrabold tracking-wider ${pedido.estado === "por_pagar" ? "text-amber-300" : "text-emerald-400"}`}>
                             {pedido.estado === "nuevo"
                               ? "Nuevo"
                               : pedido.estado === "en_cocina"
                               ? "En Cocina"
+                              : pedido.estado === "por_pagar"
+                              ? "Por Pagar"
                               : "Listo"}
                           </span>
                         </div>
@@ -1305,37 +1368,48 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
                         </span>
                       </div>
                     )}
-                    {pedido && isPorPagar && (
-                      <div className="space-y-0.5">
-                        {pedido.cliente_nombre && (
-                          <span className="text-[11px] font-bold text-amber-300 truncate block">
-                            👤 {pedido.cliente_nombre}
-                          </span>
-                        )}
+                    {numCuentas > 1 && (
+                      <div className="space-y-1">
                         <div className="flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                          <span className="text-xs uppercase font-black tracking-wider text-amber-300">
-                            Por Pagar
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+                          <span className="text-xs font-black uppercase tracking-wider text-sky-300">
+                            {numCuentas} Cuentas Abiertas
                           </span>
                         </div>
-                        <span className="text-[11px] text-amber-200/80 block font-medium">
-                          {pedido.items.length} {pedido.items.length === 1 ? "ítem consumido" : "ítems consumidos"}
-                        </span>
+                        <div className="space-y-0.5 text-[10px] text-slate-300">
+                          {mesaPedidos.slice(0, 2).map((p, idx) => (
+                            <div key={p.id} className="truncate flex justify-between gap-1 items-center">
+                              <span className="truncate text-slate-300">
+                                #{idx + 1} {p.cliente_nombre || `Comanda #${p.order_number || p.id.slice(0, 4)}`}
+                              </span>
+                              <span className="font-mono text-emerald-400 font-bold shrink-0">
+                                ${p.total.toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                          {numCuentas > 2 && (
+                            <span className="text-[9px] text-slate-500 italic block">
+                              + {numCuentas - 2} comanda(s) más...
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
 
                   {/* Base del Tablero: Total o Acción Táctil */}
                   <div className="w-full pt-1.5 border-t border-slate-800/60 flex items-center justify-between">
-                    {pedido ? (
+                    {numCuentas > 0 ? (
                       <>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total:</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          {numCuentas > 1 ? `${numCuentas} Cuentas:` : "Total:"}
+                        </span>
                         <span
                           className={`text-base sm:text-lg font-black font-mono tracking-tight ${
-                            isPorPagar ? "text-amber-400" : "text-emerald-400"
+                            anyPorPagar ? "text-amber-400" : "text-emerald-400"
                           }`}
                         >
-                          ${pedido.total.toFixed(2)}
+                          ${mesaTotalSum.toFixed(2)}
                         </span>
                       </>
                     ) : (
@@ -1409,6 +1483,11 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
               <div>
                 <h3 className="text-2xl font-black text-white flex items-center gap-2">
                   Mesa {activeMesaNumber}
+                  {activeMesaPedidos.length > 1 && (
+                    <span className="text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                      {activeMesaPedidos.length} Cuentas
+                    </span>
+                  )}
                   {activePedido && (
                     <span
                       className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
@@ -1439,6 +1518,7 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
               <button
                 onClick={() => {
                   setActiveMesaNumber(null);
+                  setSelectedPedidoId(null);
                   setShowCatalogDrawer(false);
                 }}
                 className="p-2 rounded-full bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition"
@@ -1448,6 +1528,70 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {/* SELECTOR DE CUENTAS / COMANDAS EN LA MESA */}
+              {activeMesaPedidos.length > 1 && (
+                <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800 space-y-2.5 shadow-inner">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                    <span className="flex items-center gap-1.5 text-sky-400">
+                      <Users className="w-4 h-4" /> Selecciona la cuenta a gestionar:
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {activeMesaPedidos.length} cuentas independientes
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {activeMesaPedidos.map((ped, idx) => {
+                      const isSelected = activePedido?.id === ped.id;
+                      const isPorPagar = ped.estado === "por_pagar";
+                      const pedNumber = ped.order_number || ped.id.slice(0, 5);
+                      return (
+                        <button
+                          key={ped.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPedidoId(ped.id);
+                            setCartToAdd({});
+                            setShowCatalogDrawer(false);
+                          }}
+                          className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between ${
+                            isSelected
+                              ? "bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-500/50 shadow-lg text-white"
+                              : "bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850"
+                          }`}
+                        >
+                          <div className="space-y-0.5 min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${isSelected ? "bg-emerald-500 text-slate-950" : "bg-slate-800 text-slate-300"}`}>
+                                #{idx + 1}
+                              </span>
+                              <span className="font-bold text-xs truncate">
+                                {ped.cliente_nombre ? ped.cliente_nombre : `Comanda #${pedNumber}`}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                              <span>{ped.items?.length || 0} platos</span>
+                              <span>•</span>
+                              <span className={`font-semibold uppercase ${isPorPagar ? "text-amber-400" : "text-emerald-400"}`}>
+                                {ped.estado}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className={`font-mono font-black text-sm ${isSelected ? "text-emerald-300" : "text-emerald-400"}`}>
+                              ${ped.total.toFixed(2)}
+                            </div>
+                            {isSelected && (
+                              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-wider block">
+                                Activa
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {activePedido && activePedido.solicita_mesero && (
                 <div className="bg-red-950/80 border-2 border-red-500 rounded-2xl p-3.5 flex items-center justify-between text-xs animate-pulse shadow-lg shadow-red-950/50">
                   <div className="flex items-center gap-2 text-red-200 font-bold">
