@@ -3,6 +3,7 @@ import { pool, ensureDbTables } from "@/lib/db-pool";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { cookies } from "next/headers";
+import { validatePinFormat, hashPin } from "@/lib/security-pins";
 
 export const dynamic = "force-dynamic";
 
@@ -99,17 +100,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let hashedPin: string | null = null;
+    if (pin !== undefined && pin !== null && String(pin).trim() !== "") {
+      const pinVal = validatePinFormat(pin);
+      if (!pinVal.valid || !pinVal.cleanPin) {
+        return NextResponse.json(
+          { ok: false, error: pinVal.error || "El PIN ingresado es inválido." },
+          { status: 400 }
+        );
+      }
+      hashedPin = hashPin(pinVal.cleanPin);
+    }
+
     const { rows } = await pool.query(
       `INSERT INTO camareros (negocio_id, nombre, pin, activo)
        VALUES ($1, $2, $3, true)
        RETURNING id, negocio_id, nombre, activo, created_at`,
-      [negocio_id, nombre.trim(), pin?.trim() || null]
+      [negocio_id, nombre.trim(), hashedPin]
     );
 
     return NextResponse.json({
       ok: true,
       camarero: rows[0],
-      message: "Mesero creado exitosamente",
+      message: "Mesero creado exitosamente con credenciales seguras",
     });
   } catch (err: any) {
     console.error("[POST /api/camareros] Error:", err);

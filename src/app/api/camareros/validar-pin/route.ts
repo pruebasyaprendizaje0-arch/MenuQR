@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
+import { verifyPinHash } from "@/lib/security-pins";
+import {
+  extractClientIp,
+  verifyDoubleRateLimit,
+  recordDoubleFailedAttempt,
+  clearDoubleRateLimit,
+  MESERO_PIN_LIMIT,
+} from "@/lib/security-rate-limit";
 
 export const dynamic = "force-dynamic";
 
 // POST /api/camareros/validar-pin
-// Valida el PIN de 4 dígitos de un camarero para el inicio de turno
+// Valida el PIN seguro (hash bcrypt) de un camarero con rate limiting estricto anti fuerza bruta
 export async function POST(req: NextRequest) {
   try {
     await ensureDbTables();
 
+    const clientIp = extractClientIp(req);
     const body = await req.json();
     const { negocio_id, camarero_id, pin } = body;
 
@@ -43,29 +52,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Si el camarero aún no tiene PIN configurado, permitir acceso y sugerir configurar uno, o validar contra 1234 / pin ingresado
-    if (!camarero.pin || camarero.pin.trim() === "") {
-      // Si el mesero ingresa un PIN nuevo por primera vez, asignárselo
-      if (pin && String(pin).trim().length >= 4) {
-        await pool.query(
-          "UPDATE camareros SET pin = $1 WHERE id = $2",
-          [String(pin).trim(), camarero.id]
-        );
-        camarero.pin = String(pin).trim();
-      }
-      return NextResponse.json({
-        ok: true,
-        valido: true,
-        camarero: { id: camarero.id, nombre: camarero.nombre },
-        message: "Sesión iniciada correctamente",
-      });
+    // Rate Limiting anti fuerza bruta (por mesero + por IP de origen)
+    const entityKey = `mesero:${camarero.id}`;
+    const rateCheck = verifyDoubleRateLimit(entityKey, clientIp, MESERO_PIN_LIMIT);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          valido: false,
+          error: rateCheck.error,
+          retryAfterSeconds: rateCheck.retryAfterSeconds,
+        },
+        { status: 429 }
+      );
     }
 
-    // Si tiene PIN configurado, validar igualdad estricta (sin PIN maestro universal)
-    const pinIngresado = String(pin || "").trim();
-    const pinAlmacenado = String(camarero.pin).trim();
+    // Si el camarero no tiene PIN configurado por el administrador, denegar acceso
+    // NUNCA auto-asignar PIN desde esta pantalla ni permitir acceso sin clave
+    if (!camarero.pin || camarero.pin.trim() === "") {
+      return NextResponse.json(
+        {
+          ok: false,
+          valido: false,
+          error: "Este integrante no tiene un PIN configurado. Contacta al administrador para que asigne tu PIN de acceso.",
+        },
+        { status: 401 }
+      );
+    }
 
-    if (pinIngresado === pinAlmacenado) {
+    // Verificación criptográfica segura con bcrypt contra el hash almacenado
+    const pinIngresado = String(pin || "").trim();
+    const pinValido = verifyPinHash(pinIngresado, camarero.pin);
+
+    if (pinValido) {
+      // Éxito: restablecer contadores de intentos fallidos
+      clearDoubleRateLimit(entityKey, clientIp);
       return NextResponse.json({
         ok: true,
         valido: true,
@@ -73,8 +94,20 @@ export async function POST(req: NextRequest) {
         message: "PIN verificado exitosamente",
       });
     } else {
+      // Fallo: registrar intento fallido y aplicar bloqueo si se excede el umbral
+      const failResult = recordDoubleFailedAttempt(entityKey, clientIp, MESERO_PIN_LIMIT);
+      const remainingMsg = failResult.remainingAttempts > 0
+        ? ` (${failResult.remainingAttempts} intento${failResult.remainingAttempts > 1 ? "s" : ""} restante${failResult.remainingAttempts > 1 ? "s" : ""})`
+        : "";
+
       return NextResponse.json(
-        { ok: false, valido: false, error: "PIN incorrecto. Intenta nuevamente." },
+        {
+          ok: false,
+          valido: false,
+          error: failResult.error || `PIN incorrecto. Intenta nuevamente${remainingMsg}.`,
+          remainingAttempts: failResult.remainingAttempts,
+          retryAfterSeconds: failResult.retryAfterSeconds,
+        },
         { status: 401 }
       );
     }

@@ -37,7 +37,7 @@ interface Camarero {
   id: string;
   negocio_id: string;
   nombre: string;
-  pin: string;
+  hasPin: boolean;
   rol: StaffRole;
   telefono?: string | null;
   activo: boolean;
@@ -58,11 +58,11 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
   const [camareros, setCamareros] = useState<Camarero[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showPins, setShowPins] = useState(false);
   const [roleFilter, setRoleFilter] = useState<"ALL" | "MESERO" | "CAJERO" | "REPARTIDOR">("ALL");
 
   // Estados de seguridad de Cocina
   const [kitchenPin, setKitchenPin] = useState("");
+  const [kitchenPinSet, setKitchenPinSet] = useState(false);
   const [kitchenPinRequired, setKitchenPinRequired] = useState(false);
   const [showKitchenPin, setShowKitchenPin] = useState(false);
   const [waiterPinRequired, setWaiterPinRequired] = useState(true);
@@ -87,7 +87,8 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
       if (res.success && res.camareros) {
         setCamareros(res.camareros);
         if (res.kitchenSecurity) {
-          setKitchenPin(res.kitchenSecurity.kitchenPin || "");
+          setKitchenPinSet(Boolean(res.kitchenSecurity.kitchenPinSet));
+          setKitchenPin("");
           setKitchenPinRequired(Boolean(res.kitchenSecurity.kitchenPinRequired));
           setWaiterPinRequired(res.kitchenSecurity.waiterPinRequired !== false);
         }
@@ -120,6 +121,8 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
       });
 
       if (res.success) {
+        setKitchenPinSet(Boolean(res.kitchenSecurity?.kitchenPinSet));
+        setKitchenPin("");
         setKitchenMessage({ type: "success", text: "Clave y configuración de seguridad guardadas correctamente." });
         setTimeout(() => setKitchenMessage(null), 4000);
       } else {
@@ -148,6 +151,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
 
       if (res.success) {
         setKitchenPin("");
+        setKitchenPinSet(false);
         setKitchenPinRequired(false);
         setKitchenMessage({ type: "success", text: "Acceso libre a cocina activado (sin clave)." });
         setTimeout(() => setKitchenMessage(null), 4000);
@@ -169,9 +173,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
     const targetRole = presetRole || (roleFilter !== "ALL" ? roleFilter : "MESERO");
     setFormRol(targetRole);
     setFormTelefono("");
-    // Sugerir PIN automático fácil de 4 dígitos basado en el número de miembros
-    const nextPinNum = (camareros.length + 1) * 1111;
-    setFormPin(nextPinNum <= 9999 ? String(nextPinNum) : "1234");
+    setFormPin("");
     setFormActivo(true);
     setFormError(null);
     setIsModalOpen(true);
@@ -181,7 +183,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
   const handleOpenEditModal = (waiter: Camarero) => {
     setEditingWaiter(waiter);
     setFormNombre(waiter.nombre);
-    setFormPin(waiter.pin || "1234");
+    setFormPin("");
     setFormRol(waiter.rol || "MESERO");
     setFormTelefono(waiter.telefono || "");
     setFormActivo(waiter.activo);
@@ -197,8 +199,12 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
       return;
     }
     const cleanPin = formPin.trim();
-    if (cleanPin.length < 4 || cleanPin.length > 8 || !/^\d+$/.test(cleanPin)) {
-      setFormError("El PIN debe tener entre 4 y 8 dígitos numéricos (ej. 1234).");
+    if (!editingWaiter && !cleanPin) {
+      setFormError("El administrador debe asignar un PIN numérico de 4 a 8 dígitos.");
+      return;
+    }
+    if (cleanPin && (cleanPin.length < 4 || cleanPin.length > 8 || !/^\d+$/.test(cleanPin))) {
+      setFormError("El PIN debe tener entre 4 y 8 dígitos numéricos.");
       return;
     }
 
@@ -210,7 +216,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
         // Actualizar existente
         const res = await updateWaiterAction(restaurant.id, editingWaiter.id, {
           nombre: formNombre.trim(),
-          pin: cleanPin,
+          ...(cleanPin ? { pin: cleanPin } : {}),
           rol: formRol,
           telefono: formTelefono.trim() || null,
           activo: formActivo,
@@ -437,6 +443,12 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
                 <label className="text-xs font-bold text-white flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5 text-orange-400" />
                   <span>Clave / PIN de Cocina (4 a 8 dígitos)</span>
+                  {kitchenPinSet && (
+                    <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                      <span>Hash Seguro</span>
+                    </span>
+                  )}
                 </label>
                 <button
                   type="button"
@@ -452,7 +464,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
                 <input
                   type={showKitchenPin ? "text" : "password"}
                   maxLength={8}
-                  placeholder="Ej: 1234"
+                  placeholder={kitchenPinSet ? "Escribe nuevo PIN para cambiarlo..." : "Asignar PIN de 4 a 8 dígitos..."}
                   value={kitchenPin}
                   onChange={(e) => setKitchenPin(e.target.value.replace(/\D/g, ""))}
                   className="w-full bg-slate-900 border border-slate-800 focus:border-orange-500 px-3.5 py-2.5 rounded-xl text-white font-mono text-sm tracking-widest focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder:text-slate-600"
@@ -482,11 +494,11 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
           {/* BOTONES DE ACCIÓN PARA COCINA */}
           <div className="flex items-center justify-between flex-wrap gap-3 pt-2">
             <div className="text-[11px] text-slate-500">
-              💡 Recomendación: Asigna un PIN numérico de 4 dígitos fácil de recordar para el personal de cocina (ej. <strong>2026</strong> o <strong>1234</strong>).
+              💡 Recomendación: Asigna un PIN numérico de 4 a 8 dígitos personalizado para el personal de cocina.
             </div>
 
             <div className="flex items-center gap-2.5">
-              {kitchenPin && (
+              {(kitchenPin || kitchenPinSet) && (
                 <button
                   type="button"
                   disabled={savingKitchen}
@@ -542,15 +554,10 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setShowPins(!showPins)}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold transition flex items-center gap-1.5"
-              title="Mostrar u ocultar los PINs en la lista"
-            >
-              {showPins ? <EyeOff className="w-4 h-4 text-amber-400" /> : <Eye className="w-4 h-4 text-amber-400" />}
-              <span>{showPins ? "Ocultar PINs" : "Mostrar PINs"}</span>
-            </button>
+            <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs font-bold flex items-center gap-1.5 shadow-sm">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>PINs Hasheados (Bcrypt)</span>
+            </div>
 
             <button
               type="button"
@@ -747,12 +754,17 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
                           <span className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-black border uppercase tracking-wider ${badgeColor}`}>
                             {isCajero ? "Cajero POS" : isRepartidor ? "Repartidor" : "Mesero"}
                           </span>
-                          <span className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
-                            <Lock className="w-3 h-3 text-amber-400" />
-                            <strong className="text-amber-300 font-bold">
-                              {showPins ? cam.pin : "••••"}
-                            </strong>
-                          </span>
+                          {cam.hasPin ? (
+                            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                              <span>PIN Asignado</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3 text-rose-400" />
+                              <span>Requiere PIN</span>
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -960,14 +972,16 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
               {/* PIN NUMÉRICO */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-                  <span>Clave / PIN de Acceso (4 a 8 dígitos) *</span>
-                  <span className="text-[10px] text-amber-400 font-mono">Solo números</span>
+                  <span>{editingWaiter ? "Restablecer Clave / PIN (4 a 8 dígitos)" : "Clave / PIN de Acceso (4 a 8 dígitos) *"}</span>
+                  <span className="text-[10px] text-amber-400 font-mono">
+                    {editingWaiter ? "Opcional si conserva actual" : "Requerido (sin valores fijos)"}
+                  </span>
                 </label>
                 <input
                   type="text"
-                  required
+                  required={!editingWaiter}
                   maxLength={8}
-                  placeholder="Ej: 1234"
+                  placeholder={editingWaiter ? "Dejar vacío para conservar actual o teclear nuevo..." : "Asignar nuevo PIN (ej. 8392)..."}
                   value={formPin}
                   onChange={(e) => setFormPin(e.target.value.replace(/\D/g, ""))}
                   className="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500 px-3.5 py-2.5 rounded-xl text-white font-mono text-sm tracking-widest focus:outline-none placeholder:text-slate-600"

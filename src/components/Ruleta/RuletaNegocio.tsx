@@ -233,17 +233,6 @@ export default function RuletaNegocio({
     ];
   }, [config?.sectores]);
 
-  // Conic gradient para dibujar la ruleta con 6 sectores exactos
-  const conicStyle = useMemo(() => {
-    const sectorAngle = 360 / sectores.length; // 60 deg
-    const parts = sectores.map((sec, idx) => {
-      const start = idx * sectorAngle;
-      const end = (idx + 1) * sectorAngle;
-      return `${sec.color_hex} ${start}deg ${end}deg`;
-    });
-    // Offset inicial de -30deg para que el sector 0 quede centrado arriba bajo el puntero
-    return `conic-gradient(from -30deg, ${parts.join(", ")})`;
-  }, [sectores]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -732,47 +721,124 @@ export default function RuletaNegocio({
 
           {/* Rueda Giratoria */}
           <div className="relative w-[300px] h-[300px] sm:w-[390px] sm:h-[390px] rounded-full p-2.5 bg-gradient-to-b from-slate-700 via-slate-800 to-slate-950 shadow-[0_20px_50px_rgba(0,0,0,0.6),inset_0_2px_4px_rgba(255,255,255,0.2)] border-4 border-slate-700">
-            {/* Disco de Sectores */}
+            {/* Disco de Sectores SVG Vectorial de Alta Fidelidad */}
             <div
               className="w-full h-full rounded-full relative overflow-hidden shadow-inner border-4 border-white/20 will-change-transform"
               style={{
-                background: conicStyle,
                 transform: `rotate(${rotationDeg}deg)`,
                 transition: "transform 4.2s cubic-bezier(0.12, 0.82, 0.2, 1)",
               }}
             >
-              {sectores.map((sec, idx) => {
-                const angle = idx * 60; // 60 deg por sector
-                return (
-                  <div
-                    key={sec.id || idx}
-                    className="absolute top-1/2 left-1/2 w-24 sm:w-32 h-[50%] origin-bottom pointer-events-none flex flex-col items-center justify-start pt-2 sm:pt-3"
-                    style={{
-                      transform: `translate(-50%, -100%) rotate(${angle}deg)`,
-                    }}
-                  >
-                    <span className="text-lg sm:text-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] leading-none mb-1 select-none">
-                      {getSectorEmoji(sec)}
-                    </span>
-                    <div className="px-1.5 py-0.5 rounded-lg bg-slate-950/85 backdrop-blur-sm border border-white/25 shadow-md max-w-[76px] sm:max-w-[96px]">
-                      <span className="text-[9.5px] sm:text-[11px] font-black text-white tracking-tight leading-tight block text-center line-clamp-2 select-none">
-                        {sec.label}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+              <svg viewBox="0 0 360 360" className="w-full h-full select-none pointer-events-none">
+                {/* Cuñas de colores de los 6 sectores */}
+                {sectores.map((sec, idx) => {
+                  const startAngle = (idx * 60 - 30 - 90) * (Math.PI / 180);
+                  const endAngle = ((idx + 1) * 60 - 30 - 90) * (Math.PI / 180);
+                  const x1 = 180 + 180 * Math.cos(startAngle);
+                  const y1 = 180 + 180 * Math.sin(startAngle);
+                  const x2 = 180 + 180 * Math.cos(endAngle);
+                  const y2 = 180 + 180 * Math.sin(endAngle);
 
-              {/* Divisores de sectores */}
-              {sectores.map((_, idx) => (
-                <div
-                  key={`div-${idx}`}
-                  className="absolute top-1/2 left-1/2 w-[1.5px] h-[50%] bg-white/40 origin-bottom"
-                  style={{
-                    transform: `translate(-50%, -100%) rotate(${idx * 60 - 30}deg)`,
-                  }}
-                />
-              ))}
+                  return (
+                    <path
+                      key={`wedge-${sec.id || idx}`}
+                      d={`M 180 180 L ${x1.toFixed(2)} ${y1.toFixed(2)} A 180 180 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`}
+                      fill={sec.color_hex}
+                      stroke="rgba(255,255,255,0.3)"
+                      strokeWidth="1.5"
+                    />
+                  );
+                })}
+
+                {/* Etiquetas y Emojis de cada Sector (Perfectamente centradas en cada cuña sin solapamiento) */}
+                {sectores.map((sec, idx) => {
+                  const midAngleRad = (idx * 60 - 90) * (Math.PI / 180);
+                  const radiusPos = 112; // Posición equidistante, fuera del botón central y dentro del borde
+                  const posX = 180 + radiusPos * Math.cos(midAngleRad);
+                  const posY = 180 + radiusPos * Math.sin(midAngleRad);
+
+                  const labelWords = (sec.label || "").trim().split(/\s+/);
+                  const isMultiLine = (sec.label || "").length > 11 && labelWords.length >= 2;
+                  let line1 = sec.label || "";
+                  let line2 = "";
+                  if (isMultiLine) {
+                    const mid = Math.ceil(labelWords.length / 2);
+                    line1 = labelWords.slice(0, mid).join(" ");
+                    line2 = labelWords.slice(mid).join(" ");
+                  }
+
+                  return (
+                    <g key={`content-${sec.id || idx}`} transform={`translate(${posX.toFixed(2)}, ${posY.toFixed(2)})`}>
+                      {/* Emoji representativo */}
+                      <text
+                        x="0"
+                        y={isMultiLine ? "-15" : "-12"}
+                        textAnchor="middle"
+                        fontSize="20"
+                        style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.85))" }}
+                      >
+                        {getSectorEmoji(sec)}
+                      </text>
+
+                      {/* Placa / Badge de contraste óptimo para legibilidad */}
+                      <rect
+                        x="-43"
+                        y={isMultiLine ? "-6" : "-5"}
+                        width="86"
+                        height={isMultiLine ? "30" : "22"}
+                        rx="7"
+                        fill="rgba(15, 23, 42, 0.90)"
+                        stroke="rgba(255, 255, 255, 0.35)"
+                        strokeWidth="1"
+                        style={{ filter: "drop-shadow(0 3px 5px rgba(0,0,0,0.6))" }}
+                      />
+
+                      {/* Texto del premio legible */}
+                      {isMultiLine ? (
+                        <>
+                          <text
+                            x="0"
+                            y="6"
+                            textAnchor="middle"
+                            fill="#FFFFFF"
+                            fontSize="10"
+                            fontWeight="900"
+                            fontFamily="system-ui, -apple-system, sans-serif"
+                            letterSpacing="-0.2px"
+                          >
+                            {line1}
+                          </text>
+                          <text
+                            x="0"
+                            y="18"
+                            textAnchor="middle"
+                            fill="#FFFFFF"
+                            fontSize="10"
+                            fontWeight="900"
+                            fontFamily="system-ui, -apple-system, sans-serif"
+                            letterSpacing="-0.2px"
+                          >
+                            {line2}
+                          </text>
+                        </>
+                      ) : (
+                        <text
+                          x="0"
+                          y="10.5"
+                          textAnchor="middle"
+                          fill="#FFFFFF"
+                          fontSize="11"
+                          fontWeight="900"
+                          fontFamily="system-ui, -apple-system, sans-serif"
+                          letterSpacing="-0.2px"
+                        >
+                          {line1}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+              </svg>
             </div>
 
             {/* Botón Central GIRAR */}

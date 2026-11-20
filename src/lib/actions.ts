@@ -5,7 +5,14 @@ import { getUserSession, setUserSession, clearUserSession, getSuperAdminSession,
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import {
+  extractClientIp,
+  verifyDoubleRateLimit,
+  recordDoubleFailedAttempt,
+  clearDoubleRateLimit,
+  SUPERADMIN_LOGIN_LIMIT,
+} from "@/lib/security-rate-limit";
 import { join } from "path";
 import { randomBytes, createHash } from "crypto";
 import { signKdsDispatchToken } from "@/lib/jwt";
@@ -101,25 +108,47 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
 
     const cleanEmail = email.toLowerCase().trim();
 
-    // Check SuperAdmin login via environment variables
+    // Check SuperAdmin login via environment variables with rate limiting
     const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL || "").toLowerCase().trim();
     const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || "";
-    const isSuperAdminPass = Boolean(superAdminPassword && (
-      password === superAdminPassword || 
-      password === `${superAdminPassword}*` || 
-      `${password}*` === superAdminPassword
-    ));
-
-    if (superAdminEmail && isSuperAdminPass && cleanEmail === superAdminEmail) {
+    if (superAdminEmail && cleanEmail === superAdminEmail) {
+      let clientIp = "127.0.0.1";
       try {
-        await setSuperAdminSession();
-        redirect("/super-admin");
-      } catch (saError: any) {
-        if (saError?.digest?.startsWith("NEXT_REDIRECT") || saError?.message?.includes("NEXT_REDIRECT")) {
-          throw saError;
+        const headerList = await headers();
+        clientIp = extractClientIp(headerList);
+      } catch {}
+
+      const entityKey = `superadmin:${cleanEmail}`;
+      const rateCheck = verifyDoubleRateLimit(entityKey, clientIp, SUPERADMIN_LOGIN_LIMIT);
+      if (!rateCheck.allowed) {
+        return { error: rateCheck.error || "Acceso temporalmente bloqueado por demasiados intentos fallidos." };
+      }
+
+      const isSuperAdminPass = Boolean(superAdminPassword && (
+        password === superAdminPassword || 
+        password === `${superAdminPassword}*` || 
+        `${password}*` === superAdminPassword
+      ));
+
+      if (isSuperAdminPass) {
+        clearDoubleRateLimit(entityKey, clientIp);
+        try {
+          await setSuperAdminSession();
+          redirect("/super-admin");
+        } catch (saError: any) {
+          if (saError?.digest?.startsWith("NEXT_REDIRECT") || saError?.message?.includes("NEXT_REDIRECT")) {
+            throw saError;
+          }
+          console.error("Error en Auth (SuperAdmin Session):", saError);
+          return { error: "Error al establecer sesión de SuperAdmin." };
         }
-        console.error("Error en Auth (SuperAdmin Session):", saError);
-        return { error: "Error al establecer sesión de SuperAdmin." };
+      } else {
+        const failResult = recordDoubleFailedAttempt(entityKey, clientIp, SUPERADMIN_LOGIN_LIMIT);
+        console.warn(`[Auth Warning] Intento de login SuperAdmin fallido desde /login para: ${cleanEmail}`);
+        if (!failResult.allowed) {
+          return { error: failResult.error || "Demasiados intentos fallidos. Acceso bloqueado temporalmente." };
+        }
+        return { error: "Correo o contraseña incorrectos." };
       }
     }
 
@@ -146,7 +175,13 @@ export async function loginUserAction(prevState: unknown, formData: FormData) {
       return { error: "Ocurrió un error al verificar las credenciales." };
     }
 
-    if (!passwordMatch && cleanEmail === superAdminEmail && isSuperAdminPass) {
+    const isSuperAdminEnvPass = Boolean(superAdminPassword && (
+      password === superAdminPassword || 
+      password === `${superAdminPassword}*` || 
+      `${password}*` === superAdminPassword
+    ));
+
+    if (!passwordMatch && cleanEmail === superAdminEmail && isSuperAdminEnvPass) {
       passwordMatch = true;
       try {
         await prismaControl.user.update({
@@ -1714,15 +1749,39 @@ export async function superAdminLoginAction(prevState: unknown, formData: FormDa
     }
 
     const cleanEmail = email.toLowerCase().trim();
+
+    // Obtener IP del cliente y verificar rate limit estricto anti fuerza bruta
+    let clientIp = "127.0.0.1";
+    try {
+      const headerList = await headers();
+      clientIp = extractClientIp(headerList);
+    } catch {}
+
+    const entityKey = `superadmin:${cleanEmail}`;
+    const rateCheck = verifyDoubleRateLimit(entityKey, clientIp, SUPERADMIN_LOGIN_LIMIT);
+    if (!rateCheck.allowed) {
+      return { error: rateCheck.error || "Acceso temporalmente bloqueado por demasiados intentos fallidos." };
+    }
+
     const isPassValid = 
       password === superAdminPassword || 
       password === `${superAdminPassword}*` || 
       `${password}*` === superAdminPassword;
 
     if (cleanEmail !== superAdminEmail || !isPassValid) {
+      const failResult = recordDoubleFailedAttempt(entityKey, clientIp, SUPERADMIN_LOGIN_LIMIT);
       console.warn(`[Auth Warning] Intento de login SuperAdmin fallido para: ${cleanEmail}`);
-      return { error: "Correo o contraseña incorrectos." };
+      if (!failResult.allowed) {
+        return { error: failResult.error || "Demasiados intentos fallidos. Acceso bloqueado temporalmente." };
+      }
+      const remainingMsg = failResult.remainingAttempts > 0 && failResult.remainingAttempts <= 3
+        ? ` (${failResult.remainingAttempts} intento${failResult.remainingAttempts > 1 ? "s" : ""} restante${failResult.remainingAttempts > 1 ? "s" : ""})`
+        : "";
+      return { error: `Correo o contraseña incorrectos${remainingMsg}.` };
     }
+
+    // Éxito: limpiar contadores de rate limit
+    clearDoubleRateLimit(entityKey, clientIp);
 
     try {
       await setSuperAdminSession();

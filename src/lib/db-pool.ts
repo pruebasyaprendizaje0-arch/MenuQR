@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { isHashedPin, hashPin, BLACKLISTED_PINS } from "./security-pins";
 import fs from "fs";
 import path from "path";
 
@@ -123,6 +124,9 @@ export async function ensureDbTables(): Promise<void> {
       ALTER TABLE camareros ADD COLUMN IF NOT EXISTS rol VARCHAR(20) DEFAULT 'MESERO';
       ALTER TABLE camareros ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);
       CREATE INDEX IF NOT EXISTS idx_camareros_rol ON camareros(negocio_id, rol);
+
+      -- Soporte para hash seguro bcrypt de PINs (60 caracteres)
+      ALTER TABLE camareros ALTER COLUMN pin TYPE VARCHAR(255);
     `);
 
     // Sincronizar negocios a partir de la tabla Restaurant de Prisma si existe
@@ -147,7 +151,7 @@ export async function ensureDbTables(): Promise<void> {
       END $$;
     `);
 
-    // Asegurar al menos 1 negocio de demostración o sincronizado si no hay ninguno
+    // Asegurar al menos 1 negocio de demostración si no hay ninguno (sin PINs predeterminados)
     const { rows: negocioRows } = await pool.query(`SELECT id FROM negocios LIMIT 1`);
     if (negocioRows.length === 0) {
       const { rows: inserted } = await pool.query(`
@@ -159,13 +163,13 @@ export async function ensureDbTables(): Promise<void> {
         await pool.query(`
           INSERT INTO camareros (negocio_id, nombre, pin)
           VALUES 
-            ($1, 'Carlos Gómez', '1234'),
-            ($1, 'María López', '5678'),
-            ($1, 'Andrés Torres', '0000')
+            ($1, 'Carlos Gómez', NULL),
+            ($1, 'María López', NULL),
+            ($1, 'Andrés Torres', NULL)
         `, [inserted[0].id]);
       }
     } else {
-      // Asegurar camareros para cada negocio existente si no tienen
+      // Asegurar camareros iniciales si un negocio no tiene ninguno (sin PIN predeterminado)
       const { rows: allNegocios } = await pool.query(`SELECT id, nombre FROM negocios`);
       for (const neg of allNegocios) {
         const { rows: camCount } = await pool.query(`SELECT COUNT(*)::int as c FROM camareros WHERE negocio_id = $1`, [neg.id]);
@@ -173,11 +177,31 @@ export async function ensureDbTables(): Promise<void> {
           await pool.query(`
             INSERT INTO camareros (negocio_id, nombre, pin)
             VALUES 
-              ($1, 'Mesero 1', '1234'),
-              ($1, 'Mesero 2', '5678')
+              ($1, 'Mesero 1', NULL),
+              ($1, 'Mesero 2', NULL)
           `, [neg.id]);
         }
       }
+    }
+
+    // Migración segura de PINs existentes de camareros:
+    // - Invalida PINs predeterminados/inseguros (1234, 0000, etc.) exigiéndole al admin asignarlos.
+    // - Migra PINs personalizados existentes a hash bcrypt de forma irreversible y segura.
+    try {
+      const { rows: existingStaff } = await pool.query(`SELECT id, pin FROM camareros WHERE pin IS NOT NULL`);
+      for (const member of existingStaff) {
+        const rawPin = String(member.pin || "").trim();
+        if (!rawPin || BLACKLISTED_PINS.has(rawPin) || rawPin.length < 4 || rawPin.length > 8 || !/^\d+$/.test(rawPin)) {
+          // PIN trivial, predeterminado o corrupto: revocar inmediatamente
+          await pool.query(`UPDATE camareros SET pin = NULL WHERE id = $1`, [member.id]);
+        } else if (!isHashedPin(rawPin)) {
+          // PIN personalizado válido: migrar a hash seguro bcrypt
+          const secureHash = hashPin(rawPin);
+          await pool.query(`UPDATE camareros SET pin = $1 WHERE id = $2`, [secureHash, member.id]);
+        }
+      }
+    } catch (migErr) {
+      console.error("[db-pool] Error migrando PINs de camareros a hash:", migErr);
     }
 
     globalForPg.tablesInitialized = true;

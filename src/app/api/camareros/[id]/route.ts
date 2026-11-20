@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { validatePinFormat, hashPin } from "@/lib/security-pins";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,18 @@ export async function PUT(
       );
     }
 
+    let hashedPin: string | null = null;
+    if (pin !== undefined && pin !== null && String(pin).trim() !== "") {
+      const pinVal = validatePinFormat(pin);
+      if (!pinVal.valid || !pinVal.cleanPin) {
+        return NextResponse.json(
+          { ok: false, error: pinVal.error || "El PIN ingresado es inválido." },
+          { status: 400 }
+        );
+      }
+      hashedPin = hashPin(pinVal.cleanPin);
+    }
+
     const { rows } = await pool.query(
       `UPDATE camareros 
        SET 
@@ -77,7 +90,7 @@ export async function PUT(
          activo = COALESCE($3, activo)
        WHERE id = $4
        RETURNING id, negocio_id, nombre, activo, created_at`,
-      [nombre.trim(), pin !== undefined ? String(pin).trim() : null, activo !== undefined ? activo : null, id]
+      [nombre.trim(), hashedPin, activo !== undefined ? activo : null, id]
     );
 
     if (rows.length === 0) {

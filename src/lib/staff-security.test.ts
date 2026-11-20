@@ -1,27 +1,39 @@
 import assert from "node:assert";
+import {
+  validatePinFormat,
+  hashPin,
+  verifyPinHash,
+  isHashedPin,
+  BLACKLISTED_PINS,
+} from "./security-pins";
+import {
+  verifyDoubleRateLimit,
+  recordDoubleFailedAttempt,
+  clearDoubleRateLimit,
+  COCINA_PIN_LIMIT,
+  MESERO_PIN_LIMIT,
+} from "./security-rate-limit";
 
 console.log("==========================================");
-console.log("🧪 RUNNING STAFF & KITCHEN PIN SECURITY SUITE");
+console.log("🧪 RUNNING STAFF & KITCHEN PIN SECURITY SUITE (HARDENED)");
 console.log("==========================================");
 
-// --- TEST 1: Validación de formato de PIN (4 a 8 dígitos numéricos) ---
-function isValidPin(pin: string): boolean {
-  const p = pin.trim();
-  return p.length >= 4 && p.length <= 8 && /^\d+$/.test(p);
-}
+// --- TEST 1: Validación estricta de formato de PIN y rechazo de predeterminados ---
+assert.strictEqual(validatePinFormat("8392").valid, true, "Test 1.1: 8392 debe ser válido");
+assert.strictEqual(validatePinFormat("98765432").valid, true, "Test 1.2: 8 dígitos debe ser válido");
+assert.strictEqual(validatePinFormat("1234").valid, false, "Test 1.3: 1234 predeterminado debe ser rechazado");
+assert.strictEqual(validatePinFormat("0000").valid, false, "Test 1.4: 0000 predeterminado debe ser rechazado");
+assert.strictEqual(validatePinFormat("1111").valid, false, "Test 1.5: 1111 predeterminado debe ser rechazado");
+assert.strictEqual(validatePinFormat("123").valid, false, "Test 1.6: 3 dígitos debe ser rechazado");
+assert.strictEqual(validatePinFormat("123456789").valid, false, "Test 1.7: 9 dígitos debe ser rechazado");
+assert.strictEqual(validatePinFormat("12a4").valid, false, "Test 1.8: alfanumérico debe ser rechazado");
+assert.strictEqual(validatePinFormat("").valid, false, "Test 1.9: vacío debe ser rechazado");
+console.log("✅ [PASS] Test 1: Validación estricta de formato PIN numérico y lista negra de valores predeterminados");
 
-assert.strictEqual(isValidPin("1234"), true, "Test 1.1 failed: 1234 should be valid");
-assert.strictEqual(isValidPin("0000"), true, "Test 1.2 failed: 0000 should be valid");
-assert.strictEqual(isValidPin("98765432"), true, "Test 1.3 failed: 8 digits should be valid");
-assert.strictEqual(isValidPin("123"), false, "Test 1.4 failed: 3 digits should be invalid");
-assert.strictEqual(isValidPin("123456789"), false, "Test 1.5 failed: 9 digits should be invalid");
-assert.strictEqual(isValidPin("12a4"), false, "Test 1.6 failed: alphanumeric should be invalid");
-assert.strictEqual(isValidPin(""), false, "Test 1.7 failed: empty should be invalid");
-console.log("✅ [PASS] Test 1: Validación estricta de formato PIN numérico (4 a 8 dígitos)");
-
-// --- TEST 2: Parsing y preservación de customLabels para seguridad de Cocina ---
+// --- TEST 2: Parsing y almacenamiento de Hash Bcrypt en customLabels para Cocina KDS ---
 interface CustomLabelsObj {
   kitchenPin?: string;
+  kitchenPinHash?: string | null;
   kitchenPinRequired?: boolean;
   waiterPinRequired?: boolean;
   isGastro?: boolean;
@@ -42,10 +54,23 @@ function parseAndMergeKitchenSecurity(
   }
 
   if (securityUpdates.kitchenPin !== undefined) {
-    current.kitchenPin = securityUpdates.kitchenPin.trim();
+    const p = securityUpdates.kitchenPin.trim();
+    if (p === "") {
+      delete current.kitchenPin;
+      current.kitchenPinHash = null;
+    } else {
+      const pinVal = validatePinFormat(p);
+      if (pinVal.valid && pinVal.cleanPin) {
+        current.kitchenPinHash = hashPin(pinVal.cleanPin);
+        delete current.kitchenPin; // Eliminar texto plano
+      }
+    }
   }
+
+  const hasHash = Boolean(current.kitchenPinHash && isHashedPin(String(current.kitchenPinHash)));
+
   if (securityUpdates.kitchenPinRequired !== undefined) {
-    current.kitchenPinRequired = Boolean(securityUpdates.kitchenPinRequired && current.kitchenPin);
+    current.kitchenPinRequired = Boolean(securityUpdates.kitchenPinRequired && hasHash);
   }
   if (securityUpdates.waiterPinRequired !== undefined) {
     current.waiterPinRequired = Boolean(securityUpdates.waiterPinRequired);
@@ -59,25 +84,27 @@ function parseAndMergeKitchenSecurity(
 
 const initialJson = JSON.stringify({ isGastro: true, themeColor: "#f59e0b" });
 const update1 = parseAndMergeKitchenSecurity(initialJson, {
-  kitchenPin: "5566",
+  kitchenPin: "5567",
   kitchenPinRequired: true,
   waiterPinRequired: true,
 });
 
-assert.strictEqual(update1.merged.isGastro, true, "Test 2.1: Existing customLabels fields must be preserved");
-assert.strictEqual(update1.merged.kitchenPin, "5566", "Test 2.2: kitchenPin saved");
-assert.strictEqual(update1.merged.kitchenPinRequired, true, "Test 2.3: kitchenPinRequired saved");
-console.log("✅ [PASS] Test 2: Inmutabilidad de configuraciones preexistentes en customLabels al actualizar PIN");
+assert.strictEqual(update1.merged.isGastro, true, "Test 2.1: Campos preexistentes preservados");
+assert.strictEqual(Boolean(update1.merged.kitchenPinHash), true, "Test 2.2: kitchenPinHash almacenado");
+assert.strictEqual(update1.merged.kitchenPin, undefined, "Test 2.3: kitchenPin en texto plano eliminado");
+assert.strictEqual(isHashedPin(update1.merged.kitchenPinHash), true, "Test 2.4: Es hash bcrypt válido");
+console.log("✅ [PASS] Test 2: Inmutabilidad de configuraciones preexistentes y almacenamiento como hash bcrypt");
 
-// --- TEST 3: Si kitchenPin está vacío, kitchenPinRequired debe forzarse a false ---
+// --- TEST 3: Si se quita el PIN, kitchenPinRequired debe desactivarse (Acceso Libre) ---
 const update2 = parseAndMergeKitchenSecurity(update1.updatedJson, {
   kitchenPin: "",
-  kitchenPinRequired: true, // Should become false because pin is empty
+  kitchenPinRequired: true,
 });
-assert.strictEqual(update2.merged.kitchenPinRequired, false, "Test 3.1: Required cannot be true if PIN is empty");
+assert.strictEqual(update2.merged.kitchenPinRequired, false, "Test 3.1: Required forzado a false si no hay hash");
+assert.strictEqual(update2.merged.kitchenPinHash, null, "Test 3.2: Hash nulo");
 console.log("✅ [PASS] Test 3: Desactivación automática de bloqueo si se quita el PIN de cocina (Acceso Libre)");
 
-// --- TEST 4: Validación de credencial en pantalla de Cocina KDS ---
+// --- TEST 4: Verificación criptográfica segura con bcrypt contra hash ---
 function verifyKitchenPinAccess(
   customLabelsRaw: string | null | undefined,
   inputPin: string
@@ -89,46 +116,45 @@ function verifyKitchenPinAccess(
     } catch {}
   }
 
-  const pin = typeof customObj.kitchenPin === "string" ? customObj.kitchenPin.trim() : "";
-  const required = Boolean(customObj.kitchenPinRequired && pin);
+  const hash = typeof customObj.kitchenPinHash === "string" ? customObj.kitchenPinHash.trim() : "";
+  const required = Boolean(customObj.kitchenPinRequired && hash);
 
-  // Sin clave requerida -> acceso libre
-  if (!required || !pin) {
+  if (!required || !hash) {
     return { authorized: true, reason: "Acceso libre permitido (sin PIN configurado)" };
   }
 
-  if (inputPin.trim() === pin) {
-    return { authorized: true, reason: "PIN correcto" };
-  }
-
-  return { authorized: false, reason: "PIN incorrecto" };
+  const valid = verifyPinHash(inputPin, hash);
+  return { authorized: valid, reason: valid ? "PIN verificado exitosamente" : "PIN incorrecto" };
 }
 
-const lockedConfig = JSON.stringify({ kitchenPin: "9988", kitchenPinRequired: true });
-assert.strictEqual(verifyKitchenPinAccess(lockedConfig, "9988").authorized, true, "Test 4.1: Correct PIN authorizes");
-assert.strictEqual(verifyKitchenPinAccess(lockedConfig, "1111").authorized, false, "Test 4.2: Wrong PIN denied");
-assert.strictEqual(verifyKitchenPinAccess(lockedConfig, "").authorized, false, "Test 4.3: Empty PIN denied");
+const validPinForTest = "9982";
+const lockedConfig = JSON.stringify({
+  kitchenPinHash: hashPin(validPinForTest),
+  kitchenPinRequired: true,
+});
 
-const unlockedConfig = JSON.stringify({ kitchenPin: "", kitchenPinRequired: false });
-assert.strictEqual(verifyKitchenPinAccess(unlockedConfig, "").authorized, true, "Test 4.4: Free access permitted");
-console.log("✅ [PASS] Test 4: Verificación de acceso a Pantalla Cocina KDS (Correcto / Incorrecto / Libre)");
+assert.strictEqual(verifyKitchenPinAccess(lockedConfig, validPinForTest).authorized, true, "Test 4.1: PIN correcto autoriza");
+assert.strictEqual(verifyKitchenPinAccess(lockedConfig, "1111").authorized, false, "Test 4.2: PIN incorrecto denegado");
+assert.strictEqual(verifyKitchenPinAccess(lockedConfig, "").authorized, false, "Test 4.3: PIN vacío denegado");
+assert.strictEqual(verifyKitchenPinAccess(lockedConfig, "1234").authorized, false, "Test 4.4: PIN default denegado");
+console.log("✅ [PASS] Test 4: Verificación criptográfica de acceso a Cocina KDS");
 
-// --- TEST 5: Control de meseros (nombre y pin) ---
-function validateWaiterPayload(nombre: string, pin: string): { valid: boolean; error?: string } {
-  const cleanNombre = nombre?.trim();
-  if (!cleanNombre) {
-    return { valid: false, error: "El nombre del mesero es obligatorio." };
-  }
-  if (!isValidPin(pin)) {
-    return { valid: false, error: "El PIN debe ser numérico de 4 a 8 dígitos." };
-  }
-  return { valid: true };
+// --- TEST 5: Rate Limiting anti fuerza bruta ---
+const testEntity = `kds_${Date.now()}`;
+const testIp = "192.168.1.100";
+
+for (let i = 1; i <= 4; i++) {
+  const f = recordDoubleFailedAttempt(testEntity, testIp, COCINA_PIN_LIMIT);
+  assert.strictEqual(f.allowed, true);
 }
+const locked = recordDoubleFailedAttempt(testEntity, testIp, COCINA_PIN_LIMIT);
+assert.strictEqual(locked.allowed, false);
+assert.strictEqual(locked.remainingAttempts, 0);
 
-assert.strictEqual(validateWaiterPayload("Carlos", "1234").valid, true, "Test 5.1: Valid waiter");
-assert.strictEqual(validateWaiterPayload("   ", "1234").valid, false, "Test 5.2: Blank name invalid");
-assert.strictEqual(validateWaiterPayload("Ana", "abc").valid, false, "Test 5.3: Non-numeric PIN invalid");
-console.log("✅ [PASS] Test 5: Validación de datos de mesero para creación y edición");
+clearDoubleRateLimit(testEntity, testIp, COCINA_PIN_LIMIT);
+const cleared = verifyDoubleRateLimit(testEntity, testIp, COCINA_PIN_LIMIT);
+assert.strictEqual(cleared.allowed, true);
+console.log("✅ [PASS] Test 5: Rate Limiting y recuperación segura tras desbloqueo");
 
 console.log("==========================================");
 console.log("🎉 TODAS LAS PRUEBAS DE EQUIPO Y SEGURIDAD PIN PASARON (5/5)");

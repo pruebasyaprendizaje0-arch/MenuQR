@@ -95,9 +95,9 @@ export function MesasPinLockScreen({
           nombre: selectedCamarero.nombre,
         });
       } else {
-        // Error de PIN
+        // Error de PIN o Rate Limit
         setShake(true);
-        setErrorMsg(data.error || "PIN incorrecto. Intenta con '1234' o pide tu PIN al administrador.");
+        setErrorMsg(data.error || "PIN incorrecto. Solicita tu clave al administrador.");
         setTimeout(() => {
           setEnteredPin("");
           setShake(false);
@@ -281,10 +281,10 @@ export function MesasPinLockScreen({
               </button>
             </div>
 
-            {/* NOTA O PIN POR DEFECTO */}
+            {/* NOTA DE SEGURIDAD */}
             <div className="text-center pt-2">
               <span className="text-[11px] text-slate-500">
-                💡 PIN predeterminado: <strong className="text-slate-400 font-mono">1234</strong> (configurable por el administrador).
+                🔒 Acceso protegido por PIN seguro. Solicita tu clave al administrador del local.
               </span>
             </div>
           </div>

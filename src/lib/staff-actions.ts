@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { validatePinFormat, hashPin, isHashedPin } from "@/lib/security-pins";
 
 export type StaffRole = "MESERO" | "CAJERO" | "REPARTIDOR";
 
@@ -11,7 +12,7 @@ export interface StaffMemberData {
   id: string;
   negocio_id: string;
   nombre: string;
-  pin: string;
+  hasPin: boolean;
   rol: StaffRole;
   telefono: string | null;
   activo: boolean;
@@ -20,6 +21,7 @@ export interface StaffMemberData {
 
 interface SecurityCustomLabels {
   kitchenPin?: string;
+  kitchenPinHash?: string | null;
   kitchenPinRequired?: boolean;
   waiterPinRequired?: boolean;
   [key: string]: unknown;
@@ -98,8 +100,9 @@ export async function getStaffDataAction(restaurantId: string) {
       } catch {}
     }
 
-    const kitchenPin = typeof customObj.kitchenPin === "string" ? customObj.kitchenPin : "";
-    const kitchenPinRequired = Boolean(customObj.kitchenPinRequired && customObj.kitchenPin);
+    const kitchenPinHash = typeof customObj.kitchenPinHash === "string" ? customObj.kitchenPinHash : null;
+    const kitchenPinSet = Boolean(kitchenPinHash && isHashedPin(kitchenPinHash));
+    const kitchenPinRequired = Boolean(customObj.kitchenPinRequired && kitchenPinSet);
     const waiterPinRequired = customObj.waiterPinRequired !== false;
 
     return {
@@ -108,14 +111,14 @@ export async function getStaffDataAction(restaurantId: string) {
         id: c.id,
         negocio_id: c.negocio_id,
         nombre: c.nombre,
-        pin: c.pin || "1234",
+        hasPin: Boolean(c.pin && isHashedPin(c.pin)),
         rol: (c.rol as StaffRole) || "MESERO",
         telefono: c.telefono || null,
         activo: c.activo ?? true,
         created_at: c.created_at,
       })),
       kitchenSecurity: {
-        kitchenPin,
+        kitchenPinSet,
         kitchenPinRequired,
         waiterPinRequired,
       },
@@ -129,6 +132,8 @@ export async function getStaffDataAction(restaurantId: string) {
 
 /**
  * Crear un nuevo integrante del equipo (Mesero, Cajero o Repartidor)
+ * El administrador autorizado debe asignar obligatoriamente un PIN numérico no predeterminado (4 a 8 dígitos).
+ * Se almacena únicamente como hash seguro bcrypt.
  */
 export async function createWaiterAction(
   restaurantId: string,
@@ -148,11 +153,12 @@ export async function createWaiterAction(
       return { success: false, error: "El nombre del integrante es obligatorio." };
     }
 
-    const cleanPin = pin?.trim() || "1234";
-    if (cleanPin.length < 4 || cleanPin.length > 8 || !/^\d+$/.test(cleanPin)) {
-      return { success: false, error: "El PIN debe ser numérico de 4 a 8 dígitos (ej. 1234)." };
+    const pinVal = validatePinFormat(pin);
+    if (!pinVal.valid || !pinVal.cleanPin) {
+      return { success: false, error: pinVal.error || "PIN inválido." };
     }
 
+    const hashedPin = hashPin(pinVal.cleanPin);
     const cleanRol: StaffRole = rol === "CAJERO" || rol === "REPARTIDOR" ? rol : "MESERO";
     const cleanPhone = telefono?.trim() || null;
 
@@ -176,12 +182,12 @@ export async function createWaiterAction(
       return { success: false, error: `Ya existe un integrante registrado con el nombre "${cleanNombre}".` };
     }
 
-    // Insertar miembro de equipo con rol y teléfono
+    // Insertar miembro de equipo con hash seguro de PIN
     const { rows } = await pool.query(
       `INSERT INTO camareros (negocio_id, nombre, pin, rol, telefono, activo)
        VALUES ($1, $2, $3, $4, $5, true)
        RETURNING id, negocio_id, nombre, pin, rol, telefono, activo, created_at`,
-      [auth.restaurant.id, cleanNombre, cleanPin, cleanRol, cleanPhone]
+      [auth.restaurant.id, cleanNombre, hashedPin, cleanRol, cleanPhone]
     );
 
     revalidatePath("/admin");
@@ -197,13 +203,13 @@ export async function createWaiterAction(
         id: rows[0].id,
         negocio_id: rows[0].negocio_id,
         nombre: rows[0].nombre,
-        pin: rows[0].pin || "1234",
+        hasPin: true,
         rol: (rows[0].rol as StaffRole) || cleanRol,
         telefono: rows[0].telefono || null,
         activo: rows[0].activo ?? true,
         created_at: rows[0].created_at,
       },
-      message: `${rolLabel} "${cleanNombre}" agregado exitosamente con PIN ${cleanPin}.`,
+      message: `${rolLabel} "${cleanNombre}" agregado exitosamente con PIN seguro asignado.`,
     };
   } catch (err: unknown) {
     console.error("[createWaiterAction] Error:", err);
@@ -233,11 +239,11 @@ export async function updateWaiterAction(
 
     let cleanPin: string | null = null;
     if (data.pin !== undefined && data.pin !== null && data.pin.trim() !== "") {
-      const p = data.pin.trim();
-      if (p.length < 4 || p.length > 8 || !/^\d+$/.test(p)) {
-        return { success: false, error: "El PIN debe ser numérico de 4 a 8 dígitos (ej. 1234)." };
+      const pinVal = validatePinFormat(data.pin);
+      if (!pinVal.valid || !pinVal.cleanPin) {
+        return { success: false, error: pinVal.error || "PIN inválido." };
       }
-      cleanPin = p;
+      cleanPin = hashPin(pinVal.cleanPin);
     }
 
     const cleanRol: StaffRole | null =
@@ -285,7 +291,7 @@ export async function updateWaiterAction(
         id: rows[0].id,
         negocio_id: rows[0].negocio_id,
         nombre: rows[0].nombre,
-        pin: rows[0].pin || "1234",
+        hasPin: Boolean(rows[0].pin && isHashedPin(rows[0].pin)),
         rol: (rows[0].rol as StaffRole) || "MESERO",
         telefono: rows[0].telefono || null,
         activo: rows[0].activo ?? true,
@@ -334,6 +340,7 @@ export async function deleteWaiterAction(restaurantId: string, waiterId: string)
 
 /**
  * Guardar configuración de seguridad de Pantalla Cocina KDS y Comandero de Mesas
+ * Los PINs se almacenan estrictamente como hashes bcrypt (nunca en texto plano).
  */
 export async function saveKitchenSecurityAction(
   restaurantId: string,
@@ -360,14 +367,24 @@ export async function saveKitchenSecurityAction(
 
     if (data.kitchenPin !== undefined) {
       const p = data.kitchenPin.trim();
-      if (p !== "" && (p.length < 4 || p.length > 8 || !/^\d+$/.test(p))) {
-        return { success: false, error: "El PIN de cocina debe ser numérico de 4 a 8 dígitos (ej. 1234)." };
+      if (p === "") {
+        // Deshabilitar/limpiar PIN de cocina
+        delete customObj.kitchenPin;
+        customObj.kitchenPinHash = null;
+      } else {
+        const pinVal = validatePinFormat(p);
+        if (!pinVal.valid || !pinVal.cleanPin) {
+          return { success: false, error: pinVal.error || "PIN de cocina inválido." };
+        }
+        customObj.kitchenPinHash = hashPin(pinVal.cleanPin);
+        delete customObj.kitchenPin; // Eliminar cualquier vestigio en texto plano
       }
-      customObj.kitchenPin = p;
     }
 
+    const hasKitchenHash = Boolean(customObj.kitchenPinHash && isHashedPin(String(customObj.kitchenPinHash)));
+
     if (data.kitchenPinRequired !== undefined) {
-      customObj.kitchenPinRequired = Boolean(data.kitchenPinRequired && customObj.kitchenPin);
+      customObj.kitchenPinRequired = Boolean(data.kitchenPinRequired && hasKitchenHash);
     }
 
     if (data.waiterPinRequired !== undefined) {
@@ -389,8 +406,8 @@ export async function saveKitchenSecurityAction(
       success: true,
       message: "Configuración de seguridad y claves guardada correctamente.",
       kitchenSecurity: {
-        kitchenPin: customObj.kitchenPin || "",
-        kitchenPinRequired: Boolean(customObj.kitchenPinRequired && customObj.kitchenPin),
+        kitchenPinSet: hasKitchenHash,
+        kitchenPinRequired: Boolean(customObj.kitchenPinRequired && hasKitchenHash),
         waiterPinRequired: customObj.waiterPinRequired !== false,
       },
     };
