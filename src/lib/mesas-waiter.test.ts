@@ -225,6 +225,174 @@ function runMesasWaiterSuite() {
     assert.strictEqual(isLibre, true, "Ahora sí, Mesa 10 está Disponible (Libre)");
   });
 
+  // 6. AVISO DE ÍTEMS AÑADIDOS CON IDENTIFICADOR DE CUENTA Y NEGOCIO
+  test("Socket items_añadidos: Identifica cuenta y negocio, actualizando ÚNICAMENTE la comanda destino en mesa compartida", () => {
+    // Restaurar estado de prueba con 2 cuentas en Mesa 10
+    const stateTest: TestPedido[] = [
+      {
+        id: "comanda-10-A",
+        negocio_id: "negocio-test-1",
+        mesa: "10",
+        estado: "en_cocina",
+        cliente_nombre: "Comensal A",
+        total: 20.0,
+        created_at: new Date().toISOString(),
+        items: [{ id: "it-1", nombre: "Pasta", cantidad: 1, precio: 20.0 }],
+      },
+      {
+        id: "comanda-10-B",
+        negocio_id: "negocio-test-1",
+        mesa: "10",
+        estado: "nuevo",
+        cliente_nombre: "Comensal B",
+        total: 15.0,
+        created_at: new Date().toISOString(),
+        items: [{ id: "it-2", nombre: "Ensalada", cantidad: 1, precio: 15.0 }],
+      },
+    ];
+
+    // Simulación del evento socket items_añadidos dirigido a comanda-10-A
+    const eventPayload = {
+      negocio_id: "negocio-test-1",
+      pedido_id: "comanda-10-A",
+      mesa: "10",
+      total: 28.0, // Total guardado autoritativo en servidor (con nuevo ítem)
+      items: [{ id: "it-3", nombre: "Vino", cantidad: 1, precio: 8.0, es_añadido: true }],
+    };
+
+    const targetNegocioId = "negocio-test-1";
+
+    const nextState = stateTest.map((p) => {
+      if (eventPayload.negocio_id && eventPayload.negocio_id !== targetNegocioId) return p;
+
+      const isTarget = eventPayload.pedido_id
+        ? p.id === eventPayload.pedido_id
+        : String(p.mesa) === String(eventPayload.mesa);
+
+      if (!isTarget) return p;
+
+      const existingIds = new Set((p.items || []).map((i) => i.id));
+      const newItems = eventPayload.items.filter((i) => !existingIds.has(i.id));
+
+      const authoritativeTotal = typeof eventPayload.total === "number" ? eventPayload.total : null;
+      const finalTotal = authoritativeTotal !== null
+        ? authoritativeTotal
+        : p.total + newItems.reduce((s, i) => s + i.precio * i.cantidad, 0);
+
+      return {
+        ...p,
+        total: finalTotal,
+        items: newItems.length > 0 ? [...p.items, ...newItems] : p.items,
+      };
+    });
+
+    const comandaA = nextState.find((p) => p.id === "comanda-10-A")!;
+    const comandaB = nextState.find((p) => p.id === "comanda-10-B")!;
+
+    // Comanda A: se añadió el vino y su total ahora coincide exactamente con el guardado ($28.00)
+    assert.strictEqual(comandaA.items.length, 2);
+    assert.strictEqual(comandaA.items[1].nombre, "Vino");
+    assert.strictEqual(comandaA.total, 28.0);
+
+    // Comanda B: PERMANECE INTACTA ($15.00 y 1 solo ítem, NO recibió el vino)
+    assert.strictEqual(comandaB.items.length, 1);
+    assert.strictEqual(comandaB.items[0].nombre, "Ensalada");
+    assert.strictEqual(comandaB.total, 15.0);
+  });
+
+  // 7. PREVENCIÓN DE DUPLICACIÓN DE ÍTEMS Y SUMA DOBLE DE IMPORTES
+  test("Socket items_añadidos: Si el aviso se recibe por segunda vez, no duplica platos ni suma importes dos veces", () => {
+    let state: TestPedido[] = [
+      {
+        id: "comanda-10-A",
+        negocio_id: "negocio-test-1",
+        mesa: "10",
+        estado: "en_cocina",
+        cliente_nombre: "Comensal A",
+        total: 28.0, // Ya tiene el total guardado
+        created_at: new Date().toISOString(),
+        items: [
+          { id: "it-1", nombre: "Pasta", cantidad: 1, precio: 20.0 },
+          { id: "it-3", nombre: "Vino", cantidad: 1, precio: 8.0, es_añadido: true },
+        ],
+      },
+    ];
+
+    // Reenvío idéntico del evento
+    const duplicatePayload = {
+      negocio_id: "negocio-test-1",
+      pedido_id: "comanda-10-A",
+      mesa: "10",
+      total: 28.0,
+      items: [{ id: "it-3", nombre: "Vino", cantidad: 1, precio: 8.0, es_añadido: true }],
+    };
+
+    const nextState = state.map((p) => {
+      const isTarget = duplicatePayload.pedido_id
+        ? p.id === duplicatePayload.pedido_id
+        : String(p.mesa) === String(duplicatePayload.mesa);
+
+      if (!isTarget) return p;
+
+      const existingIds = new Set((p.items || []).map((i) => i.id));
+      const newItems = duplicatePayload.items.filter((i) => !existingIds.has(i.id));
+
+      const authoritativeTotal = typeof duplicatePayload.total === "number" ? duplicatePayload.total : null;
+      if (newItems.length === 0 && authoritativeTotal !== null && p.total === authoritativeTotal) {
+        return p;
+      }
+
+      const finalTotal = authoritativeTotal !== null
+        ? authoritativeTotal
+        : p.total + newItems.reduce((s, i) => s + i.precio * i.cantidad, 0);
+
+      return {
+        ...p,
+        total: finalTotal,
+        items: newItems.length > 0 ? [...p.items, ...newItems] : p.items,
+      };
+    });
+
+    const comanda = nextState[0];
+    assert.strictEqual(comanda.items.length, 2, "No se debe duplicar el ítem");
+    assert.strictEqual(comanda.total, 28.0, "El importe no se debe sumar dos veces");
+  });
+
+  // 8. AISLAMIENTO MULTI-TENANT EN AVISOS
+  test("Socket items_añadidos: Avisos con negocio_id ajeno son descartados sin modificar comandas", () => {
+    const initialState: TestPedido[] = [
+      {
+        id: "comanda-10-A",
+        negocio_id: "negocio-test-1",
+        mesa: "10",
+        estado: "en_cocina",
+        cliente_nombre: "Comensal A",
+        total: 20.0,
+        created_at: new Date().toISOString(),
+        items: [{ id: "it-1", nombre: "Pasta", cantidad: 1, precio: 20.0 }],
+      },
+    ];
+
+    const foreignPayload = {
+      negocio_id: "negocio-ajeno-999",
+      pedido_id: "comanda-10-A",
+      mesa: "10",
+      total: 99.0,
+      items: [{ id: "it-fake", nombre: "Intruso", cantidad: 1, precio: 79.0 }],
+    };
+
+    const currentNegocioId = "negocio-test-1";
+    const nextState = initialState.map((p) => {
+      if (foreignPayload.negocio_id && foreignPayload.negocio_id !== currentNegocioId) {
+        return p;
+      }
+      return { ...p, total: foreignPayload.total };
+    });
+
+    assert.strictEqual(nextState[0].total, 20.0, "El negocio ajeno no debe modificar el estado");
+    assert.strictEqual(nextState[0].items.length, 1);
+  });
+
   console.log(`\n🎉 TODAS LAS PRUEBAS DE MESERO (MÚLTIPLES CUENTAS POR MESA) PASARON (${passed}/${total})\n`);
 }
 

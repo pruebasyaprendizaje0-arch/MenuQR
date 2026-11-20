@@ -866,7 +866,14 @@ export async function POST(req: NextRequest) {
           };
 
           // Notificar vía Socket.IO en tiempo real a cocina/camareros
-          emitItemsAñadidos(resolvedNegocioId, mesaStr, insertedItems);
+          emitItemsAñadidos(
+            resolvedNegocioId,
+            mesaStr,
+            insertedItems,
+            createdOrderId,
+            Number(responseOrder?.total ?? updatedCharges?.total ?? orderTotal ?? 0),
+            (responseOrder as any)?.order_number
+          );
           emitPedidoActualizado(resolvedNegocioId, responseOrder);
           void syncSinglePedidoToPrisma(createdOrderId, resolvedNegocioId);
 
@@ -1177,7 +1184,14 @@ export async function POST(req: NextRequest) {
           // Notificar vía Socket.IO y Telegram SOLO SI NO ES REINTENTO DUPLICADO
           if (!isConflictRetry) {
             if (isRoundReq) {
-              emitItemsAñadidos(resolvedNegocioId, mesaStr, insertedItems);
+              emitItemsAñadidos(
+                resolvedNegocioId,
+                mesaStr,
+                insertedItems,
+                createdOrderId,
+                Number(responseOrder?.total ?? orderTotal ?? 0),
+                (responseOrder as any)?.order_number
+              );
               emitPedidoActualizado(resolvedNegocioId, responseOrder);
             } else {
               emitNuevoPedido(resolvedNegocioId, responseOrder);

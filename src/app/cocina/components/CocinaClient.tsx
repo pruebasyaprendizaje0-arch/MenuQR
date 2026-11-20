@@ -394,23 +394,66 @@ export function CocinaClient({
       });
     });
 
-    socket.on("items_añadidos", ({ mesa, items }: { mesa: string; items: PedidoItem[] }) => {
-      triggerAudioAlert("nuevo");
+    socket.on("items_añadidos", (data: {
+      negocio_id?: string;
+      pedido_id?: string;
+      mesa: string;
+      items: PedidoItem[];
+      total?: number;
+      order_number?: number;
+    }) => {
+      // 1. Verificación multi-tenant: descartar avisos de otros negocios
+      if (data?.negocio_id && negocio?.id && data.negocio_id !== negocio.id) {
+        return;
+      }
+
+      let hadNewItems = false;
+
       setPedidos((prev) =>
         prev.map((pedido) => {
-          if (String(pedido.mesa) === String(mesa) && pedido.estado !== "pagado") {
-            const existingItemIds = new Set(pedido.items.map((i) => i.id));
-            const itemsToAppend = items.filter((i) => !existingItemIds.has(i.id));
-            const addedSum = itemsToAppend.reduce((sum, i) => sum + i.cantidad * i.precio, 0);
-            return {
-              ...pedido,
-              total: pedido.total + addedSum,
-              items: [...pedido.items, ...itemsToAppend],
-            };
+          // 2. Identificación precisa de la comanda:
+          // Si viene pedido_id, actualizar EXCLUSIVAMENTE esa comanda.
+          // Si no viene pedido_id (fallback legacy), actualizar solo si coincide mesa y está activa.
+          const isTarget = data.pedido_id
+            ? pedido.id === data.pedido_id
+            : String(pedido.mesa).replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase() ===
+                String(data.mesa).replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase() &&
+              pedido.estado !== "pagado" &&
+              pedido.estado !== "cancelado";
+
+          if (!isTarget) {
+            return pedido;
           }
-          return pedido;
+
+          // 3. Deduplicación estricta de platos
+          const existingItemIds = new Set((pedido.items || []).map((i) => i.id));
+          const itemsToAppend = (data.items || []).filter((i) => !existingItemIds.has(i.id));
+
+          if (itemsToAppend.length > 0) {
+            hadNewItems = true;
+          }
+
+          // 4. Total autoritativo del servidor: coincidir con los guardados sin sumar importes dos veces
+          const authoritativeTotal = typeof data.total === "number" ? data.total : null;
+          if (itemsToAppend.length === 0 && authoritativeTotal !== null && pedido.total === authoritativeTotal) {
+            return pedido;
+          }
+
+          const finalTotal = authoritativeTotal !== null
+            ? authoritativeTotal
+            : pedido.total + itemsToAppend.reduce((sum, i) => sum + (Number(i.precio) || 0) * (Number(i.cantidad) || 1), 0);
+
+          return {
+            ...pedido,
+            total: finalTotal,
+            items: itemsToAppend.length > 0 ? [...pedido.items, ...itemsToAppend] : pedido.items,
+          };
         })
       );
+
+      if (hadNewItems) {
+        triggerAudioAlert("nuevo");
+      }
     });
 
     socket.on("pedido_actualizado", (pedidoActualizado: any) => {

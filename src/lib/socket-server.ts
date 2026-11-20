@@ -42,14 +42,33 @@ export function emitNuevoPedido(negocio_id: string, pedido: any): void {
 }
 
 /**
- * Emite evento 'items_añadidos' a la sala del negocio
+ * Emite evento 'items_añadidos' a la sala del negocio identificando cuenta, negocio y total guardado
  */
-export function emitItemsAñadidos(negocio_id: string, mesa: string, items: any[]): void {
+export function emitItemsAñadidos(
+  negocio_id: string,
+  mesa: string,
+  items: any[],
+  pedido_id?: string,
+  total?: number,
+  order_number?: number
+): void {
   const io = getIO();
   if (io) {
     const room = `negocio_${negocio_id}`;
-    io.to(room).emit("items_añadidos", { mesa, items });
-    console.log(`[Socket.IO] 'items_añadidos' emitido a la sala ${room} (Mesa ${mesa}):`, items.length, "items");
+    io.to(room).emit("items_añadidos", {
+      negocio_id,
+      pedido_id,
+      mesa,
+      items,
+      total,
+      order_number,
+    });
+    console.log(
+      `[Socket.IO] 'items_añadidos' emitido a la sala ${room} (Pedido ${pedido_id || "sin-id"} / Mesa ${mesa}):`,
+      items.length,
+      "items, Total:",
+      total
+    );
   } else {
     console.warn(`[Socket.IO] No hay instancia de io disponible para emitir 'items_añadidos'`);
   }

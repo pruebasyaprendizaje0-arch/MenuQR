@@ -367,18 +367,54 @@ export function MesasClient({ initialSlug }: { initialSlug: string }) {
       refreshMetricas();
     });
 
-    socket.on("items_añadidos", ({ mesa, items }: { mesa: string; items: PedidoItem[] }) => {
+    socket.on("items_añadidos", (data: {
+      negocio_id?: string;
+      pedido_id?: string;
+      mesa: string;
+      items: PedidoItem[];
+      total?: number;
+      order_number?: number;
+    }) => {
+      // 1. Verificación multi-tenant: descartar avisos de otros negocios
+      if (data?.negocio_id && negocioInfo?.id && data.negocio_id !== negocioInfo.id) {
+        return;
+      }
+
       setPedidos((prev) =>
         prev.map((p) => {
-          if (String(p.mesa) === String(mesa) && p.estado !== "pagado") {
-            const addedSum = items.reduce((s, i) => s + i.cantidad * i.precio, 0);
-            return {
-              ...p,
-              total: p.total + addedSum,
-              items: [...p.items, ...items],
-            };
+          // 2. Identificación precisa de la comanda:
+          // Si viene pedido_id, actualizar EXCLUSIVAMENTE esa comanda.
+          // Si no viene pedido_id (fallback legacy), actualizar solo si coincide mesa y está activa.
+          const isTarget = data.pedido_id
+            ? p.id === data.pedido_id
+            : String(p.mesa).replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase() ===
+                String(data.mesa).replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase() &&
+              p.estado !== "pagado" &&
+              p.estado !== "cancelado";
+
+          if (!isTarget) {
+            return p;
           }
-          return p;
+
+          // 3. Deduplicación estricta de platos para evitar duplicar productos
+          const existingItemIds = new Set((p.items || []).map((i) => i.id));
+          const newUniqueItems = (data.items || []).filter((i) => !existingItemIds.has(i.id));
+
+          // 4. Total autoritativo del servidor: coincidir exactamente con el total guardado
+          const authoritativeTotal = typeof data.total === "number" ? data.total : null;
+          if (newUniqueItems.length === 0 && authoritativeTotal !== null && p.total === authoritativeTotal) {
+            return p;
+          }
+
+          const finalTotal = authoritativeTotal !== null
+            ? authoritativeTotal
+            : p.total + newUniqueItems.reduce((s, i) => s + (Number(i.precio) || 0) * (Number(i.cantidad) || 1), 0);
+
+          return {
+            ...p,
+            total: finalTotal,
+            items: newUniqueItems.length > 0 ? [...p.items, ...newUniqueItems] : p.items,
+          };
         })
       );
       refreshMetricas();
