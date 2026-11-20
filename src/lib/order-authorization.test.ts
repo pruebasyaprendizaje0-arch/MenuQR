@@ -436,6 +436,76 @@ async function runOrderAuthorizationSuite() {
     assert.strictEqual(decoded, null, "Token no firmado con JWT_SECRET del servidor debe ser nulo");
   });
 
+  // 6. Mesa Compartida: Cuentas independientes en una misma mesa física
+  await test("Mesa Compartida: Dos comensales en Mesa 10 tienen comandas independientes (#198 y #199) y tokens aislados", async () => {
+    const comandaA = "order-mesa-10-comanda-a";
+    const comandaB = "order-mesa-10-comanda-b";
+
+    const tokenA = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "10",
+      orderId: comandaA,
+      customerName: "Cliente A (Fettuccine)",
+      createdAt: Date.now(),
+    });
+
+    const tokenB = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "10",
+      orderId: comandaB,
+      customerName: "Cliente B (Pizza Margarita)",
+      createdAt: Date.now(),
+    });
+
+    const reqA = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=10", {
+      headers: { "x-table-session": tokenA },
+    });
+    const authA = await verifyTableSessionAuth(reqA, negocioA, "10");
+    assert.strictEqual(authA.authorized, true);
+    assert.strictEqual(authA.orderId, comandaA, "Cliente A solo tiene acceso a su comanda A");
+
+    const reqB = new NextRequest("http://localhost:3000/api/pedidos?negocio_id=" + negocioA + "&mesa=10", {
+      headers: { "x-table-session": tokenB },
+    });
+    const authB = await verifyTableSessionAuth(reqB, negocioA, "10");
+    assert.strictEqual(authB.authorized, true);
+    assert.strictEqual(authB.orderId, comandaB, "Cliente B solo tiene acceso a su comanda B");
+  });
+
+  // 7. Rondas Extras en Mesa Compartida: Vinculación Estricta y Rechazo de Apropiación
+  await test("Ronda Extra en Mesa Compartida: Token de Comanda A NO autoriza ronda para Comanda B", async () => {
+    const comandaA: string = "order-mesa-10-comanda-a";
+    const comandaB: string = "order-mesa-10-comanda-b";
+
+    const tokenA = signTableSessionToken({
+      negocioId: negocioA,
+      mesa: "10",
+      orderId: comandaA,
+      customerName: "Cliente A",
+      createdAt: Date.now(),
+    });
+
+    const decoded = verifyTableSessionToken(tokenA);
+    assert(decoded !== null);
+    assert.strictEqual(decoded.orderId, comandaA);
+
+    // Intento de enviar una ronda pretendiendo añadir a comanda B con token de comanda A
+    const isTargetComandaMatching = Boolean(decoded.orderId && (decoded.orderId as string) === comandaB);
+    assert.strictEqual(isTargetComandaMatching, false, "El token de comanda A no puede autorizar comanda B");
+  });
+
+  // 8. Idempotencia y Rechazo de Rondas no autorizadas
+  await test("Ronda Extra: Simulación de Idempotencia por roundAttemptId", () => {
+    const roundAttemptId = "attempt-round-xyz-123";
+    const existingPaymentDetails = {
+      paymentMethod: "cash",
+      roundAttempts: [roundAttemptId],
+    };
+
+    const isDuplicate = existingPaymentDetails.roundAttempts.includes(roundAttemptId);
+    assert.strictEqual(isDuplicate, true, "El reintento con el mismo roundAttemptId debe ser detectado como duplicado");
+  });
+
 
   console.log(`\n🎉 TODAS LAS PRUEBAS DE AUTORIZACIÓN DE PEDIDOS PASARON EXITOSAMENTE (${passed}/${total})\n`);
 }

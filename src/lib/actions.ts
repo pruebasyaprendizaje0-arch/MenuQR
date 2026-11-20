@@ -15,7 +15,7 @@ import {
 } from "@/lib/security-rate-limit";
 import { join } from "path";
 import { randomBytes, createHash } from "crypto";
-import { signKdsDispatchToken } from "@/lib/jwt";
+import { signKdsDispatchToken, signTableSessionToken, verifyTableSessionToken } from "@/lib/jwt";
 import { sendPasswordResetEmail } from "@/lib/email";
 import { recordSlugChange, sanitizeSlug } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
@@ -2593,6 +2593,10 @@ export async function createOrderAction(data: {
   total?: number;
   paymentMethod: string;
   paymentDetails?: string;
+  isRound?: boolean;
+  tableSessionToken?: string;
+  parentOrderId?: string;
+  roundAttemptId?: string;
   items: { 
     dishId: string; 
     dishName?: string; 
@@ -2652,6 +2656,302 @@ export async function createOrderAction(data: {
     const computedClaimHash = data.clientSecret
       ? createHash("sha256").update(data.clientSecret).digest("hex")
       : null;
+
+    const rawTableName = (data.tableName || "Mesa Sin Número").trim();
+    const isTableOrder = !rawTableName.toLowerCase().includes("domicilio") && !rawTableName.toLowerCase().includes("llevar");
+
+    // =========================================================================
+    // CASO 1: RONDA EXTRA / AÑADIDO AUTORIZADO A COMANDA EXISTENTE
+    // =========================================================================
+    if (data.isRound || data.parentOrderId) {
+      if (!isTableOrder) {
+        return {
+          error: "Las rondas adicionales solo están permitidas para consumo en mesa.",
+          errorCode: "INVALID_INPUT",
+        };
+      }
+
+      let tokenCandidate = data.tableSessionToken;
+      if (!tokenCandidate) {
+        try {
+          const cookieStore = await cookies();
+          tokenCandidate = cookieStore.get("table_session")?.value;
+        } catch {}
+      }
+
+      const decoded = tokenCandidate ? verifyTableSessionToken(tokenCandidate) : null;
+      if (!decoded) {
+        return {
+          error: "No autorizado para añadir rondas a esta comanda. Se requiere sesión activa de la mesa.",
+          errorCode: "UNAUTHORIZED_ROUND",
+        };
+      }
+
+      const cleanMesaStr = (m: string) => String(m || "").replace(/^(mesa\s*#?|#)/i, "").trim().toLowerCase();
+      if (
+        decoded.negocioId !== data.restaurantId ||
+        cleanMesaStr(decoded.mesa) !== cleanMesaStr(rawTableName)
+      ) {
+        return {
+          error: "La sesión de mesa no corresponde a este restaurante o mesa.",
+          errorCode: "UNAUTHORIZED_ROUND",
+        };
+      }
+
+      const targetOrderId = decoded.orderId;
+      if (!targetOrderId || (data.parentOrderId && data.parentOrderId !== targetOrderId)) {
+        return {
+          error: "La ronda no coincide con la comanda activa de su sesión.",
+          errorCode: "UNAUTHORIZED_ROUND",
+        };
+      }
+
+      const existingComanda = await prisma.order.findUnique({
+        where: { id: targetOrderId },
+        include: { items: true },
+      });
+
+      if (!existingComanda || existingComanda.restaurantId !== data.restaurantId) {
+        return {
+          error: "Comanda no encontrada o no pertenece a este restaurante.",
+          errorCode: "UNAUTHORIZED_ROUND",
+        };
+      }
+
+      if (existingComanda.status === "COMPLETED" || existingComanda.status === "CANCELLED") {
+        return {
+          error: "La comanda de esta mesa ya ha sido cerrada o pagada.",
+          errorCode: "ORDER_CLOSED",
+        };
+      }
+
+      // Idempotencia de la ronda: Si el intento ya fue procesado, devolver la orden sin duplicar
+      let roundMeta: { details?: string; roundAttempts?: string[] } = {};
+      try {
+        if (existingComanda.paymentDetails && existingComanda.paymentDetails.startsWith("{")) {
+          roundMeta = JSON.parse(existingComanda.paymentDetails);
+        }
+      } catch {}
+
+      const existingAttempts = Array.isArray(roundMeta.roundAttempts) ? roundMeta.roundAttempts : [];
+      const roundKey = String(data.roundAttemptId || (data.orderId !== targetOrderId ? data.orderId : "") || data.clientSecret || "").trim();
+
+      if (roundKey && existingAttempts.includes(roundKey)) {
+        const dispatchToken = signKdsDispatchToken({
+          orderId: existingComanda.id,
+          restaurantId: existingComanda.restaurantId,
+          total: existingComanda.total,
+          orderNumber: existingComanda.orderNumber || 1,
+          purpose: "kds_dispatch",
+        });
+        return {
+          success: true,
+          orderId: existingComanda.id,
+          orderNumber: existingComanda.orderNumber || 1,
+          dispatchToken,
+          isRetry: true,
+          isRound: true,
+          tableSessionToken: tokenCandidate,
+          subtotal: existingComanda.subtotal,
+          iva: existingComanda.iva,
+          serviceCharge: existingComanda.serviceCharge,
+          deliveryCost: existingComanda.deliveryCost,
+          tip: existingComanda.tip,
+          total: existingComanda.total,
+        };
+      }
+
+      // Validar platos de la ronda
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: data.restaurantId },
+      });
+
+      if (!restaurant) {
+        return { error: "Restaurante no encontrado.", errorCode: "INVALID_INPUT" };
+      }
+
+      const dishIds = Array.from(new Set(data.items.map((i) => i.dishId).filter(Boolean)));
+      if (dishIds.length === 0) {
+        return { error: "Los productos del pedido deben incluir un ID de plato válido.", errorCode: "INVALID_INPUT" };
+      }
+
+      const dbDishes = await prisma.dish.findMany({
+        where: { id: { in: dishIds } },
+      });
+      const dishMap = new Map(dbDishes.map((d) => [d.id, d]));
+
+      let roundSubtotal = 0;
+      const verifiedRoundItems: Array<{ dishId: string; dishName: string; price: number; quantity: number; notes?: string | null }> = [];
+
+      for (const item of data.items) {
+        if (
+          typeof item.quantity !== "number" ||
+          !Number.isInteger(item.quantity) ||
+          item.quantity <= 0 ||
+          item.quantity > 50 ||
+          !Number.isFinite(item.quantity)
+        ) {
+          return { error: "Cantidad inválida. Cada producto debe tener una cantidad entera entre 1 y 50." };
+        }
+
+        const dbDish = dishMap.get(item.dishId);
+        if (!dbDish) {
+          return { error: "Uno o más productos del pedido no existen.", errorCode: "INVALID_INPUT" };
+        }
+
+        if (dbDish.restaurantId !== data.restaurantId) {
+          return { error: `El producto "${dbDish.name}" no pertenece a este restaurante.`, errorCode: "INVALID_INPUT" };
+        }
+
+        if (!dbDish.isAvailable) {
+          return { error: `El producto "${dbDish.name}" no está disponible actualmente.`, errorCode: "INVALID_INPUT" };
+        }
+
+        if (dbDish.stock === null || dbDish.stock === undefined) {
+          return {
+            error: `No se puede procesar el pedido: El producto "${dbDish.name}" no tiene el stock configurado en el sistema.`,
+            errorCode: "INVALID_INPUT",
+          };
+        }
+        const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
+        if (availableStock <= 0 || !dbDish.isAvailable) {
+          return { error: `El producto "${dbDish.name}" se encuentra agotado.`, errorCode: "INVALID_INPUT" };
+        }
+        if (item.quantity > availableStock) {
+          return {
+            error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
+            errorCode: "INVALID_INPUT",
+          };
+        }
+
+        let serverPrice = Number(dbDish.price) || 0;
+        const modifierDetails: string[] = [];
+
+        if (Array.isArray(item.modifiers) && item.modifiers.length > 0) {
+          for (const mod of item.modifiers) {
+            const extra = Math.max(0, Number(mod.extraPrice) || 0);
+            serverPrice += extra;
+            const groupPrefix = mod.groupName ? `${mod.groupName}: ` : "";
+            const priceSuffix = extra > 0 ? ` (+$${extra.toFixed(2)})` : "";
+            modifierDetails.push(`${groupPrefix}${mod.optionName}${priceSuffix}`);
+          }
+        }
+
+        if (item.notes && item.notes.trim()) {
+          modifierDetails.push(`Nota: ${item.notes.trim()}`);
+        }
+
+        roundSubtotal += serverPrice * item.quantity;
+        const fullDishName = modifierDetails.length > 0
+          ? `${dbDish.name} [${modifierDetails.join(" · ")}]`
+          : dbDish.name;
+
+        verifiedRoundItems.push({
+          dishId: item.dishId,
+          dishName: fullDishName,
+          price: serverPrice,
+          quantity: item.quantity,
+          notes: modifierDetails.length > 0 ? modifierDetails.join(" · ") : null,
+        });
+      }
+
+      const roundNum = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
+      const addedSubtotal = roundNum(roundSubtotal);
+      const newSubtotal = roundNum(existingComanda.subtotal + addedSubtotal);
+
+      const ivaPercent = restaurant.ivaPercent || 0;
+      const servicePercent = restaurant.servicePercent || 0;
+      const ivaIncluded = restaurant.ivaOnTable ?? false;
+      const serviceIncluded = restaurant.serviceOnTable ?? false;
+
+      const baseForTax = newSubtotal;
+      const newIva = (ivaPercent > 0 && !ivaIncluded)
+        ? roundNum(baseForTax * (ivaPercent / 100))
+        : 0;
+
+      const newService = (isTableOrder && servicePercent > 0 && !serviceIncluded)
+        ? roundNum(baseForTax * (servicePercent / 100))
+        : 0;
+
+      const newTotal = roundNum(
+        newSubtotal - (existingComanda.discountAmount || 0) + (existingComanda.seasonRateAmount || 0) + newIva + newService + (existingComanda.deliveryCost || 0) + (existingComanda.tip || 0)
+      );
+
+      const updatedAttempts = roundKey ? [...existingAttempts, roundKey] : existingAttempts;
+      const updatedPaymentDetails = JSON.stringify({
+        details: data.paymentDetails || roundMeta.details || null,
+        roundAttempts: updatedAttempts,
+      });
+
+      await prisma.$transaction(async (tx) => {
+        for (const it of verifiedRoundItems) {
+          await tx.orderItem.create({
+            data: {
+              orderId: existingComanda.id,
+              dishName: it.dishName,
+              price: it.price,
+              quantity: it.quantity,
+              notes: it.notes,
+            },
+          });
+        }
+
+        await tx.order.update({
+          where: { id: existingComanda.id },
+          data: {
+            subtotal: newSubtotal,
+            iva: newIva,
+            serviceCharge: newService,
+            total: newTotal,
+            paymentDetails: updatedPaymentDetails,
+            kdsDispatched: false,
+          },
+        });
+
+        for (const item of data.items) {
+          const dbDish = dishMap.get(item.dishId);
+          if (dbDish) {
+            const freshDish = await tx.dish.findUnique({
+              where: { id: dbDish.id },
+              select: { id: true, name: true, stock: true, isAvailable: true },
+            });
+            if (freshDish && typeof freshDish.stock === "number") {
+              const updatedStock = Math.max(0, freshDish.stock - item.quantity);
+              await tx.dish.update({
+                where: { id: freshDish.id },
+                data: {
+                  stock: updatedStock,
+                  trackStock: true,
+                  isAvailable: updatedStock > 0,
+                },
+              });
+            }
+          }
+        }
+      });
+
+      const dispatchToken = signKdsDispatchToken({
+        orderId: existingComanda.id,
+        restaurantId: existingComanda.restaurantId,
+        total: newTotal,
+        orderNumber: existingComanda.orderNumber || 1,
+        purpose: "kds_dispatch",
+      });
+
+      return {
+        success: true,
+        orderId: existingComanda.id,
+        orderNumber: existingComanda.orderNumber || 1,
+        dispatchToken,
+        isRound: true,
+        isRetry: false,
+        tableSessionToken: tokenCandidate,
+        subtotal: newSubtotal,
+        iva: newIva,
+        serviceCharge: newService,
+        total: newTotal,
+      };
+    }
 
     // COMPROBACIÓN TEMPRANA DE IDEMPOTENCIA / RECUPERACIÓN:
     // Si viene un orderId de una compra incierta y ya existe en la base de datos,
@@ -2965,9 +3265,6 @@ export async function createOrderAction(data: {
       : 0;
 
     // Delivery cost (PASO 8)
-    const rawTableName = (data.tableName || "Mesa Sin Número").trim();
-    const isTableOrder = !rawTableName.toLowerCase().includes("domicilio") && !rawTableName.toLowerCase().includes("llevar");
-
     // SERVICIO is added to checkout ONLY IF in table/local modality, servicePercent > 0 AND Service is NOT included in prices
     // Normativa Ecuador: En Para Llevar y Delivery el servicio es estrictamente $0.00
     const calculatedService = (isTableOrder && servicePercent > 0 && !serviceIncluded)
@@ -3253,11 +3550,34 @@ export async function createOrderAction(data: {
       purpose: "kds_dispatch",
     });
 
+    let tableSessionToken: string | undefined;
+    if (isTableOrder && order?.id) {
+      const cleanMesaStr = rawTableName.replace(/^(mesa\s*#?|#)/i, "").trim();
+      tableSessionToken = signTableSessionToken({
+        negocioId: restaurant.id,
+        mesa: cleanMesaStr,
+        orderId: order.id,
+        customerName: data.customerName?.trim() || undefined,
+        createdAt: Date.now(),
+      });
+      try {
+        const cookieStore = await cookies();
+        cookieStore.set("table_session", tableSessionToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          sameSite: "lax",
+          maxAge: 12 * 3600,
+        });
+      } catch {}
+    }
+
     return {
       success: true,
       orderId: order.id,
       orderNumber: order.orderNumber || 1,
       dispatchToken,
+      tableSessionToken,
       subtotal: finalSubtotal,
       discountAmount: finalDiscount,
       seasonRateAmount: finalSeasonBonus,

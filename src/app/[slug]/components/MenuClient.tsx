@@ -588,6 +588,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   // Opción 3: Estado de Mesa Abierta Sincronizada Comensal ↔ Mesero
   const [openTableSession, setOpenTableSession] = useState<{
     tableName: string;
+    orderId?: string;
+    orderNumber?: number;
     customerName: string;
     customerPhone?: string;
     startedAt: string;
@@ -1698,6 +1700,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       clientOrderId = activeCheckoutKeysRef.current.orderId;
       clientSecret = activeCheckoutKeysRef.current.secret;
 
+      const isExtraRound = Boolean(isTableOrder && openTableSession?.tableSessionToken);
+
       const actionPayload = {
         orderId: clientOrderId,
         clientSecret: clientSecret,
@@ -1720,6 +1724,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
         paymentMethod: normalizedMethod,
         paymentDetails: paymentDetailsStr,
         items: itemsData,
+        isRound: isExtraRound,
+        tableSessionToken: isExtraRound ? openTableSession?.tableSessionToken : undefined,
+        parentOrderId: isExtraRound ? (openTableSession as any)?.orderId : undefined,
+        roundAttemptId: clientOrderId,
       };
 
       const newAttempt: PendingCheckoutAttempt = {
@@ -1897,6 +1905,9 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       tipo_entrega: effectiveTargetTipoEntrega,
       metodo_entrega: effectiveMetodoEntrega,
       skip_stock_deduction: true, // createOrderAction ya dedujo atómicamente el stock
+      is_round: Boolean(result.isRound || isExtraRound),
+      round_attempt_id: clientOrderId,
+      table_session_token: result.table_session_token || result.tableSessionToken || openTableSession?.tableSessionToken,
       items: effectiveKdsItems.map((i: any) => ({
         dishId: i.dishId || i.id,
         id: i.dishId || i.id,
@@ -1909,7 +1920,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       cliente_telefono: effectiveCustomerPhone,
       cliente_direccion: effectiveCustomerAddress,
       costo_envio: effectiveDeliveryCost,
-      total: effectiveTotal,
+      total: result.total ?? effectiveTotal,
     };
 
     const kdsDispatchRes = await executeKdsDispatch(fetch, clientSecret, kdsPayload);
@@ -1928,6 +1939,10 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       setLiveTableOrder(kdsDispatchRes.pedido);
     }
 
+    if (isExtraRound) {
+      setExtraRoundSuccessToast(true);
+    }
+
     if (typeof window !== "undefined" && window.sessionStorage) {
       window.sessionStorage.setItem(
         `active_order_${restaurant.slug}`,
@@ -1944,6 +1959,8 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       // Persistir sesión de mesa abierta (Opción 3)
       const sessionData = {
         tableName: selectedTable,
+        orderId: result.orderId || openTableSession?.orderId,
+        orderNumber: result.orderNumber || openTableSession?.orderNumber,
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim() || undefined,
         startedAt: openTableSession?.startedAt || new Date().toISOString(),
@@ -1955,8 +1972,6 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       } catch {}
       setOpenTableSession(sessionData);
     }
-
-    const isExtraRound = Boolean(isTableOrder && openTableSession);
 
     let message = isTableOrder 
       ? isExtraRound

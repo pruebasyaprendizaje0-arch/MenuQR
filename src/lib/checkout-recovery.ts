@@ -211,6 +211,9 @@ export interface KdsDispatchPayload {
   tipo_entrega: string;
   metodo_entrega: string;
   skip_stock_deduction: boolean;
+  is_round?: boolean;
+  round_attempt_id?: string;
+  table_session_token?: string;
   items: Array<{
     dishId?: string;
     id?: string;
@@ -251,12 +254,17 @@ export async function executeKdsDispatch(
   payload: KdsDispatchPayload
 ): Promise<KdsDispatchResult> {
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-client-secret": clientSecret,
+    };
+    if (payload.table_session_token) {
+      headers["x-table-session"] = payload.table_session_token;
+    }
+
     const res = await fetchFn("/api/pedidos", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-client-secret": clientSecret,
-      },
+      headers,
       body: JSON.stringify(payload),
     });
 

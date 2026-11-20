@@ -544,6 +544,8 @@ export async function POST(req: NextRequest) {
     // Si no lo trae o es inválido, se rechaza inmediatamente con 4xx SIN insertar nada y SIN caer al flujo nativo.
     const explicitOrderId = body.order_id || body.id;
     const dispatchToken = body.dispatch_token;
+    const isRoundReq = Boolean(body.is_round);
+    const roundAttemptId = body.round_attempt_id ? String(body.round_attempt_id).trim() : "";
 
     if (explicitOrderId) {
       if (!dispatchToken || typeof dispatchToken !== "string") {
@@ -712,9 +714,9 @@ export async function POST(req: NextRequest) {
           };
         };
 
-        // Verificar si la mesa ya tiene un pedido activo (ni 'pagado' ni 'cancelado')
-        // Canales como Domicilio, Para Llevar o Despacho con ID explícito SIEMPRE generan comandas independientes
-        const isNonTableChannel = isDeliveryReq || isLlevarReq || Boolean(explicitOrderId);
+        // Cada comensal o grupo abre su propia comanda independiente en la mesa (mesas compartidas).
+        // Las rondas se añaden y acumulan de forma estricta según el ID de comanda autorizada.
+        const isNonTableChannel = true;
         const mesaVariants = getMesaVariants(rawMesa);
         const searchIds = Array.from(new Set([resolvedNegocioId, restaurantPrismaId].filter(Boolean)));
         const { rows: existingOrders } = isNonTableChannel
@@ -991,23 +993,76 @@ export async function POST(req: NextRequest) {
             );
 
             if (insertRes.rows.length === 0) {
-              // Conflicto de idempotencia detectado: el pedido ya existe en pedidos
-              isConflictRetry = true;
               const { rows: existingRows } = await client.query(
                 `SELECT id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata
                  FROM pedidos WHERE id = $1::uuid`,
                 [explicitOrderId]
               );
-              newOrderRows = existingRows;
               createdOrderId = explicitOrderId;
 
-              // Cargar ítems ya existentes sin duplicar
-              const { rows: existingItems } = await client.query(
-                `SELECT id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item
-                 FROM pedido_items WHERE pedido_id = $1::uuid`,
-                [explicitOrderId]
-              );
-              insertedItems = existingItems;
+              if (isRoundReq) {
+                // --- RONDA EXTRA / AÑADIDO A COMANDA EXISTENTE ---
+                const existingRow = existingRows[0];
+                let currentMeta: any = {};
+                try {
+                  currentMeta = typeof existingRow.metadata === "string" ? JSON.parse(existingRow.metadata) : (existingRow.metadata || {});
+                } catch {}
+                const processedRounds = Array.isArray(currentMeta.processed_round_ids) ? currentMeta.processed_round_ids : [];
+
+                if (roundAttemptId && processedRounds.includes(roundAttemptId)) {
+                  // Idempotencia: esta ronda ya fue despachada e insertada previamente
+                  isConflictRetry = true;
+                  newOrderRows = existingRows;
+                  const { rows: existingItems } = await client.query(
+                    `SELECT id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item
+                     FROM pedido_items WHERE pedido_id = $1::uuid`,
+                    [explicitOrderId]
+                  );
+                  insertedItems = existingItems;
+                } else {
+                  // Insertar los platos de la ronda en pedido_items como añadidos
+                  for (const it of items) {
+                    const cantidad = parseInt(it.cantidad) || 1;
+                    const precio = parseFloat(it.precio) || 0;
+                    const notasItem = it.notas || null;
+
+                    const { rows: itemRows } = await client.query(
+                      `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+                       VALUES ($1, $2, $3, $4, $5, true, 'nuevo')
+                       RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
+                      [createdOrderId, it.nombre || it.dishName, cantidad, precio, notasItem]
+                    );
+                    insertedItems.push(itemRows[0]);
+                  }
+
+                  const updatedMeta = {
+                    ...currentMeta,
+                    subtotal: typeof authoritativeOrder.subtotal === "number" ? authoritativeOrder.subtotal : currentMeta.subtotal,
+                    iva: typeof authoritativeOrder.iva === "number" ? authoritativeOrder.iva : currentMeta.iva,
+                    service_charge: typeof authoritativeOrder.serviceCharge === "number" ? authoritativeOrder.serviceCharge : currentMeta.service_charge,
+                    processed_round_ids: roundAttemptId ? [...processedRounds, roundAttemptId] : processedRounds,
+                  };
+
+                  const { rows: updatedRows } = await client.query(
+                    `UPDATE pedidos 
+                     SET total = $1, metadata = $2
+                     WHERE id = $3::uuid
+                     RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
+                    [authoritativeOrder.total, JSON.stringify(updatedMeta), createdOrderId]
+                  );
+                  newOrderRows = updatedRows;
+                }
+              } else {
+                // Conflicto de idempotencia detectado: el pedido ya existe en pedidos
+                isConflictRetry = true;
+                newOrderRows = existingRows;
+                const { rows: existingItems } = await client.query(
+                  `SELECT id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item
+                   FROM pedido_items WHERE pedido_id = $1::uuid`,
+                  [explicitOrderId]
+                );
+                insertedItems = existingItems;
+              }
             } else {
               newOrderRows = insertRes.rows;
               createdOrderId = newOrderRows[0].id;
@@ -1081,15 +1136,36 @@ export async function POST(req: NextRequest) {
             if (camRows[0]) camareroNombre = camRows[0].nombre;
           }
 
-          responseOrder = {
-            ...newOrderRows[0],
-            camarero_nombre: camareroNombre,
-            items: insertedItems,
-          };
+          // Si es una ronda, cargar todos los platos activos acumulados de la comanda
+          if (isRoundReq) {
+            const { rows: allOrderItems } = await pool.query(
+              `SELECT id, nombre, cantidad, precio::float, notas, es_añadido, estado_item 
+               FROM pedido_items WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado') ORDER BY es_añadido ASC, nombre ASC`,
+              [createdOrderId]
+            );
+
+            responseOrder = {
+              ...newOrderRows[0],
+              camarero_nombre: camareroNombre,
+              items: allOrderItems,
+            };
+          } else {
+            responseOrder = {
+              ...newOrderRows[0],
+              camarero_nombre: camareroNombre,
+              items: insertedItems,
+            };
+          }
 
           // Notificar vía Socket.IO y Telegram SOLO SI NO ES REINTENTO DUPLICADO
           if (!isConflictRetry) {
-            emitNuevoPedido(resolvedNegocioId, responseOrder);
+            if (isRoundReq) {
+              emitItemsAñadidos(resolvedNegocioId, mesaStr, insertedItems);
+              emitPedidoActualizado(resolvedNegocioId, responseOrder);
+            } else {
+              emitNuevoPedido(resolvedNegocioId, responseOrder);
+            }
+
             if (!authoritativeOrder) {
               void syncSinglePedidoToPrisma(createdOrderId, resolvedNegocioId);
             }
@@ -1100,24 +1176,40 @@ export async function POST(req: NextRequest) {
               ? "Para Llevar" 
               : (mesaStr.toLowerCase().includes("mesa") ? mesaStr : "Mesa " + mesaStr);
 
-            // Alerta instantánea a Telegram vía webhook n8n (no bloqueante)
-            void sendTelegramAlert({
-              mensaje: `🍽️ Nuevo pedido [${channelLabel}] (${businessName}) por $${orderTotal.toFixed(2)} (${insertedItems.length} platos): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
-              cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente",
-              negocio: businessName,
-            });
+            if (isRoundReq) {
+              void sendTelegramAlert({
+                mensaje: `🍽️ Platos adicionales en ${channelLabel} (${businessName}): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")} | Total acumulado comanda: $${Number(responseOrder?.total ?? orderTotal ?? 0).toFixed(2)}`,
+                cliente: cliente_nombre ? String(cliente_nombre).trim() : "Comensal",
+                negocio: businessName,
+              });
+            } else {
+              void sendTelegramAlert({
+                mensaje: `🍽️ Nuevo pedido [${channelLabel}] (${businessName}) por $${Number(responseOrder?.total ?? orderTotal ?? 0).toFixed(2)} (${insertedItems.length} platos): ${insertedItems.map((it) => `${it.cantidad}x ${it.nombre}`).join(", ")}`,
+                cliente: cliente_nombre ? String(cliente_nombre).trim() : "Cliente",
+                negocio: businessName,
+              });
+            }
           }
 
-          whatsappMessageText = `*Nuevo Pedido - MenuQR Pro*\n` +
-            `*Restaurante:* ${businessName}\n` +
-            `*Modalidad:* ${channelLabel}\n` +
-            `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
-            (cliente_telefono ? `*Teléfono:* ${cliente_telefono}\n` : "") +
-            (cliente_direccion ? `*Dirección:* ${cliente_direccion}\n` : "") +
-            `\n*Detalle del pedido:*\n` +
-            insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)})`).join("\n") +
-            (parsedDeliveryCost > 0 ? `\n*Costo de Envío:* $${parsedDeliveryCost.toFixed(2)}` : "") +
-            `\n\n*Total a pagar:* $${orderTotal.toFixed(2)}`;
+          if (isRoundReq) {
+            whatsappMessageText = `*Platos adicionales en Mesa ${mesaStr}*\n` +
+              `*Local:* ${businessName}\n` +
+              `*Comensal:* ${cliente_nombre || "Cliente"}\n\n` +
+              `*Platos añadidos:*\n` +
+              insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)})`).join("\n") +
+              `\n\n*Total acumulado de la comanda:* $${Number(responseOrder?.total ?? orderTotal ?? 0).toFixed(2)}`;
+          } else {
+            whatsappMessageText = `*Nuevo Pedido - MenuQR Pro*\n` +
+              `*Restaurante:* ${businessName}\n` +
+              `*Modalidad:* ${channelLabel}\n` +
+              `*Cliente:* ${cliente_nombre || "Cliente"}\n` +
+              (cliente_telefono ? `*Teléfono:* ${cliente_telefono}\n` : "") +
+              (cliente_direccion ? `*Dirección:* ${cliente_direccion}\n` : "") +
+              `\n*Detalle del pedido:*\n` +
+              insertedItems.map((it) => `• ${it.cantidad}x ${it.nombre} ($${(Number(it.precio || 0) * Number(it.cantidad || 1)).toFixed(2)})`).join("\n") +
+              (parsedDeliveryCost > 0 ? `\n*Costo de Envío:* $${parsedDeliveryCost.toFixed(2)}` : "") +
+              `\n\n*Total a pagar:* $${Number(responseOrder?.total ?? orderTotal ?? 0).toFixed(2)}`;
+          }
 
           const targetPhone = formatWhatsAppNumber(businessPhone || cliente_telefono || "");
           const waUrl = targetPhone ? `https://wa.me/${targetPhone}?text=${encodeURIComponent(whatsappMessageText)}` : "";
