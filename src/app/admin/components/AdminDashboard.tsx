@@ -1284,8 +1284,25 @@ export function AdminDashboard({
     initialCustomLabels.showDietaryInCrm !== undefined ? Boolean(initialCustomLabels.showDietaryInCrm) : undefined
   );
 
+  const [prepagoDelivery, setPrepagoDelivery] = useState<boolean>(
+    Boolean(initialCustomLabels.prepagoDelivery)
+  );
+  const [prepagoTakeout, setPrepagoTakeout] = useState<boolean>(
+    Boolean(initialCustomLabels.prepagoTakeout)
+  );
+
+  const hasAdvancePaymentMethod = Boolean(
+    (restaurant as any).qrCobroUrl ||
+    restaurant.paymentQrUrl ||
+    (restaurant as any).deunaPhone ||
+    (restaurant as any).payphoneUrl ||
+    restaurant.bankAccountNumber
+  );
+
   const currentCustomLabelsJSON = JSON.stringify({
     ...initialCustomLabels,
+    prepagoDelivery,
+    prepagoTakeout,
     vertical: selectedPreset === "RESERVAS" 
       ? "reservas" 
       : selectedPreset === "SERVICIOS" 
@@ -3902,6 +3919,9 @@ export function AdminDashboard({
                 formData.set("serviceOnTakeout", String(serviceOnTakeout));
                 formData.set("enablePickup", enablePickup ? "true" : "false");
                 formData.set("enableTableOrdering", enableTableOrdering ? "true" : "false");
+                formData.set("prepagoDelivery", prepagoDelivery ? "true" : "false");
+                formData.set("prepagoTakeout", prepagoTakeout ? "true" : "false");
+                formData.set("customLabels", currentCustomLabelsJSON);
                 await updateRestaurantAction(restaurant.id, formData);
                 alert("Configuración del negocio actualizada correctamente.");
               }}
@@ -4135,6 +4155,8 @@ export function AdminDashboard({
                 <input type="hidden" name="enablePickup" value={enablePickup ? "true" : "false"} />
                 <input type="hidden" name="enableDelivery" value={enableDeliveryState ? "true" : "false"} />
                 <input type="hidden" name="deliveryEnabled" value={enableDeliveryState ? "true" : "false"} />
+                <input type="hidden" name="prepagoDelivery" value={prepagoDelivery ? "true" : "false"} />
+                <input type="hidden" name="prepagoTakeout" value={prepagoTakeout ? "true" : "false"} />
                 <input type="hidden" name="customLabels" value={currentCustomLabelsJSON} />
               </div>
 
@@ -4193,6 +4215,37 @@ export function AdminDashboard({
                         <p className="text-[11px] text-slate-400 leading-snug">
                           {enablePickup ? "✓ Habilitado para retiro en tienda." : "✕ Oculto en el checkout."}
                         </p>
+                        {enablePickup && (
+                          <div className="mt-3 pt-2.5 border-t border-emerald-500/20 flex items-center justify-between gap-2">
+                            <div>
+                              <span className="text-[11px] font-bold text-emerald-300 block">
+                                Exigir Prepago
+                              </span>
+                              <span className="text-[10px] text-slate-400 block leading-tight">
+                                Cocina no inicia hasta confirmar pago en Caja
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!prepagoTakeout && !hasAdvancePaymentMethod) {
+                                  alert("Para exigir prepago en Para Llevar, primero debes configurar al menos un método de pago anticipado (Deuna, Payphone o Cuenta Bancaria) en la sección de Métodos de Pago.");
+                                  return;
+                                }
+                                setPrepagoTakeout(!prepagoTakeout);
+                              }}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                prepagoTakeout ? "bg-amber-500" : "bg-slate-800"
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  prepagoTakeout ? "translate-x-4" : "translate-x-0"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -4224,6 +4277,37 @@ export function AdminDashboard({
                         <p className="text-[11px] text-slate-400 leading-snug">
                           {enableDeliveryState ? "✓ Habilitado con tarifa de envío." : "✕ Oculto en el checkout."}
                         </p>
+                        {enableDeliveryState && (
+                          <div className="mt-3 pt-2.5 border-t border-sky-500/20 flex items-center justify-between gap-2">
+                            <div>
+                              <span className="text-[11px] font-bold text-sky-300 block">
+                                Exigir Prepago
+                              </span>
+                              <span className="text-[10px] text-slate-400 block leading-tight">
+                                Cocina no inicia hasta confirmar pago en Caja
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!prepagoDelivery && !hasAdvancePaymentMethod) {
+                                  alert("Para exigir prepago en Domicilio, primero debes configurar al menos un método de pago anticipado (Deuna, Payphone o Cuenta Bancaria) en la sección de Métodos de Pago.");
+                                  return;
+                                }
+                                setPrepagoDelivery(!prepagoDelivery);
+                              }}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                prepagoDelivery ? "bg-amber-500" : "bg-slate-800"
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  prepagoDelivery ? "translate-x-4" : "translate-x-0"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 

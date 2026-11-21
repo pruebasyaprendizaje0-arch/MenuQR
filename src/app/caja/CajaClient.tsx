@@ -80,6 +80,7 @@ import {
   searchCustomersForCajaAction,
   CustomerSearchResult,
   settleOrderInCashShiftAction,
+  confirmarPrepagoPedidoAction,
   getActiveCashShift,
   openCashShift,
   addCashMovement,
@@ -368,6 +369,7 @@ export function CajaClient({
 
   // Selected existing order to settle (Mesa, Llevar o Domicilio)
   const [selectedActiveOrder, setSelectedActiveOrder] = useState<ActiveOrder | null>(null);
+  const [isConfirmingPrepago, setIsConfirmingPrepago] = useState(false);
 
   // Live active orders list
   const [activeOrders, setActiveOrders] = useState<ActiveOrder[]>([]);
@@ -1255,6 +1257,44 @@ export function CajaClient({
     setInvoiceEmail("");
   };
 
+  // Confirmar recepción de prepago de un pedido a domicilio o retiro
+  const handleConfirmarPrepago = async (orderId: string) => {
+    if (!orderId || isConfirmingPrepago) return;
+    setIsConfirmingPrepago(true);
+    try {
+      const res = await confirmarPrepagoPedidoAction(restaurant.id, orderId);
+      if (res.error) {
+        playErrorSound();
+        alert(res.error);
+      } else {
+        playBeep();
+        alert(
+          res.alreadyConfirmed
+            ? "El pago de este pedido ya había sido confirmado previamente."
+            : "¡Pago confirmado exitosamente! La comanda ha quedado habilitada para preparación en Cocina."
+        );
+        await fetchActiveOrders();
+        setSelectedActiveOrder((prev) => {
+          if (!prev || prev.id !== orderId) return prev;
+          let meta: any = {};
+          try {
+            meta = typeof (prev as any).metadata === "string" ? JSON.parse((prev as any).metadata) : ((prev as any).metadata || {});
+          } catch {}
+          meta.pago_confirmado = true;
+          meta.pago_estado = "pagado";
+          return {
+            ...prev,
+            metadata: meta,
+          };
+        });
+      }
+    } catch (e: any) {
+      alert("Error al confirmar el prepago: " + (e.message || "Error desconocido"));
+    } finally {
+      setIsConfirmingPrepago(false);
+    }
+  };
+
   // Descartar modal de éxito y restaurar caja operativa limpia sin congelamiento
   const handleDismissSuccessModal = () => {
     setSuccessInfo(null);
@@ -1650,6 +1690,22 @@ export function CajaClient({
   // Totales y Desglose de Envío e Impuestos
   const totalQuantity = sessionItems.reduce((acc, it) => acc + it.quantity, 0);
   const itemsSubtotal = sessionItems.reduce((acc, it) => acc + it.price * it.quantity, 0);
+
+  const selectedOrderMeta = useMemo(() => {
+    if (!selectedActiveOrder) return null;
+    try {
+      return typeof (selectedActiveOrder as any).metadata === "string"
+        ? JSON.parse((selectedActiveOrder as any).metadata)
+        : ((selectedActiveOrder as any).metadata || {});
+    } catch {
+      return {};
+    }
+  }, [selectedActiveOrder]);
+
+  const isSelectedOrderPrepaid = Boolean(selectedOrderMeta?.pago_confirmado === true);
+  const isSelectedOrderPendingPrepago = Boolean(
+    selectedOrderMeta?.exige_prepago === true && !selectedOrderMeta?.pago_confirmado
+  );
 
   const selectedOrderDeliveryCost = useMemo(() => {
     if (!selectedActiveOrder) return 0;
@@ -3139,6 +3195,13 @@ export function CajaClient({
                       const computedOrderCardTotal = Math.round((orderItemsSum + addIva + addService) * 100) / 100;
                       const displayTotal = order.total > 0 && order.total >= computedOrderCardTotal ? order.total : computedOrderCardTotal;
 
+                      let meta: any = {};
+                      try {
+                        meta = typeof (order as any).metadata === "string" ? JSON.parse((order as any).metadata) : ((order as any).metadata || {});
+                      } catch {}
+                      const isPrepayRequired = Boolean(meta?.exige_prepago);
+                      const isPrepayConfirmed = Boolean(meta?.pago_confirmado);
+
                       return (
                         <div
                           key={order.id}
@@ -3149,12 +3212,25 @@ export function CajaClient({
                             <div>
                               <span className="font-black text-base text-white">🥡 {order.cliente_nombre || "Cliente"}</span>
                               <span className="text-xs text-slate-400 block">{order.cliente_telefono || "Sin teléfono"}</span>
+                              {isPrepayRequired && (
+                                <div className="mt-1">
+                                  {isPrepayConfirmed ? (
+                                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/80 inline-flex items-center gap-1">
+                                      ✅ Prepago Confirmado
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80 inline-flex items-center gap-1 animate-pulse">
+                                      ⏳ Prepago Pendiente
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             <span className="text-xl font-mono font-black text-cyan-400">${displayTotal.toFixed(2)}</span>
                           </div>
                           <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-cyan-400 font-bold">
                             <span>{order.items.length} producto(s)</span>
-                            <span>Cobrar al entregar →</span>
+                            <span>{isPrepayConfirmed ? "📦 Entregar pedido →" : isPrepayRequired ? "💳 Confirmar pago / Entregar →" : "Cobrar al entregar →"}</span>
                           </div>
                         </div>
                       );
@@ -3188,6 +3264,8 @@ export function CajaClient({
                       } catch {}
                       const direccion = meta?.cliente_direccion || "";
                       const costoEnvio = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
+                      const isPrepayRequired = Boolean(meta?.exige_prepago);
+                      const isPrepayConfirmed = Boolean(meta?.pago_confirmado);
 
                       return (
                         <div
@@ -3203,6 +3281,19 @@ export function CajaClient({
                               <span className="text-xs text-slate-400 block mt-0.5 font-mono">
                                 📞 {order.cliente_telefono || "Sin teléfono"}
                               </span>
+                              {isPrepayRequired && (
+                                <div className="mt-1">
+                                  {isPrepayConfirmed ? (
+                                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/80 inline-flex items-center gap-1">
+                                      ✅ Prepago Confirmado
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80 inline-flex items-center gap-1 animate-pulse">
+                                      ⏳ Prepago Pendiente
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               {costoEnvio > 0 && (
                                 <div className="mt-1">
                                   <span className="text-[11px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80 inline-flex items-center gap-1">
@@ -3222,7 +3313,7 @@ export function CajaClient({
                           </div>
                           <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs text-amber-400 font-bold">
                             <span>{order.items.length} plato(s) / item(s)</span>
-                            <span className="hover:underline">Cobrar / Despachar →</span>
+                            <span className="hover:underline">{isPrepayConfirmed ? "📦 Despachar pedido →" : isPrepayRequired ? "💳 Confirmar pago / Despachar →" : "Cobrar / Despachar →"}</span>
                           </div>
                         </div>
                       );
@@ -5014,6 +5105,59 @@ export function CajaClient({
             </div>
           ) : null}
 
+          {/* BANNER DE PREPAGO (Si el pedido exige prepago) */}
+          {selectedActiveOrder && isSelectedOrderPendingPrepago && (
+            <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-amber-400 font-bold text-xs flex items-center gap-1.5">
+                  ⏳ Prepago Pendiente de Confirmación
+                </span>
+                <span className="text-[10px] text-amber-300 font-mono bg-amber-900/60 px-2 py-0.5 rounded-full border border-amber-700/50">
+                  {selectedOrderMeta?.metodo_pago ? String(selectedOrderMeta.metodo_pago).toUpperCase() : "ANTICIPADO"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-snug">
+                Cocina tiene bloqueada la preparación hasta que caja o administración confirme la recepción del pago.
+              </p>
+              <button
+                type="button"
+                disabled={isConfirmingPrepago}
+                onClick={() => handleConfirmarPrepago(selectedActiveOrder.id)}
+                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/50 cursor-pointer transition active:scale-95"
+              >
+                {isConfirmingPrepago ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Confirmando Pago...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>Confirmar Pago Recibido (Habilitar Cocina)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {selectedActiveOrder && isSelectedOrderPrepaid && (
+            <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  ✅ Pago Prepagado Confirmado
+                </span>
+                {selectedOrderMeta?.pago_confirmado_por && (
+                  <span className="text-[10px] text-slate-400">
+                    por {selectedOrderMeta.pago_confirmado_por}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] text-emerald-300 font-bold bg-emerald-900/60 px-2 py-0.5 rounded-full border border-emerald-700/50">
+                Cobrado en Caja
+              </span>
+            </div>
+          )}
+
           {/* LISTA DE ITEMS DEL TICKET */}
           <div className="flex-1 space-y-2 min-h-[140px] max-h-[260px] overflow-y-auto pr-1">
             {sessionItems.length === 0 ? (
@@ -5500,7 +5644,9 @@ export function CajaClient({
               mode === "ENTRADA"
                 ? "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/30"
                 : selectedActiveOrder
-                ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30"
+                ? isSelectedOrderPrepaid
+                  ? "bg-teal-600 hover:bg-teal-500 text-white shadow-teal-600/30"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30"
                 : saleModality === "DOMICILIO"
                 ? "bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-600/30"
                 : saleModality === "LLEVAR"
@@ -5529,11 +5675,19 @@ export function CajaClient({
                       ? `Cobrar Abono ($${(parseFloat(montoAbonoInput) || 0).toFixed(2)})`
                       : `Cobrar y Finalizar Cita ($${totalAmount.toFixed(2)})`
                     : selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO"
-                    ? `Cobrar y Despachar Domicilio ($${totalAmount.toFixed(2)})`
+                    ? isSelectedOrderPrepaid
+                      ? `📦 Marcar Despachado (Ya Pagado)`
+                      : `Cobrar y Despachar Domicilio ($${totalAmount.toFixed(2)})`
                     : selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO"
-                    ? `Cobrar y Entregar Pedido ($${totalAmount.toFixed(2)})`
+                    ? isSelectedOrderPrepaid
+                      ? `📦 Marcar Entregado (Ya Pagado)`
+                      : `Cobrar y Entregar Pedido ($${totalAmount.toFixed(2)})`
                     : isCatalogVertical
-                    ? `Cobrar y Registrar Venta ($${totalAmount.toFixed(2)})`
+                    ? isSelectedOrderPrepaid
+                      ? `📦 Marcar Entregado (Ya Pagado)`
+                      : `Cobrar y Registrar Venta ($${totalAmount.toFixed(2)})`
+                    : isSelectedOrderPrepaid
+                    ? `📦 Marcar Entregado / Cerrar (Ya Pagado)`
                     : `Cobrar y Liberar Mesa (${totalAmount.toFixed(2)})`}
                 </span>
               </>

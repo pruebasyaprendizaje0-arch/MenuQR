@@ -644,13 +644,22 @@ export async function POST(req: NextRequest) {
         }
 
         // Consultar configuración fiscal y de servicio del restaurante (IVA, Servicio, reglas de inclusión)
-        let restConfig = {
+        let restConfig: {
+          ivaPercent: number;
+          servicePercent: number;
+          ivaOnTable: boolean;
+          serviceOnTable: boolean;
+          ivaOnTakeout: boolean;
+          serviceOnTakeout: boolean;
+          customLabels?: string | null;
+        } = {
           ivaPercent: 15.0,
           servicePercent: 10.0,
           ivaOnTable: true,
           serviceOnTable: true,
           ivaOnTakeout: true,
           serviceOnTakeout: false,
+          customLabels: null,
         };
         try {
           const restDb = await prisma.restaurant.findFirst({
@@ -668,6 +677,7 @@ export async function POST(req: NextRequest) {
               serviceOnTable: true,
               ivaOnTakeout: true,
               serviceOnTakeout: true,
+              customLabels: true,
             },
           });
           if (restDb) {
@@ -678,6 +688,7 @@ export async function POST(req: NextRequest) {
               serviceOnTable: restDb.serviceOnTable ?? true,
               ivaOnTakeout: restDb.ivaOnTakeout ?? restDb.ivaOnTable ?? true,
               serviceOnTakeout: restDb.serviceOnTakeout ?? restDb.serviceOnTable ?? true,
+              customLabels: restDb.customLabels || null,
             };
           }
         } catch (confErr) {
@@ -958,7 +969,17 @@ export async function POST(req: NextRequest) {
             if (defaultCam[0]) finalCamareroId = defaultCam[0].id;
           }
 
-          const metaObj = {
+          let cLabels: any = {};
+          try {
+            cLabels = restConfig.customLabels ? JSON.parse(restConfig.customLabels) : {};
+          } catch {}
+
+          const exigePrepagoPolicy = !isTable && (
+            (isDeliveryReq && cLabels.prepagoDelivery === true) ||
+            (isLlevarReq && cLabels.prepagoTakeout === true)
+          );
+
+          const metaObj: any = {
             tipo_pedido: isDeliveryReq ? "delivery" : isLlevarReq ? "llevar" : "mesa",
             tipo_entrega: isDeliveryReq ? "DOMICILIO" : isLlevarReq ? "RETIRO" : "SALON",
             cliente_direccion: cliente_direccion || null,
@@ -967,6 +988,10 @@ export async function POST(req: NextRequest) {
             iva: charges.iva,
             service_charge: charges.service_charge,
             notas_entrega: notas_entrega || null,
+            metodo_pago: (body as any)?.metodo_pago || (body as any)?.paymentMethod || null,
+            exige_prepago: Boolean(exigePrepagoPolicy),
+            pago_confirmado: false,
+            pago_estado: exigePrepagoPolicy ? "pendiente_prepago" : "pendiente",
           };
 
           let authoritativeOrder: any = null;
@@ -992,6 +1017,23 @@ export async function POST(req: NextRequest) {
             metaObj.iva = typeof authoritativeOrder.iva === "number" ? authoritativeOrder.iva : metaObj.iva;
             metaObj.service_charge = typeof authoritativeOrder.serviceCharge === "number" ? authoritativeOrder.serviceCharge : metaObj.service_charge;
             metaObj.costo_envio = typeof authoritativeOrder.deliveryCost === "number" ? authoritativeOrder.deliveryCost : metaObj.costo_envio;
+            if (authoritativeOrder.paymentDetails && authoritativeOrder.paymentDetails.startsWith("{")) {
+              try {
+                const parsedDetails = JSON.parse(authoritativeOrder.paymentDetails);
+                if (typeof parsedDetails.exige_prepago === "boolean") {
+                  metaObj.exige_prepago = parsedDetails.exige_prepago;
+                }
+                if (typeof parsedDetails.pago_confirmado === "boolean") {
+                  metaObj.pago_confirmado = parsedDetails.pago_confirmado;
+                }
+                if (parsedDetails.pago_estado) {
+                  metaObj.pago_estado = parsedDetails.pago_estado;
+                }
+              } catch {}
+            }
+            if (authoritativeOrder.paymentMethod) {
+              metaObj.metodo_pago = authoritativeOrder.paymentMethod;
+            }
           }
 
           let isConflictRetry = false;

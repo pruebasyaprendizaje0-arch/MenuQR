@@ -401,6 +401,29 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   }, [customizingDish, selectedModifiersState]);
 
   const [selectedTable, setSelectedTable] = useState<string>("");
+
+  const isPrepagoRequired = useMemo(() => {
+    let customLabelsObj: any = {};
+    try {
+      customLabelsObj = typeof (restaurant as any).customLabels === "string"
+        ? JSON.parse((restaurant as any).customLabels)
+        : ((restaurant as any).customLabels || {});
+    } catch {}
+
+    if (selectedTable === "Domicilio") {
+      return Boolean(customLabelsObj.prepagoDelivery);
+    }
+    if (selectedTable === "Llevar") {
+      return Boolean(customLabelsObj.prepagoTakeout);
+    }
+    return false;
+  }, [selectedTable, restaurant]);
+
+  useEffect(() => {
+    if (isPrepagoRequired && paymentMethod === "cash") {
+      setPaymentMethod("deuna");
+    }
+  }, [isPrepagoRequired, paymentMethod]);
   const [suggestedAspect, setSuggestedAspect] = useState<"1:1" | "9:16">(
     bLabels.suggestedAspectRatio || bLabels.imageAspectRatio || "1:1"
   );
@@ -4236,24 +4259,48 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
 
               return (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("cash")}
-                      className={`p-3 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all duration-200 cursor-pointer ${
-                        paymentMethod === "cash"
-                          ? "border-emerald-400 bg-emerald-500/20 text-white shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-400"
-                          : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
-                      }`}
-                    >
-                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                        <DollarSign className="h-4 w-4" />
-                      </div>
+                  {isPrepagoRequired && (
+                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-start gap-2.5 text-xs text-amber-200">
+                      <span className="text-base leading-none">⏳</span>
                       <div>
-                        <span className="text-xs font-bold block text-white">Efectivo</span>
-                        <span className="text-[10px] text-slate-400 block line-clamp-1">Local / Entrega</span>
+                        <p className="font-extrabold text-amber-300">Pago Anticipado Requerido</p>
+                        <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">
+                          Este establecimiento requiere prepago para confirmar tu orden antes de iniciar su preparación. Selecciona un método de pago digital y realiza la transferencia o cobro directo.
+                        </p>
                       </div>
-                    </button>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {!isPrepagoRequired ? (
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMethod("cash")}
+                        className={`p-3 rounded-2xl border text-left flex flex-col justify-between h-24 transition-all duration-200 cursor-pointer ${
+                          paymentMethod === "cash"
+                            ? "border-emerald-400 bg-emerald-500/20 text-white shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-400"
+                            : "border-slate-800 bg-slate-950/60 text-slate-400 hover:text-slate-200 hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                          <DollarSign className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold block text-white">Efectivo</span>
+                          <span className="text-[10px] text-slate-400 block line-clamp-1">Local / Entrega</span>
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="p-3 rounded-2xl border border-slate-850 bg-slate-950/30 text-slate-600 flex flex-col justify-between h-24 opacity-40 cursor-not-allowed select-none">
+                        <div className="w-8 h-8 rounded-xl bg-slate-850 border border-slate-800 flex items-center justify-center text-slate-600">
+                          <DollarSign className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold block text-slate-500 line-through">Efectivo</span>
+                          <span className="text-[9px] text-slate-500 block leading-tight">Exige Prepago</span>
+                        </div>
+                      </div>
+                    )}
 
                     <button
                       type="button"

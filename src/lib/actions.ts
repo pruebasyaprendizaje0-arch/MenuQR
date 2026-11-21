@@ -523,6 +523,8 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       serviceOnTable: true,
       serviceOnTakeout: true,
       deliveryRates: true,
+      bankName: true,
+      bankAccountNumber: true,
       schedule: true,
       localSchedule: true,
       deliverySchedule: true,
@@ -636,6 +638,53 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
     : true;
   const customLabelsParam = formData.get("customLabels") as string || null;
 
+  let parsedCustomLabels: any = {};
+  try {
+    parsedCustomLabels = customLabelsParam ? JSON.parse(customLabelsParam) : {};
+  } catch {}
+
+  const prepagoDelivery = formData.has("prepagoDelivery")
+    ? (formData.get("prepagoDelivery") === "true" || formData.get("prepagoDelivery") === "on")
+    : Boolean(parsedCustomLabels.prepagoDelivery);
+
+  const prepagoTakeout = formData.has("prepagoTakeout")
+    ? (formData.get("prepagoTakeout") === "true" || formData.get("prepagoTakeout") === "on")
+    : Boolean(parsedCustomLabels.prepagoTakeout);
+
+  // Condición 2: Si exige prepago, solo se puede activar si hay al menos un método de pago anticipado configurado
+  if (prepagoDelivery || prepagoTakeout) {
+    const hasDeuna = Boolean(
+      paymentQrUrl ||
+      paymentQrUrlInput ||
+      deunaPhone ||
+      currentRestaurant?.qrCobroUrl ||
+      currentRestaurant?.deunaPhone
+    );
+    const hasPayphone = Boolean(
+      payphoneQrUrl ||
+      payphoneQrUrlInput ||
+      payphoneUrl ||
+      payphonePhone ||
+      (currentRestaurant as any)?.payphoneUrl ||
+      (currentRestaurant as any)?.payphonePhone ||
+      (currentRestaurant as any)?.payphoneQrUrl
+    );
+    const hasBank = Boolean(
+      (bankName && bankAccountNumber) ||
+      (currentRestaurant?.bankName && currentRestaurant?.bankAccountNumber)
+    );
+
+    if (!hasDeuna && !hasPayphone && !hasBank) {
+      return {
+        error: "Para exigir prepago en Domicilio o Retiro, primero debes configurar al menos un método de pago anticipado (Deuna, Payphone o Cuenta Bancaria).",
+      };
+    }
+  }
+
+  parsedCustomLabels.prepagoDelivery = prepagoDelivery;
+  parsedCustomLabels.prepagoTakeout = prepagoTakeout;
+  const finalCustomLabels = JSON.stringify(parsedCustomLabels);
+
   await prisma.restaurant.update({
     where: { id: restaurantId },
     data: {
@@ -703,7 +752,7 @@ export async function updateRestaurantAction(restaurantId: string, formData: For
       enableTableOrdering,
       enableDelivery: enableDeliveryParam,
       enablePickup: enablePickupParam,
-      customLabels: customLabelsParam,
+      customLabels: finalCustomLabels,
     },
   });
 
@@ -3329,9 +3378,40 @@ export async function createOrderAction(data: {
     const order = await prisma.$transaction(async (tx) => {
       const rest = await tx.restaurant.findUnique({
         where: { id: data.restaurantId },
-        select: { testMode: true },
+        select: { testMode: true, customLabels: true },
       });
       const isTestOrder = rest?.testMode ?? false;
+
+      let cLabels: any = {};
+      try {
+        cLabels = rest?.customLabels ? JSON.parse(rest.customLabels) : {};
+      } catch {}
+
+      const isDeliveryOrder = rawTableName.toLowerCase().includes("domicilio");
+      const isTakeoutOrder = rawTableName.toLowerCase().includes("llevar");
+      const exigePrepago = !data.isRound && (
+        (isDeliveryOrder && cLabels.prepagoDelivery === true) ||
+        (isTakeoutOrder && cLabels.prepagoTakeout === true)
+      );
+
+      // Condición 1 & 2: Si el negocio exige prepago, verificar que no se haya intentado saltar con efectivo contraentrega
+      if (exigePrepago) {
+        const isAdvanceMethod = rawMethod === "deuna" || rawMethod === "payphone" || rawMethod === "qr" || rawMethod === "transferencia" || rawMethod === "transfer" || rawMethod === "tarjeta" || rawMethod === "card";
+        if (!isAdvanceMethod) {
+          throw new Error("Este restaurante exige pago anticipado para esta modalidad. Debe seleccionar un método de pago válido (Deuna, Payphone o Transferencia).");
+        }
+      }
+
+      let pDetailsObj: any = {};
+      try {
+        pDetailsObj = data.paymentDetails && data.paymentDetails.startsWith("{") ? JSON.parse(data.paymentDetails) : { text: data.paymentDetails };
+      } catch {
+        pDetailsObj = { text: data.paymentDetails };
+      }
+      pDetailsObj.exige_prepago = Boolean(exigePrepago);
+      pDetailsObj.pago_confirmado = false;
+      pDetailsObj.pago_estado = exigePrepago ? "pendiente_prepago" : "pendiente";
+      const paymentDetailsJson = JSON.stringify(pDetailsObj);
 
       const newOrder = await tx.order.create({
         data: {
@@ -3354,7 +3434,7 @@ export async function createOrderAction(data: {
           discountAmount: finalDiscount,
           total: finalTotal,
           paymentMethod: rawMethod,
-          paymentDetails: data.paymentDetails?.slice(0, 500) || null,
+          paymentDetails: paymentDetailsJson,
           isTest: isTestOrder,
           items: {
             create: verifiedOrderItems.map((item) => ({

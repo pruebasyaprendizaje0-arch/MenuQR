@@ -622,6 +622,22 @@ export function CocinaClient({
 
   // 6. Cambiar estado de pedido (ACEPTAR -> en_cocina, LISTO -> listo)
   const cambiarEstado = async (pedidoId: string, nuevoEstado: "en_cocina" | "listo") => {
+    // 0. Si el pedido exige prepago y no ha sido confirmado, bloquear
+    const currentOrder = pedidos.find((p) => p.id === pedidoId);
+    const orderMeta: any = typeof currentOrder?.metadata === "string"
+      ? (() => { try { return JSON.parse(currentOrder.metadata); } catch { return {}; } })()
+      : (currentOrder?.metadata || {});
+
+    if (
+      (orderMeta?.exige_prepago || (currentOrder as any)?.exige_prepago) &&
+      !(orderMeta?.pago_confirmado || (currentOrder as any)?.pago_confirmado)
+    ) {
+      alert("No se puede iniciar preparación: el pedido exige prepago y el pago aún no ha sido confirmado por caja o administración.");
+      return;
+    }
+
+    const previousEstado = currentOrder?.estado || "nuevo";
+
     // 1. Reproducir sonido instantáneamente para feedback háptico/acústico
     if (nuevoEstado === "en_cocina") {
       triggerAudioAlert("cocina");
@@ -636,11 +652,21 @@ export function CocinaClient({
 
     // 3. Persistir en base de datos PostgreSQL
     try {
-      await fetch(`/api/pedidos/${pedidoId}`, {
+      const res = await fetch(`/api/pedidos/${pedidoId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ estado: nuevoEstado }),
       });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        // Revertir optimismo si fue rechazado por el servidor
+        setPedidos((prev) =>
+          prev.map((p) => (p.id === pedidoId ? { ...p, estado: previousEstado as any } : p))
+        );
+        alert(data.error || "No se pudo cambiar el estado del pedido.");
+        return;
+      }
 
       if (socketRef.current?.connected) {
         socketRef.current.emit("pedido_actualizado", {
@@ -1259,10 +1285,24 @@ export function CocinaClient({
             </div>
 
             <div className="space-y-3.5 flex-1 overflow-y-auto">
-              {pedidosNuevos.map((pedido) => (
+              {pedidosNuevos.map((pedido) => {
+                const meta: any = typeof pedido.metadata === "string"
+                  ? (() => { try { return JSON.parse(pedido.metadata); } catch { return {}; } })()
+                  : (pedido.metadata || {});
+                const isPendingPrepago = Boolean(
+                  (meta.exige_prepago || (pedido as any).exige_prepago) &&
+                  !(meta.pago_confirmado || (pedido as any).pago_confirmado)
+                );
+                const isPrepaidConfirmed = Boolean(meta.pago_confirmado || (pedido as any).pago_confirmado);
+
+                return (
                 <div
                   key={pedido.id}
-                  className="bg-slate-950 rounded-xl p-4 border-2 border-rose-500/60 shadow-lg shadow-rose-950/20 hover:border-rose-400 transition"
+                  className={`bg-slate-950 rounded-xl p-4 border-2 transition ${
+                    isPendingPrepago
+                      ? "border-amber-500/70 shadow-lg shadow-amber-950/30 hover:border-amber-400"
+                      : "border-rose-500/60 shadow-lg shadow-rose-950/20 hover:border-rose-400"
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-2.5 mb-2.5">
                     {renderOrderTitle(pedido)}
@@ -1271,6 +1311,28 @@ export function CocinaClient({
                       <span>{calcularHaceMinutos(pedido.created_at)}</span>
                     </span>
                   </div>
+
+                  {/* Estado de Prepago */}
+                  {isPendingPrepago && (
+                    <div className="mb-2.5 p-2 rounded-lg bg-amber-950/60 border border-amber-500/50 flex items-center justify-between text-xs text-amber-300">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                        <span>⏳ Pendiente de confirmar pago</span>
+                      </span>
+                      <span className="text-[10px] bg-amber-500/20 text-amber-200 px-2 py-0.5 rounded font-mono font-bold">
+                        CAJA / ADMIN
+                      </span>
+                    </div>
+                  )}
+
+                  {isPrepaidConfirmed && (
+                    <div className="mb-2.5 px-2 py-1 rounded-lg bg-emerald-950/50 border border-emerald-500/40 flex items-center justify-between text-xs text-emerald-300">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>✅ Pago confirmado ({meta.pago_confirmado_por || "Caja"})</span>
+                      </span>
+                    </div>
+                  )}
 
                   <div className="space-y-2 mb-3">
                     {pedido.items.map((item) => (
@@ -1317,11 +1379,27 @@ export function CocinaClient({
                   </div>
 
                   <button
-                    onClick={() => cambiarEstado(pedido.id, "en_cocina")}
-                    className="w-full py-2.5 rounded-lg bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider shadow-md shadow-orange-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
+                    disabled={isPendingPrepago}
+                    onClick={() => {
+                      if (isPendingPrepago) {
+                        alert("No se puede iniciar preparación: el pedido exige prepago y el pago aún no ha sido confirmado por caja o administración.");
+                        return;
+                      }
+                      cambiarEstado(pedido.id, "en_cocina");
+                    }}
+                    title={
+                      isPendingPrepago
+                        ? "El pedido exige prepago. Debe confirmarse en caja o administración antes de preparar."
+                        : "Aceptar comanda e iniciar preparación"
+                    }
+                    className={`w-full py-2.5 rounded-lg font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-1.5 transition ${
+                      isPendingPrepago
+                        ? "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-80"
+                        : "bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 text-slate-950 shadow-md shadow-orange-500/20 active:scale-95 cursor-pointer"
+                    }`}
                   >
-                    <Flame className="w-4 h-4 text-slate-950" />
-                    <span>ACEPTAR (A Cocina)</span>
+                    <Flame className={`w-4 h-4 ${isPendingPrepago ? "text-slate-500" : "text-slate-950"}`} />
+                    <span>{isPendingPrepago ? "Pendiente de Confirmar Pago" : "ACEPTAR (A Cocina)"}</span>
                   </button>
 
                   <div className="mt-2 pt-2 border-t border-slate-900 flex items-center justify-end">
@@ -1338,7 +1416,8 @@ export function CocinaClient({
                     </button>
                   </div>
                 </div>
-              ))}
+              );
+            })}
 
               {pedidosNuevos.length === 0 && (
                 <div className="h-64 flex flex-col items-center justify-center text-slate-500 text-xs">
@@ -1362,7 +1441,13 @@ export function CocinaClient({
             </div>
 
             <div className="space-y-3.5 flex-1 overflow-y-auto">
-              {pedidosEnCocina.map((pedido) => (
+              {pedidosEnCocina.map((pedido) => {
+                const meta: any = typeof pedido.metadata === "string"
+                  ? (() => { try { return JSON.parse(pedido.metadata); } catch { return {}; } })()
+                  : (pedido.metadata || {});
+                const isPrepaidConfirmed = Boolean(meta.pago_confirmado || (pedido as any).pago_confirmado);
+
+                return (
                 <div
                   key={pedido.id}
                   className="bg-slate-950 rounded-xl p-4 border-2 border-amber-500/50 shadow-lg shadow-amber-950/20 hover:border-amber-400 transition"
@@ -1374,6 +1459,15 @@ export function CocinaClient({
                       <span>{calcularHaceMinutos(pedido.created_at)}</span>
                     </span>
                   </div>
+
+                  {isPrepaidConfirmed && (
+                    <div className="mb-2.5 px-2 py-1 rounded-lg bg-emerald-950/50 border border-emerald-500/40 flex items-center justify-between text-xs text-emerald-300">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>✅ Pago confirmado ({meta.pago_confirmado_por || "Caja"})</span>
+                      </span>
+                    </div>
+                  )}
 
                   <div className="space-y-2 mb-3">
                     {pedido.items.map((item) => (
@@ -1441,7 +1535,8 @@ export function CocinaClient({
                     </button>
                   </div>
                 </div>
-              ))}
+              );
+            })}
 
               {pedidosEnCocina.length === 0 && (
                 <div className="h-64 flex flex-col items-center justify-center text-slate-500 text-xs">

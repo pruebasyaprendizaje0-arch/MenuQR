@@ -49,7 +49,7 @@ export async function PUT(
 
     // 1. Verificar existencia del pedido y obtener negocio_id
     const { rows: existingRows } = await pool.query(
-      "SELECT id, negocio_id, mesa, estado FROM pedidos WHERE id = $1",
+      "SELECT id, negocio_id, mesa, estado, metadata FROM pedidos WHERE id = $1",
       [id]
     );
 
@@ -81,6 +81,30 @@ export async function PUT(
       );
     }
 
+    // 4. Validación de Política de Prepago en el Servidor (Condición 1):
+    // Si el pedido exige prepago y no ha sido confirmado por caja o administración,
+    // queda estrictamente bloqueado el inicio de preparación ('en_cocina' o 'listo').
+    let orderMeta: any = {};
+    try {
+      orderMeta = typeof existingOrder.metadata === "string"
+        ? JSON.parse(existingOrder.metadata)
+        : (existingOrder.metadata || {});
+    } catch {}
+
+    if (
+      orderMeta?.exige_prepago === true &&
+      !orderMeta?.pago_confirmado &&
+      (estado === "en_cocina" || estado === "listo")
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "No se puede iniciar preparación: el pedido exige prepago y el pago aún no ha sido confirmado por caja o administración.",
+        },
+        { status: 403 }
+      );
+    }
+
     const { rows: updatedRows } = await pool.query(
       `UPDATE pedidos 
        SET estado = COALESCE($1, estado),
@@ -89,7 +113,7 @@ export async function PUT(
            cancelado_por = CASE WHEN $1 = 'cancelado' THEN COALESCE($4, cancelado_por, 'sistema') ELSE cancelado_por END,
            cancelado_at = CASE WHEN $1 = 'cancelado' THEN NOW() ELSE cancelado_at END
        WHERE id = $5 
-       RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, solicita_mesero, motivo_cancelacion, cancelado_por`,
+       RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, solicita_mesero, motivo_cancelacion, cancelado_por, metadata`,
       [
         estado || null,
         typeof solicita_mesero === "boolean" ? solicita_mesero : null,

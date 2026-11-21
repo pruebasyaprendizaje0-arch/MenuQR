@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/db";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { getUserSession, getSuperAdminSession, refreshUserSession } from "@/lib/auth";
+import { verifyOrderStaffAuth } from "@/lib/order-auth";
 import { revalidatePath } from "next/cache";
 import { emitStockActualizado, emitProductoActualizado, emitPedidoActualizado, emitCitaActualizada } from "@/lib/socket-server";
 
@@ -770,270 +771,486 @@ export async function settleOrderInCashShiftAction(
       ? data.partialPayment.montoAbonado
       : Math.max(0, Number(data.total) || 0);
 
-    const totalToSettle = Math.max(0, Number(data.total) || 0);
-
     await ensureDbTables();
 
-    // 1. Marcar como pagado o completada en la tabla relacional de pedidos
-    if (data.orderId) {
-      const { rows: orderRows } = await pool.query(
-        `SELECT id, vertical, mesa, estado, metadata, total::float, cliente_telefono, cliente_nombre FROM pedidos WHERE id = $1 AND negocio_id = $2 LIMIT 1`,
+    if (!data.orderId) {
+      return { error: "ID de comanda requerido para liquidar en caja." };
+    }
+
+    // 1. Lectura inicial para distinguir la vertical (Citas vs Menú QR) y validar estado antes de cualquier escritura
+    const { rows: initialOrderRows } = await pool.query(
+      `SELECT id, vertical, mesa, estado, metadata, total::float, cliente_telefono, cliente_nombre 
+       FROM pedidos 
+       WHERE id = $1 AND negocio_id = $2 
+       LIMIT 1`,
+      [data.orderId, restaurantId]
+    );
+
+    if (initialOrderRows.length === 0) {
+      return { error: "Pedido no encontrado." };
+    }
+
+    const initialOrder = initialOrderRows[0];
+
+    // PUNTO 1: Rechazo inmediato de pedidos cancelados antes de cualquier escritura
+    if (initialOrder.estado === "cancelado") {
+      return { error: "No se puede liquidar ni cobrar un pedido cancelado." };
+    }
+
+    // Protección de idempotencia temprana
+    if (initialOrder.estado === "pagado" && !data.partialPayment?.isPartial) {
+      return {
+        success: true,
+        orderId: data.orderId,
+        alreadyPrepaid: true,
+        message: "Este pedido ya se encuentra cobrado y registrado en caja.",
+      };
+    }
+
+    const isCitaOrder = initialOrder.vertical === "citas" || String(initialOrder.mesa).toUpperCase() === "CITA";
+
+    // =========================================================================
+    // CAMINO SEPARADO PARA VERTICAL CITAS (Comportamiento previo preservado)
+    // Evita mezclar escrituras de Prisma (CRM y stock) dentro de la transacción SQL de Menú
+    // =========================================================================
+    if (isCitaOrder) {
+      let meta: any = {};
+      try {
+        meta = typeof initialOrder.metadata === "string" ? JSON.parse(initialOrder.metadata) : (initialOrder.metadata || {});
+      } catch {}
+
+      meta.cobrado_en_caja = true;
+      meta.monto_cobrado = effectiveTotalToShift;
+      meta.fecha_cobro = new Date().toISOString();
+
+      if (data.partialPayment?.isPartial) {
+        meta.isPartialPayment = true;
+        meta.monto_abonado_hoy = data.partialPayment.montoAbonado;
+        meta.saldo_pendiente = data.partialPayment.saldoPendiente;
+        meta.costo_total = data.partialPayment.costoTotal;
+        meta.historial_abonos = [
+          ...(Array.isArray(meta.historial_abonos) ? meta.historial_abonos : []),
+          {
+            fecha: new Date().toISOString(),
+            monto: data.partialPayment.montoAbonado,
+            metodo: data.paymentMethod,
+            saldoDespues: data.partialPayment.saldoPendiente,
+          },
+        ];
+      }
+
+      // Calcular comisión por especialista si tiene porcentaje configurado
+      let comisionCalculada = meta.comision_calculada || 0;
+      if (meta.especialista_id) {
+        try {
+          const rest = await prisma.restaurant.findUnique({
+            where: { id: restaurantId },
+            select: { customLabels: true },
+          });
+          let cLabels: any = {};
+          try {
+            cLabels = typeof rest?.customLabels === "string" ? JSON.parse(rest?.customLabels) : (rest?.customLabels || {});
+          } catch {}
+          const specialists = Array.isArray(cLabels.specialists) ? cLabels.specialists : [];
+          const spec = specialists.find((s: any) => s.id === meta.especialista_id);
+          const commPercent = Number(spec?.commissionPercentage) || 0;
+          if (commPercent > 0) {
+            const servicePrice = Number(meta.precio_estimado) || Number(initialOrder.total) || 0;
+            comisionCalculada = Math.round(((servicePrice * commPercent) / 100) * 100) / 100;
+          }
+        } catch (specErr) {
+          console.warn("Error calculating specialist commission:", specErr);
+        }
+      }
+      if (comisionCalculada > 0) {
+        meta.comision_calculada = comisionCalculada;
+      }
+
+      // Si el cajero agregó productos físicos retail al ticket de la cita
+      if (Array.isArray(data.items) && data.items.length > 0) {
+        for (const it of data.items) {
+          if (it.dishId && it.dishId !== "cita-item" && it.dishId !== "abono-cuota") {
+            try {
+              await pool.query(
+                `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [data.orderId, it.name, it.quantity, it.price, "Agregado en Caja POS"]
+              );
+              const dish = await prisma.dish.findUnique({
+                where: { id: it.dishId },
+                select: { id: true, trackStock: true },
+              });
+              if (dish && dish.trackStock) {
+                await prisma.dish.update({
+                  where: { id: it.dishId },
+                  data: { stock: { decrement: it.quantity } },
+                });
+              }
+            } catch (prodErr) {
+              console.warn("Error agregando producto físico a la cita:", prodErr);
+            }
+          }
+        }
+      }
+
+      const newEstado = (data.partialPayment?.isPartial && data.partialPayment.saldoPendiente > 0)
+        ? "en_atencion"
+        : "completada";
+
+      const { rows: updatedCitaRows } = await pool.query(
+        `UPDATE pedidos 
+         SET estado = $1,
+             total = $2,
+             metadata = $3,
+             solicita_mesero = false
+         WHERE id = $4 AND negocio_id = $5
+         RETURNING *`,
+        [newEstado, effectiveTotalToShift, JSON.stringify(meta), data.orderId, restaurantId]
+      );
+
+      // Actualizar plan activo en Customer del CRM si tiene teléfono
+      if (initialOrder.cliente_telefono) {
+        try {
+          const cust = await prisma.customer.findFirst({
+            where: { restaurantId, phone: initialOrder.cliente_telefono },
+          });
+          if (cust) {
+            let custNotes: any = {};
+            try {
+              custNotes = typeof cust.notes === "string" ? JSON.parse(cust.notes) : (cust.notes || {});
+            } catch {}
+
+            if (data.partialPayment?.isPartial) {
+              const prevAbonado = Number(custNotes.activePaymentPlan?.totalAbonado) || 0;
+              custNotes.activePaymentPlan = {
+                treatmentName: data.partialPayment.treatmentName || "Tratamiento / Cita",
+                costoTotal: data.partialPayment.costoTotal,
+                totalAbonado: prevAbonado + data.partialPayment.montoAbonado,
+                saldoPendiente: data.partialPayment.saldoPendiente,
+                updatedAt: new Date().toISOString(),
+                historial: [
+                  ...(Array.isArray(custNotes.activePaymentPlan?.historial) ? custNotes.activePaymentPlan.historial : []),
+                  {
+                    fecha: new Date().toISOString(),
+                    abono: data.partialPayment.montoAbonado,
+                    metodo: data.paymentMethod,
+                    saldoDespues: data.partialPayment.saldoPendiente,
+                  },
+                ],
+              };
+            }
+
+            await prisma.customer.update({
+              where: { id: cust.id },
+              data: {
+                notes: JSON.stringify(custNotes),
+                totalSpent: { increment: effectiveTotalToShift },
+              },
+            });
+          }
+        } catch (custErr) {
+          console.warn("Error updating customer activePaymentPlan:", custErr);
+        }
+      }
+
+      // Vincular y registrar la venta en CashShift (Prisma)
+      const activeShift = await prisma.cashShift.findFirst({
+        where: { restaurantId, status: "OPEN" },
+      });
+
+      try {
+        await prisma.order.updateMany({
+          where: { id: data.orderId },
+          data: {
+            status: "COMPLETED",
+            paymentMethod: data.paymentMethod,
+            cashShiftId: activeShift?.id || null,
+            ...(data.depositDiscount !== undefined ? { depositDiscount: data.depositDiscount } : {}),
+            ...(data.reservationId ? { reservationId: data.reservationId } : {}),
+          },
+        });
+      } catch {}
+
+      if (activeShift) {
+        const deltaTotal = effectiveTotalToShift;
+        let cashSum = 0;
+        let deunaSum = 0;
+        let transferSum = 0;
+        let cardSum = 0;
+
+        if (data.splitDetails && data.splitDetails.length > 0) {
+          for (const d of data.splitDetails) {
+            const amt = Math.max(0, Number(d.amount) || 0);
+            const m = String(d.paymentMethod || "").toUpperCase();
+            if (m === "EFECTIVO" || m === "CASH") cashSum += amt;
+            else if (m === "DEUNA" || m === "QR") deunaSum += amt;
+            else if (m === "TRANSFERENCIA" || m.includes("TRANSFER")) transferSum += amt;
+            else if (m === "TARJETA" || m === "PAYPHONE" || m === "CARD") cardSum += amt;
+            else {
+              return { error: `Método no reconocido en cobro dividido ("${d.paymentMethod}"). No se puede clasificar el arqueo.` };
+            }
+          }
+        } else {
+          if (data.paymentMethod === "EFECTIVO") cashSum = deltaTotal;
+          else if (data.paymentMethod === "DEUNA") deunaSum = deltaTotal;
+          else if (data.paymentMethod === "TRANSFERENCIA") transferSum = deltaTotal;
+          else cardSum = deltaTotal;
+        }
+
+        await prisma.cashShift.update({
+          where: { id: activeShift.id },
+          data: {
+            totalSales: { increment: deltaTotal },
+            totalCash: { increment: cashSum },
+            expectedCash: { increment: cashSum },
+            totalDeuna: { increment: deunaSum },
+            totalTransfer: { increment: transferSum },
+            totalCard: { increment: cardSum },
+          },
+        });
+      }
+
+      // Si vino una reserva asociada, marcarla como completada y asociar la orden
+      if (data.reservationId) {
+        try {
+          if ((prisma as any)?.tableReservation) {
+            await (prisma as any).tableReservation.update({
+              where: { id: data.reservationId },
+              data: {
+                status: "COMPLETED",
+                usedInOrderId: data.orderId,
+              },
+            });
+          }
+        } catch (resErr) {
+          console.warn("Error updating reservation status in settleOrderInCashShiftAction (citas):", resErr);
+        }
+      }
+
+      try {
+        emitCitaActualizada(restaurantId, updatedCitaRows[0]);
+      } catch {}
+
+      try {
+        emitPedidoActualizado(restaurantId, {
+          id: data.orderId,
+          mesa: data.mesa || "CITA",
+          estado: newEstado === "completada" ? "pagado" : newEstado,
+          solicita_mesero: false,
+        });
+      } catch {}
+
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { slug: true },
+      });
+
+      revalidatePath("/caja");
+      revalidatePath("/admin");
+      if (restaurant?.slug) {
+        revalidatePath(`/${restaurant.slug}`);
+      }
+
+      return { success: true, orderId: data.orderId, alreadyPrepaid: false };
+    }
+
+    // =========================================================================
+    // CAMINO ATÓMICO TRANSACCIONAL DE MENÚ QR (Mesa, Llevar, Domicilio)
+    // Transacción común protegida contra doble cobro, cancelaciones y bypass de prepago
+    // =========================================================================
+    const client = await pool.connect();
+    let isAlreadyPrepaid = false;
+
+    try {
+      await client.query("BEGIN");
+
+      // Paso 1: Bloqueo pesimista del pedido con SELECT ... FOR UPDATE
+      const { rows: orderRows } = await client.query(
+        `SELECT id, vertical, mesa, estado, metadata, total::float, cliente_telefono, cliente_nombre 
+         FROM pedidos 
+         WHERE id = $1 AND negocio_id = $2 
+         LIMIT 1 
+         FOR UPDATE`,
         [data.orderId, restaurantId]
       );
 
-      if (orderRows.length > 0) {
-        const orderRecord = orderRows[0];
-
-        // Protección de idempotencia: si el pedido ya fue pagado previamente, no duplicar cobros ni arqueo
-        if (orderRecord.estado === "pagado" && !data.partialPayment?.isPartial) {
-          return {
-            success: true,
-            orderId: data.orderId,
-            message: "Este pedido ya se encuentra cobrado y registrado en caja.",
-          };
-        }
-
-        let meta: any = {};
-        try {
-          meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});
-        } catch {}
-
-        const isCitaOrder = orderRecord.vertical === "citas" || String(orderRecord.mesa).toUpperCase() === "CITA";
-
-        if (isCitaOrder) {
-          meta.cobrado_en_caja = true;
-          meta.monto_cobrado = effectiveTotalToShift;
-          meta.fecha_cobro = new Date().toISOString();
-
-          if (data.partialPayment?.isPartial) {
-            meta.isPartialPayment = true;
-            meta.monto_abonado_hoy = data.partialPayment.montoAbonado;
-            meta.saldo_pendiente = data.partialPayment.saldoPendiente;
-            meta.costo_total = data.partialPayment.costoTotal;
-            meta.historial_abonos = [
-              ...(Array.isArray(meta.historial_abonos) ? meta.historial_abonos : []),
-              {
-                fecha: new Date().toISOString(),
-                monto: data.partialPayment.montoAbonado,
-                metodo: data.paymentMethod,
-                saldoDespues: data.partialPayment.saldoPendiente,
-              },
-            ];
-          }
-
-          // Calcular comisión por especialista si tiene porcentaje configurado
-          let comisionCalculada = meta.comision_calculada || 0;
-          if (meta.especialista_id) {
-            try {
-              const rest = await prisma.restaurant.findUnique({
-                where: { id: restaurantId },
-                select: { customLabels: true },
-              });
-              let cLabels: any = {};
-              try {
-                cLabels = typeof rest?.customLabels === "string" ? JSON.parse(rest.customLabels) : (rest?.customLabels || {});
-              } catch {}
-              const specialists = Array.isArray(cLabels.specialists) ? cLabels.specialists : [];
-              const spec = specialists.find((s: any) => s.id === meta.especialista_id);
-              const commPercent = Number(spec?.commissionPercentage) || 0;
-              if (commPercent > 0) {
-                const servicePrice = Number(meta.precio_estimado) || Number(orderRecord.total) || 0;
-                comisionCalculada = Math.round(((servicePrice * commPercent) / 100) * 100) / 100;
-              }
-            } catch (specErr) {
-              console.warn("Error calculating specialist commission:", specErr);
-            }
-          }
-          if (comisionCalculada > 0) {
-            meta.comision_calculada = comisionCalculada;
-          }
-
-          // Si el cajero agregó productos físicos retail al ticket de la cita
-          if (Array.isArray(data.items) && data.items.length > 0) {
-            for (const it of data.items) {
-              if (it.dishId && it.dishId !== "cita-item" && it.dishId !== "abono-cuota") {
-                try {
-                  await pool.query(
-                    `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas)
-                     VALUES ($1, $2, $3, $4, $5)`,
-                    [data.orderId, it.name, it.quantity, it.price, "Agregado en Caja POS"]
-                  );
-                  const dish = await prisma.dish.findUnique({
-                    where: { id: it.dishId },
-                    select: { id: true, trackStock: true },
-                  });
-                  if (dish && dish.trackStock) {
-                    await prisma.dish.update({
-                      where: { id: it.dishId },
-                      data: { stock: { decrement: it.quantity } },
-                    });
-                  }
-                } catch (prodErr) {
-                  console.warn("Error agregando producto físico a la cita:", prodErr);
-                }
-              }
-            }
-          }
-
-          const newEstado = (data.partialPayment?.isPartial && data.partialPayment.saldoPendiente > 0)
-            ? "en_atencion"
-            : "completada";
-
-          const { rows: updatedCitaRows } = await pool.query(
-            `UPDATE pedidos 
-             SET estado = $1,
-                 total = $2,
-                 metadata = $3,
-                 solicita_mesero = false
-             WHERE id = $4 AND negocio_id = $5
-             RETURNING *`,
-            [newEstado, effectiveTotalToShift, JSON.stringify(meta), data.orderId, restaurantId]
-          );
-
-          // Actualizar plan activo en Customer del CRM si tiene teléfono
-          if (orderRecord.cliente_telefono) {
-            try {
-              const cust = await prisma.customer.findFirst({
-                where: { restaurantId, phone: orderRecord.cliente_telefono },
-              });
-              if (cust) {
-                let custNotes: any = {};
-                try {
-                  custNotes = typeof cust.notes === "string" ? JSON.parse(cust.notes) : (cust.notes || {});
-                } catch {}
-
-                if (data.partialPayment?.isPartial) {
-                  const prevAbonado = Number(custNotes.activePaymentPlan?.totalAbonado) || 0;
-                  custNotes.activePaymentPlan = {
-                    treatmentName: data.partialPayment.treatmentName || "Tratamiento / Cita",
-                    costoTotal: data.partialPayment.costoTotal,
-                    totalAbonado: prevAbonado + data.partialPayment.montoAbonado,
-                    saldoPendiente: data.partialPayment.saldoPendiente,
-                    updatedAt: new Date().toISOString(),
-                    historial: [
-                      ...(Array.isArray(custNotes.activePaymentPlan?.historial) ? custNotes.activePaymentPlan.historial : []),
-                      {
-                        fecha: new Date().toISOString(),
-                        abono: data.partialPayment.montoAbonado,
-                        metodo: data.paymentMethod,
-                        saldoDespues: data.partialPayment.saldoPendiente,
-                      },
-                    ],
-                  };
-                }
-
-                await prisma.customer.update({
-                  where: { id: cust.id },
-                  data: {
-                    notes: JSON.stringify(custNotes),
-                    totalSpent: { increment: effectiveTotalToShift },
-                  },
-                });
-              }
-            } catch (custErr) {
-              console.warn("Error updating customer activePaymentPlan:", custErr);
-            }
-          }
-
-          try {
-            emitCitaActualizada(restaurantId, updatedCitaRows[0]);
-          } catch {}
-        } else {
-          await pool.query(
-            `UPDATE pedidos 
-             SET estado = 'pagado',
-                 solicita_mesero = false
-             WHERE id = $1 AND negocio_id = $2`,
-            [data.orderId, restaurantId]
-          );
-        }
+      if (orderRows.length === 0) {
+        await client.query("ROLLBACK");
+        return { error: "Pedido no encontrado." };
       }
-    }
 
-    // 2. Si es una mesa de salón, liberar todas las comandas activas huérfanas de esa mesa
-    if (data.mesa && data.mesa !== "Delivery" && data.mesa !== "LLEVAR" && data.mesa !== "CATALOGO") {
-      await pool.query(
+      const orderRecord = orderRows[0];
+
+      // PUNTO 1: Rechazo de pedidos cancelados dentro de la transacción y antes de cualquier escritura
+      if (orderRecord.estado === "cancelado") {
+        await client.query("ROLLBACK");
+        return { error: "No se puede liquidar ni cobrar un pedido cancelado." };
+      }
+
+      // Protección de idempotencia
+      if (orderRecord.estado === "pagado") {
+        await client.query("COMMIT");
+        return {
+          success: true,
+          orderId: data.orderId,
+          alreadyPrepaid: true,
+          message: "Este pedido ya se encuentra cobrado y registrado en caja.",
+        };
+      }
+
+      let meta: any = {};
+      try {
+        meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});
+      } catch {}
+
+      // Si exige prepago pero no ha sido confirmado por caja, RECHAZAR bypass
+      if (meta.exige_prepago && !meta.pago_confirmado) {
+        await client.query("ROLLBACK");
+        return {
+          error: "Este pedido exige prepago y su pago aún no ha sido confirmado por Caja. Confirma el prepago antes de liquidar o entregar.",
+        };
+      }
+
+      // Si el pedido ya fue prepagado y confirmado previamente por caja
+      if (meta.pago_confirmado === true) {
+        isAlreadyPrepaid = true;
+      }
+
+      // Paso 2: Marcar pedido como pagado y apagar solicita_mesero
+      meta.cobrado_en_caja = true;
+      meta.monto_cobrado = effectiveTotalToShift;
+      meta.fecha_cobro = new Date().toISOString();
+
+      await client.query(
         `UPDATE pedidos 
          SET estado = 'pagado',
-             solicita_mesero = false
-         WHERE negocio_id = $1 
-           AND LOWER(TRIM(mesa)) = LOWER(TRIM($2))
-           AND estado NOT IN ('pagado', 'cancelado')`,
-        [restaurantId, data.mesa]
+             solicita_mesero = false,
+             metadata = $1
+         WHERE id = $2 AND negocio_id = $3`,
+        [JSON.stringify(meta), data.orderId, restaurantId]
       );
-    }
 
-    // 3. Vincular y registrar la venta en el Turno de Caja (CashShift) activo
-    const activeShift = await prisma.cashShift.findFirst({
-      where: { restaurantId, status: "OPEN" },
-    });
+      // Paso 3: Registrar en CashShift ÚNICAMENTE si no fue prepagado previamente
+      let activeShiftId: string | null = null;
+      if (!isAlreadyPrepaid) {
+        const { rows: shiftRows } = await client.query(
+          `SELECT id 
+           FROM "CashShift" 
+           WHERE "restaurantId" = $1 AND "status" = 'OPEN' 
+           ORDER BY "createdAt" DESC 
+           LIMIT 1 
+           FOR UPDATE`,
+          [restaurantId]
+        );
 
-    // 4. Si existe en el modelo Order de Prisma, actualizarlo y asociarlo al turno
-    try {
-      await prisma.order.updateMany({
-        where: { id: data.orderId },
-        data: {
-          status: "COMPLETED",
-          paymentMethod: data.paymentMethod,
-          cashShiftId: activeShift?.id || null,
-          ...(data.depositDiscount !== undefined ? { depositDiscount: data.depositDiscount } : {}),
-          ...(data.reservationId ? { reservationId: data.reservationId } : {}),
-        },
-      });
-    } catch {}
+        if (shiftRows.length === 0) {
+          await client.query("ROLLBACK");
+          return { error: "Abre un turno de caja primero." };
+        }
 
-    if (activeShift) {
-      const deltaTotal = effectiveTotalToShift;
+        activeShiftId = shiftRows[0].id;
+        const deltaTotal = effectiveTotalToShift;
+        let cashSum = 0;
+        let deunaSum = 0;
+        let transferSum = 0;
+        let cardSum = 0;
 
-      // Desglose de pagos si proviene de cobro dividido (Split Pay)
-      let cashSum = 0;
-      let deunaSum = 0;
-      let transferSum = 0;
-      let cardSum = 0;
+        if (data.splitDetails && data.splitDetails.length > 0) {
+          for (const d of data.splitDetails) {
+            const amt = Math.max(0, Number(d.amount) || 0);
+            const m = String(d.paymentMethod || "").toUpperCase();
+            if (m === "EFECTIVO" || m === "CASH") cashSum += amt;
+            else if (m === "DEUNA" || m === "QR") deunaSum += amt;
+            else if (m === "TRANSFERENCIA" || m.includes("TRANSFER")) transferSum += amt;
+            else if (m === "TARJETA" || m === "PAYPHONE" || m === "CARD") cardSum += amt;
+            else {
+              await client.query("ROLLBACK");
+              return { error: `Método no reconocido en cobro dividido ("${d.paymentMethod}"). No se puede clasificar el arqueo.` };
+            }
+          }
+        } else {
+          const m = String(data.paymentMethod || "").toUpperCase();
+          if (m === "EFECTIVO" || m === "CASH") cashSum = deltaTotal;
+          else if (m === "DEUNA" || m === "QR") deunaSum = deltaTotal;
+          else if (m === "TRANSFERENCIA" || m.includes("TRANSFER")) transferSum = deltaTotal;
+          else if (m === "TARJETA" || m === "PAYPHONE" || m === "CARD") cardSum = deltaTotal;
+          else {
+            await client.query("ROLLBACK");
+            return { error: `Método de pago no reconocido ("${data.paymentMethod}"). No se puede clasificar el ingreso en caja.` };
+          }
+        }
 
-      if (data.splitDetails && data.splitDetails.length > 0) {
-        data.splitDetails.forEach((d) => {
-          const amt = Number(d.amount) || 0;
-          if (d.paymentMethod === "EFECTIVO") cashSum += amt;
-          else if (d.paymentMethod === "DEUNA") deunaSum += amt;
-          else if (d.paymentMethod === "TRANSFERENCIA") transferSum += amt;
-          else cardSum += amt;
-        });
-      } else {
-        if (data.paymentMethod === "EFECTIVO") cashSum = deltaTotal;
-        else if (data.paymentMethod === "DEUNA") deunaSum = deltaTotal;
-        else if (data.paymentMethod === "TRANSFERENCIA") transferSum = deltaTotal;
-        else cardSum = deltaTotal;
+        await client.query(
+          `UPDATE "CashShift"
+           SET "totalSales" = "totalSales" + $1,
+               "totalCash" = "totalCash" + $2,
+               "expectedCash" = "expectedCash" + $2,
+               "totalDeuna" = "totalDeuna" + $3,
+               "totalTransfer" = "totalTransfer" + $4,
+               "totalCard" = "totalCard" + $5,
+               "updatedAt" = NOW()
+           WHERE id = $6`,
+          [deltaTotal, cashSum, deunaSum, transferSum, cardSum, activeShiftId]
+        );
       }
 
-      await prisma.cashShift.update({
-        where: { id: activeShift.id },
-        data: {
-          totalSales: { increment: deltaTotal },
-          totalCash: { increment: cashSum },
-          expectedCash: { increment: cashSum },
-          totalDeuna: { increment: deunaSum },
-          totalTransfer: { increment: transferSum },
-          totalCard: { increment: cardSum },
-        },
-      });
+      // Paso 4: Actualizar "Order" de Prisma en la misma transacción si existe
+      await client.query(
+        `UPDATE "Order"
+         SET "status" = 'COMPLETED',
+             "paymentMethod" = COALESCE("paymentMethod", $1),
+             "cashShiftId" = COALESCE("cashShiftId", $2),
+             "depositDiscount" = COALESCE($3, "depositDiscount"),
+             "reservationId" = COALESCE($4, "reservationId"),
+             "updatedAt" = NOW()
+         WHERE id = $5`,
+        [
+          data.paymentMethod,
+          activeShiftId || null,
+          data.depositDiscount !== undefined ? data.depositDiscount : null,
+          data.reservationId || null,
+          data.orderId,
+        ]
+      );
+
+      await client.query("COMMIT");
+    } catch (dbErr) {
+      await client.query("ROLLBACK");
+      throw dbErr;
+    } finally {
+      client.release();
     }
 
-    // 5. Si existe sesión de mesa en TableSession, cerrar y registrar pagos de split
-    if (data.mesa) {
+    // 4. Si es una mesa de salón y existe TableSession, registrar pagos divididos y evaluar si se cierra la sesión
+    const mesaRaw = String(data.mesa || "").trim();
+    const mesaUpper = mesaRaw.toUpperCase();
+    const isSalonTable = Boolean(
+      mesaRaw &&
+      mesaUpper !== "DELIVERY" &&
+      !mesaUpper.includes("DOMICILIO") &&
+      mesaUpper !== "LLEVAR" &&
+      !mesaUpper.includes("RETIRO") &&
+      !mesaUpper.includes("TAKEOUT") &&
+      !mesaUpper.includes("PICKUP") &&
+      mesaUpper !== "CATALOGO" &&
+      mesaUpper !== "CITA"
+    );
+
+    if (isSalonTable) {
       try {
         const tableSess = await prisma.tableSession.findFirst({
-          where: { restaurantId, tableName: data.mesa, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
+          where: { restaurantId, tableName: data.mesa!, status: { in: ["OPEN", "PARTIALLY_PAID"] } },
         });
 
         if (tableSess) {
+          // Conservar el registro de los pagos divididos aunque la sesión siga abierta
           if (data.splitDetails && data.splitDetails.length > 0) {
             for (const d of data.splitDetails) {
               await prisma.tableSplitPayment.create({
                 data: {
                   tableSessionId: tableSess.id,
                   payerName: d.payerName || "Pago en Caja",
-                  amount: d.amount,
+                  amount: Math.max(0, Number(d.amount) || 0),
                   paymentMethod: d.paymentMethod.toLowerCase(),
                   status: "COMPLETED",
                   confirmedAt: new Date(),
@@ -1041,15 +1258,34 @@ export async function settleOrderInCashShiftAction(
               });
             }
           }
-          await prisma.tableSession.update({
-            where: { id: tableSess.id },
-            data: { status: "CLOSED", paidAmount: tableSess.totalAmount },
-          });
+
+          // Verificar si quedan otras comandas activas de esa misma mesa y negocio
+          const { rows: remainingRows } = await pool.query(
+            `SELECT COUNT(*)::int as count 
+             FROM pedidos 
+             WHERE negocio_id = $1 
+               AND LOWER(TRIM(mesa)) = LOWER(TRIM($2)) 
+               AND id != $3 
+               AND estado NOT IN ('pagado', 'cancelado')`,
+            [restaurantId, data.mesa, data.orderId]
+          );
+
+          const remainingActiveOrders = Number(remainingRows[0]?.count) || 0;
+
+          // Solo se libera (status = CLOSED) al cobrar la última cuenta de la mesa
+          if (remainingActiveOrders === 0) {
+            await prisma.tableSession.update({
+              where: { id: tableSess.id },
+              data: { status: "CLOSED", paidAmount: tableSess.totalAmount },
+            });
+          }
         }
-      } catch {}
+      } catch (sessErr) {
+        console.warn("Error actualizando TableSession en settleOrderInCashShiftAction:", sessErr);
+      }
     }
 
-    // 5.b. Si vino una reserva asociada, marcarla como completada y asociar la orden
+    // 5. Si vino una reserva asociada, marcarla como completada y asociar la orden
     if (data.reservationId) {
       try {
         if ((prisma as any)?.tableReservation) {
@@ -1084,23 +1320,272 @@ export async function settleOrderInCashShiftAction(
     revalidatePath("/caja");
     revalidatePath("/admin");
     if (restaurant?.slug) {
-      revalidatePath(`/${restaurant.slug}/mesas`);
-      revalidatePath(`/${restaurant.slug}/cocina`);
-      revalidatePath(`/${restaurant.slug}/repartidor`);
+      revalidatePath(`/${restaurant.slug}`);
     }
 
-    return {
-      success: true,
-      orderId: data.orderId,
-      message: `Cobro de $${totalToSettle.toFixed(2)} registrado exitosamente. Mesa liberada.`,
-      total: totalToSettle,
-    };
+    return { success: true, orderId: data.orderId, alreadyPrepaid: isAlreadyPrepaid };
   } catch (error: any) {
     console.error("Error in settleOrderInCashShiftAction:", error);
     return { error: error.message || "Error al liquidar el cobro en caja." };
   }
 }
+export async function confirmarPrepagoPedidoAction(
+  restaurantId: string,
+  orderId: string
+) {
+  try {
+    await refreshUserSession();
 
+    // 1. Verificar autorización (Admin o Superadmin, o personal de caja autorizado)
+    // Solo Caja y Administración pueden confirmar pagos recibidos (Cocina y Mesero prohibidos).
+    let isAuthorized = false;
+    let staffIdentifier = "Caja / Administración";
+
+    const authOwner = await verifyRestaurantOwnership(restaurantId);
+    if (authOwner.authorized) {
+      isAuthorized = true;
+      const session = await getUserSession();
+      staffIdentifier = session?.email ? `Admin (${session.email})` : "Administrador";
+    } else {
+      const staffAuth = await verifyOrderStaffAuth(undefined, restaurantId);
+      if (staffAuth.authorized) {
+        const allowedRoles = ["CAJERO", "ADMIN", "SUPERADMIN"];
+        if (!allowedRoles.includes(staffAuth.role!)) {
+          return {
+            error: "No autorizado. Solo el personal con rol de Caja o Administración puede confirmar pagos.",
+          };
+        }
+        isAuthorized = true;
+        staffIdentifier = staffAuth.staffNombre
+          ? `${staffAuth.staffNombre} (${staffAuth.role})`
+          : `Personal (${staffAuth.role})`;
+      }
+    }
+
+    if (!isAuthorized) {
+      return { error: "No autorizado. Se requieren credenciales de caja o administración del negocio." };
+    }
+
+    await ensureDbTables();
+
+    // 2. Transacción Atómica Completa (pedidos + CashShift + Order)
+    // Protegida contra race conditions concurrentes mediante SELECT ... FOR UPDATE
+    const client = await pool.connect();
+    let updatedOrder: any = null;
+
+    try {
+      await client.query("BEGIN");
+
+      // Paso A: Bloqueo pesimista del pedido en la tabla pedidos
+      const { rows: existingRows } = await client.query(
+        `SELECT id, negocio_id, mesa, estado, total::float, metadata, cliente_nombre, cliente_telefono, created_at 
+         FROM pedidos 
+         WHERE id = $1 AND negocio_id = $2
+         FOR UPDATE`,
+        [orderId, restaurantId]
+      );
+
+      if (existingRows.length === 0) {
+        await client.query("ROLLBACK");
+        return { error: "Pedido no encontrado." };
+      }
+
+      const orderRecord = existingRows[0];
+      let meta: any = {};
+      try {
+        meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});
+      } catch {}
+
+      // A.1. Idempotencia: si ya fue confirmado previamente, salir de forma idempotente sin duplicar cobro ni alterar el turno
+      if (meta.pago_confirmado === true) {
+        await client.query("COMMIT");
+        return {
+          success: true,
+          alreadyConfirmed: true,
+          pedido: orderRecord,
+          message: "El pago de este pedido ya fue confirmado previamente.",
+        };
+      }
+
+      // A.2. Validar estado del pedido: no permitir si está cancelado o ya cerrado/pagado
+      if (orderRecord.estado === "cancelado") {
+        await client.query("ROLLBACK");
+        return { error: "No se puede confirmar el pago de un pedido cancelado." };
+      }
+
+      if (orderRecord.estado === "pagado") {
+        await client.query("ROLLBACK");
+        return { error: "Este pedido ya se encuentra cerrado o liquidado en caja." };
+      }
+
+      // A.3. Validar que realmente exige prepago anticipado
+      if (!meta.exige_prepago) {
+        await client.query("ROLLBACK");
+        return {
+          error: "Este pedido no está sujeto a prepago anticipado. Debe cobrarse en caja al finalizar o contraentrega.",
+        };
+      }
+
+      // A.4. No permitir usar esta acción para pedidos de salón (mesa)
+      const mesaUpper = String(orderRecord.mesa || "").trim().toUpperCase();
+      const isTableOrder = mesaUpper !== "DELIVERY" && mesaUpper !== "DOMICILIO" && mesaUpper !== "LLEVAR" && mesaUpper !== "RETIRO" && mesaUpper !== "CATALOGO";
+      if (isTableOrder || meta.tipo_pedido === "mesa" || meta.tipo_entrega === "SALON") {
+        await client.query("ROLLBACK");
+        return { error: "No se puede aplicar confirmación de prepago a pedidos en mesa." };
+      }
+
+      // Paso B: Leer el método de pago guardado desde Order y metadata (no depender solo de metadata)
+      const { rows: prismaOrderRows } = await client.query(
+        `SELECT id, "paymentMethod", "paymentDetails" FROM "Order" WHERE id = $1 LIMIT 1 FOR UPDATE`,
+        [orderId]
+      );
+
+      const savedMethodRaw = (
+        (prismaOrderRows.length > 0 ? prismaOrderRows[0].paymentMethod : null) ||
+        meta.metodo_pago ||
+        meta.paymentMethod ||
+        ""
+      ).toString().trim().toUpperCase();
+
+      // Validar contraentrega: no permitir confirmar prepago si el método es contraentrega
+      if (savedMethodRaw.includes("CONTRAENTREGA") || savedMethodRaw === "EFECTIVO_CONTRAENTREGA") {
+        await client.query("ROLLBACK");
+        return {
+          error: "No se puede confirmar como prepago un pedido con método contraentrega. Este pedido debe cobrarse al momento de la entrega.",
+        };
+      }
+
+      // Clasificación rigurosa del método de pago (sin convertir métodos desconocidos silenciosamente a efectivo)
+      let classifiedMethod: "DEUNA" | "PAYPHONE" | "TRANSFERENCIA" | "EFECTIVO" | null = null;
+
+      if (savedMethodRaw.includes("DEUNA") || savedMethodRaw === "QR") {
+        classifiedMethod = "DEUNA";
+      } else if (
+        savedMethodRaw.includes("PAYPHONE") ||
+        savedMethodRaw.includes("TARJETA") ||
+        savedMethodRaw.includes("CARD")
+      ) {
+        classifiedMethod = "PAYPHONE";
+      } else if (savedMethodRaw.includes("TRANSFER")) {
+        classifiedMethod = "TRANSFERENCIA";
+      } else if (savedMethodRaw === "EFECTIVO" || savedMethodRaw === "CASH") {
+        classifiedMethod = "EFECTIVO";
+      }
+
+      if (!classifiedMethod) {
+        await client.query("ROLLBACK");
+        return {
+          error: `Método de pago no reconocido o no especificado ("${savedMethodRaw}"). No se puede clasificar el ingreso en caja para el arqueo.`,
+        };
+      }
+
+      // Paso C: Verificar y bloquear el Turno de Caja (CashShift) activo en la misma transacción
+      const { rows: shiftRows } = await client.query(
+        `SELECT id 
+         FROM "CashShift" 
+         WHERE "restaurantId" = $1 AND "status" = 'OPEN' 
+         ORDER BY "createdAt" DESC 
+         LIMIT 1 
+         FOR UPDATE`,
+        [restaurantId]
+      );
+
+      // Si no hay turno abierto, RECHAZAR y revertir cualquier cambio
+      if (shiftRows.length === 0) {
+        await client.query("ROLLBACK");
+        return { error: "Abre un turno de caja primero." };
+      }
+
+      const activeShiftId = shiftRows[0].id;
+      const orderTotal = Number(orderRecord.total) || 0;
+
+      // Registrar incremento en CashShift según método exacto
+      const deunaInc = classifiedMethod === "DEUNA" ? orderTotal : 0;
+      const cardInc = classifiedMethod === "PAYPHONE" ? orderTotal : 0;
+      const transferInc = classifiedMethod === "TRANSFERENCIA" ? orderTotal : 0;
+      const cashInc = classifiedMethod === "EFECTIVO" ? orderTotal : 0;
+
+      await client.query(
+        `UPDATE "CashShift"
+         SET "totalSales" = "totalSales" + $1,
+             "totalDeuna" = "totalDeuna" + $2,
+             "totalCard" = "totalCard" + $3,
+             "totalTransfer" = "totalTransfer" + $4,
+             "totalCash" = "totalCash" + $5,
+             "expectedCash" = "expectedCash" + $5,
+             "updatedAt" = NOW()
+         WHERE id = $6`,
+        [orderTotal, deunaInc, cardInc, transferInc, cashInc, activeShiftId]
+      );
+
+      // Paso D: Actualización de metadata en pedidos (mantiene estado operativo 'nuevo' o el que tenga)
+      const nowIso = new Date().toISOString();
+      meta.pago_confirmado = true;
+      meta.pago_confirmado_por = staffIdentifier;
+      meta.pago_confirmado_at = nowIso;
+      meta.pago_estado = "pagado";
+      meta.metodo_pago_clasificado = classifiedMethod;
+
+      const { rows: updatedRows } = await client.query(
+        `UPDATE pedidos
+         SET metadata = $1
+         WHERE id = $2 AND negocio_id = $3
+         RETURNING id, negocio_id, mesa, estado, total::float, metadata, cliente_nombre, cliente_telefono, created_at`,
+        [JSON.stringify(meta), orderId, restaurantId]
+      );
+
+      updatedOrder = updatedRows[0];
+
+      // Paso E: Si existe registro en la tabla "Order" de Prisma, actualizarlo en la misma transacción
+      if (prismaOrderRows.length > 0) {
+        let pDetails: any = {};
+        try {
+          const rawPd = prismaOrderRows[0].paymentDetails;
+          pDetails = rawPd && rawPd.startsWith("{") ? JSON.parse(rawPd) : { details: rawPd };
+        } catch {}
+
+        pDetails.pago_confirmado = true;
+        pDetails.pago_confirmado_por = staffIdentifier;
+        pDetails.pago_confirmado_at = nowIso;
+        pDetails.pago_estado = "pagado";
+
+        await client.query(
+          `UPDATE "Order"
+           SET "cashShiftId" = COALESCE($1, "cashShiftId"),
+               "paymentDetails" = $2,
+               "paymentMethod" = COALESCE("paymentMethod", $3),
+               "updatedAt" = NOW()
+           WHERE id = $4`,
+          [activeShiftId, JSON.stringify(pDetails), classifiedMethod, orderId]
+        );
+      }
+
+      // Paso F: Commit atómico - si todo fue exitoso, ambas escrituras persisten juntas
+      await client.query("COMMIT");
+    } catch (dbErr) {
+      await client.query("ROLLBACK");
+      throw dbErr;
+    } finally {
+      client.release();
+    }
+
+    // 3. Emitir socket para que Cocina desbloquee la comanda inmediatamente
+    try {
+      emitPedidoActualizado(restaurantId, updatedOrder);
+    } catch {}
+
+    revalidatePath("/caja");
+    revalidatePath("/admin");
+    return {
+      success: true,
+      pedido: updatedOrder,
+      message: "Pago confirmado exitosamente. La preparación en cocina ha sido habilitada.",
+    };
+  } catch (err: any) {
+    console.error("Error en confirmarPrepagoPedidoAction:", err);
+    return { error: err.message || "Error al confirmar el prepago del pedido." };
+  }
+}
 /**
  * ==========================================
  * ACCIONES DE SESIÓN DE CAJA (CASH SHIFT / ARQUEO)
