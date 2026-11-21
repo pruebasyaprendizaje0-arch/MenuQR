@@ -134,6 +134,10 @@ export interface ActiveOrder {
   tipo_entrega?: string | null;
   solicita_mesero?: boolean;
   created_at: string;
+  metadata?: any;
+  orderPrisma?: any;
+  paymentMethod?: string | null;
+  metodo_pago?: string | null;
   items: Array<{
     id: string;
     nombre: string;
@@ -141,6 +145,54 @@ export interface ActiveOrder {
     precio: number;
     notas?: string | null;
   }>;
+}
+
+export function resolveOrderPaymentMethod(order: any): { method: string; display: string; isPrepaid: boolean } {
+  if (!order) {
+    return { method: "NO_IDENTIFICADO", display: "No identificado", isPrepaid: false };
+  }
+
+  let meta: any = {};
+  try {
+    meta = typeof order.metadata === "string" ? JSON.parse(order.metadata) : (order.metadata || {});
+  } catch {
+    meta = {};
+  }
+
+  const isPrepaid = Boolean(meta.pago_confirmado === true);
+
+  const rawCandidate = (
+    order.orderPrisma?.paymentMethod ||
+    order.paymentMethod ||
+    meta.metodo_pago_clasificado ||
+    meta.metodo_pago ||
+    order.metodo_pago ||
+    ""
+  ).toString().trim();
+
+  if (!rawCandidate) {
+    return { method: "NO_IDENTIFICADO", display: "No identificado", isPrepaid };
+  }
+
+  const normalized = rawCandidate.toUpperCase();
+
+  if (normalized === "DEUNA" || normalized.includes("DEUNA") || normalized === "QR") {
+    return { method: "DEUNA", display: "Deuna", isPrepaid };
+  }
+  if (normalized === "PAYPHONE" || normalized.includes("PAYPHONE")) {
+    return { method: "PAYPHONE", display: "Payphone", isPrepaid };
+  }
+  if (normalized === "TRANSFERENCIA" || normalized.includes("TRANSF")) {
+    return { method: "TRANSFERENCIA", display: "Transferencia", isPrepaid };
+  }
+  if (normalized === "TARJETA" || normalized === "DATAFAST" || normalized.includes("CARD") || normalized === "POS") {
+    return { method: "TARJETA", display: "Tarjeta / POS", isPrepaid };
+  }
+  if (normalized === "EFECTIVO" || normalized === "CASH") {
+    return { method: "EFECTIVO", display: "Efectivo", isPrepaid };
+  }
+
+  return { method: "NO_IDENTIFICADO", display: "No identificado", isPrepaid };
 }
 
 interface CategoryItem {
@@ -1703,6 +1755,11 @@ export function CajaClient({
   }, [selectedActiveOrder]);
 
   const isSelectedOrderPrepaid = Boolean(selectedOrderMeta?.pago_confirmado === true);
+  const resolvedConfirmedPayment = useMemo(() => {
+    if (!selectedActiveOrder || !isSelectedOrderPrepaid) return null;
+    return resolveOrderPaymentMethod(selectedActiveOrder);
+  }, [selectedActiveOrder, isSelectedOrderPrepaid]);
+  const confirmedPaymentMethodDisplay = resolvedConfirmedPayment?.display || "No identificado";
   const isSelectedOrderPendingPrepago = Boolean(
     selectedOrderMeta?.exige_prepago === true && !selectedOrderMeta?.pago_confirmado
   );
@@ -2435,7 +2492,9 @@ export function CajaClient({
           orderId: selectedActiveOrder.id,
           mesa: selectedActiveOrder.mesa,
           total: totalAmount,
-          paymentMethod: paymentMethod === "TRANSFERENCIA" ? "TRANSFERENCIA" : paymentMethod,
+          paymentMethod: (isSelectedOrderPrepaid && resolvedConfirmedPayment
+            ? (resolvedConfirmedPayment.method === "NO_IDENTIFICADO" ? "OTRO" : resolvedConfirmedPayment.method)
+            : (paymentMethod === "TRANSFERENCIA" ? "TRANSFERENCIA" : paymentMethod)) as any,
           customerName: selectedActiveOrder.cliente_nombre,
           depositDiscount: appliedDepositDiscount,
           reservationId: selectedReservationForOrder?.id,
@@ -2463,7 +2522,17 @@ export function CajaClient({
           const isReserva = isReservasVertical || selectedActiveOrder.mesa === "RESERVA" || (selectedActiveOrder as any).vertical === "reservas";
           const isDom = !isReserva && (selectedActiveOrder.mesa === "DELIVERY" || (selectedActiveOrder as any).tipo_entrega === "DOMICILIO");
           const isLlev = !isReserva && (selectedActiveOrder.mesa === "LLEVAR" || (selectedActiveOrder as any).tipo_entrega === "RETIRO");
-          const targetTitle = isReserva
+          const effectiveMethodDisplay = isSelectedOrderPrepaid
+            ? confirmedPaymentMethodDisplay
+            : paymentMethod;
+
+          const targetTitle = isSelectedOrderPrepaid
+            ? isDom
+              ? "¡Domicilio Despachado!"
+              : isLlev
+              ? "¡Pedido para Llevar Entregado!"
+              : "¡Pedido Entregado!"
+            : isReserva
             ? `¡Check-out de ${selectedActiveOrder.cliente_nombre || "Huésped"} Finalizado!`
             : isDom
             ? "¡Domicilio Cobrado y Despachado!"
@@ -2472,13 +2541,24 @@ export function CajaClient({
             : selectedActiveOrder.mesa
             ? `¡Mesa #${selectedActiveOrder.mesa} Cobrada!`
             : "¡Pedido Cobrado!";
-          const targetMessage = isReserva
-            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Habitación liberada y check-out cerrado exitosamente.`
+
+          const targetMessage = isSelectedOrderPrepaid
+            ? isDom
+              ? `Pedido a domicilio despachado. Prepago confirmado con ${effectiveMethodDisplay} (${totalAmount.toFixed(2)}).`
+              : isLlev
+              ? `Pedido entregado al cliente en mostrador. Prepago confirmado con ${effectiveMethodDisplay} (${totalAmount.toFixed(2)}).`
+              : `Pedido entregado y cerrado. Prepago confirmado con ${effectiveMethodDisplay} (${totalAmount.toFixed(2)}).`
+            : isReserva
+            ? `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Habitación liberada y check-out cerrado exitosamente.`
             : isDom
-            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Pedido a domicilio despachado.`
+            ? `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Pedido a domicilio despachado.`
             : isLlev
-            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. Pedido entregado al cliente en mostrador.`
-            : `Cobro de $${totalAmount.toFixed(2)} registrado con ${paymentMethod}. La mesa ha quedado liberada.`;
+            ? `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Pedido entregado al cliente en mostrador.`
+            : `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. La mesa ha quedado liberada.`;
+
+          const targetBadge = isSelectedOrderPrepaid
+            ? `✅ Prepago: ${effectiveMethodDisplay} · ${totalAmount.toFixed(2)}`
+            : `✅ ${effectiveMethodDisplay} · ${totalAmount.toFixed(2)}`;
 
           // Emitir Factura Electrónica Dátil / SRI si está configurado
           let invoiceResult: any = null;
@@ -2505,7 +2585,7 @@ export function CajaClient({
           setSuccessInfo({
             title: targetTitle,
             message: targetMessage,
-            badge: `✅ ${paymentMethod} · $${totalAmount.toFixed(2)}`,
+            badge: targetBadge,
             orderData: {
               id: res.orderId || selectedActiveOrder.id,
               orderNumber: selectedActiveOrder.id?.slice(0, 6),
@@ -2517,7 +2597,7 @@ export function CajaClient({
               deliveryCost: saleDeliveryCost,
               total: totalAmount,
               tableName: selectedActiveOrder.mesa,
-              paymentMethod,
+              paymentMethod: effectiveMethodDisplay,
               customerName: isInvoiceWithData ? invoiceName : (selectedActiveOrder.cliente_nombre || "Cliente"),
               customerPhone: selectedActiveOrder.cliente_telefono,
               customerAddress: (selectedActiveOrder as any).cliente_direccion || null,
@@ -3216,7 +3296,7 @@ export function CajaClient({
                                 <div className="mt-1">
                                   {isPrepayConfirmed ? (
                                     <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/80 inline-flex items-center gap-1">
-                                      ✅ Prepago Confirmado
+                                      ✅ Prepago: {resolveOrderPaymentMethod(order).display}
                                     </span>
                                   ) : (
                                     <span className="text-[10px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80 inline-flex items-center gap-1 animate-pulse">
@@ -3285,7 +3365,7 @@ export function CajaClient({
                                 <div className="mt-1">
                                   {isPrepayConfirmed ? (
                                     <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/80 inline-flex items-center gap-1">
-                                      ✅ Prepago Confirmado
+                                      ✅ Prepago: {resolveOrderPaymentMethod(order).display}
                                     </span>
                                   ) : (
                                     <span className="text-[10px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80 inline-flex items-center gap-1 animate-pulse">
@@ -5144,7 +5224,7 @@ export function CajaClient({
             <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
                 <span className="text-emerald-400 font-bold flex items-center gap-1">
-                  ✅ Pago Prepagado Confirmado
+                  ✅ Prepago Confirmado ({confirmedPaymentMethodDisplay})
                 </span>
                 {selectedOrderMeta?.pago_confirmado_por && (
                   <span className="text-[10px] text-slate-400">
@@ -5349,7 +5429,42 @@ export function CajaClient({
             </div>
           )}
 
-          {/* SELECTOR DE FORMA DE PAGO */}
+          {selectedActiveOrder && isSelectedOrderPrepaid ? (
+            /* RESUMEN DE SOLO LECTURA DEL PAGO CONFIRMADO (Evita sugerir nuevo cobro o cambio de método) */
+            <div className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-500/40 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Estado del Pago
+                </span>
+                <span className="text-[10px] text-emerald-300 font-bold bg-emerald-900/60 px-2 py-0.5 rounded-full border border-emerald-700/50">
+                  ✅ PREPAGO CONFIRMADO
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-300 font-medium">Método de Prepago:</span>
+                <span className="font-bold text-emerald-400 font-mono text-sm">
+                  {confirmedPaymentMethodDisplay}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-300 font-medium">Total Pagado:</span>
+                <span className="font-bold text-white font-mono text-sm">
+                  ${totalAmount.toFixed(2)}
+                </span>
+              </div>
+              {selectedOrderMeta?.pago_confirmado_por && (
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-emerald-900/40">
+                  <span>Confirmado por:</span>
+                  <span className="font-medium text-slate-300">{selectedOrderMeta.pago_confirmado_por}</span>
+                </div>
+              )}
+              <p className="text-[11px] text-emerald-400/80 italic pt-1">
+                Este pedido ya fue cobrado en caja. Al marcarlo como entregado o despachado no se generará ningún cobro adicional.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* SELECTOR DE FORMA DE PAGO */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-300 block">Forma de Pago:</label>
             <div className="grid grid-cols-2 gap-2">
@@ -5476,6 +5591,8 @@ export function CajaClient({
                 </span>
               )}
             </button>
+          )}
+            </>
           )}
 
           {/* DATOS DE FACTURACIÓN ELECTRÓNICA SRI ECUADOR */}

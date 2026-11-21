@@ -247,7 +247,7 @@ export async function generateThermalTicketHtml(data: ThermalTicketData): Promis
           ${invoice?.customerEmail ? `<div><strong>Email:</strong> ${invoice.customerEmail}</div>` : ""}
           ${order.customerPhone ? `<div><strong>Teléfono:</strong> ${order.customerPhone}</div>` : ""}
           ${order.customerAddress ? `<div><strong>Dirección:</strong> ${order.customerAddress}</div>` : ""}
-          <div><strong>Forma de Pago:</strong> ${order.paymentMethod || "Efectivo"}</div>
+          <div><strong>Forma de Pago:</strong> ${order.paymentMethod || "No identificado"}</div>
         </div>
 
         <div class="dashed"></div>
