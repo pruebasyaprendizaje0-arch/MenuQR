@@ -2544,21 +2544,21 @@ export function CajaClient({
 
           const targetMessage = isSelectedOrderPrepaid
             ? isDom
-              ? `Pedido a domicilio despachado. Prepago confirmado con ${effectiveMethodDisplay} (${totalAmount.toFixed(2)}).`
+              ? `Pedido a domicilio despachado. Prepago confirmado con ${effectiveMethodDisplay} ($${totalAmount.toFixed(2)}).`
               : isLlev
-              ? `Pedido entregado al cliente en mostrador. Prepago confirmado con ${effectiveMethodDisplay} (${totalAmount.toFixed(2)}).`
-              : `Pedido entregado y cerrado. Prepago confirmado con ${effectiveMethodDisplay} (${totalAmount.toFixed(2)}).`
+              ? `Pedido entregado al cliente en mostrador. Prepago confirmado con ${effectiveMethodDisplay} ($${totalAmount.toFixed(2)}).`
+              : `Pedido entregado y cerrado. Prepago confirmado con ${effectiveMethodDisplay} ($${totalAmount.toFixed(2)}).`
             : isReserva
-            ? `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Habitación liberada y check-out cerrado exitosamente.`
+            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Habitación liberada y check-out cerrado exitosamente.`
             : isDom
-            ? `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Pedido a domicilio despachado.`
+            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Pedido a domicilio despachado.`
             : isLlev
-            ? `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Pedido entregado al cliente en mostrador.`
-            : `Cobro de ${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. La mesa ha quedado liberada.`;
+            ? `Cobro de $${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. Pedido entregado al cliente en mostrador.`
+            : `Cobro de $${totalAmount.toFixed(2)} registrado con ${effectiveMethodDisplay}. La mesa ha quedado liberada.`;
 
           const targetBadge = isSelectedOrderPrepaid
-            ? `✅ Prepago: ${effectiveMethodDisplay} · ${totalAmount.toFixed(2)}`
-            : `✅ ${effectiveMethodDisplay} · ${totalAmount.toFixed(2)}`;
+            ? `✅ Prepago: ${effectiveMethodDisplay} · $${totalAmount.toFixed(2)}`
+            : `✅ ${effectiveMethodDisplay} · $${totalAmount.toFixed(2)}`;
 
           // Emitir Factura Electrónica Dátil / SRI si está configurado
           let invoiceResult: any = null;
