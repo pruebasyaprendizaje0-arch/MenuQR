@@ -6419,7 +6419,7 @@ export function CajaClient({
                     </h3>
                   </div>
                   <p className="text-xs text-slate-400 pl-10">
-                    Conciliación transparente: cuánto debe haber en <strong>Físico</strong>, <strong>DeUna QR</strong> y <strong>Transferencias</strong>.
+                    Separación clara: arqueo de <strong>efectivo físico en cajón</strong> y revisión manual de <strong>dinero digital en cuentas</strong>.
                   </p>
                 </div>
                 <button
@@ -6441,7 +6441,7 @@ export function CajaClient({
                       <span>1. Físico en Cajón</span>
                     </div>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">
-                      ${expectedCashVal.toFixed(2)}
+                      Debe haber: ${expectedCashVal.toFixed(2)}
                     </span>
                   </div>
 
@@ -6468,7 +6468,7 @@ export function CajaClient({
                       </div>
                     )}
                     <div className="flex justify-between pt-1 border-t border-slate-800 font-bold text-white">
-                      <span>Debe haber:</span>
+                      <span>Total Físico Esperado:</span>
                       <span className="text-emerald-400 text-sm">${expectedCashVal.toFixed(2)}</span>
                     </div>
                   </div>
@@ -6503,28 +6503,29 @@ export function CajaClient({
 
                   {/* Live Diferencia */}
                   {!hasEnteredCash ? (
-                    <div className="text-[10px] text-slate-500 text-center py-1">
-                      Cuenta el cajón e ingresa el total
+                    <div className="flex items-center justify-center gap-1.5 bg-amber-950/40 border border-amber-800/60 text-amber-300 text-[11px] font-bold py-1.5 px-2 rounded-xl">
+                      <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Pendiente de conteo — Cuenta el cajón</span>
                     </div>
                   ) : Math.abs(cashDiff) < 0.01 ? (
                     <div className="flex items-center justify-center gap-1.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold py-1.5 px-2 rounded-xl">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                       <span>Cuadre Perfecto ($0.00)</span>
                     </div>
                   ) : cashDiff < 0 ? (
                     <div className="flex items-center justify-center gap-1.5 bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[11px] font-bold py-1.5 px-2 rounded-xl">
-                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                       <span>Faltante: -${Math.abs(cashDiff).toFixed(2)}</span>
                     </div>
                   ) : (
                     <div className="flex items-center justify-center gap-1.5 bg-blue-500/20 border border-blue-500/40 text-blue-300 text-[11px] font-bold py-1.5 px-2 rounded-xl">
-                      <CheckCircle2 className="w-4 h-4 text-blue-400" />
+                      <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
                       <span>Sobrante: +${cashDiff.toFixed(2)}</span>
                     </div>
                   )}
                 </div>
 
-                {/* CANAL 2: DEUNA QR */}
+                {/* CANAL 2: DEUNA QR (DIGITAL) */}
                 <div
                   className={`bg-slate-950/90 border ${
                     isDeunaVerified
@@ -6535,19 +6536,23 @@ export function CajaClient({
                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                     <div className="flex items-center gap-1.5 text-purple-400 font-black text-xs uppercase tracking-wider">
                       <QrCode className="w-4 h-4" />
-                      <span>2. DeUna QR</span>
+                      <span>2. DeUna QR (Digital)</span>
                     </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono">
-                      ${totalDeunaVal.toFixed(2)}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-mono ${
+                      isDeunaVerified
+                        ? "bg-purple-500/20 text-purple-300 border border-purple-500/40"
+                        : "bg-slate-800 text-slate-400"
+                    }`}>
+                      {isDeunaVerified ? "Revisado manualmente" : "Pendiente de revisión"}
                     </span>
                   </div>
 
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Dinero cobrado por QR y acreditado directamente en tu cuenta y app <strong>DeUna Banco Pichincha</strong>.
+                    Ventas registradas como Deuna, fuera del cajón. Revisa estos cobros en tu app; el sistema no consulta la cuenta ni confirma su acreditación.
                   </p>
 
                   <div className="py-2.5 px-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-center space-y-0.5">
-                    <p className="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Debe reflejar en App DeUna</p>
+                    <p className="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Esperado en App DeUna</p>
                     <p className="text-2xl font-black font-mono text-purple-200">
                       ${totalDeunaVal.toFixed(2)}
                     </p>
@@ -6566,26 +6571,26 @@ export function CajaClient({
                     {isDeunaVerified ? (
                       <>
                         <CheckCircle2 className="w-4 h-4 text-purple-200" />
-                        <span>✓ Verificado en App DeUna</span>
+                        <span>✓ Revisado manualmente en app</span>
                       </>
                     ) : (
                       <>
                         <Smartphone className="w-4 h-4 text-purple-400" />
-                        <span>Verificar en App DeUna</span>
+                        <span>Registrar revisión manual</span>
                       </>
                     )}
                   </button>
 
                   <div className="text-[10px] text-center text-slate-500">
                     {isDeunaVerified ? (
-                      <span className="text-purple-300 font-semibold">Saldo comprobado en smartphone</span>
+                      <span className="text-purple-300 font-semibold">Revisión manual registrada por cajero</span>
                     ) : (
-                      <span>Abre tu app DeUna y confirma los cobros</span>
+                      <span>Abre tu app DeUna y confirma haber recibido estos cobros</span>
                     )}
                   </div>
                 </div>
 
-                {/* CANAL 3: TRANSFERENCIAS BANCARIAS */}
+                {/* CANAL 3: TRANSFERENCIAS BANCARIAS (DIGITAL) */}
                 <div
                   className={`bg-slate-950/90 border ${
                     isTransferVerified
@@ -6596,19 +6601,23 @@ export function CajaClient({
                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                     <div className="flex items-center gap-1.5 text-cyan-400 font-black text-xs uppercase tracking-wider">
                       <Landmark className="w-4 h-4" />
-                      <span>3. Transferencias</span>
+                      <span>3. Transferencias (Digital)</span>
                     </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
-                      ${totalTransferVal.toFixed(2)}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-mono ${
+                      isTransferVerified
+                        ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                        : "bg-slate-800 text-slate-400"
+                    }`}>
+                      {isTransferVerified ? "Revisado manualmente" : "Pendiente de revisión"}
                     </span>
                   </div>
 
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    Pagos directos a tus cuentas de banco (Pichincha, Guayaquil, Pacífico, Produbanco, etc.).
+                    Pagos a cuentas de banco (no ingresa al cajón). El sistema no consulta cuentas bancarias; contrasta los comprobantes en tu banca web.
                   </p>
 
                   <div className="py-2.5 px-3 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-center space-y-0.5">
-                    <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">Debe haber en Bancos</p>
+                    <p className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider">Esperado en Bancos</p>
                     <p className="text-2xl font-black font-mono text-cyan-200">
                       ${totalTransferVal.toFixed(2)}
                     </p>
@@ -6627,21 +6636,21 @@ export function CajaClient({
                     {isTransferVerified ? (
                       <>
                         <CheckCircle2 className="w-4 h-4 text-cyan-200" />
-                        <span>✓ Verificado en Cuentas</span>
+                        <span>✓ Revisado manualmente en banco</span>
                       </>
                     ) : (
                       <>
                         <Landmark className="w-4 h-4 text-cyan-400" />
-                        <span>Verificar en Cuentas Bancarias</span>
+                        <span>Registrar revisión manual</span>
                       </>
                     )}
                   </button>
 
                   <div className="text-[10px] text-center text-slate-500">
                     {isTransferVerified ? (
-                      <span className="text-cyan-300 font-semibold">Transferencias bancarias confirmadas</span>
+                      <span className="text-cyan-300 font-semibold">Revisión manual registrada por cajero</span>
                     ) : (
-                      <span>Revisa los comprobantes y extracto bancario</span>
+                      <span>Revisa los comprobantes o banca web y confirma aquí</span>
                     )}
                   </div>
                 </div>
@@ -6655,10 +6664,21 @@ export function CajaClient({
                       <CreditCard className="w-4 h-4" />
                     </div>
                     <div>
-                      <p className="text-xs font-bold text-white">
-                        4. Tarjetas / Terminal POS: <span className="font-mono text-amber-300">${totalCardVal.toFixed(2)}</span>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-bold text-white">
+                          4. Tarjetas / Terminal POS (Digital): <span className="font-mono text-amber-300">${totalCardVal.toFixed(2)}</span>
+                        </p>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-mono ${
+                          isCardVerified
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            : "bg-slate-800 text-slate-400"
+                        }`}>
+                          {isCardVerified ? "Revisado manualmente" : "Pendiente de revisión"}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Ventas registradas con tarjeta o plataforma de cobro. Revisa los comprobantes o el reporte del proveedor correspondiente; esta marca es manual y el sistema no consulta esos servicios.
                       </p>
-                      <p className="text-[10px] text-slate-400">Verifica el total de vouchers y cierre de lote en la máquina POS Datafast</p>
                     </div>
                   </div>
                   <button
@@ -6671,27 +6691,63 @@ export function CajaClient({
                     }`}
                   >
                     {isCardVerified && <CheckCircle2 className="w-3.5 h-3.5" />}
-                    <span>{isCardVerified ? "✓ Lote POS Verificado" : "Verificar Lote POS"}</span>
+                    <span>{isCardVerified ? "✓ Lote revisado manualmente" : "Registrar revisión manual de lote"}</span>
                   </button>
                 </div>
               )}
 
-              {/* Barra de Resumen Global */}
-              <div className="p-3.5 bg-slate-950/70 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-4">
-                  <div>
-                    <span className="text-[10px] text-slate-500 uppercase block font-bold">Ventas Totales</span>
-                    <span className="text-sm font-black font-mono text-white">${totalSalesVal.toFixed(2)}</span>
-                  </div>
-                  <div className="h-6 w-px bg-slate-800" />
-                  <div>
-                    <span className="text-[10px] text-slate-500 uppercase block font-bold">Total Esperado (Físico + Digital)</span>
-                    <span className="text-sm font-black font-mono text-amber-400">${totalGlobalExpected.toFixed(2)}</span>
+              {/* Barra de Resumen Global: Separación estricta de Ventas, Efectivo Físico y Digital Esperado */}
+              <div className="p-3.5 bg-slate-950/90 rounded-2xl border border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                {/* 1. Ventas Registradas (totalSales del turno) */}
+                <div className="space-y-0.5">
+                  <span className="text-[10px] text-slate-400 uppercase block font-bold tracking-wider">
+                    Ventas Registradas en Turno
+                  </span>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-base font-black font-mono text-white">
+                      ${totalSalesVal.toFixed(2)}
+                    </span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-500 uppercase block font-bold">Total Declarado / Contado</span>
-                  <span className="text-sm font-black font-mono text-emerald-400">${totalGlobalDeclared.toFixed(2)}</span>
+
+                {/* 2. Efectivo Físico Contado */}
+                <div className="space-y-0.5 sm:border-x sm:border-slate-800 sm:px-3">
+                  <span className="text-[10px] text-emerald-400/90 uppercase block font-bold tracking-wider">
+                    Efectivo Físico Contado (Cajón)
+                  </span>
+                  {hasEnteredCash ? (
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-base font-black font-mono text-emerald-300">
+                        ${parsedCash.toFixed(2)}
+                      </span>
+                      {Math.abs(cashDiff) < 0.01 ? (
+                        <span className="text-[10px] font-bold text-emerald-400">Cuadre exacto</span>
+                      ) : cashDiff < 0 ? (
+                        <span className="text-[10px] font-bold text-rose-400 font-mono">-${Math.abs(cashDiff).toFixed(2)}</span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-blue-400 font-mono">+${cashDiff.toFixed(2)}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/70 inline-block font-mono">
+                      Pendiente de conteo
+                    </span>
+                  )}
+                </div>
+
+                {/* 3. Dinero Digital Esperado en Cuentas */}
+                <div className="space-y-0.5 text-left sm:text-right">
+                  <span className="text-[10px] text-purple-400/90 uppercase block font-bold tracking-wider">
+                    Dinero Digital Esperado (Cuentas)
+                  </span>
+                  <div className="flex items-baseline justify-start sm:justify-end gap-1.5">
+                    <span className="text-base font-black font-mono text-purple-300">
+                      ${totalDigital.toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      (no ingresa a cajón)
+                    </span>
+                  </div>
                 </div>
               </div>
 
