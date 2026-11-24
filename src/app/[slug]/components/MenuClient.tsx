@@ -1931,14 +1931,18 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       is_round: Boolean(result.isRound || isExtraRound),
       round_attempt_id: clientOrderId,
       table_session_token: result.table_session_token || result.tableSessionToken || openTableSession?.tableSessionToken,
-      items: effectiveKdsItems.map((i: any) => ({
-        dishId: i.dishId || i.id,
-        id: i.dishId || i.id,
-        nombre: i.dishName || i.nombre || i.name,
-        cantidad: i.quantity || i.cantidad || 1,
-        precio: i.price ?? i.precio ?? 0,
-        notas: i.notes || i.modifiersNotes || null,
-      })),
+      items: effectiveKdsItems.map((i: any, idx: number) => {
+        const orderItemId = (result as any)?.items?.[idx]?.id || i.orderItemId || i.id;
+        return {
+          dishId: i.dishId || i.id,
+          id: i.dishId || i.id,
+          orderItemId,
+          nombre: i.dishName || i.nombre || i.name,
+          cantidad: i.quantity || i.cantidad || 1,
+          precio: i.price ?? i.precio ?? 0,
+          notas: i.notes || i.modifiersNotes || null,
+        };
+      }),
       cliente_nombre: effectiveCustomerName,
       cliente_telefono: effectiveCustomerPhone,
       cliente_direccion: effectiveCustomerAddress,

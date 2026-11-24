@@ -2932,17 +2932,21 @@ export async function createOrderAction(data: {
         roundAttempts: updatedAttempts,
       });
 
+      const createdRoundItems: Array<{ id: string; dishName: string; price: number; quantity: number; notes: string | null }> = [];
       await prisma.$transaction(async (tx) => {
         for (const it of verifiedRoundItems) {
-          await tx.orderItem.create({
+          const itemCreated = await tx.orderItem.create({
             data: {
               orderId: existingComanda.id,
               dishName: it.dishName,
               price: it.price,
               quantity: it.quantity,
               notes: it.notes,
+              sourcePedidoItemId: null,
+              lineStatus: "ACTIVE",
             },
           });
+          createdRoundItems.push(itemCreated);
         }
 
         await tx.order.update({
@@ -2995,6 +2999,14 @@ export async function createOrderAction(data: {
         isRound: true,
         isRetry: false,
         tableSessionToken: tokenCandidate,
+        items: createdRoundItems.map((i) => ({
+          id: i.id,
+          orderItemId: i.id,
+          dishName: i.dishName,
+          price: i.price,
+          quantity: i.quantity,
+          notes: i.notes,
+        })),
         subtotal: newSubtotal,
         iva: newIva,
         serviceCharge: newService,
@@ -3442,9 +3454,12 @@ export async function createOrderAction(data: {
               price: item.price,
               quantity: item.quantity,
               notes: item.notes || null,
+              sourcePedidoItemId: null,
+              lineStatus: "ACTIVE",
             })),
           },
         },
+        include: { items: true },
       });
 
       // An open table bill is a visit snapshot. New orders are explicitly linked
@@ -3658,6 +3673,14 @@ export async function createOrderAction(data: {
       orderNumber: order.orderNumber || 1,
       dispatchToken,
       tableSessionToken,
+      items: (order.items || []).map((i: any) => ({
+        id: i.id,
+        orderItemId: i.id,
+        dishName: i.dishName,
+        price: i.price,
+        quantity: i.quantity,
+        notes: i.notes,
+      })),
       subtotal: finalSubtotal,
       discountAmount: finalDiscount,
       seasonRateAmount: finalSeasonBonus,

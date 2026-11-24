@@ -217,6 +217,7 @@ export interface KdsDispatchPayload {
   items: Array<{
     dishId?: string;
     id?: string;
+    orderItemId?: string;
     nombre?: string;
     cantidad?: number;
     precio?: number;

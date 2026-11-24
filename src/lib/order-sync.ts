@@ -2,6 +2,63 @@ import { prisma } from "./db";
 import { pool } from "./db-pool";
 
 /**
+ * Hooks de sincronización para pruebas controladas de concurrencia e intercalado.
+ * ÚNICAMENTE activos si process.env.NODE_ENV === "test".
+ */
+export const __testOrderSyncHooks = {
+  beforeSingleSyncLock: null as null | ((pedidoId: string) => Promise<void>),
+  beforeBatchSyncLock: null as null | ((pedidoId: string) => Promise<void>),
+  afterSyncReadBeforeDecision: null as null | ((pedidoId: string) => Promise<void>),
+  beforeCreateOrderAttempt: null as null | ((pedidoId: string, isBatch: boolean) => Promise<void>),
+  singleSyncHookCount: 0,
+  batchSyncHookCount: 0,
+  p2002ObservedCount: 0,
+  reset() {
+    this.beforeSingleSyncLock = null;
+    this.beforeBatchSyncLock = null;
+    this.afterSyncReadBeforeDecision = null;
+    this.beforeCreateOrderAttempt = null;
+    this.singleSyncHookCount = 0;
+    this.batchSyncHookCount = 0;
+    this.p2002ObservedCount = 0;
+  },
+};
+
+/**
+ * Clave canónica única para normalizar ítems y evitar duplicación entre sincronizadores.
+ */
+export const makeCanonicalLineKey = (name: string, price: number, notes?: string | null): string =>
+  `${(name || "").trim()}__${Number(price || 0).toFixed(2)}__${(notes || "").trim()}`;
+
+/**
+ * Jerarquía estricta de estados operativos para evitar regresiones de estados avanzados o terminales.
+ */
+const STATUS_RANK: Record<string, number> = {
+  PENDING: 1,
+  PREPARING: 2,
+  READY: 3,
+  IN_TRANSIT: 4,
+  DELIVERED: 5,
+  COMPLETED: 5,
+  CANCELLED: 6,
+};
+
+export function resolveSafeOrderStatus(existingStatus: string | null | undefined, newStatus: string): string {
+  if (!existingStatus) return newStatus;
+  const existingRank = STATUS_RANK[existingStatus] || 1;
+  const newRank = STATUS_RANK[newStatus] || 1;
+
+  // Estados terminales o avanzados no retroceden jamás
+  if (existingStatus === "COMPLETED" || existingStatus === "DELIVERED" || existingStatus === "CANCELLED") {
+    return existingStatus;
+  }
+  if (existingRank >= newRank) {
+    return existingStatus;
+  }
+  return newStatus;
+}
+
+/**
  * Mapea los estados de la tabla PostgreSQL `pedidos` hacia el enum de estados de Prisma `Order`.
  */
 export function mapPedidoEstadoToPrismaStatus(estado: string | null | undefined): string {
@@ -16,8 +73,251 @@ export function mapPedidoEstadoToPrismaStatus(estado: string | null | undefined)
   return "PENDING";
 }
 
+export interface RawPedidoItem {
+  id: string;
+  nombre?: string;
+  cantidad?: number | string;
+  precio?: number | string;
+  notas?: string | null;
+  estado_item?: string | null;
+}
+
 /**
- * Sincroniza un pedido individual de la tabla PostgreSQL `pedidos` hacia el modelo Prisma `Order`
+ * Reconcilia de forma estable los ítems de un pedido con OrderItem en Prisma:
+ * 1. Coincidencia directa 1:1 por sourcePedidoItemId existente (o id de origen).
+ * 2. Enlace automático de legados (sourcePedidoItemId == null) ÚNICAMENTE en coincidencias 1:1 inequívocas.
+ *    Si hay ambigüedad (multiplicidad diferente o firmas idénticas no distinguibles), marca UNRESOLVED.
+ * 3. Ítems POS legítimos (sourcePedidoItemId == null sin candidatos en origen) permanecen ACTIVE.
+ * 4. Orígenes nuevos o no emparejados se crean con su propio sourcePedidoItemId y lineStatus correspondiente.
+ * 5. Conservación de snapshot para pedidos cobrados/prepagados (isSettled).
+ */
+export async function reconcileOrderItems(
+  tx: any,
+  orderId: string,
+  rawItems: RawPedidoItem[],
+  isSettled: boolean
+): Promise<{
+  activeItemsCount: number;
+  totalItemsCount: number;
+  allCancelled: boolean;
+}> {
+  const existingItems = await tx.orderItem.findMany({
+    where: { orderId },
+  });
+
+  // Si la orden ya está cobrada / liquidada:
+  // PROTECCIÓN: Solo actualizar lineStatus si en origen se canceló operativamente una línea en cocina,
+  // para trazabilidad visual, sin reescribir la venta pasada ni descontar el arqueo.
+  if (isSettled) {
+    for (const it of rawItems) {
+      if (it.estado_item === "cancelado") {
+        await tx.orderItem.updateMany({
+          where: {
+            orderId,
+            OR: [
+              { sourcePedidoItemId: it.id },
+              { id: it.id }
+            ]
+          },
+          data: { lineStatus: "CANCELLED" }
+        });
+      }
+    }
+    const current = await tx.orderItem.findMany({ where: { orderId } });
+    const active = current.filter((i: any) => i.lineStatus === "ACTIVE");
+    return {
+      activeItemsCount: active.length,
+      totalItemsCount: current.length,
+      allCancelled: current.length > 0 && current.every((i: any) => i.lineStatus === "CANCELLED"),
+    };
+  }
+
+  const matchedExistingIds = new Set<string>();
+  const matchedOriginIds = new Set<string>();
+
+  const itemsToCreate: Array<{
+    dishName: string;
+    price: number;
+    quantity: number;
+    notes: string | null;
+    sourcePedidoItemId: string | null;
+    lineStatus: string;
+  }> = [];
+
+  const itemsToUpdate: Array<{
+    id: string;
+    quantity: number;
+    lineStatus: string;
+    sourcePedidoItemId?: string | null;
+  }> = [];
+
+  // FASE 1: Coincidencia inequívoca por sourcePedidoItemId ya enlazado previamente (o coincidencia directa de ID)
+  for (const it of rawItems) {
+    if (!it || !it.id) continue;
+    const directMatch = existingItems.find(
+      (e: any) => !matchedExistingIds.has(e.id) && (e.sourcePedidoItemId === it.id || e.id === it.id)
+    );
+    if (directMatch) {
+      matchedExistingIds.add(directMatch.id);
+      matchedOriginIds.add(it.id);
+      const targetStatus = it.estado_item === "cancelado" ? "CANCELLED" : "ACTIVE";
+      const targetQty = parseInt(String(it.cantidad)) || 1;
+      itemsToUpdate.push({
+        id: directMatch.id,
+        quantity: targetQty,
+        lineStatus: targetStatus,
+        sourcePedidoItemId: it.id,
+      });
+    }
+  }
+
+  // FASE 2: Enlace de ítems legados (existingItems con sourcePedidoItemId == null)
+  // REGLA: "enlaza automáticamente solo coincidencias inequívocas 1 a 1, respetando multiplicidad/cantidad/ronda.
+  // Si hay ambigüedad, marca UNRESOLVED y no fusiones ni asignes por orden del array.
+  // Null en source no implica por sí solo UNRESOLVED: un POS legítimo antes de despacho puede seguir ACTIVE."
+  const unlinkedExisting = existingItems.filter(
+    (e: any) => !matchedExistingIds.has(e.id) && !e.sourcePedidoItemId
+  );
+  const unmatchedOrigin = rawItems.filter(
+    (it: any) => it && it.id && !matchedOriginIds.has(it.id)
+  );
+
+  const makeSig = (name: string, price: number, notes?: string | null) =>
+    `${(name || "").trim()}__${Number(price || 0).toFixed(2)}__${(notes || "").trim()}`;
+
+  const existingBySig = new Map<string, typeof unlinkedExisting>();
+  for (const e of unlinkedExisting) {
+    const sig = makeSig(e.dishName, e.price, e.notes);
+    if (!existingBySig.has(sig)) existingBySig.set(sig, []);
+    existingBySig.get(sig)!.push(e);
+  }
+
+  const originBySig = new Map<string, typeof unmatchedOrigin>();
+  for (const it of unmatchedOrigin) {
+    const sig = makeSig(it.nombre || "Producto", Number(it.precio) || 0, it.notas);
+    if (!originBySig.has(sig)) originBySig.set(sig, []);
+    originBySig.get(sig)!.push(it);
+  }
+
+  for (const [sig, origins] of originBySig.entries()) {
+    const existings = existingBySig.get(sig) || [];
+    if (origins.length === 1 && existings.length === 1) {
+      const e = existings[0];
+      const it = origins[0];
+      const originQty = parseInt(String(it.cantidad)) || 1;
+
+      // Comprobar compatibilidad de cantidad y ronda:
+      // Si la cantidad coincide exactamente, es un enlace 1a1 inequívoco
+      if (e.quantity === originQty) {
+        if (e.lineStatus === "UNRESOLVED") {
+          // Si la línea ya está marcada persistida como UNRESOLVED, se conserva UNRESOLVED
+          // y se absorbe el origen para evitar crear líneas ACTIVE de reemplazo espurias.
+          matchedExistingIds.add(e.id);
+          matchedOriginIds.add(it.id);
+          itemsToUpdate.push({
+            id: e.id,
+            quantity: e.quantity,
+            lineStatus: "UNRESOLVED",
+          });
+        } else {
+          matchedExistingIds.add(e.id);
+          matchedOriginIds.add(it.id);
+          const targetStatus = it.estado_item === "cancelado" ? "CANCELLED" : "ACTIVE";
+          itemsToUpdate.push({
+            id: e.id,
+            quantity: e.quantity,
+            lineStatus: targetStatus,
+            sourcePedidoItemId: it.id,
+          });
+        }
+      } else {
+        // Discrepancia de cantidad (ej: legacy qty 2 vs origen qty 1).
+        // No se puede demostrar compatibilidad de cantidad/ronda -> queda No conciliado (UNRESOLVED)
+        // y NO se sobrescribe la cantidad con la del origen.
+        matchedExistingIds.add(e.id);
+        matchedOriginIds.add(it.id); // Consumido para que no cree línea activa en Fase 3
+        itemsToUpdate.push({
+          id: e.id,
+          quantity: e.quantity,
+          lineStatus: "UNRESOLVED",
+        });
+      }
+    } else if (existings.length > 0) {
+      // AMBIGÜEDAD detectada (múltiples ítems existentes o múltiples orígenes con la misma firma)
+      // Se marcan todos los existings como UNRESOLVED sin asignar por orden de array ni fusionar
+      for (const e of existings) {
+        if (!matchedExistingIds.has(e.id)) {
+          matchedExistingIds.add(e.id);
+          itemsToUpdate.push({
+            id: e.id,
+            quantity: e.quantity,
+            lineStatus: "UNRESOLVED",
+          });
+        }
+      }
+      // CRÍTICO: Todos los orígenes de esta firma ambigua TAMBIÉN se marcan en matchedOriginIds
+      // para que NUNCA pasen a Fase 3 y creen una línea nueva ACTIVE cobrable!
+      for (const it of origins) {
+        matchedOriginIds.add(it.id);
+      }
+    }
+  }
+
+  // FASE 3: Orígenes no emparejados (ítems de rondas nuevas o generados tras ambigüedad)
+  for (const it of rawItems) {
+    if (!it || !it.id || matchedOriginIds.has(it.id)) continue;
+    matchedOriginIds.add(it.id);
+    itemsToCreate.push({
+      dishName: it.nombre || "Producto",
+      price: Number(it.precio) || 0,
+      quantity: parseInt(String(it.cantidad)) || 1,
+      notes: it.notas || null,
+      sourcePedidoItemId: it.id,
+      lineStatus: it.estado_item === "cancelado" ? "CANCELLED" : "ACTIVE",
+    });
+  }
+
+  // Ejecutar updates
+  for (const up of itemsToUpdate) {
+    await tx.orderItem.update({
+      where: { id: up.id },
+      data: {
+        quantity: up.quantity,
+        lineStatus: up.lineStatus,
+        ...(up.sourcePedidoItemId ? { sourcePedidoItemId: up.sourcePedidoItemId } : {}),
+      },
+    });
+  }
+
+  // Ejecutar creates
+  if (itemsToCreate.length > 0) {
+    for (const c of itemsToCreate) {
+      await tx.orderItem.create({
+        data: {
+          orderId,
+          dishName: c.dishName,
+          price: c.price,
+          quantity: c.quantity,
+          notes: c.notes,
+          sourcePedidoItemId: c.sourcePedidoItemId,
+          lineStatus: c.lineStatus,
+        },
+      });
+    }
+  }
+
+  const current = await tx.orderItem.findMany({ where: { orderId } });
+  const active = current.filter((i: any) => i.lineStatus === "ACTIVE");
+  return {
+    activeItemsCount: active.length,
+    totalItemsCount: current.length,
+    allCancelled: current.length > 0 && current.every((i: any) => i.lineStatus === "CANCELLED"),
+  };
+}
+
+/**
+ * Sincroniza un pedido individual de la tabla PostgreSQL `pedidos` hacia el modelo Prisma `Order`.
+ * Protege la decisión y todas las escrituras bajo transacción atómica y bloqueo pesimista FOR UPDATE.
  */
 export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: string): Promise<void> {
   try {
@@ -29,8 +329,10 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
                   'nombre', pi.nombre,
                   'cantidad', pi.cantidad,
                   'precio', pi.precio,
+                  'notas', pi.notas,
+                  'es_añadido', pi.es_añadido,
                   'estado_item', pi.estado_item
-                )
+                ) ORDER BY pi.id
               ) FILTER (WHERE pi.id IS NOT NULL) as items
        FROM pedidos p
        LEFT JOIN pedido_items pi ON pi.pedido_id = p.id
@@ -43,6 +345,12 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     const p = pRows[0];
     const targetRestId = restaurantId || p.negocio_id;
     if (!targetRestId) return;
+
+    // 1. Validación estricta de pertenencia del pedido al restaurante
+    if (restaurantId && p.negocio_id !== restaurantId) {
+      console.warn(`[syncSinglePedidoToPrisma] Pedido ${pedidoId} pertenece a ${p.negocio_id}, no coincide con ${restaurantId}`);
+      return;
+    }
 
     const rest = await prisma.restaurant.findUnique({
       where: { id: targetRestId },
@@ -59,9 +367,6 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     });
     if (!rest) return;
 
-    const pTotal = Number(p.total) || 0;
-    const pStatus = mapPedidoEstadoToPrismaStatus(p.estado);
-
     const pTable = p.mesa
       ? p.mesa.toLowerCase().includes("mesa") || p.mesa.toLowerCase().includes("delivery")
         ? p.mesa
@@ -72,7 +377,10 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
 
     const rawItems = Array.isArray(p.items) ? p.items : [];
     const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
-    const itemsToSave = validItems.length > 0 ? validItems : rawItems;
+    const itemsToSave = validItems; // Nunca volver a rawItems si todos están cancelados
+    const allItemsCancelled = rawItems.length > 0 && validItems.length === 0;
+    const isOrderCancelled = p.estado === "cancelado" || p.estado === "cancelled" || allItemsCancelled;
+    const pStatus = isOrderCancelled ? "CANCELLED" : mapPedidoEstadoToPrismaStatus(p.estado);
 
     let meta: any = {};
     try {
@@ -91,174 +399,244 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
       ? false
       : (isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false));
 
-    const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
-      ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100
+    const subtotalCents = Math.round(itemsSubtotal * 100);
+    const calcIva = (itemsToSave.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
+      ? Math.round(subtotalCents * (rest.ivaPercent / 100)) / 100
       : 0;
-    const calcService = (isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
-      ? Math.round(itemsSubtotal * (rest.servicePercent / 100) * 100) / 100
+    const calcService = (itemsToSave.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
+      ? Math.round(subtotalCents * (rest.servicePercent / 100)) / 100
       : 0;
-    const deliveryCost = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
+    const deliveryCost = isOrderCancelled ? 0 : (typeof meta?.costo_envio === "number" ? meta.costo_envio : 0);
 
-    const subtotalFinal = typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal;
-    const ivaFinal = typeof meta?.iva === "number" ? meta.iva : calcIva;
-    const serviceFinal = typeof meta?.service_charge === "number" ? meta.service_charge : calcService;
+    const hasCancelledItems = validItems.length < rawItems.length;
+    const subtotalFinal = (isOrderCancelled || hasCancelledItems)
+      ? itemsSubtotal
+      : (typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal);
+    const ivaFinal = (isOrderCancelled || hasCancelledItems)
+      ? calcIva
+      : (typeof meta?.iva === "number" ? meta.iva : calcIva);
+    const serviceFinal = (isOrderCancelled || hasCancelledItems)
+      ? calcService
+      : (typeof meta?.service_charge === "number" ? meta.service_charge : calcService);
+    const pTotal = isOrderCancelled
+      ? 0
+      : (hasCancelledItems
+          ? Math.round((subtotalFinal + ivaFinal + serviceFinal + deliveryCost) * 100) / 100
+          : (Number(p.total) || 0));
 
-    const existing = await prisma.order.findUnique({
-      where: { id: p.id },
-      include: { items: true },
-    });
-
-    if (!existing) {
-      await prisma.order.create({
-        data: {
-          id: p.id,
-          restaurantId: rest.id,
-          tableName: pTable,
-          customerName: p.cliente_nombre?.trim() || null,
-          customerPhone: p.cliente_telefono?.trim() || null,
-          status: pStatus,
-          subtotal: subtotalFinal,
-          iva: ivaFinal,
-          serviceCharge: serviceFinal,
-          deliveryCost: deliveryCost,
-          tip: 0.0,
-          total: pTotal,
-          paymentMethod: p.metodo_pago || "efectivo",
-          isTest: isTestOrder,
-          createdAt: new Date(p.created_at || Date.now()),
-          items: {
-            create: itemsToSave.map((it: any) => ({
-              dishName: it.nombre || "Producto",
-              price: Number(it.precio) || 0,
-              quantity: parseInt(it.cantidad) || 1,
-              notes: it.notas || null,
-            })),
-          },
-        },
+    // Verificar si el pedido ya fue cobrado y cuenta con cash_shift_id explícito en metadata para este restaurante
+    let shiftIdToAssign: string | null = null;
+    if (meta?.cash_shift_id && typeof meta.cash_shift_id === "string") {
+      const validShift = await prisma.cashShift.findFirst({
+        where: { id: meta.cash_shift_id, restaurantId: rest.id },
+        select: { id: true },
       });
-    } else {
-      // Mapear cantidades agregadas por clave canónica desde pedido_items
-      const makeLineKey = (name: string, price: number, notes?: string | null) =>
-        `${(name || "").trim()}__${Number(price || 0).toFixed(2)}__${(notes || "").trim()}`;
-
-      const targetItemsMap = new Map<string, { name: string; price: number; quantity: number; notes: string | null }>();
-      for (const it of itemsToSave) {
-        const k = makeLineKey(it.nombre, it.precio, it.notas);
-        const qty = parseInt(it.cantidad) || 1;
-        const curr = targetItemsMap.get(k);
-        if (curr) {
-          curr.quantity += qty;
-        } else {
-          targetItemsMap.set(k, {
-            name: it.nombre || "Producto",
-            price: Number(it.precio) || 0,
-            quantity: qty,
-            notes: it.notas || null,
-          });
-        }
-      }
-
-      // Mapear ítems existentes en Prisma Order
-      const existingItemByKey = new Map<string, typeof existing.items[0]>();
-      const existingQtyMap = new Map<string, number>();
-      for (const e of existing.items) {
-        const k = makeLineKey(e.dishName, e.price, e.notes);
-        existingItemByKey.set(k, e);
-        existingQtyMap.set(k, (existingQtyMap.get(k) || 0) + e.quantity);
-      }
-
-      // Detectar mutaciones en ítems (tanto platos nuevos como aumento de cantidad de líneas existentes)
-      let itemsMutated = false;
-      const itemsToCreate: Array<{ dishName: string; price: number; quantity: number; notes: string | null }> = [];
-      const itemsToUpdate: Array<{ id: string; quantity: number }> = [];
-
-      for (const [k, target] of targetItemsMap.entries()) {
-        const existQty = existingQtyMap.get(k) || 0;
-        if (existQty === 0) {
-          itemsMutated = true;
-          itemsToCreate.push({
-            dishName: target.name,
-            price: target.price,
-            quantity: target.quantity,
-            notes: target.notes,
-          });
-        } else if (target.quantity > existQty) {
-          itemsMutated = true;
-          const existItem = existingItemByKey.get(k);
-          if (existItem) {
-            itemsToUpdate.push({ id: existItem.id, quantity: target.quantity });
-          }
-        }
-      }
-
-      if (!itemsMutated) {
-        // Si no hay platos añadidos ni aumento de cantidades, actualizar ÚNICAMENTE estado y mesa
-        await prisma.order.update({
-          where: { id: p.id },
-          data: {
-            status: pStatus,
-            tableName: pTable,
-          },
-        });
-      } else {
-        // Si hay adiciones o aumentos de cantidad, actualizar OrderItem y recalcular totales
-        for (const up of itemsToUpdate) {
-          await prisma.orderItem.update({
-            where: { id: up.id },
-            data: { quantity: up.quantity },
-          });
-        }
-
-        const preservedTip = existing.tip || 0;
-        const preservedDiscount = existing.discountAmount || 0;
-        const preservedDelivery = existing.deliveryCost || 0;
-
-        const newItemsSubtotal = itemsToSave.reduce(
-          (sum: number, it: any) => sum + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
-          0
-        );
-        const subtotalAfterCoupon = Math.max(0, newItemsSubtotal - preservedDiscount);
-
-        const roundMoney = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
-
-        const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
-          ? roundMoney(subtotalAfterCoupon * (rest.ivaPercent / 100))
-          : 0;
-        const calcService = (isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
-          ? roundMoney(subtotalAfterCoupon * (rest.servicePercent / 100))
-          : 0;
-
-        const updatedTotal = roundMoney(subtotalAfterCoupon + calcIva + calcService + preservedDelivery + preservedTip);
-
-        await prisma.order.update({
-          where: { id: p.id },
-          data: {
-            status: pStatus,
-            subtotal: newItemsSubtotal,
-            iva: calcIva,
-            serviceCharge: calcService,
-            total: updatedTotal,
-            tableName: pTable,
-            items: itemsToCreate.length > 0 ? {
-              create: itemsToCreate.map((it) => ({
-                dishName: it.dishName,
-                price: it.price,
-                quantity: it.quantity,
-                notes: it.notes,
-              })),
-            } : undefined,
-          },
-        });
+      if (validShift) {
+        shiftIdToAssign = validShift.id;
       }
     }
+
+    // Hook de prueba antes de adquirir bloqueo en sync individual
+    if (process.env.NODE_ENV === "test" && __testOrderSyncHooks.beforeSingleSyncLock) {
+      __testOrderSyncHooks.singleSyncHookCount++;
+      await __testOrderSyncHooks.beforeSingleSyncLock(p.id);
+    }
+
+    // Comprobación inicial de existencia fuera de transacción
+    const initialCheck = await prisma.order.findUnique({
+      where: { id: p.id },
+      select: { id: true, restaurantId: true },
+    });
+
+    if (!initialCheck) {
+      if (process.env.NODE_ENV === "test" && __testOrderSyncHooks.beforeCreateOrderAttempt) {
+        await __testOrderSyncHooks.beforeCreateOrderAttempt(p.id, false);
+      }
+      // Intentar crear la orden inicialmente fuera de transacción para que un posible P2002
+      // no aborte una transacción activa que impida consultas posteriores
+      try {
+        await prisma.order.create({
+          data: {
+            id: p.id,
+            restaurantId: rest.id,
+            cashShiftId: shiftIdToAssign,
+            tableName: pTable,
+            customerName: p.cliente_nombre?.trim() || null,
+            customerPhone: p.cliente_telefono?.trim() || null,
+            status: pStatus,
+            subtotal: subtotalFinal,
+            iva: ivaFinal,
+            serviceCharge: serviceFinal,
+            deliveryCost: deliveryCost,
+            tip: 0.0,
+            total: pTotal,
+            paymentMethod: p.metodo_pago || "efectivo",
+            isTest: isTestOrder,
+            createdAt: new Date(p.created_at || Date.now()),
+            items: {
+              create: rawItems.map((it: any) => ({
+                id: it.id || undefined,
+                dishName: it.nombre || "Producto",
+                price: Number(it.precio) || 0,
+                quantity: parseInt(it.cantidad) || 1,
+                notes: it.notas || null,
+                sourcePedidoItemId: it.id || null,
+                lineStatus: it.estado_item === "cancelado" ? "CANCELLED" : "ACTIVE",
+              })),
+            },
+          },
+        });
+        return; // Creado exitosamente
+      } catch (createErr: any) {
+        if (createErr?.code === "P2002") {
+          if (process.env.NODE_ENV === "test") {
+            __testOrderSyncHooks.p2002ObservedCount++;
+          }
+          // Colisión concurrente P2002: continuar hacia la transacción limpia para bloquear y recuperar
+        } else {
+          throw createErr;
+        }
+      }
+    }
+
+    // 2. Operación Atómica Coherente con Bloqueo FOR UPDATE en una transacción limpia y válida
+    await prisma.$transaction(async (tx) => {
+      // Adquirir bloqueo pesimista FOR UPDATE en Order utilizando únicamente campos reales del esquema
+      const lockedOrders = await tx.$queryRaw<Array<{
+        id: string;
+        restaurantId: string;
+        cashShiftId: string | null;
+        status: string;
+        paymentMethod: string;
+        paymentDetails: string | null;
+        total: any;
+        subtotal: any;
+        iva: any;
+        serviceCharge: any;
+        deliveryCost: any;
+        discountAmount: any;
+        tip: any;
+        tableName: string;
+        customerName: string | null;
+        customerPhone: string | null;
+      }>>`
+        SELECT id, "restaurantId", "cashShiftId", "status", "paymentMethod", "paymentDetails",
+               total, subtotal, iva, "serviceCharge", "deliveryCost", "discountAmount", tip,
+               "tableName", "customerName", "customerPhone"
+        FROM "Order"
+        WHERE id = ${p.id}
+        FOR UPDATE
+      `;
+
+      if (!lockedOrders || lockedOrders.length === 0) {
+        throw new Error(`[syncSinglePedidoToPrisma] Order ${p.id} no encontrada para recuperación tras P2002`);
+      }
+      const locked = lockedOrders[0];
+
+      // Validación estricta de restaurante bajo bloqueo
+      if (locked.restaurantId !== rest.id) {
+        throw new Error(`[syncSinglePedidoToPrisma] Order ${p.id} pertenece a otro restaurante (${locked.restaurantId}) y no coincide con ${rest.id}`);
+      }
+
+      // Hook de prueba tras adquirir el lock para verificar intercalado
+      if (process.env.NODE_ENV === "test" && __testOrderSyncHooks.afterSyncReadBeforeDecision) {
+        await __testOrderSyncHooks.afterSyncReadBeforeDecision(p.id);
+      }
+
+      // 3. Evaluar si la orden ya fue cobrada / prepagada / liquidada
+      let isPrepaidConfirmed = false;
+      if (locked.paymentDetails) {
+        try {
+          const pd = typeof locked.paymentDetails === "string" ? JSON.parse(locked.paymentDetails) : locked.paymentDetails;
+          if (pd?.pago_confirmado === true || pd?.pago_estado === "pagado") {
+            isPrepaidConfirmed = true;
+          }
+        } catch {}
+      }
+      const isSettled = locked.cashShiftId != null || locked.status === "COMPLETED" || isPrepaidConfirmed;
+
+      // 4. Reconciliación estable de ítems con OrderItem (mantiene correspondencia 1:1, cancelaciones y legados)
+      const { allCancelled } = await reconcileOrderItems(
+        tx,
+        p.id,
+        rawItems,
+        isSettled
+      );
+
+      if (isSettled) {
+        // PROTECCIÓN ESTRICTA DE ÓRDENES COBRADAS/PREPAGADAS/LIQUIDADAS:
+        // Las órdenes cerradas en turno o con pago confirmado son financieramente inmutables.
+        // No se alteran importes ni totales, no se tocan datos de pago ni turno.
+        const safeStatus = resolveSafeOrderStatus(locked.status, pStatus);
+        await tx.order.update({
+          where: { id: p.id },
+          data: {
+            status: safeStatus,
+            tableName: pTable,
+            customerName: p.cliente_nombre?.trim() || locked.customerName,
+            customerPhone: p.cliente_telefono?.trim() || locked.customerPhone,
+          },
+        });
+        return;
+      }
+
+      // Re-consultar todos los ítems actuales para calcular totales estrictamente sobre líneas ACTIVE
+      const currentItems = await tx.orderItem.findMany({ where: { orderId: p.id } });
+      const activeItems = currentItems.filter((i: any) => i.lineStatus === "ACTIVE");
+
+      const newItemsSubtotal = activeItems.reduce(
+        (sum: number, it: any) => sum + (Number(it.price) || 0) * (it.quantity || 1),
+        0
+      );
+      const preservedTip = allCancelled ? 0 : (Number(locked.tip) || 0);
+      const preservedDiscount = allCancelled ? 0 : (Number(locked.discountAmount) || 0);
+      const preservedDelivery = allCancelled ? 0 : (Number(locked.deliveryCost) || 0);
+
+      const subtotalCents = Math.round(newItemsSubtotal * 100);
+      const discountCents = Math.round(preservedDiscount * 100);
+      const taxableBaseCents = Math.max(0, subtotalCents - discountCents);
+
+      const calcIvaFinal = (activeItems.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
+        ? Math.round(taxableBaseCents * (rest.ivaPercent / 100)) / 100
+        : 0;
+      const calcServiceFinal = (activeItems.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
+        ? Math.round(taxableBaseCents * (rest.servicePercent / 100)) / 100
+        : 0;
+
+      const updatedTotal = activeItems.length === 0
+        ? 0
+        : Math.round(taxableBaseCents + (calcIvaFinal * 100) + (calcServiceFinal * 100) + Math.round(preservedDelivery * 100) + Math.round(preservedTip * 100)) / 100;
+
+      const effectiveStatus = allCancelled ? "CANCELLED" : resolveSafeOrderStatus(locked.status, pStatus);
+      const finalShiftId = locked.cashShiftId ?? (shiftIdToAssign ?? null);
+
+      await tx.order.update({
+        where: { id: p.id },
+        data: {
+          status: effectiveStatus,
+          subtotal: newItemsSubtotal,
+          iva: calcIvaFinal,
+          serviceCharge: calcServiceFinal,
+          total: updatedTotal,
+          discountAmount: preservedDiscount,
+          tableName: pTable,
+          cashShiftId: finalShiftId,
+          customerName: p.cliente_nombre?.trim() || locked.customerName,
+          customerPhone: p.cliente_telefono?.trim() || locked.customerPhone,
+        },
+      });
+    });
   } catch (err) {
     console.error("[syncSinglePedidoToPrisma] Error:", err);
+    if (process.env.NODE_ENV === "test") {
+      throw err;
+    }
   }
 }
 
 /**
  * Sincroniza pedidos recientes o activos de PostgreSQL `pedidos` hacia Prisma `Order`.
- * Optimizado para alta velocidad: filtra por los últimos 3 días o pedidos activos y limita a 100 registros.
+ * Protege cada sincronización como una operación coherente bajo FOR UPDATE.
  */
 export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<number> {
   try {
@@ -285,8 +663,10 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
                   'nombre', pi.nombre,
                   'cantidad', pi.cantidad,
                   'precio', pi.precio,
+                  'notas', pi.notas,
+                  'es_añadido', pi.es_añadido,
                   'estado_item', pi.estado_item
-                )
+                ) ORDER BY pi.id
               ) FILTER (WHERE pi.id IS NOT NULL) as items
        FROM pedidos p
        LEFT JOIN pedido_items pi ON pi.pedido_id = p.id
@@ -300,20 +680,10 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
 
     if (!pedidos || pedidos.length === 0) return 0;
 
-    const existingOrders = await prisma.order.findMany({
-      where: {
-        restaurantId,
-        createdAt: { gte: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) },
-      },
-      select: { id: true, status: true, total: true, isTest: true },
-    });
-    const existingMap = new Map(existingOrders.map((o) => [o.id, o]));
-
     let syncedCount = 0;
 
     for (const p of pedidos) {
-      const pTotal = Number(p.total) || 0;
-      const pStatus = mapPedidoEstadoToPrismaStatus(p.estado);
+      if (p.negocio_id !== rest.id) continue;
 
       const pTable = p.mesa
         ? p.mesa.toLowerCase().includes("mesa") || p.mesa.toLowerCase().includes("delivery")
@@ -323,16 +693,17 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
 
       const isTestOrder = rest.testMode ? true : (typeof p.es_prueba === "boolean" ? p.es_prueba : false);
 
-      const existing = existingMap.get(p.id);
+      const rawItems = Array.isArray(p.items) ? p.items : [];
+      const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
+      const itemsToSave = validItems; // Nunca volver a rawItems si todos están cancelados
+      const allItemsCancelled = rawItems.length > 0 && validItems.length === 0;
+      const isOrderCancelled = p.estado === "cancelado" || p.estado === "cancelled" || allItemsCancelled;
+      const pStatus = isOrderCancelled ? "CANCELLED" : mapPedidoEstadoToPrismaStatus(p.estado);
 
       let meta: any = {};
       try {
         meta = typeof p.metadata === "string" ? JSON.parse(p.metadata) : (p.metadata || {});
       } catch { }
-
-      const rawItems = Array.isArray(p.items) ? p.items : [];
-      const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
-      const itemsToSave = validItems.length > 0 ? validItems : rawItems;
 
       const itemsSubtotal = itemsToSave.reduce(
         (acc: number, it: any) => acc + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
@@ -346,63 +717,226 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
         ? false
         : (isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false));
 
-      const calcIva = (rest.ivaPercent > 0 && !ivaIncluded)
-        ? Math.round(itemsSubtotal * (rest.ivaPercent / 100) * 100) / 100
+      const subtotalCents = Math.round(itemsSubtotal * 100);
+      const calcIva = (itemsToSave.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
+        ? Math.round(subtotalCents * (rest.ivaPercent / 100)) / 100
         : 0;
-      const calcService = (isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
-        ? Math.round(itemsSubtotal * (rest.servicePercent / 100) * 100) / 100
+      const calcService = (itemsToSave.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
+        ? Math.round(subtotalCents * (rest.servicePercent / 100)) / 100
         : 0;
-      const deliveryCost = typeof meta?.costo_envio === "number" ? meta.costo_envio : 0;
+      const deliveryCost = isOrderCancelled ? 0 : (typeof meta?.costo_envio === "number" ? meta.costo_envio : 0);
 
-      const subtotalFinal = typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal;
-      const ivaFinal = typeof meta?.iva === "number" ? meta.iva : calcIva;
-      const serviceFinal = typeof meta?.service_charge === "number" ? meta.service_charge : calcService;
+      const hasCancelledItems = validItems.length < rawItems.length;
+      const subtotalFinal = (isOrderCancelled || hasCancelledItems)
+        ? itemsSubtotal
+        : (typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal);
+      const ivaFinal = (isOrderCancelled || hasCancelledItems)
+        ? calcIva
+        : (typeof meta?.iva === "number" ? meta.iva : calcIva);
+      const serviceFinal = (isOrderCancelled || hasCancelledItems)
+        ? calcService
+        : (typeof meta?.service_charge === "number" ? meta.service_charge : calcService);
+      const pTotal = isOrderCancelled
+        ? 0
+        : (hasCancelledItems
+            ? Math.round((subtotalFinal + ivaFinal + serviceFinal + deliveryCost) * 100) / 100
+            : (Number(p.total) || 0));
 
+      let shiftIdToAssign: string | null = null;
+      if (meta?.cash_shift_id && typeof meta.cash_shift_id === "string") {
+        const validShift = await prisma.cashShift.findFirst({
+          where: { id: meta.cash_shift_id, restaurantId: rest.id },
+          select: { id: true },
+        });
+        if (validShift) {
+          shiftIdToAssign = validShift.id;
+        }
+      }
+
+      // Hook de prueba en lote para pedido objetivo
+      if (process.env.NODE_ENV === "test" && __testOrderSyncHooks.beforeBatchSyncLock) {
+        __testOrderSyncHooks.batchSyncHookCount++;
+        await __testOrderSyncHooks.beforeBatchSyncLock(p.id);
+      }
+
+      // Sincronización atómica individual para cada pedido en el lote bajo FOR UPDATE
       try {
-        await prisma.order.upsert({
+        const initialCheck = await prisma.order.findUnique({
           where: { id: p.id },
-          create: {
-            id: p.id,
-            restaurantId: rest.id,
-            tableName: pTable,
-            customerName: p.cliente_nombre?.trim() || null,
-            customerPhone: p.cliente_telefono?.trim() || null,
-            status: pStatus,
-            subtotal: subtotalFinal,
-            iva: ivaFinal,
-            serviceCharge: serviceFinal,
-            deliveryCost: deliveryCost,
-            tip: 0.0,
-            total: pTotal,
-            paymentMethod: p.metodo_pago || "efectivo",
-            isTest: isTestOrder,
-            createdAt: new Date(p.created_at || Date.now()),
-            items: {
-              create: itemsToSave.map((it: any) => ({
-                dishName: it.nombre || "Producto",
-                price: Number(it.precio) || 0,
-                quantity: parseInt(it.cantidad) || 1,
-              })),
+          select: { id: true, restaurantId: true },
+        });
+
+        if (!initialCheck) {
+          if (process.env.NODE_ENV === "test" && __testOrderSyncHooks.beforeCreateOrderAttempt) {
+            await __testOrderSyncHooks.beforeCreateOrderAttempt(p.id, true);
+          }
+          try {
+            await prisma.order.create({
+              data: {
+                id: p.id,
+                restaurantId: rest.id,
+                cashShiftId: shiftIdToAssign,
+                tableName: pTable,
+                customerName: p.cliente_nombre?.trim() || null,
+                customerPhone: p.cliente_telefono?.trim() || null,
+                status: pStatus,
+                subtotal: subtotalFinal,
+                iva: ivaFinal,
+                serviceCharge: serviceFinal,
+                deliveryCost: deliveryCost,
+                tip: 0.0,
+                total: pTotal,
+                paymentMethod: p.metodo_pago || "efectivo",
+                isTest: isTestOrder,
+                createdAt: new Date(p.created_at || Date.now()),
+                items: {
+                  create: rawItems.map((it: any) => ({
+                    id: it.id || undefined,
+                    dishName: it.nombre || "Producto",
+                    price: Number(it.precio) || 0,
+                    quantity: parseInt(it.cantidad) || 1,
+                    notes: it.notas || null,
+                    sourcePedidoItemId: it.id || null,
+                    lineStatus: it.estado_item === "cancelado" ? "CANCELLED" : "ACTIVE",
+                  })),
+                },
+              },
+            });
+            syncedCount++;
+            continue;
+          } catch (createErr: any) {
+            if (createErr?.code === "P2002") {
+              if (process.env.NODE_ENV === "test") {
+                __testOrderSyncHooks.p2002ObservedCount++;
+              }
+              // Colisión concurrente
+            } else {
+              throw createErr;
+            }
+          }
+        }
+
+        // Transacción válida y limpia para bloquear y recuperar
+        await prisma.$transaction(async (tx) => {
+          const lockedOrders = await tx.$queryRaw<Array<{
+            id: string;
+            restaurantId: string;
+            cashShiftId: string | null;
+            status: string;
+            paymentMethod: string;
+            paymentDetails: string | null;
+            total: any;
+            subtotal: any;
+            iva: any;
+            serviceCharge: any;
+            deliveryCost: any;
+            discountAmount: any;
+            tip: any;
+            tableName: string;
+            customerName: string | null;
+            customerPhone: string | null;
+          }>>`
+            SELECT id, "restaurantId", "cashShiftId", "status", "paymentMethod", "paymentDetails",
+                   total, subtotal, iva, "serviceCharge", "deliveryCost", "discountAmount", tip,
+                   "tableName", "customerName", "customerPhone"
+            FROM "Order"
+            WHERE id = ${p.id}
+            FOR UPDATE
+          `;
+
+          if (!lockedOrders || lockedOrders.length === 0) {
+            throw new Error(`[syncPedidosToPrismaOrders] Order ${p.id} no encontrada para recuperación tras P2002`);
+          }
+          const locked = lockedOrders[0];
+
+          if (locked.restaurantId !== rest.id) {
+            throw new Error(`[syncPedidosToPrismaOrders] Order ${p.id} pertenece a otro restaurante (${locked.restaurantId}) y no coincide con ${rest.id}`);
+          }
+
+          let isPrepaidConfirmed = false;
+          if (locked.paymentDetails) {
+            try {
+              const pd = typeof locked.paymentDetails === "string" ? JSON.parse(locked.paymentDetails) : locked.paymentDetails;
+              if (pd?.pago_confirmado === true || pd?.pago_estado === "pagado") {
+                isPrepaidConfirmed = true;
+              }
+            } catch {}
+          }
+          const isSettled = locked.cashShiftId != null || locked.status === "COMPLETED" || isPrepaidConfirmed;
+
+          // 4. Reconciliación estable de ítems con OrderItem (mantiene correspondencia 1:1, cancelaciones y legados)
+          const { allCancelled } = await reconcileOrderItems(
+            tx,
+            p.id,
+            rawItems,
+            isSettled
+          );
+
+          if (isSettled) {
+            // PROTECCIÓN ESTRICTA DE ÓRDENES COBRADAS/PREPAGADAS/LIQUIDADAS:
+            // No alterar líneas, totales ni datos financieros
+            const safeStatus = resolveSafeOrderStatus(locked.status, pStatus);
+            await tx.order.update({
+              where: { id: p.id },
+              data: {
+                status: safeStatus,
+                tableName: pTable,
+                customerName: p.cliente_nombre?.trim() || locked.customerName,
+                customerPhone: p.cliente_telefono?.trim() || locked.customerPhone,
+              },
+            });
+            return;
+          }
+
+          // Re-consultar todos los ítems actuales para calcular totales estrictamente sobre líneas ACTIVE
+          const currentItems = await tx.orderItem.findMany({ where: { orderId: p.id } });
+          const activeItems = currentItems.filter((i: any) => i.lineStatus === "ACTIVE");
+
+          const newItemsSubtotal = activeItems.reduce(
+            (sum: number, it: any) => sum + (Number(it.price) || 0) * (it.quantity || 1),
+            0
+          );
+          const preservedTip = allCancelled ? 0 : (Number(locked.tip) || 0);
+          const preservedDiscount = allCancelled ? 0 : (Number(locked.discountAmount) || 0);
+          const preservedDelivery = allCancelled ? 0 : (Number(locked.deliveryCost) || 0);
+
+          const subtotalCents = Math.round(newItemsSubtotal * 100);
+          const discountCents = Math.round(preservedDiscount * 100);
+          const taxableBaseCents = Math.max(0, subtotalCents - discountCents);
+
+          const calcIvaFinal = (activeItems.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
+            ? Math.round(taxableBaseCents * (rest.ivaPercent / 100)) / 100
+            : 0;
+          const calcServiceFinal = (activeItems.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
+            ? Math.round(taxableBaseCents * (rest.servicePercent / 100)) / 100
+            : 0;
+
+          const updatedTotal = activeItems.length === 0
+            ? 0
+            : Math.round(taxableBaseCents + (calcIvaFinal * 100) + (calcServiceFinal * 100) + Math.round(preservedDelivery * 100) + Math.round(preservedTip * 100)) / 100;
+
+          const effectiveStatus = allCancelled ? "CANCELLED" : resolveSafeOrderStatus(locked.status, pStatus);
+          const finalShiftId = locked.cashShiftId ?? (shiftIdToAssign ?? null);
+
+          await tx.order.update({
+            where: { id: p.id },
+            data: {
+              status: effectiveStatus,
+              subtotal: newItemsSubtotal,
+              iva: calcIvaFinal,
+              serviceCharge: calcServiceFinal,
+              total: updatedTotal,
+              discountAmount: preservedDiscount,
+              tableName: pTable,
+              cashShiftId: finalShiftId,
+              customerName: p.cliente_nombre?.trim() || locked.customerName,
+              customerPhone: p.cliente_telefono?.trim() || locked.customerPhone,
             },
-          },
-          update: {
-            status: pStatus,
-            subtotal: subtotalFinal,
-            iva: ivaFinal,
-            serviceCharge: serviceFinal,
-            deliveryCost: deliveryCost,
-            total: pTotal,
-            customerName: p.cliente_nombre?.trim() || undefined,
-            customerPhone: p.cliente_telefono?.trim() || undefined,
-          },
+          });
         });
         syncedCount++;
-      } catch (itemErr: any) {
-        if (itemErr?.code === "P2002") {
-          // Clave duplicada por concurrencia paralela en base de datos: ignorar de forma segura
-          continue;
-        }
-        console.warn(`[syncPedidosToPrismaOrders] Error en pedido ${p.id}:`, itemErr?.message || itemErr);
+      } catch (orderErr: any) {
+        console.warn(`[syncPedidosToPrismaOrders] Error en orden ${p.id}:`, orderErr?.message || orderErr);
       }
     }
 
@@ -430,19 +964,40 @@ export async function reconcileUndispatchedOrders(restaurantId: string): Promise
     const pendingOrders = await prisma.order.findMany({
       where: {
         restaurantId,
-        claimHash: { not: null },
         kdsDispatched: false,
         status: { not: "CANCELLED" },
         createdAt: { gte: thirtyMinutesAgo },
       },
       include: { items: true },
-      take: 10,
+      take: 20,
     });
 
     if (!pendingOrders || pendingOrders.length === 0) return 0;
 
     let reconciledCount = 0;
     for (const ord of pendingOrders) {
+      // 1. REGLA ESTRICTA DE RECUPERACIÓN AUTOMÁTICA:
+      // Si la comanda tiene conciliación pendiente (alguna línea UNRESOLVED),
+      // se mantiene pendiente hasta una resolución explícita válida.
+      // reconcileUndispatchedOrders NO debe crear orígenes en pedido_items,
+      // NO debe asignar vínculos, NO debe volver ACTIVE ninguna línea UNRESOLVED,
+      // y NO debe marcar su despacho como completado (kdsDispatched = false).
+      const hasPendingReconciliation = ord.items.some((it: any) => it.lineStatus === "UNRESOLVED");
+      if (hasPendingReconciliation) {
+        continue;
+      }
+
+      // 2. Despachar únicamente ítems legítimos ACTIVE que aún no tienen sourcePedidoItemId vinculado en PostgreSQL
+      const undispatchedItems = ord.items.filter((it: any) => !it.sourcePedidoItemId && it.lineStatus === "ACTIVE");
+      if (undispatchedItems.length === 0) {
+        // Si no quedan ítems activos por despachar y no hay líneas UNRESOLVED, asegurar kdsDispatched = true
+        await prisma.order.update({
+          where: { id: ord.id },
+          data: { kdsDispatched: true },
+        });
+        continue;
+      }
+
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
@@ -458,10 +1013,10 @@ export async function reconcileUndispatchedOrders(restaurantId: string): Promise
           reconciled: true,
         };
 
-        const insertRes = await client.query(
+        await client.query(
           `INSERT INTO pedidos (id, negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
            VALUES ($1::uuid, $2, $3, NULL, 'nuevo', $4, $5, $6, 'menuqr', $7)
-           ON CONFLICT (id) DO NOTHING
+           ON CONFLICT (id) DO UPDATE SET total = EXCLUDED.total, metadata = EXCLUDED.metadata
            RETURNING id`,
           [
             ord.id,
@@ -474,22 +1029,37 @@ export async function reconcileUndispatchedOrders(restaurantId: string): Promise
           ]
         );
 
-        if (insertRes.rows.length > 0) {
-          for (const it of ord.items) {
+        // Despachar únicamente ítems ACTIVE que aún no tienen sourcePedidoItemId vinculado en PostgreSQL
+        const hasExistingDispatched = ord.items.some((it: any) => Boolean(it.sourcePedidoItemId));
+
+        for (const it of undispatchedItems) {
+          const isAddedRound = hasExistingDispatched;
+          const piRes = await client.query(
+            `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+             VALUES ($1, $2, $3, $4, $5, $6, 'nuevo')
+             RETURNING id`,
+            [ord.id, it.dishName, it.quantity, it.price, it.notes || null, isAddedRound]
+          );
+
+          if (piRes.rows.length > 0) {
+            const piId = String(piRes.rows[0].id);
             await client.query(
-              `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-               VALUES ($1, $2, $3, $4, $5, false, 'nuevo')`,
-              [ord.id, it.dishName, it.quantity, it.price, it.notes || null]
+              `UPDATE "OrderItem"
+               SET "sourcePedidoItemId" = $1, "lineStatus" = 'ACTIVE'
+               WHERE id = $2 AND "lineStatus" = 'ACTIVE'`,
+              [piId, it.id]
             );
           }
         }
 
-        await client.query("COMMIT");
+        await client.query(
+          `UPDATE "Order"
+           SET "kdsDispatched" = true, "updatedAt" = NOW()
+           WHERE id = $1`,
+          [ord.id]
+        );
 
-        await prisma.order.update({
-          where: { id: ord.id },
-          data: { kdsDispatched: true },
-        });
+        await client.query("COMMIT");
 
         reconciledCount++;
       } catch (e) {

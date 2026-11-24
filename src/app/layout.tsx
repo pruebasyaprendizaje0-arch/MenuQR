@@ -162,23 +162,31 @@ export default function RootLayout({
       lang="es"
       data-scroll-behavior="smooth"
       className={`${geistSans.variable} ${geistMono.variable} ${outfit.variable} ${playfair.variable} dark scroll-smooth`}
+      suppressHydrationWarning
     >
       <head>
         <script
+          id="ld-website-schema"
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema).replace(/</g, "\\u003c") }}
         />
         <script
+          id="ld-software-schema"
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema).replace(/</g, "\\u003c") }}
         />
         <script
+          id="ld-org-schema"
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema) }}
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationSchema).replace(/</g, "\\u003c") }}
         />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-100 selection:bg-red-500 selection:text-white`}
+        suppressHydrationWarning
       >
         {children}
       </body>

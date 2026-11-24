@@ -6,6 +6,7 @@ import { getUserSession, getSuperAdminSession, refreshUserSession } from "@/lib/
 import { verifyOrderStaffAuth } from "@/lib/order-auth";
 import { revalidatePath } from "next/cache";
 import { emitStockActualizado, emitProductoActualizado, emitPedidoActualizado, emitCitaActualizada } from "@/lib/socket-server";
+import { __testCajaHooks } from "./caja-test-hooks";
 
 async function verifyRestaurantOwnership(restaurantId: string): Promise<{ authorized: boolean; error?: string }> {
   const isSuperAdmin = await getSuperAdminSession();
@@ -400,6 +401,34 @@ export async function processCajaSaleAction(
     const finalTotal = typeof data.total === "number" && data.total >= 0 ? data.total : computedTotal;
 
     const result = await prisma.$transaction(async (tx) => {
+      let clientPid: number | undefined;
+      if (process.env.NODE_ENV === "test") {
+        try {
+          const pidRows = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+          clientPid = pidRows[0]?.pid;
+          if (__testCajaHooks.beforePosSaleLock) {
+            await __testCajaHooks.beforePosSaleLock(restaurantId, clientPid);
+          }
+        } catch {}
+      }
+
+      // 0. Exigir turno de caja abierto y bloquearlo pesimísticamente para coordinar con closeCashShift
+      const lockedShifts = await tx.$queryRaw<Array<{ id: string; status: string }>>`
+        SELECT id, status FROM "CashShift"
+        WHERE "restaurantId" = ${restaurantId} AND status = 'OPEN'
+        LIMIT 1
+        FOR UPDATE
+      `;
+      const activeShift = lockedShifts[0];
+
+      if (!activeShift) {
+        throw new Error("Abre un turno de caja primero.");
+      }
+
+      if (process.env.NODE_ENV === "test" && __testCajaHooks.afterPosSaleLock) {
+        await __testCajaHooks.afterPosSaleLock(activeShift.id, clientPid);
+      }
+
       // 1. Validar existencias de stock estricto (solo para productos físicos con trackStock activo)
       for (const it of data.items) {
         const dish = await tx.dish.findUnique({
@@ -429,23 +458,17 @@ export async function processCajaSaleAction(
         }
       }
 
-      // Buscar turno de caja activo para vincular la venta automáticamente
-      const activeShift = await tx.cashShift.findFirst({
-        where: { restaurantId, status: "OPEN" },
-        select: { id: true },
-      });
-
       const rest = await tx.restaurant.findUnique({
         where: { id: restaurantId },
         select: { id: true, name: true, testMode: true },
       });
       const isTestSale = Boolean(rest?.testMode);
 
-      // 2. Crear Pedido / Ticket de Venta oficial
+      // 2. Crear Pedido / Ticket de Venta oficial vinculado al turno abierto
       const order = await tx.order.create({
         data: {
           restaurantId,
-          cashShiftId: activeShift?.id || null,
+          cashShiftId: activeShift.id,
           tableName: data.tableName?.trim() || `Caja POS (${data.paymentMethod})`,
           customerName: data.customerName?.trim() || `Venta Directa (${data.paymentMethod})`,
           customerPhone: data.customerPhone?.trim() || null,
@@ -466,6 +489,8 @@ export async function processCajaSaleAction(
               dishName: it.name,
               price: it.price,
               quantity: it.quantity,
+              sourcePedidoItemId: null,
+              lineStatus: "ACTIVE",
             })),
           },
         },
@@ -604,7 +629,25 @@ export async function processCajaSaleAction(
         }
       }
 
-      return { orderId: order.id, orderNumber: order.orderNumber, total: finalTotal, updatedDishes, isTestSale };
+      // Hook de prueba para validar rollback integral post-escritura en transacción POS
+      if (process.env.NODE_ENV === "test" && __testCajaHooks.beforePosSaleCommit) {
+        await __testCajaHooks.beforePosSaleCommit(order.id, activeShift.id);
+      }
+
+      const createdItems = await tx.orderItem.findMany({
+        where: { orderId: order.id },
+        orderBy: { id: "asc" },
+      });
+
+      return {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        total: finalTotal,
+        updatedDishes,
+        isTestSale,
+        shiftId: activeShift.id,
+        createdItems,
+      };
     });
 
     // Sincronizar venta de Caja POS a la tabla de PostgreSQL pedidos para visibilidad inmediata en módulo mesero y cocina
@@ -613,6 +656,7 @@ export async function processCajaSaleAction(
       const finalTableName = data.tableName?.trim() || "Caja POS";
       const metadataPayload = {
         tipo_pedido: "caja_pos",
+        cash_shift_id: result.shiftId,
         paymentMethod: data.paymentMethod,
         subtotal,
         iva: safeIva,
@@ -633,12 +677,20 @@ export async function processCajaSaleAction(
           JSON.stringify(metadataPayload),
         ]
       );
-      for (const it of data.items) {
-        await pool.query(
-          `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, es_añadido, estado_item)
-           VALUES ($1, $2, $3, $4, false, 'pagado')`,
-          [result.orderId, it.name, it.quantity, it.price]
+      for (const it of result.createdItems) {
+        const piRes = await pool.query(
+          `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
+           VALUES ($1, $2, $3, $4, $5, false, 'pagado')
+           RETURNING id`,
+          [result.orderId, it.dishName, it.quantity, it.price, it.notes || null]
         );
+        if (piRes.rows.length > 0) {
+          const insertedPiId = String(piRes.rows[0].id);
+          await prisma.orderItem.update({
+            where: { id: it.id },
+            data: { sourcePedidoItemId: insertedPiId },
+          });
+        }
       }
 
       // Si la venta directa corresponde a una mesa, cerrar cualquier TableSession abierta
@@ -808,6 +860,15 @@ export async function settleOrderInCashShiftAction(
     }
 
     const isCitaOrder = initialOrder.vertical === "citas" || String(initialOrder.mesa).toUpperCase() === "CITA";
+
+    const unresolvedCheckPrisma = await prisma.orderItem.findFirst({
+      where: { orderId: data.orderId, lineStatus: "UNRESOLVED" },
+    });
+    if (unresolvedCheckPrisma) {
+      return {
+        error: "No se puede liquidar ni cobrar este pedido porque contiene líneas no conciliadas (UNRESOLVED). Resuelva la ambigüedad antes de cobrar.",
+      };
+    }
 
     // =========================================================================
     // CAMINO SEPARADO PARA VERTICAL CITAS (Comportamiento previo preservado)
@@ -1064,7 +1125,30 @@ export async function settleOrderInCashShiftAction(
     try {
       await client.query("BEGIN");
 
-      // Paso 1: Bloqueo pesimista del pedido con SELECT ... FOR UPDATE
+      // Paso 1: Bloqueo pesimista de la fila contable en Order de Prisma
+      const { rows: prismaOrderRows } = await client.query(
+        `SELECT id, "restaurantId", "cashShiftId", "status", "paymentMethod"
+         FROM "Order" 
+         WHERE id = $1 
+         LIMIT 1 
+         FOR UPDATE`,
+        [data.orderId]
+      );
+
+      if (prismaOrderRows.length === 0) {
+        await client.query("ROLLBACK");
+        return {
+          error: "La orden aún no está sincronizada en el registro contable. Por favor, reintente en unos segundos.",
+        };
+      }
+
+      const orderPrisma = prismaOrderRows[0];
+      if (orderPrisma.restaurantId !== restaurantId) {
+        await client.query("ROLLBACK");
+        return { error: "La orden no pertenece a este negocio." };
+      }
+
+      // Paso 2: Bloqueo pesimista del pedido operativo en la tabla pedidos
       const { rows: orderRows } = await client.query(
         `SELECT id, vertical, mesa, estado, metadata, total::float, cliente_telefono, cliente_nombre 
          FROM pedidos 
@@ -1081,14 +1165,49 @@ export async function settleOrderInCashShiftAction(
 
       const orderRecord = orderRows[0];
 
-      // PUNTO 1: Rechazo de pedidos cancelados dentro de la transacción y antes de cualquier escritura
+      // Rechazo de pedidos cancelados dentro de la transacción y antes de cualquier escritura
       if (orderRecord.estado === "cancelado") {
         await client.query("ROLLBACK");
         return { error: "No se puede liquidar ni cobrar un pedido cancelado." };
       }
 
-      // Protección de idempotencia
+      // Bloqueo estricto si el pedido contiene líneas no conciliadas (UNRESOLVED)
+      const { rows: unresolvedRows } = await client.query(
+        `SELECT id, "dishName" FROM "OrderItem" WHERE "orderId" = $1 AND "lineStatus" = 'UNRESOLVED' LIMIT 1`,
+        [data.orderId]
+      );
+      if (unresolvedRows.length > 0) {
+        await client.query("ROLLBACK");
+        return {
+          error: "No se puede liquidar ni cobrar este pedido porque contiene líneas no conciliadas (UNRESOLVED). Resuelva la ambigüedad antes de cobrar.",
+        };
+      }
+
+      let meta: any = {};
+      try {
+        meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});
+      } catch {}
+
+      // Protección de idempotencia y validación de trazabilidad si ya figura como pagado
       if (orderRecord.estado === "pagado") {
+        const origShiftId = orderPrisma.cashShiftId || meta.cash_shift_id;
+        if (!origShiftId) {
+          await client.query("ROLLBACK");
+          return { error: "Falta trazabilidad: el pedido figura como pagado pero no tiene turno de caja registrado." };
+        }
+        if (orderPrisma.cashShiftId && meta.cash_shift_id && orderPrisma.cashShiftId !== meta.cash_shift_id) {
+          await client.query("ROLLBACK");
+          return { error: "Contradicción en trazabilidad: el turno contable difiere del turno operativo." };
+        }
+        const { rows: origShiftRows } = await client.query(
+          `SELECT id, "restaurantId", status FROM "CashShift" WHERE id = $1 AND "restaurantId" = $2`,
+          [origShiftId, restaurantId]
+        );
+        if (origShiftRows.length === 0) {
+          await client.query("ROLLBACK");
+          return { error: "El turno original de este pedido no pertenece a este negocio o no existe." };
+        }
+
         await client.query("COMMIT");
         return {
           success: true,
@@ -1098,10 +1217,27 @@ export async function settleOrderInCashShiftAction(
         };
       }
 
-      let meta: any = {};
-      try {
-        meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});
-      } catch {}
+      // Si el pedido ya fue prepagado y confirmado previamente por caja
+      if (meta.pago_confirmado === true) {
+        isAlreadyPrepaid = true;
+        const origShiftId = orderPrisma.cashShiftId || meta.cash_shift_id;
+        if (!origShiftId) {
+          await client.query("ROLLBACK");
+          return { error: "Falta trazabilidad: el prepago está confirmado pero carece de turno original." };
+        }
+        if (orderPrisma.cashShiftId && meta.cash_shift_id && orderPrisma.cashShiftId !== meta.cash_shift_id) {
+          await client.query("ROLLBACK");
+          return { error: "Contradicción en trazabilidad entre registro contable y operativo del prepago." };
+        }
+        const { rows: origShiftRows } = await client.query(
+          `SELECT id, "restaurantId", status FROM "CashShift" WHERE id = $1 AND "restaurantId" = $2`,
+          [origShiftId, restaurantId]
+        );
+        if (origShiftRows.length === 0) {
+          await client.query("ROLLBACK");
+          return { error: "El turno original del prepago no pertenece a este negocio o no existe." };
+        }
+      }
 
       // Si exige prepago pero no ha sido confirmado por caja, RECHAZAR bypass
       if (meta.exige_prepago && !meta.pago_confirmado) {
@@ -1111,30 +1247,22 @@ export async function settleOrderInCashShiftAction(
         };
       }
 
-      // Si el pedido ya fue prepagado y confirmado previamente por caja
-      if (meta.pago_confirmado === true) {
-        isAlreadyPrepaid = true;
-      }
-
-      // Paso 2: Marcar pedido como pagado y apagar solicita_mesero
-      meta.cobrado_en_caja = true;
-      meta.monto_cobrado = effectiveTotalToShift;
-      meta.fecha_cobro = new Date().toISOString();
-
-      await client.query(
-        `UPDATE pedidos 
-         SET estado = 'pagado',
-             solicita_mesero = false,
-             metadata = $1
-         WHERE id = $2 AND negocio_id = $3`,
-        [JSON.stringify(meta), data.orderId, restaurantId]
-      );
-
-      // Paso 3: Registrar en CashShift ÚNICAMENTE si no fue prepagado previamente
+      // Paso 3: Verificar y bloquear Turno de Caja (CashShift) activo ÚNICAMENTE si no es prepago previo
       let activeShiftId: string | null = null;
       if (!isAlreadyPrepaid) {
+        let clientPid: number | undefined;
+        if (process.env.NODE_ENV === "test") {
+          try {
+            const { rows: pidRows } = await client.query("SELECT pg_backend_pid() AS pid");
+            clientPid = pidRows[0]?.pid;
+            if (__testCajaHooks.beforeSettleOrderLock) {
+              await __testCajaHooks.beforeSettleOrderLock(data.orderId, restaurantId, clientPid);
+            }
+          } catch {}
+        }
+
         const { rows: shiftRows } = await client.query(
-          `SELECT id 
+          `SELECT id, status 
            FROM "CashShift" 
            WHERE "restaurantId" = $1 AND "status" = 'OPEN' 
            ORDER BY "createdAt" DESC 
@@ -1149,6 +1277,38 @@ export async function settleOrderInCashShiftAction(
         }
 
         activeShiftId = shiftRows[0].id;
+
+        if (process.env.NODE_ENV === "test" && __testCajaHooks.afterSettleOrderLock) {
+          await __testCajaHooks.afterSettleOrderLock(data.orderId, activeShiftId, clientPid);
+        }
+
+        if (orderPrisma.cashShiftId && orderPrisma.cashShiftId !== activeShiftId) {
+          await client.query("ROLLBACK");
+          return {
+            error: "El pedido ya se encuentra asociado a otro turno de caja. No se puede cobrar en un turno diferente.",
+          };
+        }
+      }
+
+      // Paso 3: Marcar pedido como pagado y apagar solicita_mesero, persistiendo el cash_shift_id
+      meta.cobrado_en_caja = true;
+      meta.monto_cobrado = effectiveTotalToShift;
+      meta.fecha_cobro = new Date().toISOString();
+      if (activeShiftId) {
+        meta.cash_shift_id = activeShiftId;
+      }
+
+      await client.query(
+        `UPDATE pedidos 
+         SET estado = 'pagado',
+             solicita_mesero = false,
+             metadata = $1
+         WHERE id = $2 AND negocio_id = $3`,
+        [JSON.stringify(meta), data.orderId, restaurantId]
+      );
+
+      // Paso 4: Registrar en CashShift ÚNICAMENTE si no fue prepagado previamente
+      if (!isAlreadyPrepaid && activeShiftId) {
         const deltaTotal = effectiveTotalToShift;
         let cashSum = 0;
         let deunaSum = 0;
@@ -1192,26 +1352,36 @@ export async function settleOrderInCashShiftAction(
            WHERE id = $6`,
           [deltaTotal, cashSum, deunaSum, transferSum, cardSum, activeShiftId]
         );
-      }
 
-      // Paso 4: Actualizar "Order" de Prisma en la misma transacción si existe
-      await client.query(
-        `UPDATE "Order"
-         SET "status" = 'COMPLETED',
-             "paymentMethod" = COALESCE("paymentMethod", $1),
-             "cashShiftId" = COALESCE("cashShiftId", $2),
-             "depositDiscount" = COALESCE($3, "depositDiscount"),
-             "reservationId" = COALESCE($4, "reservationId"),
-             "updatedAt" = NOW()
-         WHERE id = $5`,
-        [
-          data.paymentMethod,
-          activeShiftId || null,
-          data.depositDiscount !== undefined ? data.depositDiscount : null,
-          data.reservationId || null,
-          data.orderId,
-        ]
-      );
+        // Actualizar "Order" de Prisma vinculándola explícitamente al turno activo
+        await client.query(
+          `UPDATE "Order"
+           SET "status" = 'COMPLETED',
+               "paymentMethod" = COALESCE($1, "paymentMethod"),
+               "cashShiftId" = $2,
+               "depositDiscount" = COALESCE($3, "depositDiscount"),
+               "reservationId" = COALESCE($4, "reservationId"),
+               "updatedAt" = NOW()
+           WHERE id = $5 AND "restaurantId" = $6`,
+          [
+            data.paymentMethod,
+            activeShiftId,
+            data.depositDiscount !== undefined ? data.depositDiscount : null,
+            data.reservationId || null,
+            data.orderId,
+            restaurantId,
+          ]
+        );
+      } else {
+        // Si ya estaba prepagado, únicamente finalizar el estado operativo a COMPLETED sin alterar el turno original
+        await client.query(
+          `UPDATE "Order"
+           SET "status" = 'COMPLETED',
+               "updatedAt" = NOW()
+           WHERE id = $1 AND "restaurantId" = $2`,
+          [data.orderId, restaurantId]
+        );
+      }
 
       await client.query("COMMIT");
     } catch (dbErr) {
@@ -1376,7 +1546,30 @@ export async function confirmarPrepagoPedidoAction(
     try {
       await client.query("BEGIN");
 
-      // Paso A: Bloqueo pesimista del pedido en la tabla pedidos
+      // Paso A: Bloqueo pesimista de la fila contable en Order de Prisma
+      const { rows: prismaOrderRows } = await client.query(
+        `SELECT id, "restaurantId", "cashShiftId", "paymentMethod", "paymentDetails", status 
+         FROM "Order" 
+         WHERE id = $1 
+         LIMIT 1 
+         FOR UPDATE`,
+        [orderId]
+      );
+
+      if (prismaOrderRows.length === 0) {
+        await client.query("ROLLBACK");
+        return {
+          error: "La orden aún no está sincronizada en el registro contable. Por favor, reintente en unos segundos.",
+        };
+      }
+
+      const orderPrisma = prismaOrderRows[0];
+      if (orderPrisma.restaurantId !== restaurantId) {
+        await client.query("ROLLBACK");
+        return { error: "La orden no pertenece a este negocio." };
+      }
+
+      // Paso B: Bloqueo pesimista del pedido operativo en la tabla pedidos
       const { rows: existingRows } = await client.query(
         `SELECT id, negocio_id, mesa, estado, total::float, metadata, cliente_nombre, cliente_telefono, created_at 
          FROM pedidos 
@@ -1396,8 +1589,27 @@ export async function confirmarPrepagoPedidoAction(
         meta = typeof orderRecord.metadata === "string" ? JSON.parse(orderRecord.metadata) : (orderRecord.metadata || {});
       } catch {}
 
-      // A.1. Idempotencia: si ya fue confirmado previamente, salir de forma idempotente sin duplicar cobro ni alterar el turno
+      // A.1. Idempotencia y Reintentos Válidos con Validación Rigurosa de Trazabilidad
       if (meta.pago_confirmado === true) {
+        const originalShiftId = orderPrisma.cashShiftId || meta.cash_shift_id;
+        if (!originalShiftId) {
+          await client.query("ROLLBACK");
+          return { error: "Falta trazabilidad: el pedido figura como confirmado pero carece de turno de caja registrado." };
+        }
+        if (orderPrisma.cashShiftId && meta.cash_shift_id && orderPrisma.cashShiftId !== meta.cash_shift_id) {
+          await client.query("ROLLBACK");
+          return { error: "Contradicción en trazabilidad: el turno contable difiere del turno operativo." };
+        }
+        const { rows: origShiftRows } = await client.query(
+          `SELECT id, "restaurantId", status FROM "CashShift" WHERE id = $1 AND "restaurantId" = $2`,
+          [originalShiftId, restaurantId]
+        );
+        if (origShiftRows.length === 0) {
+          await client.query("ROLLBACK");
+          return { error: "El turno original de este pedido no pertenece a este negocio o no existe." };
+        }
+
+        // Reintento válido: se reconoce aunque el turno de origen esté cerrado, sin sumar nuevamente ni adelantar estado
         await client.query("COMMIT");
         return {
           success: true,
@@ -1434,14 +1646,9 @@ export async function confirmarPrepagoPedidoAction(
         return { error: "No se puede aplicar confirmación de prepago a pedidos en mesa." };
       }
 
-      // Paso B: Leer el método de pago guardado desde Order y metadata (no depender solo de metadata)
-      const { rows: prismaOrderRows } = await client.query(
-        `SELECT id, "paymentMethod", "paymentDetails" FROM "Order" WHERE id = $1 LIMIT 1 FOR UPDATE`,
-        [orderId]
-      );
-
+      // Paso C: Leer y clasificar método de pago
       const savedMethodRaw = (
-        (prismaOrderRows.length > 0 ? prismaOrderRows[0].paymentMethod : null) ||
+        orderPrisma.paymentMethod ||
         meta.metodo_pago ||
         meta.paymentMethod ||
         ""
@@ -1479,9 +1686,20 @@ export async function confirmarPrepagoPedidoAction(
         };
       }
 
-      // Paso C: Verificar y bloquear el Turno de Caja (CashShift) activo en la misma transacción
+      // Paso D: Verificar y bloquear el Turno de Caja (CashShift) activo en la misma transacción
+      let clientPid: number | undefined;
+      if (process.env.NODE_ENV === "test") {
+        try {
+          const { rows: pidRows } = await client.query("SELECT pg_backend_pid() AS pid");
+          clientPid = pidRows[0]?.pid;
+          if (__testCajaHooks.beforeConfirmPrepagoLock) {
+            await __testCajaHooks.beforeConfirmPrepagoLock(orderId, restaurantId, clientPid);
+          }
+        } catch {}
+      }
+
       const { rows: shiftRows } = await client.query(
-        `SELECT id 
+        `SELECT id, status 
          FROM "CashShift" 
          WHERE "restaurantId" = $1 AND "status" = 'OPEN' 
          ORDER BY "createdAt" DESC 
@@ -1497,6 +1715,19 @@ export async function confirmarPrepagoPedidoAction(
       }
 
       const activeShiftId = shiftRows[0].id;
+
+      if (process.env.NODE_ENV === "test" && __testCajaHooks.afterConfirmPrepagoLock) {
+        await __testCajaHooks.afterConfirmPrepagoLock(orderId, activeShiftId, clientPid);
+      }
+
+      // Evitar mover pedidos entre turnos o duplicar ingresos
+      if (orderPrisma.cashShiftId && orderPrisma.cashShiftId !== activeShiftId) {
+        await client.query("ROLLBACK");
+        return {
+          error: "El pedido ya se encuentra asociado a otro turno de caja. No se puede confirmar en un turno diferente.",
+        };
+      }
+
       const orderTotal = Number(orderRecord.total) || 0;
 
       // Registrar incremento en CashShift según método exacto
@@ -1525,6 +1756,7 @@ export async function confirmarPrepagoPedidoAction(
       meta.pago_confirmado_at = nowIso;
       meta.pago_estado = "pagado";
       meta.metodo_pago_clasificado = classifiedMethod;
+      meta.cash_shift_id = activeShiftId;
 
       const { rows: updatedRows } = await client.query(
         `UPDATE pedidos
@@ -1536,29 +1768,27 @@ export async function confirmarPrepagoPedidoAction(
 
       updatedOrder = updatedRows[0];
 
-      // Paso E: Si existe registro en la tabla "Order" de Prisma, actualizarlo en la misma transacción
-      if (prismaOrderRows.length > 0) {
-        let pDetails: any = {};
-        try {
-          const rawPd = prismaOrderRows[0].paymentDetails;
-          pDetails = rawPd && rawPd.startsWith("{") ? JSON.parse(rawPd) : { details: rawPd };
-        } catch {}
+      // Paso E: Actualizar la tabla "Order" vinculándola explícitamente al turno activo sin cambiar su estado operativo
+      let pDetails: any = {};
+      try {
+        const rawPd = orderPrisma.paymentDetails;
+        pDetails = rawPd && rawPd.startsWith("{") ? JSON.parse(rawPd) : { details: rawPd };
+      } catch {}
 
-        pDetails.pago_confirmado = true;
-        pDetails.pago_confirmado_por = staffIdentifier;
-        pDetails.pago_confirmado_at = nowIso;
-        pDetails.pago_estado = "pagado";
+      pDetails.pago_confirmado = true;
+      pDetails.pago_confirmado_por = staffIdentifier;
+      pDetails.pago_confirmado_at = nowIso;
+      pDetails.pago_estado = "pagado";
 
-        await client.query(
-          `UPDATE "Order"
-           SET "cashShiftId" = COALESCE($1, "cashShiftId"),
-               "paymentDetails" = $2,
-               "paymentMethod" = COALESCE("paymentMethod", $3),
-               "updatedAt" = NOW()
-           WHERE id = $4`,
-          [activeShiftId, JSON.stringify(pDetails), classifiedMethod, orderId]
-        );
-      }
+      await client.query(
+        `UPDATE "Order"
+         SET "cashShiftId" = $1,
+             "paymentDetails" = $2,
+             "paymentMethod" = COALESCE("paymentMethod", $3),
+             "updatedAt" = NOW()
+         WHERE id = $4 AND "restaurantId" = $5`,
+        [activeShiftId, JSON.stringify(pDetails), classifiedMethod, orderId, restaurantId]
+      );
 
       // Paso F: Commit atómico - si todo fue exitoso, ambas escrituras persisten juntas
       await client.query("COMMIT");
@@ -1636,15 +1866,21 @@ function serializeShift(
     expectedCash?: number;
   }
 ): SerializedCashShift {
+  const toIso = (d: any): string | null => {
+    if (!d) return null;
+    if (d instanceof Date) return d.toISOString();
+    return new Date(d).toISOString();
+  };
+
   return {
     id: shift.id,
     restaurantId: shift.restaurantId,
     openedById: shift.openedById,
     openedByName: shift.openedByName,
-    openedAt: shift.openedAt ? shift.openedAt.toISOString() : new Date().toISOString(),
+    openedAt: toIso(shift.openedAt) || new Date().toISOString(),
     closedById: shift.closedById || null,
     closedByName: shift.closedByName || null,
-    closedAt: shift.closedAt ? shift.closedAt.toISOString() : null,
+    closedAt: toIso(shift.closedAt),
     initialCash: Number(shift.initialCash) || 0,
     expectedCash: overrides?.expectedCash !== undefined ? overrides.expectedCash : (Number(shift.expectedCash) || 0),
     actualCash: shift.actualCash !== null && shift.actualCash !== undefined ? Number(shift.actualCash) : null,
@@ -1663,7 +1899,7 @@ function serializeShift(
       amount: Number(m.amount) || 0,
       reason: m.reason,
       performedBy: m.performedBy,
-      createdAt: m.createdAt ? m.createdAt.toISOString() : new Date().toISOString(),
+      createdAt: toIso(m.createdAt) || new Date().toISOString(),
     })),
   };
 }
@@ -1846,66 +2082,103 @@ export async function addCashMovement(params: {
 }): Promise<{ success: boolean; movement?: SerializedCashMovement; error?: string }> {
   try {
     await refreshUserSession();
+    await ensureDbTables();
 
-    const shift = await prisma.cashShift.findUnique({
-      where: { id: params.shiftId },
-      select: { id: true, restaurantId: true, status: true, expectedCash: true },
-    });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    if (!shift) {
-      return { success: false, error: "Turno de caja no encontrado." };
-    }
+      let clientPid: number | undefined;
+      if (process.env.NODE_ENV === "test") {
+        try {
+          const { rows: pidRows } = await client.query("SELECT pg_backend_pid() AS pid");
+          clientPid = pidRows[0]?.pid;
+          if (__testCajaHooks.beforeCashMovementLock) {
+            await __testCajaHooks.beforeCashMovementLock(params.shiftId, clientPid);
+          }
+        } catch {}
+      }
 
-    if (shift.status !== "OPEN") {
-      return { success: false, error: "El turno de caja se encuentra cerrado." };
-    }
+      // Adquirir bloqueo pesimista exclusivo en la misma transacción para coordinar con closeCashShift
+      const { rows: shiftRows } = await client.query(
+        `SELECT id, "restaurantId", status, "expectedCash"::float
+         FROM "CashShift"
+         WHERE id = $1
+         FOR UPDATE`,
+        [params.shiftId]
+      );
 
-    const auth = await verifyRestaurantOwnership(shift.restaurantId);
-    if (!auth.authorized) return { success: false, error: auth.error };
+      if (shiftRows.length === 0) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Turno de caja no encontrado." };
+      }
 
-    const cleanAmount = Math.max(0.01, Math.round((Number(params.amount) || 0) * 100) / 100);
-    const cleanReason = (params.reason || "").trim();
-    if (!cleanReason) {
-      return { success: false, error: "Debe especificar el motivo del movimiento." };
-    }
+      const shift = shiftRows[0];
+      if (shift.status !== "OPEN") {
+        await client.query("ROLLBACK");
+        return { success: false, error: "El turno de caja se encuentra cerrado." };
+      }
 
-    const delta = params.type === "CASH_IN" ? cleanAmount : -cleanAmount;
-    const currentExpected = Number(shift.expectedCash) || 0;
-    const newExpected = Math.max(0, Math.round((currentExpected + delta) * 100) / 100);
+      if (process.env.NODE_ENV === "test" && __testCajaHooks.afterCashMovementLock) {
+        await __testCajaHooks.afterCashMovementLock(shift.id, clientPid);
+      }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const mov = await tx.cashMovement.create({
-        data: {
-          shiftId: params.shiftId,
-          type: params.type,
-          amount: cleanAmount,
-          reason: cleanReason,
-          performedBy: params.performedBy || "Cajero",
+      const auth = await verifyRestaurantOwnership(shift.restaurantId);
+      if (!auth.authorized) {
+        await client.query("ROLLBACK");
+        return { success: false, error: auth.error };
+      }
+
+      const cleanAmount = Math.max(0.01, Math.round((Number(params.amount) || 0) * 100) / 100);
+      const cleanReason = (params.reason || "").trim();
+      if (!cleanReason) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Debe especificar el motivo del movimiento." };
+      }
+
+      const delta = params.type === "CASH_IN" ? cleanAmount : -cleanAmount;
+      const currentExpected = Number(shift.expectedCash) || 0;
+      const newExpected = Math.max(0, Math.round((currentExpected + delta) * 100) / 100);
+
+      const movId = "mov_" + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
+      const { rows: movRows } = await client.query(
+        `INSERT INTO "CashMovement" (id, "shiftId", type, amount, reason, "performedBy", "createdAt")
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         RETURNING id, "shiftId", type, amount::float, reason, "performedBy", "createdAt"`,
+        [movId, params.shiftId, params.type, cleanAmount, cleanReason, params.performedBy || "Cajero"]
+      );
+
+      await client.query(
+        `UPDATE "CashShift"
+         SET "expectedCash" = $1,
+             "updatedAt" = NOW()
+         WHERE id = $2`,
+        [newExpected, params.shiftId]
+      );
+
+      await client.query("COMMIT");
+      const result = movRows[0];
+
+      revalidatePath("/caja");
+
+      return {
+        success: true,
+        movement: {
+          id: result.id,
+          shiftId: result.shiftId,
+          type: result.type,
+          amount: Number(result.amount),
+          reason: result.reason,
+          performedBy: result.performedBy,
+          createdAt: result.createdAt instanceof Date ? result.createdAt.toISOString() : new Date(result.createdAt).toISOString(),
         },
-      });
-
-      await tx.cashShift.update({
-        where: { id: params.shiftId },
-        data: { expectedCash: newExpected },
-      });
-
-      return mov;
-    });
-
-    revalidatePath("/caja");
-
-    return {
-      success: true,
-      movement: {
-        id: result.id,
-        shiftId: result.shiftId,
-        type: result.type,
-        amount: Number(result.amount),
-        reason: result.reason,
-        performedBy: result.performedBy,
-        createdAt: result.createdAt.toISOString(),
-      },
-    };
+      };
+    } catch (txErr) {
+      await client.query("ROLLBACK");
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (error: any) {
     console.error("Error adding cash movement:", error);
     return { success: false, error: error.message || "Error al registrar movimiento de efectivo." };
@@ -1947,125 +2220,201 @@ export async function closeCashShift(params: {
 }> {
   try {
     await refreshUserSession();
+    await ensureDbTables();
 
-    const shift = await prisma.cashShift.findUnique({
-      where: { id: params.shiftId },
-      include: {
-        movements: true,
-        orders: {
-          select: {
-            id: true,
-            total: true,
-            paymentMethod: true,
-            status: true,
-          },
-        },
-      },
-    });
-
-    if (!shift) {
-      return { success: false, error: "Turno de caja no encontrado." };
-    }
-
-    if (shift.status !== "OPEN") {
-      return { success: false, error: "Este turno de caja ya fue cerrado previamente." };
-    }
-
-    const auth = await verifyRestaurantOwnership(shift.restaurantId);
-    if (!auth.authorized) return { success: false, error: auth.error };
-
-    // 1. Totales de ventas asociadas a este turno (Live Order scan)
-    let liveCashSales = 0;
-    let liveCardSales = 0;
-    let liveTransferSales = 0;
-    let liveDeunaSales = 0;
-    let liveTotalSales = 0;
-
-    for (const order of shift.orders) {
-      // Solo sumamos órdenes no canceladas
-      if (order.status === "CANCELLED") continue;
-
-      const orderTotal = Number(order.total) || 0;
-      liveTotalSales += orderTotal;
-
-      const pm = (order.paymentMethod || "").toUpperCase();
-      if (pm.includes("EFECTIVO") || pm === "CASH") {
-        liveCashSales += orderTotal;
-      } else if (pm.includes("TARJETA") || pm.includes("CARD") || pm.includes("PAYPHONE")) {
-        liveCardSales += orderTotal;
-      } else if (pm.includes("TRANSFERENCIA") || pm.includes("TRANSFER")) {
-        liveTransferSales += orderTotal;
-      } else if (pm.includes("DEUNA")) {
-        liveDeunaSales += orderTotal;
-      } else {
-        liveCashSales += orderTotal; // Default fallback
-      }
-    }
-
-    // Reconciliación con acumuladores atómicos persistidos en el CashShift (soporte Split Pay y comandas)
-    const dbCash = Number(shift.totalCash) || 0;
-    const dbCard = Number(shift.totalCard) || 0;
-    const dbTransfer = Number(shift.totalTransfer) || 0;
-    const dbDeuna = Number(shift.totalDeuna) || 0;
-    const dbSales = Number(shift.totalSales) || 0;
-
-    let resolvedCashSales = dbCash;
-    let resolvedCardSales = dbCard;
-    let resolvedTransferSales = dbTransfer;
-    let resolvedDeunaSales = dbDeuna;
-    let resolvedTotalSales = dbSales;
-
-    if (resolvedTotalSales === 0 && liveTotalSales > 0) {
-      resolvedCashSales = liveCashSales;
-      resolvedCardSales = liveCardSales;
-      resolvedTransferSales = liveTransferSales;
-      resolvedDeunaSales = liveDeunaSales;
-      resolvedTotalSales = liveTotalSales;
-    } else if (liveTotalSales > resolvedTotalSales) {
-      resolvedTotalSales = liveTotalSales;
-      resolvedCashSales += Math.max(0, liveCashSales - dbCash);
-      resolvedCardSales += Math.max(0, liveCardSales - dbCard);
-      resolvedTransferSales += Math.max(0, liveTransferSales - dbTransfer);
-      resolvedDeunaSales += Math.max(0, liveDeunaSales - dbDeuna);
-    }
-
-    // 2. Totales de movimientos de caja chica
+    const client = await pool.connect();
+    let shift: any = null;
+    let updatedShift: any = null;
+    let now = new Date();
+    let initialCash = 0;
+    let resolvedCashSales = 0;
+    let resolvedCardSales = 0;
+    let resolvedTransferSales = 0;
+    let resolvedDeunaSales = 0;
+    let resolvedTotalSales = 0;
     let cashInTotal = 0;
     let cashOutTotal = 0;
-    for (const m of shift.movements) {
-      const amt = Number(m.amount) || 0;
-      if (m.type === "CASH_IN") cashInTotal += amt;
-      if (m.type === "CASH_OUT") cashOutTotal += amt;
+    let expectedCash = 0;
+    let actualCash = 0;
+    let difference = 0;
+
+    try {
+      await client.query("BEGIN");
+
+      let clientPid: number | undefined;
+      if (process.env.NODE_ENV === "test") {
+        try {
+          const { rows: pidRows } = await client.query("SELECT pg_backend_pid() AS pid");
+          clientPid = pidRows[0]?.pid;
+          if (__testCajaHooks.beforeCloseShiftLock) {
+            await __testCajaHooks.beforeCloseShiftLock(params.shiftId, clientPid);
+          }
+        } catch {}
+      }
+
+      // 1. Bloqueo pesimista exclusivo y lectura atómica del turno en la misma conexión
+      const { rows: lockedRows } = await client.query(
+        `SELECT id, "restaurantId", status, "openedByName", "openedAt", "initialCash"::float,
+                "totalCash"::float, "totalCard"::float, "totalTransfer"::float, "totalDeuna"::float, "totalSales"::float
+         FROM "CashShift"
+         WHERE id = $1
+         FOR UPDATE`,
+        [params.shiftId]
+      );
+
+      if (lockedRows.length === 0) {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Turno de caja no encontrado." };
+      }
+
+      shift = lockedRows[0];
+      if (shift.status !== "OPEN") {
+        await client.query("ROLLBACK");
+        return { success: false, error: "Este turno de caja ya fue cerrado previamente." };
+      }
+
+      if (process.env.NODE_ENV === "test" && __testCajaHooks.afterCloseShiftLock) {
+        await __testCajaHooks.afterCloseShiftLock(shift.id, clientPid);
+      }
+
+      const auth = await verifyRestaurantOwnership(shift.restaurantId);
+      if (!auth.authorized) {
+        await client.query("ROLLBACK");
+        return { success: false, error: auth.error };
+      }
+
+      // 2. Re-lectura atómica de órdenes asociadas a este turno en la MISMA conexión y transacción
+      const { rows: orderRows } = await client.query(
+        `SELECT id, total::float, "paymentMethod", status
+         FROM "Order"
+         WHERE "cashShiftId" = $1`,
+        [params.shiftId]
+      );
+
+      // 3. Re-lectura atómica de movimientos asociados a este turno en la MISMA conexión y transacción
+      const { rows: movementRows } = await client.query(
+        `SELECT id, "shiftId", type, amount::float, reason, "performedBy", "createdAt"
+         FROM "CashMovement"
+         WHERE "shiftId" = $1`,
+        [params.shiftId]
+      );
+
+      // 4. Totales de ventas asociadas a este turno (Live Order scan)
+      let liveCashSales = 0;
+      let liveCardSales = 0;
+      let liveTransferSales = 0;
+      let liveDeunaSales = 0;
+      let liveTotalSales = 0;
+
+      for (const order of orderRows) {
+        // Solo sumamos órdenes no canceladas
+        if (order.status === "CANCELLED") continue;
+
+        const orderTotal = Number(order.total) || 0;
+        liveTotalSales += orderTotal;
+
+        const pm = (order.paymentMethod || "").toUpperCase();
+        if (pm.includes("EFECTIVO") || pm === "CASH") {
+          liveCashSales += orderTotal;
+        } else if (pm.includes("TARJETA") || pm.includes("CARD") || pm.includes("PAYPHONE")) {
+          liveCardSales += orderTotal;
+        } else if (pm.includes("TRANSFERENCIA") || pm.includes("TRANSFER")) {
+          liveTransferSales += orderTotal;
+        } else if (pm.includes("DEUNA")) {
+          liveDeunaSales += orderTotal;
+        } else {
+          liveCashSales += orderTotal; // Default fallback
+        }
+      }
+
+      // 5. Reconciliación con acumuladores atómicos persistidos en el CashShift (soporte Split Pay y comandas)
+      const dbCash = Number(shift.totalCash) || 0;
+      const dbCard = Number(shift.totalCard) || 0;
+      const dbTransfer = Number(shift.totalTransfer) || 0;
+      const dbDeuna = Number(shift.totalDeuna) || 0;
+      const dbSales = Number(shift.totalSales) || 0;
+
+      resolvedCashSales = dbCash;
+      resolvedCardSales = dbCard;
+      resolvedTransferSales = dbTransfer;
+      resolvedDeunaSales = dbDeuna;
+      resolvedTotalSales = dbSales;
+
+      if (resolvedTotalSales === 0 && liveTotalSales > 0) {
+        resolvedCashSales = liveCashSales;
+        resolvedCardSales = liveCardSales;
+        resolvedTransferSales = liveTransferSales;
+        resolvedDeunaSales = liveDeunaSales;
+        resolvedTotalSales = liveTotalSales;
+      } else if (liveTotalSales > resolvedTotalSales) {
+        resolvedTotalSales = liveTotalSales;
+        resolvedCashSales += Math.max(0, liveCashSales - dbCash);
+        resolvedCardSales += Math.max(0, liveCardSales - dbCard);
+        resolvedTransferSales += Math.max(0, liveTransferSales - dbTransfer);
+        resolvedDeunaSales += Math.max(0, liveDeunaSales - dbDeuna);
+      }
+
+      // 6. Totales de movimientos de caja chica
+      cashInTotal = 0;
+      cashOutTotal = 0;
+      for (const m of movementRows) {
+        const amt = Number(m.amount) || 0;
+        if (m.type === "CASH_IN") cashInTotal += amt;
+        if (m.type === "CASH_OUT") cashOutTotal += amt;
+      }
+
+      initialCash = Number(shift.initialCash) || 0;
+      expectedCash = Math.round((initialCash + resolvedCashSales + cashInTotal - cashOutTotal) * 100) / 100;
+      actualCash = Math.round((Number(params.actualCash) || 0) * 100) / 100;
+      difference = Math.round((actualCash - expectedCash) * 100) / 100;
+
+      now = new Date();
+
+      // 7. Cierre atómico del turno en la MISMA conexión y transacción
+      const { rows: updatedRows } = await client.query(
+        `UPDATE "CashShift"
+         SET status = 'CLOSED',
+             "closedById" = $1,
+             "closedByName" = $2,
+             "closedAt" = $3,
+             "expectedCash" = $4,
+             "actualCash" = $5,
+             "difference" = $6,
+             "totalCash" = $7,
+             "totalCard" = $8,
+             "totalTransfer" = $9,
+             "totalDeuna" = $10,
+             "totalSales" = $11,
+             "notes" = $12,
+             "updatedAt" = NOW()
+         WHERE id = $13
+         RETURNING *`,
+        [
+          params.closedById || "anon",
+          params.closedByName || "Cajero",
+          now,
+          expectedCash,
+          actualCash,
+          difference,
+          Math.round(resolvedCashSales * 100) / 100,
+          Math.round(resolvedCardSales * 100) / 100,
+          Math.round(resolvedTransferSales * 100) / 100,
+          Math.round(resolvedDeunaSales * 100) / 100,
+          Math.round(resolvedTotalSales * 100) / 100,
+          params.notes?.trim() || null,
+          params.shiftId,
+        ]
+      );
+
+      await client.query("COMMIT");
+      updatedShift = updatedRows[0];
+      updatedShift.movements = movementRows;
+    } catch (lockErr) {
+      await client.query("ROLLBACK");
+      throw lockErr;
+    } finally {
+      client.release();
     }
-
-    const initialCash = Number(shift.initialCash) || 0;
-    const expectedCash = Math.round((initialCash + resolvedCashSales + cashInTotal - cashOutTotal) * 100) / 100;
-    const actualCash = Math.round((Number(params.actualCash) || 0) * 100) / 100;
-    const difference = Math.round((actualCash - expectedCash) * 100) / 100;
-
-    const now = new Date();
-
-    const updatedShift = await prisma.cashShift.update({
-      where: { id: params.shiftId },
-      data: {
-        status: "CLOSED",
-        closedById: params.closedById || "anon",
-        closedByName: params.closedByName || "Cajero",
-        closedAt: now,
-        expectedCash,
-        actualCash,
-        difference,
-        totalCash: Math.round(resolvedCashSales * 100) / 100,
-        totalCard: Math.round(resolvedCardSales * 100) / 100,
-        totalTransfer: Math.round(resolvedTransferSales * 100) / 100,
-        totalDeuna: Math.round(resolvedDeunaSales * 100) / 100,
-        totalSales: Math.round(resolvedTotalSales * 100) / 100,
-        notes: params.notes?.trim() || null,
-      },
-      include: {
-        movements: true,
-      },
-    });
 
     revalidatePath("/caja");
     revalidatePath("/admin");
@@ -2079,7 +2428,7 @@ export async function closeCashShift(params: {
         shiftId: updatedShift.id,
         openedByName: updatedShift.openedByName,
         closedByName: updatedShift.closedByName || "Cajero",
-        openedAt: updatedShift.openedAt.toISOString(),
+        openedAt: (updatedShift.openedAt instanceof Date ? updatedShift.openedAt : new Date(updatedShift.openedAt)).toISOString(),
         closedAt: now.toISOString(),
         initialCash,
         totalCashSales: Math.round(resolvedCashSales * 100) / 100,

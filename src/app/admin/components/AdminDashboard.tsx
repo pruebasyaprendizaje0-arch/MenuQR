@@ -135,7 +135,7 @@ import CitasAdminTab from "./CitasAdminTab";
 import ReservasAdminTab from "./ReservasAdminTab";
 import { ReservasMesasAdminTab } from "./ReservasMesasAdminTab";
 import { ModifiersAdminTab } from "./ModifiersAdminTab";
-import OrderTicketModal from "./OrderTicketModal";
+import OrderTicketModal, { formatOrderPaymentMethod, resolveOrderChannel } from "./OrderTicketModal";
 import StaffAdminTab from "./StaffAdminTab";
 import SalesAnalyticsDashboard from "./SalesAnalyticsDashboard";
 import { DailyMenuBoard } from "./DailyMenuBoard";
@@ -205,6 +205,9 @@ type OrderItem = {
   dishName: string;
   price: number;
   quantity: number;
+  notes?: string | null;
+  sourcePedidoItemId?: string | null;
+  lineStatus?: string | null;
 };
 
 type Order = {
@@ -485,6 +488,7 @@ export function getCustomerInsights(cust: Customer, orders: Order[], meta: Custo
   const dishCountMap: Record<string, number> = {};
   matchingOrders.forEach((o) => {
     (o.items || []).forEach((it) => {
+      if (it.lineStatus && it.lineStatus !== "ACTIVE") return;
       dishCountMap[it.dishName] = (dishCountMap[it.dishName] || 0) + it.quantity;
     });
   });
@@ -1036,6 +1040,13 @@ export function AdminDashboard({
       const platosRows: any[] = [];
       filteredOrders.forEach((o: any) => {
         (o.items || []).forEach((it: any) => {
+          const estadoLinea =
+            it.lineStatus === "CANCELLED"
+              ? "Cancelado"
+              : it.lineStatus === "UNRESOLVED"
+              ? "No conciliado"
+              : "Activo";
+
           platosRows.push({
             "Nº Pedido": o.orderNumber ? `#${o.orderNumber}` : o.id.slice(0, 8),
             "Fecha": new Date(o.createdAt).toLocaleDateString(),
@@ -1044,6 +1055,7 @@ export function AdminDashboard({
             "Cantidad": it.quantity,
             "Precio Unitario ($)": Number(it.price.toFixed(2)),
             "Total Ítem ($)": Number((it.price * it.quantity).toFixed(2)),
+            "Estado Línea": estadoLinea,
             "Estado Pedido": o.status,
             "Tipo": o.isTest ? "Prueba" : "Real",
           });
@@ -1084,7 +1096,7 @@ export function AdminDashboard({
         const wsPlatos = XLSX.utils.json_to_sheet(platosRows);
         wsPlatos["!cols"] = [
           { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 32 },
-          { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 12 },
+          { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 12 },
         ];
         XLSX.utils.book_append_sheet(wb, wsPlatos, bLabels.isGastro ? "Platos_Vendidos" : "Productos_Vendidos");
       }
@@ -9386,28 +9398,21 @@ export function AdminDashboard({
                                 <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono text-[10px] font-bold block w-fit">
                                   #{order.orderNumber || order.id.substring(0, 6)}
                                 </span>
-                                <span className={`inline-flex items-center gap-1 font-bold text-xs px-2.5 py-1 rounded-xl border ${
-                                  order.tableName === "Llevar"
-                                    ? "bg-purple-500/15 text-purple-300 border-purple-500/30"
-                                    : order.tableName === "Domicilio"
-                                    ? "bg-sky-500/15 text-sky-300 border-sky-500/30"
-                                    : order.tableName === "Visita Técnica" || order.tableName.includes("Visita") || order.tableName.includes("Cotizac") || isServiciosTecnicos
-                                    ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/30 shadow-sm"
-                                    : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                                }`}>
-                                  {order.tableName === "Llevar" 
-                                    ? "🛍 Para Llevar" 
-                                    : order.tableName === "Domicilio" 
-                                      ? "🛵 A Domicilio" 
-                                      : order.tableName === "Visita Técnica" || order.tableName.includes("Visita") || isServiciosTecnicos
-                                        ? "🚗 Visita Técnica"
-                                        : `🪑 Mesa #${order.tableName}`}
-                                </span>
-                                {order.customerName && order.tableName !== "Llevar" && order.tableName !== "Domicilio" && order.tableName !== "Visita Técnica" && !order.tableName.includes("Visita") && (
-                                  <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
-                                    👤 {order.customerName}
-                                  </span>
-                                )}
+                                {(() => {
+                                  const channel = resolveOrderChannel(order.tableName, isServiciosTecnicos);
+                                  return (
+                                    <>
+                                      <span className={`inline-flex items-center gap-1 font-bold text-xs px-2.5 py-1 rounded-xl border ${channel.badgeColorTable}`}>
+                                        {channel.badgeText}
+                                      </span>
+                                      {order.customerName && channel.type === "table" && (
+                                        <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block">
+                                          👤 {order.customerName}
+                                        </span>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </td>
 
@@ -9504,7 +9509,7 @@ export function AdminDashboard({
 
                             <td className="py-3.5 align-top">
                               <span className="uppercase font-bold text-[10px] block text-slate-300">
-                                {order.paymentMethod === "WHATSAPP_COTIZACION" ? "Cotización Express" : order.paymentMethod === "qr" ? "QR de Cobro" : "Efectivo / Local"}
+                                {formatOrderPaymentMethod(order.paymentMethod)}
                               </span>
                               <span suppressHydrationWarning className="text-slate-500 text-[10px] block mt-0.5">
                                 {new Date(order.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
@@ -9646,6 +9651,10 @@ export function AdminDashboard({
                                         Totales y Despacho:
                                       </span>
                                       <div className="space-y-1.5">
+                                        <div className="flex justify-between text-slate-400">
+                                          <span>Método de Pago:</span>
+                                          <span className="font-semibold text-slate-200">{formatOrderPaymentMethod(order.paymentMethod)}</span>
+                                        </div>
                                         <div className="flex justify-between text-slate-400">
                                           <span>Subtotal:</span>
                                           <span className="font-mono">${Number(order.subtotal || 0).toFixed(2)}</span>
@@ -9817,6 +9826,7 @@ export function AdminDashboard({
               <OrderTicketModal
                 order={ticketModalOrder}
                 restaurant={restaurant}
+                isServiciosTecnicos={isServiciosTecnicos}
                 onClose={() => setTicketModalOrder(null)}
                 onStatusChange={async (newStatus: string) => {
                   await updateOrderStatusAction(ticketModalOrder.id, newStatus);

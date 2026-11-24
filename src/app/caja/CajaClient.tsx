@@ -1832,15 +1832,16 @@ export function CajaClient({
       ) > 0.01
     );
 
+    const baseCents = Math.round(baseAmount * 100);
     const iva = (!isOrderItemsModified && typeof meta?.iva === "number" && meta.iva > 0)
       ? meta.iva
-      : (!ivaIncluded && ivaRate > 0 ? Math.round(baseAmount * (ivaRate / 100) * 100) / 100 : 0);
+      : (!ivaIncluded && ivaRate > 0 ? Math.round(baseCents * (ivaRate / 100)) / 100 : 0);
 
     const isTableSale = isTable;
 
     const service = (!isOrderItemsModified && typeof meta?.service_charge === "number" && meta.service_charge > 0)
       ? meta.service_charge
-      : (isTableSale && !serviceIncluded && serviceRate > 0 ? Math.round(baseAmount * (serviceRate / 100) * 100) / 100 : 0);
+      : (isTableSale && !serviceIncluded && serviceRate > 0 ? Math.round(baseCents * (serviceRate / 100)) / 100 : 0);
 
     const effectiveDelivery = selectedActiveOrder
       ? selectedOrderDeliveryCost

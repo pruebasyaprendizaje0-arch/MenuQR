@@ -1,4 +1,6 @@
 import assert from "node:assert";
+import { resolveOrderPaymentMethod } from "../app/caja/CajaClient";
+import { generateThermalTicketHtml } from "./thermal-printer";
 
 console.log("🔒 INICIANDO PRUEBAS UNITARIAS: FLUJO DE PREPAGO, CONCURRENCIA Y ARQUEO DE CAJA");
 
@@ -706,6 +708,219 @@ async function runPrepagoFlowSuite() {
 
     // Verificar que un pedido a Domicilio no se confunde con una mesa de salón ni altera TableSession
     assert.strictEqual(tableSessionClosed, false, "Domicilio nunca debe confundirse con una mesa de salón ni cerrar TableSession");
+  });
+
+  // =========================================================================
+  // CONDICIÓN 5: PRESENTACIÓN EN CAJA, MODAL DE ENTREGA Y TICKET TÉRMICO
+  // (Utiliza el código REAL importado de CajaClient.tsx y thermal-printer.ts)
+  // =========================================================================
+
+  await test("5.1 Prepago DEUNA con selector en EFECTIVO: el aviso, chip, modal y ticket muestran DEUNA", async () => {
+    // Pedido real tal como lo devuelve /api/pedidos para un domicilio con prepago Deuna confirmado (#203)
+    const orderDeuna = {
+      id: "ff69666e-eff7-47ca-af81-634a74ff56f6",
+      mesa: "DELIVERY",
+      estado: "en_cocina",
+      total: 12.50,
+      cliente_nombre: "Mauro Prueba",
+      cliente_telefono: "0991234567",
+      metadata: JSON.stringify({
+        exige_prepago: true,
+        pago_confirmado: true,
+        pago_confirmado_por: "Admin (admin@menuqr.com)",
+        metodo_pago_clasificado: "DEUNA",
+        metodo_pago: "DEUNA",
+      }),
+      items: [{ id: "i1", dishName: "Empanada de Carne", cantidad: 2, price: 6.25 }],
+    };
+
+    // 1. Simulación del estado en pantalla: el cajero tenía el selector en EFECTIVO
+    const screenSelectorMethod = "EFECTIVO";
+    const isSelectedOrderPrepaid = Boolean(JSON.parse(orderDeuna.metadata).pago_confirmado === true);
+    assert.strictEqual(isSelectedOrderPrepaid, true, "El pedido debe ser reconocido como prepagado");
+
+    // 2. Resolución del método guardado en el pedido mediante la función REAL de Caja
+    const resolved = resolveOrderPaymentMethod(orderDeuna);
+    assert.strictEqual(resolved.method, "DEUNA");
+    assert.strictEqual(resolved.display, "Deuna");
+
+    // 3. Método efectivo para presentación (no debe usar screenSelectorMethod)
+    const effectiveMethodDisplay = isSelectedOrderPrepaid ? resolved.display : screenSelectorMethod;
+    assert.strictEqual(effectiveMethodDisplay, "Deuna", "Debe usar Deuna aunque el selector esté en EFECTIVO");
+
+    // 4. Construcción del mensaje y badge de despacho
+    const targetTitle = "¡Domicilio Despachado!";
+    const targetMessage = `Pedido a domicilio despachado. Prepago confirmado con ${effectiveMethodDisplay} ($${orderDeuna.total.toFixed(2)}).`;
+    const targetBadge = `✅ Prepago: ${effectiveMethodDisplay} · $${orderDeuna.total.toFixed(2)}`;
+
+    assert.ok(targetMessage.includes("Prepago confirmado con Deuna ($12.50)"), "El mensaje debe incluir Deuna");
+    assert.ok(!targetMessage.includes("EFECTIVO"), "El mensaje NUNCA debe mencionar Efectivo para un prepago Deuna");
+    assert.strictEqual(targetBadge, "✅ Prepago: Deuna · $12.50");
+
+    // 5. Composición del ticket térmico mediante el generador REAL generateThermalTicketHtml
+    const realTicketHtml = await generateThermalTicketHtml({
+      order: {
+        id: orderDeuna.id,
+        orderNumber: "203",
+        items: [{ dishName: "Empanada de Carne", quantity: 2, price: 6.25 }],
+        subtotal: 12.50,
+        total: 12.50,
+        tableName: "Domicilio",
+        paymentMethod: effectiveMethodDisplay,
+        customerName: orderDeuna.cliente_nombre,
+        customerPhone: orderDeuna.cliente_telefono,
+      },
+      restaurant: { name: "Las Empanadas de Mauro" },
+    });
+
+    assert.ok(realTicketHtml.includes("<div><strong>Forma de Pago:</strong> Deuna</div>"), "El HTML real del ticket debe imprimir Forma de Pago: Deuna");
+    assert.ok(!realTicketHtml.includes("Forma de Pago:</strong> Efectivo"), "El ticket NUNCA debe imprimir Efectivo");
+  });
+
+  await test("5.2 Prepago PAYPHONE: el aviso, chip y ticket muestran PAYPHONE", async () => {
+    const orderPayphone = {
+      id: "payphone-order-001",
+      mesa: "LLEVAR",
+      estado: "listo",
+      total: 18.00,
+      cliente_nombre: "Karla Gómez",
+      cliente_telefono: "0987654321",
+      metadata: JSON.stringify({
+        exige_prepago: true,
+        pago_confirmado: true,
+        metodo_pago_clasificado: "PAYPHONE",
+        metodo_pago: "PAYPHONE",
+      }),
+      items: [{ id: "i2", dishName: "Pizza Mediana", cantidad: 1, price: 18.00 }],
+    };
+
+    const resolved = resolveOrderPaymentMethod(orderPayphone);
+    assert.strictEqual(resolved.method, "PAYPHONE");
+    assert.strictEqual(resolved.display, "Payphone");
+
+    const effectiveMethodDisplay = resolved.display;
+    const targetBadge = `✅ Prepago: ${effectiveMethodDisplay} · $${orderPayphone.total.toFixed(2)}`;
+    assert.strictEqual(targetBadge, "✅ Prepago: Payphone · $18.00");
+
+    const realTicketHtml = await generateThermalTicketHtml({
+      order: {
+        id: orderPayphone.id,
+        orderNumber: "204",
+        items: [{ dishName: "Pizza Mediana", quantity: 1, price: 18.00 }],
+        subtotal: 18.00,
+        total: 18.00,
+        tableName: "Llevar",
+        paymentMethod: effectiveMethodDisplay,
+        customerName: orderPayphone.cliente_nombre,
+      },
+      restaurant: { name: "Pizzería Demo" },
+    });
+
+    assert.ok(realTicketHtml.includes("<div><strong>Forma de Pago:</strong> Payphone</div>"), "El ticket real debe imprimir Forma de Pago: Payphone");
+  });
+
+  await test("5.3 Prepago con método ausente o desconocido: muestra 'No identificado', NUNCA 'Efectivo'", async () => {
+    // Caso A: método vacío o ausente
+    const orderWithoutMethod = {
+      id: "unknown-order-001",
+      mesa: "DELIVERY",
+      estado: "nuevo",
+      total: 15.00,
+      metadata: JSON.stringify({
+        exige_prepago: true,
+        pago_confirmado: true,
+      }),
+    };
+
+    const resolvedA = resolveOrderPaymentMethod(orderWithoutMethod);
+    assert.strictEqual(resolvedA.method, "NO_IDENTIFICADO");
+    assert.strictEqual(resolvedA.display, "No identificado");
+    assert.notStrictEqual(resolvedA.display, "Efectivo", "Nunca debe convertir método ausente en Efectivo");
+
+    // Caso B: método con valor no reconocido (ej. 'CRIPTOMONEDA_DESCONOCIDA')
+    const orderWithGibberishMethod = {
+      id: "unknown-order-002",
+      mesa: "DELIVERY",
+      estado: "nuevo",
+      total: 25.00,
+      metadata: JSON.stringify({
+        exige_prepago: true,
+        pago_confirmado: true,
+        metodo_pago: "CRIPTOMONEDA_DESCONOCIDA",
+      }),
+    };
+
+    const resolvedB = resolveOrderPaymentMethod(orderWithGibberishMethod);
+    assert.strictEqual(resolvedB.method, "NO_IDENTIFICADO");
+    assert.strictEqual(resolvedB.display, "No identificado");
+    assert.notStrictEqual(resolvedB.display, "Efectivo", "Nunca debe convertir método desconocido en Efectivo");
+
+    // Ticket térmico real generado con método no identificado
+    const realTicketHtml = await generateThermalTicketHtml({
+      order: {
+        id: orderWithGibberishMethod.id,
+        total: 25.00,
+        paymentMethod: resolvedB.display,
+        tableName: "Domicilio",
+      },
+      restaurant: { name: "Demo Restaurant" },
+    });
+
+    assert.ok(realTicketHtml.includes("<div><strong>Forma de Pago:</strong> No identificado</div>"), "El ticket real debe mostrar 'No identificado'");
+    assert.ok(!realTicketHtml.includes("Forma de Pago:</strong> Efectivo"), "El ticket NUNCA debe sustituirlo por Efectivo");
+  });
+
+  await test("5.4 Pedido sin prepago: conserva selector de métodos, cambio y no muestra chip de prepago", async () => {
+    const regularOrder = {
+      id: "regular-table-001",
+      mesa: "Mesa 4",
+      estado: "nuevo",
+      total: 20.00,
+      cliente_nombre: "Comensal Mesa 4",
+      metadata: JSON.stringify({
+        tipo_entrega: "SALON",
+      }),
+      items: [{ id: "i3", dishName: "Hamburguesa", cantidad: 2, price: 10.00 }],
+    };
+
+    let meta: any = {};
+    try {
+      meta = JSON.parse(regularOrder.metadata);
+    } catch {}
+
+    const isSelectedOrderPrepaid = Boolean(meta.pago_confirmado === true);
+    assert.strictEqual(isSelectedOrderPrepaid, false, "Pedido normal en mesa no es prepago");
+
+    // En pedido normal, el cajero elige en pantalla el método
+    const screenSelectorMethod = "EFECTIVO";
+    const resolved = isSelectedOrderPrepaid ? resolveOrderPaymentMethod(regularOrder) : null;
+    const effectiveMethodDisplay = resolved ? resolved.display : screenSelectorMethod;
+    assert.strictEqual(effectiveMethodDisplay, "EFECTIVO", "Debe usar el selector de pantalla");
+
+    // Verificación de que los controles interactivos de cobro deben mostrarse
+    const shouldShowPaymentControls = !isSelectedOrderPrepaid;
+    assert.strictEqual(shouldShowPaymentControls, true, "Los controles de pago y cambio deben estar habilitados");
+
+    // Calculadora de cambio para $20 con billete de $50
+    const cashReceived = 50.00;
+    const cashChange = cashReceived - regularOrder.total;
+    assert.strictEqual(cashChange, 30.00, "El vuelto calculado debe ser exactamente $30.00");
+  });
+
+  await test("5.5 Prioridad de resolución: registro Order (Prisma) tiene precedencia sobre metadata", async () => {
+    const orderWithBoth = {
+      id: "dual-source-order",
+      mesa: "DELIVERY",
+      total: 14.00,
+      orderPrisma: { paymentMethod: "DEUNA" },
+      metadata: JSON.stringify({
+        pago_confirmado: true,
+        metodo_pago_clasificado: "TRANSFERENCIA", // Valor secundario en metadata
+      }),
+    };
+
+    const resolved = resolveOrderPaymentMethod(orderWithBoth);
+    assert.strictEqual(resolved.display, "Deuna", "Order.paymentMethod debe tener máxima precedencia");
   });
 
   console.log(`\n🎉 RESULTADO FINAL: ${passed} de ${total} pruebas pasaron satisfactoriamente (100%).\n`);

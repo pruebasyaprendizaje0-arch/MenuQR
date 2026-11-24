@@ -11,6 +11,7 @@ import { verifyKdsDispatchToken, signTableSessionToken, verifyTableSessionToken 
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { verifyOrderStaffAuth, verifyTableSessionAuth, extractTableToken, TableAuthContext } from "@/lib/order-auth";
 import { cookies } from "next/headers";
+import { __testDispatchHooks } from "@/lib/caja-test-hooks";
 
 export const dynamic = "force-dynamic";
 
@@ -159,7 +160,11 @@ export async function GET(req: NextRequest) {
 
     // Reconciliador pasivo: asegura que pedidos web pendientes se sincronicen a KDS
     for (const vNegId of validNegocioIds) {
-      void reconcileUndispatchedOrders(vNegId);
+      try {
+        await reconcileUndispatchedOrders(vNegId);
+      } catch (e) {
+        console.warn("[GET /api/pedidos] Error en recuperador pasivo:", e);
+      }
     }
 
     const targetIdsArray = Array.from(validNegocioIds);
@@ -389,6 +394,94 @@ interface ResponseOrder {
   camarero_nombre?: string | null;
   items?: InsertedOrderItem[] | unknown[];
   [key: string]: unknown;
+}
+
+/**
+ * Conciliación estricta de identidad para reintentos de despacho en /api/pedidos.
+ * - Elimina la asociación por existingItems[i] y la elección del primer origen disponible.
+ * - No asume ordenación, nombre/precio/notas ni heurísticas.
+ * - Conserva vínculos existentes (sourcePedidoItemId ya asignado).
+ * - Repara vínculos ausentes (sourcePedidoItemId == null) ÚNICAMENTE ante identidad explícita y validada del mismo pedido/negocio.
+ * - Un origen no puede asignarse a dos líneas (máximo un uso por fila de pedido_items).
+ * - Si no hay evidencia suficiente para reparar, persiste UNRESOLVED en la base de datos y marca el despacho como incompleto.
+ */
+async function reconcileRetryLinks(
+  client: any,
+  explicitOrderId: string,
+  authoritativeOrderItems: any[],
+  existingPgItems: any[],
+  requestItems: any[]
+): Promise<{
+  allReconciled: boolean;
+  unresolvedCount: number;
+  repairedCount: number;
+  unresolvedItemIds: string[];
+}> {
+  // 1. Conservar vínculos existentes y registrar orígenes ya reclamados
+  const claimedSourceIds = new Set<string>();
+  for (const oi of authoritativeOrderItems) {
+    if (oi.sourcePedidoItemId) {
+      claimedSourceIds.add(String(oi.sourcePedidoItemId));
+    }
+  }
+
+  // 2. Extraer identidad explícita y validada provista en la petición
+  // La correspondencia debe ser 1:1, inequívoca y comprobada contra existingPgItems
+  const explicitReqMap = new Map<string, string>();
+  const reqItemsList = Array.isArray(requestItems) ? requestItems : [];
+  for (const reqIt of reqItemsList) {
+    const targetOid = reqIt.orderItemId || reqIt.id;
+    const targetSid = reqIt.sourcePedidoItemId || reqIt.pedidoItemId || reqIt.originId || reqIt.sourceId;
+    if (targetOid && targetSid) {
+      const sIdStr = String(targetSid);
+      // Validar que el origen pertenece estrictamente a las filas de este pedido en PostgreSQL
+      const existsInPg = existingPgItems.some((e: any) => String(e.id) === sIdStr);
+      if (existsInPg) {
+        // Un origen no puede asignarse a dos líneas
+        if (!claimedSourceIds.has(sIdStr) && !Array.from(explicitReqMap.values()).includes(sIdStr)) {
+          explicitReqMap.set(String(targetOid), sIdStr);
+        }
+      }
+    }
+  }
+
+  // 3. Procesar líneas no vinculadas (sourcePedidoItemId == null)
+  const unlinked = authoritativeOrderItems.filter((i: any) => !i.sourcePedidoItemId);
+  let unresolvedCount = 0;
+  let repairedCount = 0;
+  const unresolvedItemIds: string[] = [];
+
+  for (const uItem of unlinked) {
+    const explicitSid = explicitReqMap.get(String(uItem.id));
+    if (explicitSid && !claimedSourceIds.has(explicitSid)) {
+      // Reparar con identidad explícita y validada
+      claimedSourceIds.add(explicitSid);
+      repairedCount++;
+      await client.query(
+        `UPDATE "OrderItem"
+         SET "sourcePedidoItemId" = $1, "lineStatus" = 'ACTIVE'
+         WHERE id = $2 AND "sourcePedidoItemId" IS NULL`,
+        [explicitSid, uItem.id]
+      );
+    } else {
+      // Sin evidencia suficiente para reparar: persistir UNRESOLVED en la base de datos
+      unresolvedCount++;
+      unresolvedItemIds.push(String(uItem.id));
+      await client.query(
+        `UPDATE "OrderItem"
+         SET "lineStatus" = 'UNRESOLVED'
+         WHERE id = $1 AND "sourcePedidoItemId" IS NULL`,
+        [uItem.id]
+      );
+    }
+  }
+
+  return {
+    allReconciled: unresolvedCount === 0,
+    unresolvedCount,
+    repairedCount,
+    unresolvedItemIds,
+  };
 }
 
 // POST /api/pedidos - Endpoint unificado para procesar pedidos/solicitudes de todas las verticales
@@ -624,7 +717,8 @@ export async function POST(req: NextRequest) {
         }
 
         // Deducción y validación atómica universal de stock en Prisma (si no fue deducido previamente en createOrderAction)
-        if (!skip_stock_deduction && (restaurantPrismaId || businessSlug || resolvedNegocioId)) {
+        const shouldSkipStockDeduction = Boolean(skip_stock_deduction || explicitOrderId);
+        if (!shouldSkipStockDeduction && (restaurantPrismaId || businessSlug || resolvedNegocioId)) {
           const deductTarget = restaurantPrismaId || businessSlug || resolvedNegocioId!;
           const deductRes = await deductStockUniversal(
             deductTarget,
@@ -729,9 +823,27 @@ export async function POST(req: NextRequest) {
           };
         };
 
+        // Si viene explicitOrderId (despacho desde comanda MenuClient/Prisma), cargar la orden autoritativa
+        let authoritativeOrder: any = null;
+        if (explicitOrderId) {
+          authoritativeOrder = await prisma.order.findUnique({
+            where: { id: explicitOrderId },
+            include: { items: true },
+          });
+
+          if (!authoritativeOrder || (authoritativeOrder.restaurantId !== resolvedNegocioId && authoritativeOrder.restaurantId !== restaurantPrismaId)) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              { ok: false, error: "Orden autoritativa no encontrada para el restaurante especificado." },
+              { status: 404 }
+            );
+          }
+        }
+
         // Cada comensal o grupo abre su propia comanda independiente en la mesa (mesas compartidas).
         // Las rondas se añaden y acumulan de forma estricta según el ID de comanda autorizada (targetPedidoId o explicitOrderId).
-        const targetComandaId = targetPedidoId || (isRoundReq ? explicitOrderId : null);
+        // Si la orden es autoritativa de Prisma, fluye hacia la conciliación autoritativa transaccional.
+        const targetComandaId = authoritativeOrder ? null : (targetPedidoId || (isRoundReq ? explicitOrderId : null));
         let existingOrders: any[] = [];
 
         if (targetComandaId) {
@@ -994,23 +1106,7 @@ export async function POST(req: NextRequest) {
             pago_estado: exigePrepagoPolicy ? "pendiente_prepago" : "pendiente",
           };
 
-          let authoritativeOrder: any = null;
-
-          if (explicitOrderId) {
-            // Cargar comanda autoritativa desde Prisma Order
-            authoritativeOrder = await prisma.order.findUnique({
-              where: { id: explicitOrderId },
-              include: { items: true },
-            });
-
-            if (!authoritativeOrder || (authoritativeOrder.restaurantId !== resolvedNegocioId && authoritativeOrder.restaurantId !== restaurantPrismaId)) {
-              await client.query("ROLLBACK");
-              return NextResponse.json(
-                { ok: false, error: "Orden autoritativa no encontrada para el restaurante especificado." },
-                { status: 404 }
-              );
-            }
-
+          if (authoritativeOrder) {
             // Totales siempre autoritativos del servidor
             orderTotal = authoritativeOrder.total;
             metaObj.subtotal = typeof authoritativeOrder.subtotal === "number" ? authoritativeOrder.subtotal : metaObj.subtotal;
@@ -1085,20 +1181,94 @@ export async function POST(req: NextRequest) {
                     [explicitOrderId]
                   );
                   insertedItems = existingItems;
+
+                  // Conciliación estricta de identidad en reintento de ronda ya procesada
+                  const reconcileRes = await reconcileRetryLinks(
+                    client,
+                    explicitOrderId,
+                    authoritativeOrder.items || [],
+                    existingItems,
+                    items
+                  );
+
+                  if (!reconcileRes.allReconciled) {
+                    // Despacho incompleto: marcar kdsDispatched = false
+                    await client.query(
+                      `UPDATE "Order"
+                       SET "kdsDispatched" = false, "updatedAt" = NOW()
+                       WHERE id = $1`,
+                      [createdOrderId]
+                    );
+                    await client.query("COMMIT");
+                    return NextResponse.json(
+                      {
+                        ok: false,
+                        error: "Conciliación pendiente: existen líneas no conciliadas (UNRESOLVED) sin correspondencia explícita verificada.",
+                        pendingReconciliation: true,
+                        isConflictRetry: true,
+                        orderId: createdOrderId,
+                        unresolvedItemIds: reconcileRes.unresolvedItemIds,
+                      },
+                      { status: 409 }
+                    );
+                  }
+
+                  await client.query(
+                    `UPDATE "Order"
+                     SET "kdsDispatched" = true, "updatedAt" = NOW()
+                     WHERE id = $1`,
+                    [createdOrderId]
+                  );
                 } else {
-                  // Insertar los platos de la ronda en pedido_items como añadidos
-                  for (const it of items) {
-                    const cantidad = parseInt(it.cantidad) || 1;
-                    const precio = parseFloat(it.precio) || 0;
-                    const notasItem = it.notas || null;
+                  // Identificar ítems de la ronda autoritativa que aún no tienen sourcePedidoItemId
+                  const undispatchedRoundItems = (authoritativeOrder.items || []).filter((i: any) => !i.sourcePedidoItemId);
+
+                  // Mapear cada ítem a insertar con su OrderItem.id correspondiente
+                  let roundItemIndex = 0;
+                  const itemsToInsert = undispatchedRoundItems.length > 0
+                    ? undispatchedRoundItems
+                    : (Array.isArray(items) ? items : []).map((it: any) => ({
+                        id: it.orderItemId || it.id || null,
+                        dishName: it.nombre || it.dishName,
+                        quantity: parseInt(it.cantidad) || 1,
+                        price: parseFloat(it.precio) || 0,
+                        notes: it.notas || null,
+                      }));
+
+                  for (const it of itemsToInsert) {
+                    roundItemIndex++;
+                    const targetOrderItemId = it.id || (items[roundItemIndex - 1]?.orderItemId) || (undispatchedRoundItems[roundItemIndex - 1]?.id);
+
+                    if (process.env.NODE_ENV === "test" && __testDispatchHooks.beforeItemInsert) {
+                      await __testDispatchHooks.beforeItemInsert(roundItemIndex, targetOrderItemId);
+                    }
+
+                    const cantidad = it.quantity || parseInt(it.cantidad) || 1;
+                    const precio = typeof it.price === "number" ? it.price : (parseFloat(it.precio) || 0);
+                    const notasItem = it.notes || null;
 
                     const { rows: itemRows } = await client.query(
                       `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
                        VALUES ($1, $2, $3, $4, $5, true, 'nuevo')
                        RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-                      [createdOrderId, it.nombre || it.dishName, cantidad, precio, notasItem]
+                      [createdOrderId, it.dishName || it.nombre, cantidad, precio, notasItem]
                     );
-                    insertedItems.push(itemRows[0]);
+                    const insertedPi = itemRows[0];
+                    insertedItems.push(insertedPi);
+
+                    if (process.env.NODE_ENV === "test" && __testDispatchHooks.afterItemInsert) {
+                      await __testDispatchHooks.afterItemInsert(roundItemIndex, targetOrderItemId, String(insertedPi.id));
+                    }
+
+                    // Vínculo explícito atómico en la MISMA transacción de PostgreSQL
+                    if (targetOrderItemId) {
+                      await client.query(
+                        `UPDATE "OrderItem"
+                         SET "sourcePedidoItemId" = $1, "lineStatus" = 'ACTIVE'
+                         WHERE id = $2`,
+                        [String(insertedPi.id), targetOrderItemId]
+                      );
+                    }
                   }
 
                   const updatedMeta = {
@@ -1117,6 +1287,14 @@ export async function POST(req: NextRequest) {
                     [authoritativeOrder.total, JSON.stringify(updatedMeta), createdOrderId]
                   );
                   newOrderRows = updatedRows;
+
+                  // Actualizar kdsDispatched en "Order" en la MISMA transacción
+                  await client.query(
+                    `UPDATE "Order"
+                     SET "kdsDispatched" = true, "updatedAt" = NOW()
+                     WHERE id = $1`,
+                    [createdOrderId]
+                  );
                 }
               } else {
                 // Conflicto de idempotencia detectado: el pedido ya existe en pedidos
@@ -1128,13 +1306,58 @@ export async function POST(req: NextRequest) {
                   [explicitOrderId]
                 );
                 insertedItems = existingItems;
+
+                // Conciliación estricta de identidad en reintento de pedido inicial
+                const reconcileRes = await reconcileRetryLinks(
+                  client,
+                  explicitOrderId,
+                  authoritativeOrder.items || [],
+                  existingItems,
+                  items
+                );
+
+                if (!reconcileRes.allReconciled) {
+                  // Despacho incompleto: marcar kdsDispatched = false
+                  await client.query(
+                    `UPDATE "Order"
+                     SET "kdsDispatched" = false, "updatedAt" = NOW()
+                     WHERE id = $1`,
+                    [createdOrderId]
+                  );
+                  await client.query("COMMIT");
+                  return NextResponse.json(
+                    {
+                      ok: false,
+                      error: "Conciliación pendiente: existen líneas no conciliadas (UNRESOLVED) sin correspondencia explícita verificada.",
+                      pendingReconciliation: true,
+                      isConflictRetry: true,
+                      orderId: createdOrderId,
+                      unresolvedItemIds: reconcileRes.unresolvedItemIds,
+                    },
+                    { status: 409 }
+                  );
+                }
+
+                await client.query(
+                  `UPDATE "Order"
+                   SET "kdsDispatched" = true, "updatedAt" = NOW()
+                   WHERE id = $1`,
+                  [createdOrderId]
+                );
               }
             } else {
               newOrderRows = insertRes.rows;
               createdOrderId = newOrderRows[0].id;
 
               // Insertar ítems desde la orden autoritativa (con notas y precios de servidor)
+              // y vincular atómicamente cada OrderItem en la MISMA transacción de PostgreSQL
+              let itemIdx = 0;
               for (const it of authoritativeOrder.items) {
+                itemIdx++;
+                if (process.env.NODE_ENV === "test" && __testDispatchHooks.beforeItemInsert) {
+                  await __testDispatchHooks.beforeItemInsert(itemIdx, it.id);
+                }
+
                 const cantidad = it.quantity || 1;
                 const precio = it.price || 0;
                 const notasItem = it.notes || null;
@@ -1145,8 +1368,29 @@ export async function POST(req: NextRequest) {
                    RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
                   [createdOrderId, it.dishName, cantidad, precio, notasItem]
                 );
-                insertedItems.push(itemRows[0]);
+                const insertedPi = itemRows[0];
+                insertedItems.push(insertedPi);
+
+                if (process.env.NODE_ENV === "test" && __testDispatchHooks.afterItemInsert) {
+                  await __testDispatchHooks.afterItemInsert(itemIdx, it.id, String(insertedPi.id));
+                }
+
+                // Vínculo atómico en la MISMA transacción PostgreSQL
+                await client.query(
+                  `UPDATE "OrderItem"
+                   SET "sourcePedidoItemId" = $1, "lineStatus" = 'ACTIVE'
+                   WHERE id = $2`,
+                  [String(insertedPi.id), it.id]
+                );
               }
+
+              // Marcar kdsDispatched dentro de la MISMA transacción
+              await client.query(
+                `UPDATE "Order"
+                 SET "kdsDispatched" = true, "updatedAt" = NOW()
+                 WHERE id = $1`,
+                [createdOrderId]
+              );
             }
           } else {
             // Flujo normal nativo (Catálogo o comanda sin orden previa)
@@ -1182,16 +1426,6 @@ export async function POST(req: NextRequest) {
           }
 
           await client.query("COMMIT");
-
-          // Si el pedido provenía de Prisma Order, marcar kdsDispatched: true
-          if (authoritativeOrder) {
-            try {
-              await prisma.order.update({
-                where: { id: createdOrderId },
-                data: { kdsDispatched: true },
-              });
-            } catch {}
-          }
 
           let camareroNombre = "Sin camarero";
           if (finalCamareroId) {

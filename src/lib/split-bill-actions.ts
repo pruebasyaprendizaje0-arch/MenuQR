@@ -64,8 +64,13 @@ function safe(value: any) {
 
   // Build a Set of item IDs that belong ONLY to active orders in current visit.
   // Allocations from older/paid orders must NOT count against the current pending balance.
+  // Solo líneas ACTIVE participan en el reparto/split bill; CANCELLED y UNRESOLVED quedan excluidas.
   const activeItemIds = new Set<string>(
-    activeSessionOrders.flatMap((x: any) => (x.order.items || []).map((i: any) => i.id))
+    activeSessionOrders.flatMap((x: any) =>
+      (x.order.items || [])
+        .filter((i: any) => !i.lineStatus || i.lineStatus === "ACTIVE")
+        .map((i: any) => i.id)
+    )
   );
 
   // Map allocations — only COMPLETED payments reduce the pending balance.
@@ -88,7 +93,9 @@ function safe(value: any) {
   const orders = activeSessionOrders.map((x: any) => ({
     id: x.order.id,
     status: x.order.status,
-    items: (x.order.items || []).map((i: any) => {
+    items: (x.order.items || [])
+      .filter((i: any) => !i.lineStatus || i.lineStatus === "ACTIVE")
+      .map((i: any) => {
       const allocated = allocatedMap.get(i.id) || 0;
       const remainingQuantity = Math.max(0, i.quantity - allocated);
       return {
@@ -257,6 +264,15 @@ export async function calculateEqualSplitAction(restaurantId: string, tableSessi
   try {
     const s = await session(tableSessionId, restaurantId);
     if (!Number.isInteger(people) || people < 2 || people > 50) return { error: "El número de personas debe estar entre 2 y 50." };
+
+    // Bloqueo estricto si la mesa contiene pedidos con líneas no conciliadas (UNRESOLVED)
+    const hasUnresolved = (s.orders || []).some((x: any) =>
+      (x.order?.items || []).some((i: any) => i.lineStatus === "UNRESOLVED")
+    );
+    if (hasUnresolved) {
+      return { error: "La mesa contiene pedidos con líneas no conciliadas (UNRESOLVED). Debe conciliarse antes de calcular o solicitar el reparto." };
+    }
+
     const safeData = safe(s);
     const pending = cents(safeData.pendingAmount);
     if (pending <= 0) return { error: "La cuenta ya está pagada." };
@@ -272,6 +288,15 @@ export async function calculateEqualSplitAction(restaurantId: string, tableSessi
 async function productCalc(restaurantId: string, tableSessionId: string, selections: SelectedItem[]) {
   const s = await session(tableSessionId, restaurantId);
   if (!selections?.length) throw new Error("Debes seleccionar al menos un producto.");
+
+  // Bloqueo estricto si alguna orden activa de la mesa contiene líneas no conciliadas (UNRESOLVED)
+  const hasUnresolved = (s.orders || []).some((x: any) =>
+    (x.order?.items || []).some((i: any) => i.lineStatus === "UNRESOLVED")
+  );
+  if (hasUnresolved) {
+    throw new Error("La comanda contiene líneas no conciliadas (UNRESOLVED). Resuelva la ambigüedad antes de repartir o cobrar la cuenta.");
+  }
+
   const safeData = safe(s);
   // Only COMPLETED allocations block item quantities — PENDING payments do not reserve items.
   const allocations = await prisma.tableSplitAllocation.findMany({
@@ -289,6 +314,9 @@ async function productCalc(restaurantId: string, tableSessionId: string, selecti
   for (const pick of selections) {
     const found = lookup.get(pick.orderItemId);
     if (!found || !Number.isInteger(pick.quantity) || pick.quantity < 1) throw new Error("Producto inválido.");
+    if (found.i.lineStatus === "CANCELLED" || found.i.lineStatus === "UNRESOLVED") {
+      throw new Error(`El producto ${found.i.dishName} está ${found.i.lineStatus === "CANCELLED" ? "cancelado" : "no conciliado"} y no puede repartirse ni cobrarse.`);
+    }
     if (pick.quantity > found.i.quantity - (used.get(pick.orderItemId) || 0)) throw new Error(`No quedan suficientes unidades de ${found.i.dishName}.`);
     const ratio = (found.i.price * pick.quantity) / (found.o.subtotal || 1);
     const part = {

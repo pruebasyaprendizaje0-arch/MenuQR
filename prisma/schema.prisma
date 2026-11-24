@@ -349,16 +349,19 @@ model Order {
 }
 
 model OrderItem {
-  id        String   @id @default(uuid())
-  orderId   String
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  splitAllocations TableSplitAllocation[]
-  dishName  String
-  price     Float
-  quantity  Int
-  notes     String?
+  id                 String   @id @default(uuid())
+  orderId            String
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  splitAllocations   TableSplitAllocation[]
+  dishName           String
+  price              Float
+  quantity           Int
+  notes              String?
+  sourcePedidoItemId String?  @unique
+  lineStatus         String   @default("ACTIVE") // ACTIVE, CANCELLED, UNRESOLVED
 
   @@index([orderId])
+  @@index([lineStatus])
 }
 
 model Lead {
