@@ -353,6 +353,8 @@ model OrderItem {
   orderId            String
   order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   splitAllocations   TableSplitAllocation[]
+  dishId             String?
+  unitsDeducted      Int?
   dishName           String
   price              Float
   quantity           Int
@@ -362,6 +364,7 @@ model OrderItem {
 
   @@index([orderId])
   @@index([lineStatus])
+  @@index([dishId])
 }
 
 model Lead {

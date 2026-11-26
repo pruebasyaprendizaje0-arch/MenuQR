@@ -1,5 +1,12 @@
 import { prisma } from "./db";
 import { pool } from "./db-pool";
+import {
+  computeSyncCreateTotals,
+  computeSyncUpdateTotals,
+  extractPricingSnapshot,
+  buildMirrorPaymentDetails,
+  buildReconciledPedidoMetadata,
+} from "./order-pricing";
 
 /**
  * Hooks de sincronización para pruebas controladas de concurrencia e intercalado.
@@ -76,10 +83,14 @@ export function mapPedidoEstadoToPrismaStatus(estado: string | null | undefined)
 export interface RawPedidoItem {
   id: string;
   nombre?: string;
+  producto_id?: string | null;
+  dishId?: string | null;
   cantidad?: number | string;
   precio?: number | string;
   notas?: string | null;
   estado_item?: string | null;
+  unidades_descontadas?: number | null;
+  unitsDeducted?: number | null;
 }
 
 /**
@@ -137,6 +148,8 @@ export async function reconcileOrderItems(
 
   const itemsToCreate: Array<{
     dishName: string;
+    dishId?: string | null;
+    unitsDeducted?: number | null;
     price: number;
     quantity: number;
     notes: string | null;
@@ -149,6 +162,8 @@ export async function reconcileOrderItems(
     quantity: number;
     lineStatus: string;
     sourcePedidoItemId?: string | null;
+    dishId?: string | null;
+    unitsDeducted?: number | null;
   }> = [];
 
   // FASE 1: Coincidencia inequívoca por sourcePedidoItemId ya enlazado previamente (o coincidencia directa de ID)
@@ -167,6 +182,8 @@ export async function reconcileOrderItems(
         quantity: targetQty,
         lineStatus: targetStatus,
         sourcePedidoItemId: it.id,
+        dishId: it.producto_id || directMatch.dishId || null,
+        unitsDeducted: typeof it.unidades_descontadas === "number" ? it.unidades_descontadas : (typeof directMatch.unitsDeducted === "number" ? directMatch.unitsDeducted : null),
       });
     }
   }
@@ -228,6 +245,8 @@ export async function reconcileOrderItems(
             quantity: e.quantity,
             lineStatus: targetStatus,
             sourcePedidoItemId: it.id,
+            dishId: it.producto_id || e.dishId || null,
+            unitsDeducted: typeof it.unidades_descontadas === "number" ? it.unidades_descontadas : (typeof e.unitsDeducted === "number" ? e.unitsDeducted : null),
           });
         }
       } else {
@@ -269,6 +288,8 @@ export async function reconcileOrderItems(
     matchedOriginIds.add(it.id);
     itemsToCreate.push({
       dishName: it.nombre || "Producto",
+      dishId: it.producto_id || it.dishId || null,
+      unitsDeducted: typeof it.unidades_descontadas === "number" ? it.unidades_descontadas : (typeof it.unitsDeducted === "number" ? it.unitsDeducted : null),
       price: Number(it.precio) || 0,
       quantity: parseInt(String(it.cantidad)) || 1,
       notes: it.notas || null,
@@ -277,7 +298,8 @@ export async function reconcileOrderItems(
     });
   }
 
-  // Ejecutar updates
+  // Ejecutar updates en orden canónico por ID para prevenir deadlocks (40P01)
+  itemsToUpdate.sort((a, b) => a.id.localeCompare(b.id));
   for (const up of itemsToUpdate) {
     await tx.orderItem.update({
       where: { id: up.id },
@@ -285,6 +307,8 @@ export async function reconcileOrderItems(
         quantity: up.quantity,
         lineStatus: up.lineStatus,
         ...(up.sourcePedidoItemId ? { sourcePedidoItemId: up.sourcePedidoItemId } : {}),
+        ...(up.dishId ? { dishId: up.dishId } : {}),
+        ...(typeof up.unitsDeducted === "number" ? { unitsDeducted: up.unitsDeducted } : {}),
       },
     });
   }
@@ -296,6 +320,8 @@ export async function reconcileOrderItems(
         data: {
           orderId,
           dishName: c.dishName,
+          dishId: c.dishId ?? null,
+          unitsDeducted: typeof c.unitsDeducted === "number" ? c.unitsDeducted : null,
           price: c.price,
           quantity: c.quantity,
           notes: c.notes,
@@ -326,12 +352,14 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
               json_agg(
                 json_build_object(
                   'id', pi.id,
+                  'producto_id', pi.producto_id,
                   'nombre', pi.nombre,
                   'cantidad', pi.cantidad,
                   'precio', pi.precio,
                   'notas', pi.notas,
                   'es_añadido', pi.es_añadido,
-                  'estado_item', pi.estado_item
+                  'estado_item', pi.estado_item,
+                  'unidades_descontadas', pi.unidades_descontadas
                 ) ORDER BY pi.id
               ) FILTER (WHERE pi.id IS NOT NULL) as items
        FROM pedidos p
@@ -367,13 +395,31 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     });
     if (!rest) return;
 
+    // Comprobación inicial de existencia fuera de transacción
+    const initialCheck = await prisma.order.findUnique({
+      where: { id: p.id },
+      select: { id: true, restaurantId: true, isTest: true },
+    });
+
     const pTable = p.mesa
       ? p.mesa.toLowerCase().includes("mesa") || p.mesa.toLowerCase().includes("delivery")
         ? p.mesa
         : `Mesa ${p.mesa}`
       : "Mesa";
 
-    const isTestOrder = rest.testMode ? true : (typeof p.es_prueba === "boolean" ? p.es_prueba : false);
+    let isTestOrder: boolean;
+    if (initialCheck && typeof (initialCheck as any).isTest === "boolean") {
+      // Si existe un espejo con origen conocido, consérvalo
+      if (typeof p.es_prueba === "boolean" && p.es_prueba !== (initialCheck as any).isTest) {
+        console.warn(`[syncSinglePedidoToPrisma] Conflicto de marcado en pedido ${p.id}: pedidos.es_prueba (${p.es_prueba}) != Order.isTest (${(initialCheck as any).isTest}). Se conserva el origen del espejo conocido.`);
+      }
+      isTestOrder = (initialCheck as any).isTest;
+    } else if (typeof p.es_prueba === "boolean") {
+      isTestOrder = p.es_prueba;
+    } else {
+      console.warn(`[syncSinglePedidoToPrisma] Origen de pedido ${p.id} desconocido (es_prueba null y sin espejo con origen conocido); se deja pendiente sin crear clasificación inventada.`);
+      return;
+    }
 
     const rawItems = Array.isArray(p.items) ? p.items : [];
     const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
@@ -392,37 +438,24 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
       0
     );
     const isTableOrder = !pTable.toLowerCase().includes("delivery") && !pTable.toLowerCase().includes("llevar");
-    const ivaIncluded = rest.ivaOnTable === false
-      ? false
-      : (isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true));
-    const serviceIncluded = rest.serviceOnTable === false
-      ? false
-      : (isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false));
-
-    const subtotalCents = Math.round(itemsSubtotal * 100);
-    const calcIva = (itemsToSave.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
-      ? Math.round(subtotalCents * (rest.ivaPercent / 100)) / 100
-      : 0;
-    const calcService = (itemsToSave.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
-      ? Math.round(subtotalCents * (rest.servicePercent / 100)) / 100
-      : 0;
     const deliveryCost = isOrderCancelled ? 0 : (typeof meta?.costo_envio === "number" ? meta.costo_envio : 0);
-
     const hasCancelledItems = validItems.length < rawItems.length;
-    const subtotalFinal = (isOrderCancelled || hasCancelledItems)
-      ? itemsSubtotal
-      : (typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal);
-    const ivaFinal = (isOrderCancelled || hasCancelledItems)
-      ? calcIva
-      : (typeof meta?.iva === "number" ? meta.iva : calcIva);
-    const serviceFinal = (isOrderCancelled || hasCancelledItems)
-      ? calcService
-      : (typeof meta?.service_charge === "number" ? meta.service_charge : calcService);
-    const pTotal = isOrderCancelled
-      ? 0
-      : (hasCancelledItems
-          ? Math.round((subtotalFinal + ivaFinal + serviceFinal + deliveryCost) * 100) / 100
-          : (Number(p.total) || 0));
+    const createTotals = computeSyncCreateTotals({
+      itemsSubtotal,
+      isTableOrder,
+      config: rest,
+      isOrderCancelled,
+      hasCancelledItems,
+      hasActiveItems: itemsToSave.length > 0,
+      deliveryCost,
+      meta,
+      originTotal: Number(p.total) || 0,
+    });
+    const subtotalFinal = createTotals.subtotal;
+    const ivaFinal = createTotals.iva;
+    const serviceFinal = createTotals.serviceCharge;
+    const pTotal = createTotals.total;
+    const createPaymentDetails = buildMirrorPaymentDetails(null, meta, createTotals.snapshot);
 
     // Verificar si el pedido ya fue cobrado y cuenta con cash_shift_id explícito en metadata para este restaurante
     let shiftIdToAssign: string | null = null;
@@ -441,12 +474,6 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
       __testOrderSyncHooks.singleSyncHookCount++;
       await __testOrderSyncHooks.beforeSingleSyncLock(p.id);
     }
-
-    // Comprobación inicial de existencia fuera de transacción
-    const initialCheck = await prisma.order.findUnique({
-      where: { id: p.id },
-      select: { id: true, restaurantId: true },
-    });
 
     if (!initialCheck) {
       if (process.env.NODE_ENV === "test" && __testOrderSyncHooks.beforeCreateOrderAttempt) {
@@ -468,15 +495,20 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
             iva: ivaFinal,
             serviceCharge: serviceFinal,
             deliveryCost: deliveryCost,
-            tip: 0.0,
+            discountAmount: createTotals.discountAmount,
+            seasonRateAmount: createTotals.seasonRateAmount,
+            tip: createTotals.tip,
             total: pTotal,
             paymentMethod: p.metodo_pago || "efectivo",
+            ...(createPaymentDetails ? { paymentDetails: createPaymentDetails } : {}),
             isTest: isTestOrder,
             createdAt: new Date(p.created_at || Date.now()),
             items: {
               create: rawItems.map((it: any) => ({
                 id: it.id || undefined,
                 dishName: it.nombre || "Producto",
+                dishId: it.producto_id || it.dishId || null,
+                unitsDeducted: typeof it.unidades_descontadas === "number" ? it.unidades_descontadas : (typeof it.unitsDeducted === "number" ? it.unitsDeducted : null),
                 price: Number(it.precio) || 0,
                 quantity: parseInt(it.cantidad) || 1,
                 notes: it.notas || null,
@@ -500,7 +532,11 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
     }
 
     // 2. Operación Atómica Coherente con Bloqueo FOR UPDATE en una transacción limpia y válida
-    await prisma.$transaction(async (tx) => {
+    let syncAttempt = 0;
+    while (true) {
+      try {
+        syncAttempt++;
+        await prisma.$transaction(async (tx) => {
       // Adquirir bloqueo pesimista FOR UPDATE en Order utilizando únicamente campos reales del esquema
       const lockedOrders = await tx.$queryRaw<Array<{
         id: string;
@@ -515,13 +551,14 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
         serviceCharge: any;
         deliveryCost: any;
         discountAmount: any;
+        seasonRateAmount: any;
         tip: any;
         tableName: string;
         customerName: string | null;
         customerPhone: string | null;
       }>>`
         SELECT id, "restaurantId", "cashShiftId", "status", "paymentMethod", "paymentDetails",
-               total, subtotal, iva, "serviceCharge", "deliveryCost", "discountAmount", tip,
+               total, subtotal, iva, "serviceCharge", "deliveryCost", "discountAmount", "seasonRateAmount", tip,
                "tableName", "customerName", "customerPhone"
         FROM "Order"
         WHERE id = ${p.id}
@@ -588,37 +625,48 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
         (sum: number, it: any) => sum + (Number(it.price) || 0) * (it.quantity || 1),
         0
       );
-      const preservedTip = allCancelled ? 0 : (Number(locked.tip) || 0);
-      const preservedDiscount = allCancelled ? 0 : (Number(locked.discountAmount) || 0);
-      const preservedDelivery = allCancelled ? 0 : (Number(locked.deliveryCost) || 0);
+      const v4Snapshot = extractPricingSnapshot(locked.paymentDetails) ?? extractPricingSnapshot(meta);
+      const preservedTip = (v4Snapshot && allCancelled) ? 0 : (Number(locked.tip) || 0);
+      const preservedDiscount = (v4Snapshot && allCancelled) ? 0 : (Number(locked.discountAmount) || 0);
+      const preservedSeason = (v4Snapshot && allCancelled) ? 0 : (Number(locked.seasonRateAmount) || 0);
+      const preservedDelivery = (v4Snapshot && allCancelled) ? 0 : (Number(locked.deliveryCost) || 0);
 
-      const subtotalCents = Math.round(newItemsSubtotal * 100);
-      const discountCents = Math.round(preservedDiscount * 100);
-      const taxableBaseCents = Math.max(0, subtotalCents - discountCents);
-
-      const calcIvaFinal = (activeItems.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
-        ? Math.round(taxableBaseCents * (rest.ivaPercent / 100)) / 100
-        : 0;
-      const calcServiceFinal = (activeItems.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
-        ? Math.round(taxableBaseCents * (rest.servicePercent / 100)) / 100
-        : 0;
-
-      const updatedTotal = activeItems.length === 0
-        ? 0
-        : Math.round(taxableBaseCents + (calcIvaFinal * 100) + (calcServiceFinal * 100) + Math.round(preservedDelivery * 100) + Math.round(preservedTip * 100)) / 100;
+      const updateTotals = computeSyncUpdateTotals({
+        activeItemsSubtotal: newItemsSubtotal,
+        isTableOrder,
+        config: rest,
+        allCancelled,
+        hasActiveItems: activeItems.length > 0,
+        preservedDiscount,
+        preservedSeason,
+        preservedDelivery,
+        preservedTip,
+        snapshot: v4Snapshot,
+        lockedOrderTotals: {
+          subtotal: Number(locked.subtotal) || 0,
+          iva: Number(locked.iva) || 0,
+          serviceCharge: Number(locked.serviceCharge) || 0,
+          total: Number(locked.total) || 0,
+        },
+      });
+      const calcIvaFinal = updateTotals.iva;
+      const calcServiceFinal = updateTotals.serviceCharge;
+      const updatedTotal = updateTotals.total;
 
       const effectiveStatus = allCancelled ? "CANCELLED" : resolveSafeOrderStatus(locked.status, pStatus);
       const finalShiftId = locked.cashShiftId ?? (shiftIdToAssign ?? null);
+      const updatedPaymentDetails = buildMirrorPaymentDetails(locked.paymentDetails, meta, v4Snapshot);
 
       await tx.order.update({
         where: { id: p.id },
         data: {
           status: effectiveStatus,
-          subtotal: newItemsSubtotal,
+          subtotal: updateTotals.subtotal,
           iva: calcIvaFinal,
           serviceCharge: calcServiceFinal,
           total: updatedTotal,
-          discountAmount: preservedDiscount,
+          discountAmount: updateTotals.discountAmount,
+          ...(updatedPaymentDetails ? { paymentDetails: updatedPaymentDetails } : {}),
           tableName: pTable,
           cashShiftId: finalShiftId,
           customerName: p.cliente_nombre?.trim() || locked.customerName,
@@ -626,6 +674,19 @@ export async function syncSinglePedidoToPrisma(pedidoId: string, restaurantId?: 
         },
       });
     });
+        break;
+      } catch (txErr: any) {
+        const isDeadlock =
+          txErr?.code === "40P01" ||
+          txErr?.message?.includes("deadlock detected") ||
+          txErr?.message?.includes("could not serialize access");
+        if (isDeadlock && syncAttempt < 3) {
+          await new Promise((r) => setTimeout(r, Math.floor(Math.random() * 50) + 25 * syncAttempt));
+          continue;
+        }
+        throw txErr;
+      }
+    }
   } catch (err) {
     console.error("[syncSinglePedidoToPrisma] Error:", err);
     if (process.env.NODE_ENV === "test") {
@@ -660,12 +721,14 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
               json_agg(
                 json_build_object(
                   'id', pi.id,
+                  'producto_id', pi.producto_id,
                   'nombre', pi.nombre,
                   'cantidad', pi.cantidad,
                   'precio', pi.precio,
                   'notas', pi.notas,
                   'es_añadido', pi.es_añadido,
-                  'estado_item', pi.estado_item
+                  'estado_item', pi.estado_item,
+                  'unidades_descontadas', pi.unidades_descontadas
                 ) ORDER BY pi.id
               ) FILTER (WHERE pi.id IS NOT NULL) as items
        FROM pedidos p
@@ -691,7 +754,24 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
           : `Mesa ${p.mesa}`
         : "Mesa";
 
-      const isTestOrder = rest.testMode ? true : (typeof p.es_prueba === "boolean" ? p.es_prueba : false);
+      // Consultar si existe un espejo Order previo con isTest conocido
+      const existingOrder = await prisma.order.findUnique({
+        where: { id: p.id },
+        select: { id: true, isTest: true },
+      });
+
+      let isTestOrder: boolean;
+      if (existingOrder && typeof (existingOrder as any).isTest === "boolean") {
+        if (typeof p.es_prueba === "boolean" && p.es_prueba !== (existingOrder as any).isTest) {
+          console.warn(`[syncPedidosToPrismaOrders] Conflicto de marcado en pedido ${p.id}: pedidos.es_prueba (${p.es_prueba}) != Order.isTest (${(existingOrder as any).isTest}). Se conserva el origen del espejo conocido.`);
+        }
+        isTestOrder = (existingOrder as any).isTest;
+      } else if (typeof p.es_prueba === "boolean") {
+        isTestOrder = p.es_prueba;
+      } else {
+        console.warn(`[syncPedidosToPrismaOrders] Origen de pedido ${p.id} desconocido (es_prueba null y sin espejo con origen conocido); se deja pendiente sin crear clasificación inventada.`);
+        continue;
+      }
 
       const rawItems = Array.isArray(p.items) ? p.items : [];
       const validItems = rawItems.filter((it: any) => it && it.estado_item !== "cancelado");
@@ -710,37 +790,24 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
         0
       );
       const isTableOrder = !pTable.toLowerCase().includes("delivery") && !pTable.toLowerCase().includes("llevar");
-      const ivaIncluded = rest.ivaOnTable === false
-        ? false
-        : (isTableOrder ? (rest.ivaOnTable ?? true) : (rest.ivaOnTakeout ?? true));
-      const serviceIncluded = rest.serviceOnTable === false
-        ? false
-        : (isTableOrder ? (rest.serviceOnTable ?? true) : (rest.serviceOnTakeout ?? false));
-
-      const subtotalCents = Math.round(itemsSubtotal * 100);
-      const calcIva = (itemsToSave.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
-        ? Math.round(subtotalCents * (rest.ivaPercent / 100)) / 100
-        : 0;
-      const calcService = (itemsToSave.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
-        ? Math.round(subtotalCents * (rest.servicePercent / 100)) / 100
-        : 0;
       const deliveryCost = isOrderCancelled ? 0 : (typeof meta?.costo_envio === "number" ? meta.costo_envio : 0);
-
       const hasCancelledItems = validItems.length < rawItems.length;
-      const subtotalFinal = (isOrderCancelled || hasCancelledItems)
-        ? itemsSubtotal
-        : (typeof meta?.subtotal === "number" ? meta.subtotal : itemsSubtotal);
-      const ivaFinal = (isOrderCancelled || hasCancelledItems)
-        ? calcIva
-        : (typeof meta?.iva === "number" ? meta.iva : calcIva);
-      const serviceFinal = (isOrderCancelled || hasCancelledItems)
-        ? calcService
-        : (typeof meta?.service_charge === "number" ? meta.service_charge : calcService);
-      const pTotal = isOrderCancelled
-        ? 0
-        : (hasCancelledItems
-            ? Math.round((subtotalFinal + ivaFinal + serviceFinal + deliveryCost) * 100) / 100
-            : (Number(p.total) || 0));
+      const createTotals = computeSyncCreateTotals({
+        itemsSubtotal,
+        isTableOrder,
+        config: rest,
+        isOrderCancelled,
+        hasCancelledItems,
+        hasActiveItems: itemsToSave.length > 0,
+        deliveryCost,
+        meta,
+        originTotal: Number(p.total) || 0,
+      });
+      const subtotalFinal = createTotals.subtotal;
+      const ivaFinal = createTotals.iva;
+      const serviceFinal = createTotals.serviceCharge;
+      const pTotal = createTotals.total;
+      const createPaymentDetails = buildMirrorPaymentDetails(null, meta, createTotals.snapshot);
 
       let shiftIdToAssign: string | null = null;
       if (meta?.cash_shift_id && typeof meta.cash_shift_id === "string") {
@@ -784,15 +851,20 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
                 iva: ivaFinal,
                 serviceCharge: serviceFinal,
                 deliveryCost: deliveryCost,
-                tip: 0.0,
+                discountAmount: createTotals.discountAmount,
+                seasonRateAmount: createTotals.seasonRateAmount,
+                tip: createTotals.tip,
                 total: pTotal,
                 paymentMethod: p.metodo_pago || "efectivo",
+                ...(createPaymentDetails ? { paymentDetails: createPaymentDetails } : {}),
                 isTest: isTestOrder,
                 createdAt: new Date(p.created_at || Date.now()),
                 items: {
                   create: rawItems.map((it: any) => ({
                     id: it.id || undefined,
                     dishName: it.nombre || "Producto",
+                    dishId: it.producto_id || it.dishId || null,
+                    unitsDeducted: typeof it.unidades_descontadas === "number" ? it.unidades_descontadas : (typeof it.unitsDeducted === "number" ? it.unitsDeducted : null),
                     price: Number(it.precio) || 0,
                     quantity: parseInt(it.cantidad) || 1,
                     notes: it.notas || null,
@@ -831,13 +903,14 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
             serviceCharge: any;
             deliveryCost: any;
             discountAmount: any;
+            seasonRateAmount: any;
             tip: any;
             tableName: string;
             customerName: string | null;
             customerPhone: string | null;
           }>>`
             SELECT id, "restaurantId", "cashShiftId", "status", "paymentMethod", "paymentDetails",
-                   total, subtotal, iva, "serviceCharge", "deliveryCost", "discountAmount", tip,
+                   total, subtotal, iva, "serviceCharge", "deliveryCost", "discountAmount", "seasonRateAmount", tip,
                    "tableName", "customerName", "customerPhone"
             FROM "Order"
             WHERE id = ${p.id}
@@ -896,37 +969,48 @@ export async function syncPedidosToPrismaOrders(restaurantId: string): Promise<n
             (sum: number, it: any) => sum + (Number(it.price) || 0) * (it.quantity || 1),
             0
           );
-          const preservedTip = allCancelled ? 0 : (Number(locked.tip) || 0);
-          const preservedDiscount = allCancelled ? 0 : (Number(locked.discountAmount) || 0);
-          const preservedDelivery = allCancelled ? 0 : (Number(locked.deliveryCost) || 0);
+          const v4Snapshot = extractPricingSnapshot(locked.paymentDetails) ?? extractPricingSnapshot(meta);
+          const preservedTip = (v4Snapshot && allCancelled) ? 0 : (Number(locked.tip) || 0);
+          const preservedDiscount = (v4Snapshot && allCancelled) ? 0 : (Number(locked.discountAmount) || 0);
+          const preservedSeason = (v4Snapshot && allCancelled) ? 0 : (Number(locked.seasonRateAmount) || 0);
+          const preservedDelivery = (v4Snapshot && allCancelled) ? 0 : (Number(locked.deliveryCost) || 0);
 
-          const subtotalCents = Math.round(newItemsSubtotal * 100);
-          const discountCents = Math.round(preservedDiscount * 100);
-          const taxableBaseCents = Math.max(0, subtotalCents - discountCents);
-
-          const calcIvaFinal = (activeItems.length > 0 && rest.ivaPercent > 0 && !ivaIncluded)
-            ? Math.round(taxableBaseCents * (rest.ivaPercent / 100)) / 100
-            : 0;
-          const calcServiceFinal = (activeItems.length > 0 && isTableOrder && rest.servicePercent > 0 && !serviceIncluded)
-            ? Math.round(taxableBaseCents * (rest.servicePercent / 100)) / 100
-            : 0;
-
-          const updatedTotal = activeItems.length === 0
-            ? 0
-            : Math.round(taxableBaseCents + (calcIvaFinal * 100) + (calcServiceFinal * 100) + Math.round(preservedDelivery * 100) + Math.round(preservedTip * 100)) / 100;
+          const updateTotals = computeSyncUpdateTotals({
+            activeItemsSubtotal: newItemsSubtotal,
+            isTableOrder,
+            config: rest,
+            allCancelled,
+            hasActiveItems: activeItems.length > 0,
+            preservedDiscount,
+            preservedSeason,
+            preservedDelivery,
+            preservedTip,
+            snapshot: v4Snapshot,
+            lockedOrderTotals: {
+              subtotal: Number(locked.subtotal) || 0,
+              iva: Number(locked.iva) || 0,
+              serviceCharge: Number(locked.serviceCharge) || 0,
+              total: Number(locked.total) || 0,
+            },
+          });
+          const calcIvaFinal = updateTotals.iva;
+          const calcServiceFinal = updateTotals.serviceCharge;
+          const updatedTotal = updateTotals.total;
 
           const effectiveStatus = allCancelled ? "CANCELLED" : resolveSafeOrderStatus(locked.status, pStatus);
           const finalShiftId = locked.cashShiftId ?? (shiftIdToAssign ?? null);
+          const updatedPaymentDetails = buildMirrorPaymentDetails(locked.paymentDetails, meta, v4Snapshot);
 
           await tx.order.update({
             where: { id: p.id },
             data: {
               status: effectiveStatus,
-              subtotal: newItemsSubtotal,
+              subtotal: updateTotals.subtotal,
               iva: calcIvaFinal,
               serviceCharge: calcServiceFinal,
               total: updatedTotal,
-              discountAmount: preservedDiscount,
+              discountAmount: updateTotals.discountAmount,
+              ...(updatedPaymentDetails ? { paymentDetails: updatedPaymentDetails } : {}),
               tableName: pTable,
               cashShiftId: finalShiftId,
               customerName: p.cliente_nombre?.trim() || locked.customerName,
@@ -1001,33 +1085,66 @@ export async function reconcileUndispatchedOrders(restaurantId: string): Promise
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const metaObj = {
-          tipo_pedido: ord.tableName === "Domicilio" ? "delivery" : ord.tableName === "Llevar" ? "llevar" : "mesa",
-          tipo_entrega: ord.tableName === "Domicilio" ? "DOMICILIO" : ord.tableName === "Llevar" ? "RETIRO" : "SALON",
-          cliente_direccion: ord.customerAddress || null,
-          costo_envio: ord.deliveryCost || 0,
-          subtotal: ord.subtotal,
-          iva: ord.iva,
-          service_charge: ord.serviceCharge,
-          notas_entrega: null,
-          reconciled: true,
-        };
 
-        await client.query(
-          `INSERT INTO pedidos (id, negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
-           VALUES ($1::uuid, $2, $3, NULL, 'nuevo', $4, $5, $6, 'menuqr', $7)
-           ON CONFLICT (id) DO UPDATE SET total = EXCLUDED.total, metadata = EXCLUDED.metadata
-           RETURNING id`,
-          [
-            ord.id,
-            ord.restaurantId,
-            ord.tableName,
-            ord.total,
-            ord.customerName,
-            ord.customerPhone,
-            JSON.stringify(metaObj),
-          ]
+        // Verificar si la comanda ya existe en pedidos de PostgreSQL (conservando metadata existente)
+        const { rows: existingPedRows } = await client.query(
+          `SELECT id, es_prueba, metadata FROM pedidos WHERE id = $1::uuid LIMIT 1`,
+          [ord.id]
         );
+
+        const metaObj = buildReconciledPedidoMetadata(
+          ord,
+          existingPedRows.length > 0 ? existingPedRows[0].metadata : undefined
+        );
+
+        if (existingPedRows.length > 0) {
+          const currentEsPrueba = existingPedRows[0].es_prueba;
+          const orderIsTest = ord.isTest;
+
+          if (currentEsPrueba === null || typeof currentEsPrueba === "undefined" || typeof orderIsTest !== "boolean" || currentEsPrueba !== orderIsTest) {
+            if (currentEsPrueba === null || typeof currentEsPrueba === "undefined" || typeof orderIsTest !== "boolean") {
+              console.warn(
+                `[reconcileUndispatchedOrders] Deteniendo recuperación de orden ${ord.id}: marcado desconocido detectado (pedidos.es_prueba=${currentEsPrueba}, Order.isTest=${orderIsTest}). No se modifican datos ni se marca despacho.`
+              );
+            } else {
+              console.warn(
+                `[reconcileUndispatchedOrders] Deteniendo recuperación de orden ${ord.id}: conflicto de marcado detectado (pedidos.es_prueba=${currentEsPrueba} != Order.isTest=${orderIsTest}). No se modifican datos ni se marca despacho.`
+              );
+            }
+            await client.query("ROLLBACK");
+            continue;
+          }
+
+          await client.query(
+            `UPDATE pedidos SET total = $1, metadata = $2 WHERE id = $3::uuid`,
+            [ord.total, JSON.stringify(metaObj), ord.id]
+          );
+        } else {
+          // Inserción de orden nueva que no existía en pedidos
+          if (typeof ord.isTest !== "boolean") {
+            console.warn(
+              `[reconcileUndispatchedOrders] Deteniendo recuperación de orden ${ord.id}: marcado desconocido en Order (isTest no booleano). No se modifican datos ni se marca despacho.`
+            );
+            await client.query("ROLLBACK");
+            continue;
+          }
+
+          await client.query(
+            `INSERT INTO pedidos (id, negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata, es_prueba)
+             VALUES ($1::uuid, $2, $3, NULL, 'nuevo', $4, $5, $6, 'menuqr', $7, $8)
+             RETURNING id`,
+            [
+              ord.id,
+              ord.restaurantId,
+              ord.tableName,
+              ord.total,
+              ord.customerName,
+              ord.customerPhone,
+              JSON.stringify(metaObj),
+              ord.isTest,
+            ]
+          );
+        }
 
         // Despachar únicamente ítems ACTIVE que aún no tienen sourcePedidoItemId vinculado en PostgreSQL
         const hasExistingDispatched = ord.items.some((it: any) => Boolean(it.sourcePedidoItemId));
@@ -1035,10 +1152,19 @@ export async function reconcileUndispatchedOrders(restaurantId: string): Promise
         for (const it of undispatchedItems) {
           const isAddedRound = hasExistingDispatched;
           const piRes = await client.query(
-            `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-             VALUES ($1, $2, $3, $4, $5, $6, 'nuevo')
+            `INSERT INTO pedido_items (pedido_id, producto_id, nombre, cantidad, precio, notas, es_añadido, estado_item, unidades_descontadas)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'nuevo', $8)
              RETURNING id`,
-            [ord.id, it.dishName, it.quantity, it.price, it.notes || null, isAddedRound]
+            [
+              ord.id,
+              it.dishId || null,
+              it.dishName,
+              it.quantity,
+              it.price,
+              it.notes || null,
+              isAddedRound,
+              typeof it.unitsDeducted === "number" ? it.unitsDeducted : null,
+            ]
           );
 
           if (piRes.rows.length > 0) {

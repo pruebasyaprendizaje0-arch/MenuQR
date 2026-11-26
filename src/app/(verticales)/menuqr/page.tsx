@@ -26,6 +26,8 @@ import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMar
 import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: "MenuQR Pro | Menú Digital QR para Restaurantes, Bares y Cafeterías",
   description:

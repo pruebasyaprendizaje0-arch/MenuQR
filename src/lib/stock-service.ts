@@ -32,13 +32,19 @@ export interface StockDeductResult {
 export async function deductStockUniversal(
   restaurantId: string,
   items: StockDeductItem[],
-  externalTx?: any
+  externalTx?: any,
+  isTest?: boolean
 ): Promise<StockDeductResult> {
   if (!items || items.length === 0) {
     return { success: true, updatedDishes: [] };
   }
 
   const runWithTx = async (tx: any): Promise<StockDeductResult> => {
+    // 0. Determinar si la comanda opera en Modo Demo autorizado resuelto por el servidor
+    // Se limita estrictamente al parámetro resuelto por el servidor; no se deduce automáticamente de Restaurant.testMode
+    // para no alterar el comportamiento de POS, Catálogo u otros llamadores compartidos.
+    const isDemoMode = isTest === true;
+
     // 1. Recolectar IDs y nombres de platos
     const dishIds = items.map((i) => i.dishId).filter(Boolean) as string[];
     const itemNames = items.map((i) => i.name?.trim()).filter(Boolean) as string[];
@@ -113,7 +119,12 @@ export async function deductStockUniversal(
       }
     }
 
-    // 3. FASE 2: Deducción atómica y auto-bloqueo al llegar a 0
+    // 3. FASE 2: Deducción atómica y auto-bloqueo al llegar a 0 (solo en pedidos reales)
+    if (isDemoMode) {
+      // Modo DEMO: Las validaciones de FASE 1 fueron superadas, pero NO se altera stock real ni se emiten consumos ficticios
+      return { success: true, updatedDishes: [] };
+    }
+
     const updatedDishes: StockDeductResult["updatedDishes"] = [];
 
     for (const item of items) {
@@ -175,16 +186,18 @@ export async function deductStockUniversal(
         revalidatePath(`/ctalo/${rest.slug}`);
       }
 
-      // Emisión de Socket.IO para actualizar todas las pantallas conectadas
-      emitStockActualizado(restaurantId, result.updatedDishes);
-      for (const d of result.updatedDishes) {
-        emitProductoActualizado(restaurantId, {
-          id: d.id,
-          name: d.name,
-          stock: d.newStock,
-          isAvailable: d.isAvailable,
-          trackStock: true,
-        });
+      // Emisión de Socket.IO únicamente si hubo productos realmente modificados (evita emisiones espurias de 0 productos)
+      if (result.updatedDishes && result.updatedDishes.length > 0) {
+        emitStockActualizado(restaurantId, result.updatedDishes);
+        for (const d of result.updatedDishes) {
+          emitProductoActualizado(restaurantId, {
+            id: d.id,
+            name: d.name,
+            stock: d.newStock,
+            isAvailable: d.isAvailable,
+            trackStock: true,
+          });
+        }
       }
     } catch (notifyErr) {
       console.warn("[deductStockUniversal] Error en notificaciones no críticas:", notifyErr);

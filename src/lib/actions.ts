@@ -23,6 +23,13 @@ import { saveUploadedFile, deleteUploadedFile } from "@/lib/storage";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { parseDishImages, serializeDishImages } from "@/lib/dish-images";
+import {
+  buildPricingSnapshot,
+  calculateV4OrderTotals,
+  extractPricingSnapshot,
+  attachPricingSnapshot,
+  stripClientPricingFields,
+} from "@/lib/order-pricing";
 import { emitStockActualizado, emitProductoActualizado } from "@/lib/socket-server";
 import { notificarSuperAdmin } from "@/lib/telegramAdmin";
 
@@ -2662,7 +2669,7 @@ export async function createOrderAction(data: {
   }[];
 }) {
   let finalTotal = 0;
-  let verifiedOrderItems: Array<{ dishName: string; price: number; quantity: number; notes?: string | null }> = [];
+  let verifiedOrderItems: Array<{ dishId: string; dishName: string; price: number; quantity: number; notes?: string | null; unitsDeducted: number }> = [];
 
   const areOrderItemsCanonicallyIdentical = (
     reqItems: Array<{ dishName: string; price: number; quantity: number; notes?: string | null }>,
@@ -2819,7 +2826,7 @@ export async function createOrderAction(data: {
         return { error: "Restaurante no encontrado.", errorCode: "INVALID_INPUT" };
       }
 
-      const dishIds = Array.from(new Set(data.items.map((i) => i.dishId).filter(Boolean)));
+      const dishIds = Array.from(new Set(data.items.map((i) => i.dishId).filter(Boolean))).sort();
       if (dishIds.length === 0) {
         return { error: "Los productos del pedido deben incluir un ID de plato válido.", errorCode: "INVALID_INPUT" };
       }
@@ -2830,7 +2837,7 @@ export async function createOrderAction(data: {
       const dishMap = new Map(dbDishes.map((d) => [d.id, d]));
 
       let roundSubtotal = 0;
-      const verifiedRoundItems: Array<{ dishId: string; dishName: string; price: number; quantity: number; notes?: string | null }> = [];
+      const verifiedRoundItems: Array<{ dishId: string; dishName: string; price: number; quantity: number; notes?: string | null; unitsDeducted: number }> = [];
 
       for (const item of data.items) {
         if (
@@ -2852,25 +2859,29 @@ export async function createOrderAction(data: {
           return { error: `El producto "${dbDish.name}" no pertenece a este restaurante.`, errorCode: "INVALID_INPUT" };
         }
 
+        // Availability check (PASO 3)
         if (!dbDish.isAvailable) {
           return { error: `El producto "${dbDish.name}" no está disponible actualmente.`, errorCode: "INVALID_INPUT" };
         }
 
-        if (dbDish.stock === null || dbDish.stock === undefined) {
-          return {
-            error: `No se puede procesar el pedido: El producto "${dbDish.name}" no tiene el stock configurado en el sistema.`,
-            errorCode: "INVALID_INPUT",
-          };
-        }
-        const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
-        if (availableStock <= 0 || !dbDish.isAvailable) {
-          return { error: `El producto "${dbDish.name}" se encuentra agotado.`, errorCode: "INVALID_INPUT" };
-        }
-        if (item.quantity > availableStock) {
-          return {
-            error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
-            errorCode: "INVALID_INPUT",
-          };
+        // Stock check estricto: solo aplica si el producto tiene control de inventario activo (trackStock === true)
+        if (dbDish.trackStock === true) {
+          if (dbDish.stock === null || dbDish.stock === undefined || typeof dbDish.stock !== "number") {
+            return {
+              error: `No se puede procesar el pedido: El producto "${dbDish.name}" no tiene el stock configurado en el sistema.`,
+              errorCode: "INVALID_INPUT",
+            };
+          }
+          const availableStock = dbDish.stock;
+          if (availableStock <= 0 || !dbDish.isAvailable) {
+            return { error: `El producto "${dbDish.name}" se encuentra agotado.`, errorCode: "INVALID_INPUT" };
+          }
+          if (item.quantity > availableStock) {
+            return {
+              error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
+              errorCode: "INVALID_INPUT",
+            };
+          }
         }
 
         let serverPrice = Number(dbDish.price) || 0;
@@ -2895,12 +2906,15 @@ export async function createOrderAction(data: {
           ? `${dbDish.name} [${modifierDetails.join(" · ")}]`
           : dbDish.name;
 
+        const unitsDeducted = (dbDish.trackStock && typeof dbDish.stock === "number") ? item.quantity : 0;
+
         verifiedRoundItems.push({
           dishId: item.dishId,
           dishName: fullDishName,
           price: serverPrice,
           quantity: item.quantity,
           notes: modifierDetails.length > 0 ? modifierDetails.join(" · ") : null,
+          unitsDeducted,
         });
       }
 
@@ -2908,36 +2922,125 @@ export async function createOrderAction(data: {
       const addedSubtotal = roundNum(roundSubtotal);
       const newSubtotal = roundNum(existingComanda.subtotal + addedSubtotal);
 
-      const ivaPercent = restaurant.ivaPercent || 0;
-      const servicePercent = restaurant.servicePercent || 0;
-      const ivaIncluded = restaurant.ivaOnTable ?? false;
-      const serviceIncluded = restaurant.serviceOnTable ?? false;
+      const existingSnapshot = extractPricingSnapshot(roundMeta);
+      let newIva: number;
+      let newService: number;
+      let newTotal: number;
 
-      const baseForTax = newSubtotal;
-      const newIva = (ivaPercent > 0 && !ivaIncluded)
-        ? roundNum(baseForTax * (ivaPercent / 100))
-        : 0;
+      if (existingSnapshot) {
+        const v4Round = calculateV4OrderTotals({
+          itemsSubtotal: newSubtotal,
+          isTable: isTableOrder,
+          snapshot: existingSnapshot,
+          hasActiveItems: true,
+          discountAmount: existingComanda.discountAmount || 0,
+          seasonRateAmount: existingComanda.seasonRateAmount || 0,
+          deliveryCost: existingComanda.deliveryCost || 0,
+          tip: existingComanda.tip || 0,
+        });
+        newIva = v4Round.iva;
+        newService = v4Round.serviceCharge;
+        newTotal = v4Round.total;
+      } else {
+        const ivaPercent = restaurant.ivaPercent || 0;
+        const servicePercent = restaurant.servicePercent || 0;
+        const ivaIncluded = restaurant.ivaOnTable ?? false;
+        const serviceIncluded = restaurant.serviceOnTable ?? false;
 
-      const newService = (isTableOrder && servicePercent > 0 && !serviceIncluded)
-        ? roundNum(baseForTax * (servicePercent / 100))
-        : 0;
+        const baseForTax = newSubtotal;
+        newIva = (ivaPercent > 0 && !ivaIncluded)
+          ? roundNum(baseForTax * (ivaPercent / 100))
+          : 0;
 
-      const newTotal = roundNum(
-        newSubtotal - (existingComanda.discountAmount || 0) + (existingComanda.seasonRateAmount || 0) + newIva + newService + (existingComanda.deliveryCost || 0) + (existingComanda.tip || 0)
-      );
+        newService = (isTableOrder && servicePercent > 0 && !serviceIncluded)
+          ? roundNum(baseForTax * (servicePercent / 100))
+          : 0;
+
+        newTotal = roundNum(
+          newSubtotal - (existingComanda.discountAmount || 0) + (existingComanda.seasonRateAmount || 0) + newIva + newService + (existingComanda.deliveryCost || 0) + (existingComanda.tip || 0)
+        );
+      }
 
       const updatedAttempts = roundKey ? [...existingAttempts, roundKey] : existingAttempts;
       const updatedPaymentDetails = JSON.stringify({
+        ...stripClientPricingFields(roundMeta),
+        ...(existingSnapshot ? { pricing_version: existingSnapshot.pricingVersion, pricing_snapshot: existingSnapshot } : {}),
         details: data.paymentDetails || roundMeta.details || null,
         roundAttempts: updatedAttempts,
       });
 
-      const createdRoundItems: Array<{ id: string; dishName: string; price: number; quantity: number; notes: string | null }> = [];
+      const createdRoundItems: Array<{ id: string; dishId: string | null; unitsDeducted: number | null; dishName: string; price: number; quantity: number; notes: string | null }> = [];
       await prisma.$transaction(async (tx) => {
+        // 1. Bloqueo pesimista canónico y verificación de inventario bajo bloqueo ANTES de insertar ítems
+        const roundQtyByDish = new Map<string, number>();
+        for (const item of data.items) {
+          roundQtyByDish.set(item.dishId, (roundQtyByDish.get(item.dishId) || 0) + item.quantity);
+        }
+        const sortedRoundDishIds = Array.from(roundQtyByDish.keys()).sort();
+
+        const actualDeductedByDish = new Map<string, number>();
+        for (const dishId of sortedRoundDishIds) {
+          const requiredQty = roundQtyByDish.get(dishId) || 0;
+          const lockedDishes: any[] = await tx.$queryRaw`
+            SELECT id, name, stock, "trackStock", "isAvailable", "restaurantId"
+            FROM "Dish"
+            WHERE id = ${dishId}
+            FOR UPDATE
+          `;
+          const freshDish = lockedDishes[0];
+          if (!freshDish) {
+            throw new Error(`Uno o más productos de la ronda no existen.`);
+          }
+          if (freshDish.restaurantId !== data.restaurantId) {
+            throw new Error(`El producto "${freshDish.name}" no pertenece a este restaurante.`);
+          }
+          if (!freshDish.isAvailable) {
+            throw new Error(`El producto "${freshDish.name}" no está disponible actualmente.`);
+          }
+
+          if (freshDish.trackStock === true) {
+            if (freshDish.stock === null || freshDish.stock === undefined || typeof freshDish.stock !== "number") {
+              throw new Error(`El producto "${freshDish.name}" no tiene el stock configurado en el sistema.`);
+            }
+            if (freshDish.stock <= 0) {
+              throw new Error(`El producto "${freshDish.name}" se encuentra agotado.`);
+            }
+            if (freshDish.stock < requiredQty) {
+              throw new Error(
+                `Solo quedan ${freshDish.stock} unidad(es) de "${freshDish.name}". Por favor ajusta la cantidad en tu orden.`
+              );
+            }
+
+            const isTestRound = Boolean(existingComanda.isTest);
+            if (!isTestRound) {
+              const updatedStock = freshDish.stock - requiredQty;
+              await tx.dish.update({
+                where: { id: freshDish.id },
+                data: {
+                  stock: updatedStock,
+                  isAvailable: updatedStock > 0,
+                },
+              });
+              actualDeductedByDish.set(dishId, requiredQty);
+            } else {
+              // Modo DEMO heredado de la comanda padre: no altera existencias ni disponibilidad
+              actualDeductedByDish.set(dishId, 0);
+            }
+          } else {
+            // trackStock === false: producto sin control de inventario (incluso si tiene stock numérico)
+            actualDeductedByDish.set(dishId, 0);
+          }
+        }
+
+        // 2. Insertar OrderItem registrando el descuento REALMENTE ejecutado bajo bloqueo
         for (const it of verifiedRoundItems) {
+          const dishDeducted = actualDeductedByDish.get(it.dishId) ?? 0;
+          const lineUnitsDeducted = dishDeducted > 0 ? it.quantity : 0;
           const itemCreated = await tx.orderItem.create({
             data: {
               orderId: existingComanda.id,
+              dishId: it.dishId,
+              unitsDeducted: lineUnitsDeducted,
               dishName: it.dishName,
               price: it.price,
               quantity: it.quantity,
@@ -2960,27 +3063,6 @@ export async function createOrderAction(data: {
             kdsDispatched: false,
           },
         });
-
-        for (const item of data.items) {
-          const dbDish = dishMap.get(item.dishId);
-          if (dbDish) {
-            const freshDish = await tx.dish.findUnique({
-              where: { id: dbDish.id },
-              select: { id: true, name: true, stock: true, isAvailable: true },
-            });
-            if (freshDish && typeof freshDish.stock === "number") {
-              const updatedStock = Math.max(0, freshDish.stock - item.quantity);
-              await tx.dish.update({
-                where: { id: freshDish.id },
-                data: {
-                  stock: updatedStock,
-                  trackStock: true,
-                  isAvailable: updatedStock > 0,
-                },
-              });
-            }
-          }
-        }
       });
 
       const dispatchToken = signKdsDispatchToken({
@@ -3002,6 +3084,8 @@ export async function createOrderAction(data: {
         items: createdRoundItems.map((i) => ({
           id: i.id,
           orderItemId: i.id,
+          dishId: i.dishId,
+          unitsDeducted: i.unitsDeducted,
           dishName: i.dishName,
           price: i.price,
           quantity: i.quantity,
@@ -3125,7 +3209,7 @@ export async function createOrderAction(data: {
     }
 
     // Map & lookup dishes by dishId
-    const dishIds = Array.from(new Set(data.items.map((i) => i.dishId).filter(Boolean)));
+    const dishIds = Array.from(new Set(data.items.map((i) => i.dishId).filter(Boolean))).sort();
     if (dishIds.length === 0) {
       return { error: "Los productos del pedido deben incluir un ID de plato válido.", errorCode: "INVALID_INPUT" };
     }
@@ -3167,22 +3251,24 @@ export async function createOrderAction(data: {
         return { error: `El producto "${dbDish.name}" no está disponible actualmente.`, errorCode: "INVALID_INPUT" };
       }
 
-      // Stock check estricto para platos: no se puede pedir si no está configurado o si no hay stock
-      if (dbDish.stock === null || dbDish.stock === undefined) {
-        return {
-          error: `No se puede procesar el pedido: El producto "${dbDish.name}" no tiene el stock configurado en el sistema.`,
-          errorCode: "INVALID_INPUT",
-        };
-      }
-      const availableStock = typeof dbDish.stock === "number" ? dbDish.stock : 0;
-      if (availableStock <= 0 || !dbDish.isAvailable) {
-        return { error: `El producto "${dbDish.name}" se encuentra agotado.`, errorCode: "INVALID_INPUT" };
-      }
-      if (item.quantity > availableStock) {
-        return {
-          error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
-          errorCode: "INVALID_INPUT",
-        };
+      // Stock check estricto para platos: solo aplica si el producto tiene control de inventario activo (trackStock === true)
+      if (dbDish.trackStock === true) {
+        if (dbDish.stock === null || dbDish.stock === undefined || typeof dbDish.stock !== "number") {
+          return {
+            error: `No se puede procesar el pedido: El producto "${dbDish.name}" no tiene el stock configurado en el sistema.`,
+            errorCode: "INVALID_INPUT",
+          };
+        }
+        const availableStock = dbDish.stock;
+        if (availableStock <= 0 || !dbDish.isAvailable) {
+          return { error: `El producto "${dbDish.name}" se encuentra agotado.`, errorCode: "INVALID_INPUT" };
+        }
+        if (item.quantity > availableStock) {
+          return {
+            error: `Solo quedan ${availableStock} unidad(es) de "${dbDish.name}". Por favor ajusta la cantidad en tu orden.`,
+            errorCode: "INVALID_INPUT",
+          };
+        }
       }
 
       let serverPrice = Number(dbDish.price) || 0;
@@ -3208,11 +3294,15 @@ export async function createOrderAction(data: {
         ? `${dbDish.name} [${modifierDetails.join(" · ")}]`
         : dbDish.name;
 
+      const unitsDeducted = (dbDish.trackStock && typeof dbDish.stock === "number") ? item.quantity : 0;
+
       verifiedOrderItems.push({
+        dishId: item.dishId,
         dishName: fullDishName,
         price: serverPrice,
         quantity: item.quantity,
         notes: modifierDetails.length > 0 ? modifierDetails.join(" · ") : null,
+        unitsDeducted,
       });
     }
 
@@ -3309,28 +3399,8 @@ export async function createOrderAction(data: {
       calculatedSeasonBonus = (subtotalAfterCoupon * (activeRate.percentageBonus / 100)) + activeRate.fixedBonus;
     }
 
-    // Taxes & Service Charge (PASO 6 & 7 - Global Business Rules)
-    const baseForTax = subtotalAfterCoupon + calculatedSeasonBonus;
-
-    const ivaPercent = restaurant.ivaPercent || 0;
-    const servicePercent = restaurant.servicePercent || 0;
-
-    // ivaOnTable represents if IVA is INCLUDED in dish prices (true = included, false = additional)
-    const ivaIncluded = restaurant.ivaOnTable ?? false;
-    // serviceOnTable represents if Service is INCLUDED in dish prices (true = included, false = additional)
-    const serviceIncluded = restaurant.serviceOnTable ?? false;
-
-    // IVA is added to checkout ONLY IF ivaPercent > 0 AND IVA is NOT included in prices
-    const calculatedIva = (ivaPercent > 0 && !ivaIncluded)
-      ? baseForTax * (ivaPercent / 100)
-      : 0;
-
-    // Delivery cost (PASO 8)
-    // SERVICIO is added to checkout ONLY IF in table/local modality, servicePercent > 0 AND Service is NOT included in prices
-    // Normativa Ecuador: En Para Llevar y Delivery el servicio es estrictamente $0.00
-    const calculatedService = (isTableOrder && servicePercent > 0 && !serviceIncluded)
-      ? baseForTax * (servicePercent / 100)
-      : 0;
+    // Taxes & Service Charge (PASO 6 & 7 - Unified v4_tax_base Rules)
+    const pricingSnapshot = buildPricingSnapshot(restaurant, isTableOrder);
     let calculatedDeliveryCost = 0;
     if (rawTableName === "Domicilio") {
       if (restaurant.deliveryRates) {
@@ -3370,20 +3440,26 @@ export async function createOrderAction(data: {
       calculatedTip = Math.min(data.tip, 500);
     }
 
-    // Rounding numbers (PASO 11 & 24)
-    const round = (val: number) => Math.round((val + Number.EPSILON) * 100) / 100;
+    // Rounding numbers (v4 integer-cent half-up)
+    const v4Create = calculateV4OrderTotals({
+      itemsSubtotal: calculatedSubtotal,
+      isTable: isTableOrder,
+      snapshot: pricingSnapshot,
+      hasActiveItems: true,
+      discountAmount: calculatedDiscount,
+      seasonRateAmount: calculatedSeasonBonus,
+      deliveryCost: calculatedDeliveryCost,
+      tip: calculatedTip,
+    });
 
-    const finalSubtotal = round(calculatedSubtotal);
-    const finalDiscount = round(calculatedDiscount);
-    const finalSeasonBonus = round(calculatedSeasonBonus);
-    const finalIva = round(calculatedIva);
-    const finalService = round(calculatedService);
-    const finalDelivery = round(calculatedDeliveryCost);
-    const finalTip = round(calculatedTip);
-
-    finalTotal = round(
-      finalSubtotal - finalDiscount + finalSeasonBonus + finalIva + finalService + finalDelivery + finalTip
-    );
+    const finalSubtotal = v4Create.subtotal;
+    const finalDiscount = v4Create.discountAmount;
+    const finalSeasonBonus = v4Create.seasonRateAmount;
+    const finalIva = v4Create.iva;
+    const finalService = v4Create.serviceCharge;
+    const finalDelivery = v4Create.deliveryCost;
+    const finalTip = v4Create.tip;
+    finalTotal = v4Create.total;
 
     // Save order within transaction (PASO 23)
     const updatedDishesForSocket: any[] = [];
@@ -3420,10 +3496,83 @@ export async function createOrderAction(data: {
       } catch {
         pDetailsObj = { text: data.paymentDetails };
       }
+      pDetailsObj = stripClientPricingFields(pDetailsObj);
       pDetailsObj.exige_prepago = Boolean(exigePrepago);
       pDetailsObj.pago_confirmado = false;
       pDetailsObj.pago_estado = exigePrepago ? "pendiente_prepago" : "pendiente";
-      const paymentDetailsJson = JSON.stringify(pDetailsObj);
+      const paymentDetailsJson = JSON.stringify(attachPricingSnapshot(pDetailsObj, pricingSnapshot));
+
+      // Descontar inventario de forma atómica con verificación en caliente para evitar sobreventa
+      // Orden canónico estricto de IDs para eliminar interbloqueos (deadlocks)
+      const qtyByDish = new Map<string, number>();
+      for (const item of data.items) {
+        qtyByDish.set(item.dishId, (qtyByDish.get(item.dishId) || 0) + item.quantity);
+      }
+      const sortedOrderDishIds = Array.from(qtyByDish.keys()).sort();
+
+      const actualDeductedByDish = new Map<string, number>();
+      for (const dishId of sortedOrderDishIds) {
+        const requiredQty = qtyByDish.get(dishId) || 0;
+        const lockedDishes: any[] = await tx.$queryRaw`
+          SELECT id, name, stock, "trackStock", "isAvailable", "restaurantId"
+          FROM "Dish"
+          WHERE id = ${dishId}
+          FOR UPDATE
+        `;
+        const freshDish = lockedDishes[0];
+
+        if (!freshDish) {
+          throw new Error(`Uno o más productos del pedido no existen.`);
+        }
+        if (freshDish.restaurantId !== data.restaurantId) {
+          throw new Error(`El producto "${freshDish.name}" no pertenece a este restaurante.`);
+        }
+        if (!freshDish.isAvailable) {
+          throw new Error(`El producto "${freshDish.name}" no está disponible actualmente.`);
+        }
+
+        if (freshDish.trackStock === true) {
+          if (freshDish.stock === null || freshDish.stock === undefined || typeof freshDish.stock !== "number") {
+            throw new Error(`El producto "${freshDish.name}" no tiene el stock configurado en el sistema.`);
+          }
+          if (freshDish.stock <= 0) {
+            throw new Error(`El producto "${freshDish.name}" se acaba de agotar.`);
+          }
+          if (freshDish.stock < requiredQty) {
+            throw new Error(
+              `Solo quedan ${freshDish.stock} unidad(es) de "${freshDish.name}". Por favor ajusta tu pedido.`
+            );
+          }
+
+          if (!isTestOrder) {
+            const updatedStock = freshDish.stock - requiredQty;
+            const isStillAvailable = updatedStock > 0;
+
+            await tx.dish.update({
+              where: { id: freshDish.id },
+              data: {
+                stock: updatedStock,
+                isAvailable: isStillAvailable,
+              },
+            });
+
+            actualDeductedByDish.set(dishId, requiredQty);
+            updatedDishesForSocket.push({
+              id: freshDish.id,
+              name: freshDish.name,
+              stock: updatedStock,
+              isAvailable: isStillAvailable,
+              trackStock: true,
+            });
+          } else {
+            // Modo DEMO autorizado por el restaurante: no altera stock ni disponibilidad real
+            actualDeductedByDish.set(dishId, 0);
+          }
+        } else {
+          // trackStock === false: producto sin control de inventario (incluso si tiene stock numérico)
+          actualDeductedByDish.set(dishId, 0);
+        }
+      }
 
       const newOrder = await tx.order.create({
         data: {
@@ -3449,14 +3598,20 @@ export async function createOrderAction(data: {
           paymentDetails: paymentDetailsJson,
           isTest: isTestOrder,
           items: {
-            create: verifiedOrderItems.map((item) => ({
-              dishName: item.dishName,
-              price: item.price,
-              quantity: item.quantity,
-              notes: item.notes || null,
-              sourcePedidoItemId: null,
-              lineStatus: "ACTIVE",
-            })),
+            create: verifiedOrderItems.map((item) => {
+              const dishDeducted = actualDeductedByDish.get(item.dishId) ?? 0;
+              const lineUnitsDeducted = dishDeducted > 0 ? item.quantity : 0;
+              return {
+                dishId: item.dishId,
+                unitsDeducted: lineUnitsDeducted,
+                dishName: item.dishName,
+                price: item.price,
+                quantity: item.quantity,
+                notes: item.notes || null,
+                sourcePedidoItemId: null,
+                lineStatus: "ACTIVE",
+              };
+            }),
           },
         },
         include: { items: true },
@@ -3490,53 +3645,6 @@ export async function createOrderAction(data: {
           where: { restaurantId: data.restaurantId, codigoCupon: verifiedCouponCode },
           data: { estado: "CANJEADO", fechaCanjeo: new Date() },
         });
-      }
-
-      // Descontar inventario de forma atómica con verificación en caliente para evitar sobreventa
-      for (const item of data.items) {
-        const dbDish = dishMap.get(item.dishId);
-        if (dbDish) {
-          const freshDish = await tx.dish.findUnique({
-            where: { id: dbDish.id },
-            select: { id: true, name: true, stock: true, isAvailable: true },
-          });
-
-          if (freshDish) {
-            if (freshDish.stock === null || freshDish.stock === undefined) {
-              throw new Error(
-                `El producto "${freshDish.name}" no tiene el stock configurado en el sistema.`
-              );
-            }
-            const currentStock = typeof freshDish.stock === "number" ? freshDish.stock : 0;
-            if (currentStock <= 0 || !freshDish.isAvailable) {
-              throw new Error(`El producto "${freshDish.name}" se acaba de agotar.`);
-            }
-            if (currentStock < item.quantity) {
-              throw new Error(
-                `Solo quedan ${currentStock} unidad(es) disponibles de "${freshDish.name}". Por favor ajusta tu pedido.`
-              );
-            }
-            const updatedStock = Math.max(0, currentStock - item.quantity);
-            const isStillAvailable = updatedStock > 0;
-
-            await tx.dish.update({
-              where: { id: freshDish.id },
-              data: {
-                stock: updatedStock,
-                trackStock: true,
-                isAvailable: isStillAvailable,
-              },
-            });
-
-            updatedDishesForSocket.push({
-              id: freshDish.id,
-              name: freshDish.name,
-              stock: updatedStock,
-              isAvailable: isStillAvailable,
-              trackStock: true,
-            });
-          }
-        }
       }
 
       if (data.customerPhone && data.customerPhone.trim()) {
@@ -3676,6 +3784,8 @@ export async function createOrderAction(data: {
       items: (order.items || []).map((i: any) => ({
         id: i.id,
         orderItemId: i.id,
+        dishId: i.dishId,
+        unitsDeducted: i.unitsDeducted,
         dishName: i.dishName,
         price: i.price,
         quantity: i.quantity,

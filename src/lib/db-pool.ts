@@ -1,7 +1,4 @@
 import { Pool } from "pg";
-import { isHashedPin, hashPin, BLACKLISTED_PINS } from "./security-pins";
-import fs from "fs";
-import path from "path";
 
 const globalForPg = globalThis as unknown as {
   pgPool?: Pool;
@@ -45,12 +42,7 @@ export async function ensureDbTables(): Promise<void> {
   // 3. Crear promesa compartida para resolver de forma atómica y neutralizar contención de locks DDL
   globalForPg.initializationPromise = (async () => {
     try {
-      const initSqlPath = path.join(process.cwd(), "init.sql");
-      if (fs.existsSync(initSqlPath)) {
-        const sqlContent = fs.readFileSync(initSqlPath, "utf-8");
-        await pool.query(sqlContent);
-      } else {
-        await pool.query(`
+      await pool.query(`
         CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
         CREATE TABLE IF NOT EXISTS negocios (
@@ -98,118 +90,50 @@ export async function ensureDbTables(): Promise<void> {
         CREATE INDEX IF NOT EXISTS idx_pedidos_camarero_fecha ON pedidos(camarero_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_pedido_items_pedido ON pedido_items(pedido_id);
       `);
-    }
 
-    // Migraciones seguras para comensales en mesa abierta, llamada a mesero y cancelación de pedidos/platos
-    await pool.query(`
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_nombre VARCHAR(200);
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_telefono VARCHAR(50);
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS solicita_mesero BOOLEAN DEFAULT false;
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelacion VARCHAR(255);
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(50);
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ;
+      // Migraciones estructurales idempotentes para columnas de mesa abierta, cancelación y multi-rol
+      await pool.query(`
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_nombre VARCHAR(200);
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente_telefono VARCHAR(50);
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS solicita_mesero BOOLEAN DEFAULT false;
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS motivo_cancelacion VARCHAR(255);
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(50);
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ;
 
-      ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS motivo_cancelacion VARCHAR(255);
-      ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(50);
-      ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ;
-      CREATE INDEX IF NOT EXISTS idx_pedido_items_estado ON pedido_items(estado_item);
+        ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS motivo_cancelacion VARCHAR(255);
+        ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(50);
+        ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS cancelado_at TIMESTAMPTZ;
+        ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS producto_id VARCHAR(50);
+        ALTER TABLE pedido_items ADD COLUMN IF NOT EXISTS unidades_descontadas INT;
+        ALTER TABLE pedido_items ALTER COLUMN unidades_descontadas DROP DEFAULT;
+        CREATE INDEX IF NOT EXISTS idx_pedido_items_estado ON pedido_items(estado_item);
+        CREATE INDEX IF NOT EXISTS idx_pedido_items_producto ON pedido_items(producto_id);
 
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS es_prueba BOOLEAN DEFAULT false;
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS vertical VARCHAR(50) DEFAULT 'menuqr';
-      ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
-      CREATE INDEX IF NOT EXISTS idx_pedidos_es_prueba ON pedidos(negocio_id, es_prueba);
-      CREATE INDEX IF NOT EXISTS idx_pedidos_vertical ON pedidos(vertical);
+        ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS "dishId" TEXT;
+        ALTER TABLE "OrderItem" ADD COLUMN IF NOT EXISTS "unitsDeducted" INT;
+        CREATE INDEX IF NOT EXISTS "OrderItem_dishId_idx" ON "OrderItem"("dishId");
 
-      -- Soporte multi-rol para equipo: Meseros, Cajeros y Repartidores
-      ALTER TABLE camareros ADD COLUMN IF NOT EXISTS rol VARCHAR(20) DEFAULT 'MESERO';
-      ALTER TABLE camareros ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);
-      CREATE INDEX IF NOT EXISTS idx_camareros_rol ON camareros(negocio_id, rol);
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS es_prueba BOOLEAN DEFAULT false;
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS vertical VARCHAR(50) DEFAULT 'menuqr';
+        ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
+        CREATE INDEX IF NOT EXISTS idx_pedidos_es_prueba ON pedidos(negocio_id, es_prueba);
+        CREATE INDEX IF NOT EXISTS idx_pedidos_vertical ON pedidos(vertical);
 
-      -- Soporte para hash seguro bcrypt de PINs (60 caracteres)
-      ALTER TABLE camareros ALTER COLUMN pin TYPE VARCHAR(255);
-    `);
+        -- Soporte multi-rol para equipo: Meseros, Cajeros y Repartidores
+        ALTER TABLE camareros ADD COLUMN IF NOT EXISTS rol VARCHAR(20) DEFAULT 'MESERO';
+        ALTER TABLE camareros ADD COLUMN IF NOT EXISTS telefono VARCHAR(50);
+        CREATE INDEX IF NOT EXISTS idx_camareros_rol ON camareros(negocio_id, rol);
 
-    // Sincronizar negocios a partir de la tabla Restaurant de Prisma si existe
-    await pool.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Restaurant') THEN
-          INSERT INTO negocios (id, nombre, slug, numero_mesas)
-          SELECT 
-            id::uuid, 
-            name, 
-            slug, 
-            10
-          FROM "Restaurant"
-          WHERE id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-          ON CONFLICT (id) DO NOTHING;
-        END IF;
-      EXCEPTION
-        WHEN OTHERS THEN
-          -- Ignorar si la tabla Restaurant no tiene formato UUID en ID
-          NULL;
-      END $$;
-    `);
-
-    // Asegurar al menos 1 negocio de demostración si no hay ninguno (sin PINs predeterminados)
-    const { rows: negocioRows } = await pool.query(`SELECT id FROM negocios LIMIT 1`);
-    if (negocioRows.length === 0) {
-      const { rows: inserted } = await pool.query(`
-        INSERT INTO negocios (nombre, slug, numero_mesas)
-        VALUES ('Restaurante Demo', 'demo', 12)
-        RETURNING id
+        -- Soporte para hash seguro bcrypt de PINs (60 caracteres)
+        ALTER TABLE camareros ALTER COLUMN pin TYPE VARCHAR(255);
       `);
-      if (inserted[0]?.id) {
-        await pool.query(`
-          INSERT INTO camareros (negocio_id, nombre, pin)
-          VALUES 
-            ($1, 'Carlos Gómez', NULL),
-            ($1, 'María López', NULL),
-            ($1, 'Andrés Torres', NULL)
-        `, [inserted[0].id]);
-      }
-    } else {
-      // Asegurar camareros iniciales si un negocio no tiene ninguno (sin PIN predeterminado)
-      const { rows: allNegocios } = await pool.query(`SELECT id, nombre FROM negocios`);
-      for (const neg of allNegocios) {
-        const { rows: camCount } = await pool.query(`SELECT COUNT(*)::int as c FROM camareros WHERE negocio_id = $1`, [neg.id]);
-        if (camCount[0]?.c === 0) {
-          await pool.query(`
-            INSERT INTO camareros (negocio_id, nombre, pin)
-            VALUES 
-              ($1, 'Mesero 1', NULL),
-              ($1, 'Mesero 2', NULL)
-          `, [neg.id]);
-        }
-      }
-    }
 
-    // Migración segura de PINs existentes de camareros:
-    // - Invalida PINs predeterminados/inseguros (1234, 0000, etc.) exigiéndole al admin asignarlos.
-    // - Migra PINs personalizados existentes a hash bcrypt de forma irreversible y segura.
-    try {
-      const { rows: existingStaff } = await pool.query(`SELECT id, pin FROM camareros WHERE pin IS NOT NULL`);
-      for (const member of existingStaff) {
-        const rawPin = String(member.pin || "").trim();
-        if (!rawPin || BLACKLISTED_PINS.has(rawPin) || rawPin.length < 4 || rawPin.length > 8 || !/^\d+$/.test(rawPin)) {
-          // PIN trivial, predeterminado o corrupto: revocar inmediatamente
-          await pool.query(`UPDATE camareros SET pin = NULL WHERE id = $1`, [member.id]);
-        } else if (!isHashedPin(rawPin)) {
-          // PIN personalizado válido: migrar a hash seguro bcrypt
-          const secureHash = hashPin(rawPin);
-          await pool.query(`UPDATE camareros SET pin = $1 WHERE id = $2`, [secureHash, member.id]);
-        }
-      }
-    } catch (migErr) {
-      console.error("[db-pool] Error migrando PINs de camareros a hash:", migErr);
+      globalForPg.tablesInitialized = true;
+      console.log("[db-pool] Tablas de Cocina y Mesero verificadas con éxito en PostgreSQL.");
+    } catch (err) {
+      globalForPg.initializationPromise = null;
+      console.error("[db-pool] Error asegurando tablas de base de datos:", err);
     }
-
-    globalForPg.tablesInitialized = true;
-    console.log("[db-pool] Tablas de Cocina y Mesero verificadas con éxito en PostgreSQL.");
-  } catch (err) {
-    globalForPg.initializationPromise = null;
-    console.error("[db-pool] Error asegurando tablas de base de datos:", err);
-  }
   })();
 
   return globalForPg.initializationPromise;

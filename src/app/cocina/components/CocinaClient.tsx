@@ -163,7 +163,7 @@ export function CocinaClient({
   } | null>(null);
   const [cancelItemReason, setCancelItemReason] = useState("Sin ingredientes / Stock agotado");
   const [cancelItemCustomReason, setCancelItemCustomReason] = useState("");
-  const [cancelMarcarAgotado, setCancelMarcarAgotado] = useState(true);
+  const [cancelMarcarAgotado, setCancelMarcarAgotado] = useState(false); // Por defecto desmarcado para evitar agotar productos involuntariamente
   const [isSubmittingItemCancel, setIsSubmittingItemCancel] = useState(false);
 
   // Estados de Cancelación de Comanda Completa
@@ -576,6 +576,12 @@ export function CocinaClient({
         setItemToCancel(null);
       } else {
         alert(data.error || "No se pudo cancelar el plato");
+        if (res.status === 409 && negocio?.id) {
+          fetch(`/api/pedidos?negocio_id=${negocio.id}&activos=true`)
+            .then((r) => r.json())
+            .then((d) => d.ok && setPedidos(d.pedidos || []));
+          setItemToCancel(null);
+        }
       }
     } catch (err) {
       console.error("Error al cancelar plato:", err);
@@ -611,6 +617,12 @@ export function CocinaClient({
         setOrderToCancel(null);
       } else {
         alert(data.error || "No se pudo cancelar el pedido");
+        if (res.status === 409 && negocio?.id) {
+          fetch(`/api/pedidos?negocio_id=${negocio.id}&activos=true`)
+            .then((r) => r.json())
+            .then((d) => d.ok && setPedidos(d.pedidos || []));
+          setOrderToCancel(null);
+        }
       }
     } catch (err) {
       console.error("Error al cancelar pedido:", err);
@@ -647,7 +659,19 @@ export function CocinaClient({
 
     // 2. Actualización optimista de interfaz
     setPedidos((prev) =>
-      prev.map((p) => (p.id === pedidoId ? { ...p, estado: nuevoEstado } : p))
+      prev.map((p) =>
+        p.id === pedidoId
+          ? {
+              ...p,
+              estado: nuevoEstado,
+              items: p.items.map((it) =>
+                nuevoEstado === "en_cocina" && it.estado_item === "nuevo"
+                  ? { ...it, estado_item: "en_cocina" }
+                  : it
+              ),
+            }
+          : p
+      )
     );
 
     // 3. Persistir en base de datos PostgreSQL
@@ -665,7 +689,18 @@ export function CocinaClient({
           prev.map((p) => (p.id === pedidoId ? { ...p, estado: previousEstado as any } : p))
         );
         alert(data.error || "No se pudo cambiar el estado del pedido.");
+        if (res.status === 409 && negocio?.id) {
+          fetch(`/api/pedidos?negocio_id=${negocio.id}&activos=true`)
+            .then((r) => r.json())
+            .then((d) => d.ok && setPedidos(d.pedidos || []));
+        }
         return;
+      }
+
+      if (data.pedido) {
+        setPedidos((prev) =>
+          prev.map((p) => (p.id === pedidoId ? { ...p, ...data.pedido } : p))
+        );
       }
 
       if (socketRef.current?.connected) {
@@ -673,6 +708,7 @@ export function CocinaClient({
           id: pedidoId,
           estado: nuevoEstado,
           negocio_id: negocio?.id,
+          pedido: data.pedido,
         });
       }
     } catch (err) {
@@ -683,6 +719,89 @@ export function CocinaClient({
           .then((d) => d.ok && setPedidos(d.pedidos));
       }
     }
+  };
+
+  // Aceptar items específicos de una ronda sin alterar ni reiniciar platos en preparación
+  const handleAcceptItems = async (pedidoId: string, itemIds: string[]) => {
+    const currentOrder = pedidos.find((p) => p.id === pedidoId);
+    if (!currentOrder) return;
+
+    // Guardar snapshot previo para revertir cualquier rechazo (403, 500, red, etc.)
+    const previousPedidos = pedidos;
+
+    triggerAudioAlert("cocina");
+
+    // Actualización optimista: solo los items indicados pasan a 'en_cocina'
+    setPedidos((prev) =>
+      prev.map((p) =>
+        p.id === pedidoId
+          ? {
+              ...p,
+              estado: "en_cocina",
+              items: p.items.map((it) =>
+                itemIds.includes(it.id) ? { ...it, estado_item: "en_cocina" } : it
+              ),
+            }
+          : p
+      )
+    );
+
+    try {
+      const res = await fetch(`/api/pedidos/${pedidoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          estado: "en_cocina",
+          item_ids: itemIds,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        // En caso de rechazo del servidor (403, 500, 409 u otro), revertir la actualización optimista inmediatamente
+        setPedidos(previousPedidos);
+        alert(data.error || "No se pudo aceptar los platos de la ronda.");
+        if (negocio?.id) {
+          fetch(`/api/pedidos?negocio_id=${negocio.id}&activos=true`)
+            .then((r) => r.json())
+            .then((d) => d.ok && setPedidos(d.pedidos || []));
+        }
+        return;
+      }
+
+      if (data.pedido) {
+        setPedidos((prev) =>
+          prev.map((p) => (p.id === pedidoId ? { ...p, ...data.pedido } : p))
+        );
+      }
+
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("pedido_actualizado", {
+          id: pedidoId,
+          estado: "en_cocina",
+          negocio_id: negocio?.id,
+          pedido: data.pedido,
+        });
+      }
+    } catch (err) {
+      console.error("Error al aceptar items de ronda:", err);
+      // Revertir optimismo en caso de excepción de red o servidor
+      setPedidos(previousPedidos);
+      if (negocio?.id) {
+        fetch(`/api/pedidos?negocio_id=${negocio.id}&activos=true`)
+          .then((r) => r.json())
+          .then((d) => d.ok && setPedidos(d.pedidos || []));
+      }
+    }
+  };
+
+  const handleAcceptRonda = async (pedidoId: string) => {
+    const currentOrder = pedidos.find((p) => p.id === pedidoId);
+    const pendingIds = currentOrder?.items
+      .filter((i) => i.estado_item === "nuevo")
+      .map((i) => i.id) || [];
+    if (pendingIds.length === 0) return;
+    await handleAcceptItems(pedidoId, pendingIds);
   };
 
   // Toggle disponibilidad de producto
@@ -1350,6 +1469,10 @@ export function CocinaClient({
                             <span className="text-sm truncate">{item.nombre}</span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
+                            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[10px] px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
+                              <Clock className="w-2.5 h-2.5 text-amber-400" />
+                              <span>PENDIENTE</span>
+                            </span>
                             {item.es_añadido && (
                               <span className="bg-amber-500 text-slate-950 font-black text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">
                                 AÑADIDO
@@ -1360,7 +1483,7 @@ export function CocinaClient({
                                 setItemToCancel({ pedidoId: pedido.id, mesa: pedido.mesa, item });
                                 setCancelItemReason("Sin ingredientes / Stock agotado");
                                 setCancelItemCustomReason("");
-                                setCancelMarcarAgotado(true);
+                                setCancelMarcarAgotado(false);
                               }}
                               title="Cancelar plato (Falta de ingredientes)"
                               className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-700/60 hover:bg-rose-950/40 transition"
@@ -1469,12 +1592,35 @@ export function CocinaClient({
                     </div>
                   )}
 
+                  {/* ALERTA DE NUEVA RONDA PENDIENTE SI EXISTEN PLATOS CON ESTADO NUEVO */}
+                  {pedido.items.some((i) => i.estado_item === "nuevo") && (
+                    <div className="mb-2.5 p-2 rounded-xl bg-amber-950/40 border border-amber-500/60 flex items-center justify-between text-xs text-amber-200">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Nueva ronda: {pedido.items.filter((i) => i.estado_item === "nuevo").length} plato(s) pendiente(s)</span>
+                      </div>
+                      <button
+                        onClick={() => handleAcceptRonda(pedido.id)}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] uppercase tracking-wider transition active:scale-95 cursor-pointer flex items-center gap-1"
+                      >
+                        <Flame className="w-3 h-3 text-slate-950" />
+                        <span>Aceptar Ronda</span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="space-y-2 mb-3">
                     {pedido.items.map((item) => (
                       <div
                         key={item.id}
                         className={`p-2 rounded-lg text-xs ${
-                          item.es_añadido ? "bg-amber-950/40 border border-amber-500/50" : "bg-slate-900 border border-slate-800/80"
+                          item.estado_item === "nuevo"
+                            ? "bg-amber-950/40 border border-amber-500/60"
+                            : item.estado_item === "listo"
+                            ? "bg-emerald-950/20 border border-emerald-500/30"
+                            : item.es_añadido
+                            ? "bg-amber-950/20 border border-amber-500/30"
+                            : "bg-slate-900 border border-slate-800/80"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-1">
@@ -1485,9 +1631,35 @@ export function CocinaClient({
                             <span className="text-sm truncate">{item.nombre}</span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {item.es_añadido && (
-                              <span className="bg-amber-500 text-slate-950 font-black text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider">
-                                AÑADIDO
+                            {item.estado_item === "nuevo" ? (
+                              <>
+                                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[10px] px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5 text-amber-400" />
+                                  <span>PENDIENTE</span>
+                                </span>
+                                <button
+                                  onClick={() => handleAcceptItems(pedido.id, [item.id])}
+                                  title="Aceptar este plato e iniciar preparación"
+                                  className="p-1 px-1.5 rounded bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-[10px] font-black uppercase tracking-wider transition flex items-center gap-1 cursor-pointer active:scale-95"
+                                >
+                                  <Check className="w-3 h-3 text-slate-950" />
+                                  <span>Aceptar</span>
+                                </button>
+                              </>
+                            ) : item.estado_item === "listo" ? (
+                              <>
+                                {item.es_añadido && (
+                                  <span className="text-[10px] text-amber-400 font-semibold">(Añadido)</span>
+                                )}
+                                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-[10px] px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                                  <span>LISTO</span>
+                                </span>
+                              </>
+                            ) : (
+                              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-[10px] px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
+                                <Flame className="w-2.5 h-2.5 text-emerald-400" />
+                                <span>EN PREPARACIÓN</span>
                               </span>
                             )}
                             <button
@@ -1495,7 +1667,7 @@ export function CocinaClient({
                                 setItemToCancel({ pedidoId: pedido.id, mesa: pedido.mesa, item });
                                 setCancelItemReason("Sin ingredientes / Stock agotado");
                                 setCancelItemCustomReason("");
-                                setCancelMarcarAgotado(true);
+                                setCancelMarcarAgotado(false);
                               }}
                               title="Cancelar plato (Falta de ingredientes)"
                               className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-700/60 hover:bg-rose-950/40 transition"
@@ -1514,7 +1686,14 @@ export function CocinaClient({
                   </div>
 
                   <button
-                    onClick={() => cambiarEstado(pedido.id, "listo")}
+                    onClick={() => {
+                      const hasPending = pedido.items.some((i) => i.estado_item === "nuevo");
+                      if (hasPending) {
+                        alert("Hay platos de una nueva ronda pendientes de aceptar. Acéptalos o resuélvelos antes de marcar el pedido completo como listo.");
+                        return;
+                      }
+                      cambiarEstado(pedido.id, "listo");
+                    }}
                     className="w-full py-2.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-extrabold text-xs uppercase tracking-wider shadow-md shadow-emerald-500/20 flex items-center justify-center space-x-1.5 transition active:scale-95"
                   >
                     <CheckCircle2 className="w-4 h-4 text-white" />
@@ -1573,23 +1752,72 @@ export function CocinaClient({
                     </span>
                   </div>
 
+                  {/* ALERTA DE NUEVA RONDA PENDIENTE SI EXISTEN PLATOS CON ESTADO NUEVO */}
+                  {pedido.items.some((i) => i.estado_item === "nuevo") && (
+                    <div className="mb-2.5 p-2 rounded-xl bg-amber-950/40 border border-amber-500/60 flex items-center justify-between text-xs text-amber-200">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Nueva ronda: {pedido.items.filter((i) => i.estado_item === "nuevo").length} plato(s) pendiente(s)</span>
+                      </div>
+                      <button
+                        onClick={() => handleAcceptRonda(pedido.id)}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] uppercase tracking-wider transition active:scale-95 cursor-pointer flex items-center gap-1"
+                      >
+                        <Flame className="w-3 h-3 text-slate-950" />
+                        <span>Aceptar Ronda</span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="space-y-1 mb-2">
                     {pedido.items.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between text-xs text-slate-300 py-0.5">
+                      <div
+                        key={item.id}
+                        className={`flex items-center justify-between text-xs py-1 px-1.5 rounded ${
+                          item.estado_item === "nuevo"
+                            ? "bg-amber-950/40 border border-amber-500/60 text-amber-200"
+                            : "text-slate-300"
+                        }`}
+                      >
                         <span className="flex items-center gap-1.5 flex-1 min-w-0">
-                          <span className="text-emerald-400 font-mono font-bold shrink-0">{item.cantidad}x</span>
+                          <span className={item.estado_item === "nuevo" ? "text-amber-400 font-mono font-bold shrink-0" : "text-emerald-400 font-mono font-bold shrink-0"}>
+                            {item.cantidad}x
+                          </span>
                           <span className="truncate">{item.nombre}</span>
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
-                          {item.es_añadido && (
-                            <span className="text-[10px] text-amber-400 font-semibold">(Añadido)</span>
+                          {item.estado_item === "nuevo" ? (
+                            <>
+                              <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[10px] px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
+                                <Clock className="w-2.5 h-2.5 text-amber-400" />
+                                <span>PENDIENTE</span>
+                              </span>
+                              <button
+                                onClick={() => handleAcceptItems(pedido.id, [item.id])}
+                                title="Aceptar este plato e iniciar preparación"
+                                className="p-1 px-1.5 rounded bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-[10px] font-black uppercase tracking-wider transition flex items-center gap-1 cursor-pointer active:scale-95"
+                              >
+                                <Check className="w-3 h-3 text-slate-950" />
+                                <span>Aceptar</span>
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {item.es_añadido && (
+                                <span className="text-[10px] text-amber-400 font-semibold">(Añadido)</span>
+                              )}
+                              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-[10px] px-1.5 py-0.5 rounded uppercase flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                                <span>LISTO</span>
+                              </span>
+                            </>
                           )}
                           <button
                             onClick={() => {
                               setItemToCancel({ pedidoId: pedido.id, mesa: pedido.mesa, item });
                               setCancelItemReason("Sin ingredientes / Stock agotado");
                               setCancelItemCustomReason("");
-                              setCancelMarcarAgotado(true);
+                              setCancelMarcarAgotado(false);
                             }}
                             title="Cancelar plato (Falta de ingredientes)"
                             className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition"
@@ -1777,7 +2005,15 @@ export function CocinaClient({
             </div>
 
             <p className="text-[11px] text-amber-300/90 italic bg-amber-950/20 p-2.5 rounded-xl border border-amber-900/40">
-              💡 El monto del plato se descontará de la cuenta y el mesero recibirá una notificación sonora en su pantalla.
+              {itemToCancel.item.estado_item === "en_cocina" ||
+              itemToCancel.item.estado_item === "preparando" ||
+              itemToCancel.item.estado_item === "listo" ||
+              (!itemToCancel.item.es_añadido && (
+                pedidos.find((p) => p.id === itemToCancel.pedidoId)?.estado === "en_cocina" ||
+                pedidos.find((p) => p.id === itemToCancel.pedidoId)?.estado === "listo"
+              ))
+                ? "⚠️ Este plato ya fue aceptado por cocina. Al cancelar, su stock NO se devolverá automáticamente."
+                : "💡 Este plato aún no ha sido aceptado por cocina. Al cancelar, las unidades descontadas se devolverán automáticamente al stock."}
             </p>
 
             <div className="flex gap-2 pt-2">

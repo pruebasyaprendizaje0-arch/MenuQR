@@ -12,6 +12,14 @@ import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 import { verifyOrderStaffAuth, verifyTableSessionAuth, extractTableToken, TableAuthContext } from "@/lib/order-auth";
 import { cookies } from "next/headers";
 import { __testDispatchHooks } from "@/lib/caja-test-hooks";
+import {
+  calculatePostOrderTotals,
+  buildPricingSnapshot,
+  calculateV4OrderTotals,
+  extractPricingSnapshot,
+  attachPricingSnapshot,
+  stripClientPricingFields,
+} from "@/lib/order-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -232,18 +240,21 @@ export async function GET(req: NextRequest) {
         p.cliente_telefono,
         p.solicita_mesero,
         p.vertical,
+        p.es_prueba,
         p.metadata,
         c.nombre as camarero_nombre,
         COALESCE(
           json_agg(
             json_build_object(
               'id', pi.id,
+              'producto_id', pi.producto_id,
               'nombre', pi.nombre,
               'cantidad', pi.cantidad,
               'precio', pi.precio::float,
               'notas', pi.notas,
               'es_añadido', pi.es_añadido,
-              'estado_item', pi.estado_item
+              'estado_item', pi.estado_item,
+              'unidades_descontadas', pi.unidades_descontadas
             ) ORDER BY pi.es_añadido ASC, pi.nombre ASC
           ) FILTER (WHERE pi.id IS NOT NULL AND (pi.estado_item IS NULL OR pi.estado_item != 'cancelado')),
           '[]'
@@ -288,7 +299,7 @@ export async function GET(req: NextRequest) {
     }
 
     query += `
-      GROUP BY p.id, c.nombre, p.cliente_nombre, p.cliente_telefono, p.solicita_mesero, p.vertical, p.metadata
+      GROUP BY p.id, c.nombre, p.cliente_nombre, p.cliente_telefono, p.solicita_mesero, p.vertical, p.es_prueba, p.metadata
       ORDER BY p.created_at DESC
     `;
 
@@ -484,6 +495,142 @@ async function reconcileRetryLinks(
   };
 }
 
+// Helper para reintentos acotados (hasta 3) ante interbloqueos (deadlocks) o fallos de serialización de PostgreSQL
+async function withDeadlockRetry<T>(fn: (attempt: number) => Promise<T>, maxRetries = 3): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      attempt++;
+      return await fn(attempt);
+    } catch (err: any) {
+      const isDeadlock =
+        err?.code === "40P01" ||
+        err?.code === "40001" ||
+        err?.message?.includes("deadlock detected") ||
+        err?.message?.includes("could not serialize access") ||
+        err?.message?.includes("TEST_SIMULATE_DEADLOCK");
+      if (isDeadlock && attempt < maxRetries) {
+        const jitter = Math.floor(Math.random() * 50) + 20 * attempt;
+        await new Promise((r) => setTimeout(r, jitter));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+// Helper para validación estricta de cantidad entera positiva sin permitir conversiones permisivas
+function validateItemQuantity(rawQty: any, itemName?: string): number {
+  if (rawQty === undefined || rawQty === null || String(rawQty).trim() === "") {
+    throw new Error(`Cantidad inválida para "${itemName || "producto"}": la cantidad es obligatoria.`);
+  }
+
+  let qty: number;
+  if (typeof rawQty === "number") {
+    if (!Number.isInteger(rawQty) || rawQty <= 0) {
+      throw new Error(`Cantidad inválida para "${itemName || "producto"}": debe ser un número entero positivo mayor a cero.`);
+    }
+    qty = rawQty;
+  } else if (typeof rawQty === "string") {
+    const trimmed = rawQty.trim();
+    if (!/^\d+$/.test(trimmed) || Number(trimmed) <= 0) {
+      throw new Error(`Cantidad inválida para "${itemName || "producto"}": debe ser un número entero positivo mayor a cero.`);
+    }
+    qty = Number(trimmed);
+  } else {
+    throw new Error(`Cantidad inválida para "${itemName || "producto"}": debe ser un número entero positivo mayor a cero.`);
+  }
+  return qty;
+}
+
+// Función auxiliar para resolver de forma atómica y estricta el ID inmutable de Dish y deducir existencias en flujo directo
+// Valida siempre que el producto pertenezca al negocio y no utiliza nombres para reconstruir identidades
+async function resolveDirectProductAndDebit(
+  client: any,
+  restaurantId: string,
+  item: { dishId?: string; productId?: string; id?: string; nombre?: string; dishName?: string; cantidad?: string | number; quantity?: number },
+  wasStockDeducted: boolean,
+  executeDeduction: boolean = false,
+  isDemo: boolean = false
+): Promise<{ producto_id: string | null; unidades_descontadas: number; validQuantity: number }> {
+  // 1. Validar estrictamente la cantidad: debe ser un número entero positivo mayor a cero (sin usar parseInt permisivo)
+  const rawQty = item.quantity !== undefined ? item.quantity : item.cantidad;
+  const qty = validateItemQuantity(rawQty, item.nombre || item.dishName);
+
+  const candidateId = item.dishId || item.productId || (item.id && typeof item.id === "string" && !item.id.startsWith("cart-") && item.id.length > 5 ? item.id : null) || null;
+  if (!candidateId) {
+    return { producto_id: null, unidades_descontadas: 0, validQuantity: qty };
+  }
+
+  // 2. Validar pertenencia estricta al restaurante mediante bloqueo pesimista
+  const { rows: dRows } = await client.query(
+    `SELECT id, name, "trackStock", stock, "isAvailable", "restaurantId"
+     FROM "Dish"
+     WHERE id = $1 AND ("restaurantId" = $2 OR "restaurantId" IN (SELECT id FROM "Restaurant" WHERE id = $2 OR slug = $2))
+     LIMIT 1
+     FOR UPDATE`,
+    [candidateId, restaurantId]
+  );
+
+  if (dRows.length === 0) {
+    // Si no pertenece a este restaurante, verificar si pertenece a otro para rechazar explícitamente en el alta
+    const { rows: foreignRows } = await client.query(
+      `SELECT id, name, "restaurantId" FROM "Dish" WHERE id = $1 LIMIT 1`,
+      [candidateId]
+    );
+    if (foreignRows.length > 0) {
+      throw new Error(`El producto "${item.nombre || item.dishName || foreignRows[0].name}" con ID ${candidateId} no pertenece a este restaurante.`);
+    }
+    return { producto_id: null, unidades_descontadas: 0, validQuantity: qty };
+  }
+
+  const dbDish = dRows[0];
+
+  // 3. Validar disponibilidad bajo bloqueo: NO vender ni reactivar productos deshabilitados (incluso en Modo Demo)
+  if (dbDish.isAvailable === false || dbDish.isAvailable === null) {
+    throw new Error(`El producto "${dbDish.name}" no está disponible actualmente.`);
+  }
+
+  // 4. Validar stock numérico válido cuando trackStock = true
+  let unidadesDebitadas = 0;
+
+  if (dbDish.trackStock === true) {
+    if (typeof dbDish.stock !== "number" || isNaN(dbDish.stock) || dbDish.stock === null) {
+      throw new Error(`El producto "${dbDish.name}" tiene control de stock activado pero sus existencias no están configuradas.`);
+    }
+
+    if (dbDish.stock <= 0) {
+      throw new Error(`El producto "${dbDish.name}" se encuentra agotado.`);
+    }
+
+    if (dbDish.stock < qty) {
+      throw new Error(`Stock insuficiente para "${dbDish.name}". Disponible: ${dbDish.stock}, solicitado: ${qty}.`);
+    }
+
+    if (isDemo) {
+      // Modo DEMO: No altera Dish.stock ni isAvailable, y registra explícitamente 0 unidades debitadas
+      unidadesDebitadas = 0;
+    } else if (executeDeduction) {
+      const newStock = dbDish.stock - qty;
+      const isStillAvailable = newStock > 0;
+      await client.query(
+        `UPDATE "Dish"
+         SET stock = $1, "isAvailable" = $2
+         WHERE id = $3`,
+        [newStock, isStillAvailable, dbDish.id]
+      );
+      unidadesDebitadas = qty;
+    } else if (wasStockDeducted) {
+      unidadesDebitadas = qty;
+    }
+  } else {
+    // trackStock es false: producto sin control de inventario (incluso si tiene stock numérico)
+    unidadesDebitadas = 0;
+  }
+
+  return { producto_id: dbDish.id, unidades_descontadas: unidadesDebitadas, validQuantity: qty };
+}
+
 // POST /api/pedidos - Endpoint unificado para procesar pedidos/solicitudes de todas las verticales
 export async function POST(req: NextRequest) {
   try {
@@ -665,12 +812,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const client = await pool.connect();
+    let authoritativeOrder: any = null;
+    if (explicitOrderId) {
+      try {
+        authoritativeOrder = await prisma.order.findUnique({
+          where: { id: explicitOrderId },
+          include: { items: true },
+        });
+      } catch {}
+    }
 
-    try {
-      await client.query("BEGIN");
+    return await withDeadlockRetry(async (retryAttempt) => {
+      const client = await pool.connect();
 
-      let createdOrderId: string;
+      try {
+        await client.query("BEGIN");
+
+        if (retryAttempt === 1 && (globalThis as any).__testHooks?.simulateDeadlockInPostOrderAttempt1) {
+          delete (globalThis as any).__testHooks.simulateDeadlockInPostOrderAttempt1;
+          const deadlockErr: any = new Error("deadlock detected");
+          deadlockErr.code = "40P01";
+          throw deadlockErr;
+        }
+
+        let createdOrderId: string;
       let responseOrder: ResponseOrder | null = null;
       let whatsappMessageText = "";
       let orderTotal = 0;
@@ -716,28 +881,24 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        // Deducción y validación atómica universal de stock en Prisma (si no fue deducido previamente en createOrderAction)
-        const shouldSkipStockDeduction = Boolean(skip_stock_deduction || explicitOrderId);
-        if (!shouldSkipStockDeduction && (restaurantPrismaId || businessSlug || resolvedNegocioId)) {
-          const deductTarget = restaurantPrismaId || businessSlug || resolvedNegocioId!;
-          const deductRes = await deductStockUniversal(
-            deductTarget,
-            items.map((it: { dishId?: string; productId?: string; id?: string; nombre?: string; cantidad: string | number }) => ({
-              dishId: it.dishId || it.productId || it.id,
-              name: it.nombre,
-              quantity: parseInt(String(it.cantidad)) || 1,
-            }))
+        // Deducción y validación atómica de stock (si no fue deducido previamente en createOrderAction)
+        // No se confía en skip_stock_deduction ni en autenticación de personal para saltar el consumo de líneas reales nuevas.
+        // Exige un débito persistido confiable o valida y descuenta exactamente una vez bajo bloqueo.
+
+        // Bloqueo pesimista canónico en orden lexicográfico de IDs para prevenir deadlocks
+        const candidateDishIds = (items || [])
+          .map((it: any) => it.dishId || it.productId || (it.id && typeof it.id === "string" && !it.id.startsWith("cart-") && it.id.length > 5 ? it.id : null))
+          .filter(Boolean) as string[];
+        const sortedDishIds = Array.from(new Set(candidateDishIds)).sort();
+        if (sortedDishIds.length > 0) {
+          await client.query(
+            `SELECT id FROM "Dish" WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE`,
+            [sortedDishIds]
           );
-          if (!deductRes.success) {
-            await client.query("ROLLBACK");
-            return NextResponse.json(
-              { ok: false, error: deductRes.error || "Existencias insuficientes en bodega." },
-              { status: 400 }
-            );
-          }
         }
 
-        // Consultar configuración fiscal y de servicio del restaurante (IVA, Servicio, reglas de inclusión)
+        // Consultar configuración fiscal, de servicio y modo de pruebas del restaurante
+        let restaurantTestMode = false;
         let restConfig: {
           ivaPercent: number;
           servicePercent: number;
@@ -765,6 +926,7 @@ export async function POST(req: NextRequest) {
               ],
             },
             select: {
+              testMode: true,
               ivaPercent: true,
               servicePercent: true,
               ivaOnTable: true,
@@ -775,6 +937,7 @@ export async function POST(req: NextRequest) {
             },
           });
           if (restDb) {
+            restaurantTestMode = Boolean(restDb.testMode);
             restConfig = {
               ivaPercent: typeof restDb.ivaPercent === "number" ? restDb.ivaPercent : 15.0,
               servicePercent: typeof restDb.servicePercent === "number" ? restDb.servicePercent : 10.0,
@@ -791,45 +954,30 @@ export async function POST(req: NextRequest) {
 
         const isTable = !isDeliveryReq && !isLlevarReq;
         const calcChargesForSubtotal = (subtotal: number, deliveryFee = 0) => {
-          // Si el negocio tiene ivaOnTable === true ("IVA Incluido"), rige en todos los canales (Mesa, Llevar, Delivery).
-          // Si el negocio tiene ivaOnTable === false ("IVA Adicional"), aplica como adicional en todos los canales.
-          const ivaIncluded = restConfig.ivaOnTable === true
-            ? true
-            : (restConfig.ivaOnTable === false
-                ? false
-                : (isTable ? restConfig.ivaOnTable : restConfig.ivaOnTakeout));
-          // Si el negocio tiene serviceOnTable === true ("Servicio Incluido"), rige como incluido en todos los canales.
-          // Si tiene serviceOnTable === false ("Servicio Adicional"), aplica como adicional.
-          const serviceIncluded = restConfig.serviceOnTable === true
-            ? true
-            : (restConfig.serviceOnTable === false
-                ? false
-                : (isTable ? restConfig.serviceOnTable : restConfig.serviceOnTakeout));
-
-          const ivaAmount = (restConfig.ivaPercent > 0 && !ivaIncluded)
-            ? Math.round(subtotal * (restConfig.ivaPercent / 100) * 100) / 100
-            : 0;
-          // Normativa Ecuador: El 10% de Servicio aplica ÚNICAMENTE en salón / mesa. En Para Llevar y Delivery es estrictamente $0.00.
-          const serviceAmount = (isTable && restConfig.servicePercent > 0 && !serviceIncluded)
-            ? Math.round(subtotal * (restConfig.servicePercent / 100) * 100) / 100
-            : 0;
-          const totalAmount = Math.round((subtotal + ivaAmount + serviceAmount + deliveryFee) * 100) / 100;
+          const res = calculatePostOrderTotals({
+            itemsSubtotal: subtotal,
+            isTable,
+            config: restConfig,
+            hasActiveItems: true,
+            deliveryCost: deliveryFee,
+          });
           return {
-            subtotal: Math.round(subtotal * 100) / 100,
-            iva: ivaAmount,
-            service_charge: serviceAmount,
-            costo_envio: Math.round(deliveryFee * 100) / 100,
-            total: totalAmount,
+            subtotal: res.subtotal,
+            iva: res.iva,
+            service_charge: res.serviceCharge,
+            costo_envio: res.deliveryCost,
+            total: res.total,
           };
         };
 
-        // Si viene explicitOrderId (despacho desde comanda MenuClient/Prisma), cargar la orden autoritativa
-        let authoritativeOrder: any = null;
+        // Si viene explicitOrderId (despacho desde comanda MenuClient/Prisma), verificar la orden autoritativa
         if (explicitOrderId) {
-          authoritativeOrder = await prisma.order.findUnique({
-            where: { id: explicitOrderId },
-            include: { items: true },
-          });
+          if (!authoritativeOrder) {
+            authoritativeOrder = await prisma.order.findUnique({
+              where: { id: explicitOrderId },
+              include: { items: true },
+            });
+          }
 
           if (!authoritativeOrder || (authoritativeOrder.restaurantId !== resolvedNegocioId && authoritativeOrder.restaurantId !== restaurantPrismaId)) {
             await client.query("ROLLBACK");
@@ -908,16 +1056,30 @@ export async function POST(req: NextRequest) {
           }
 
           createdOrderId = currentOrder.id;
+          const isRoundDemo = Boolean(currentOrder.es_prueba);
 
           for (const item of items) {
-            const cantidad = parseInt(item.cantidad) || 1;
+            const { producto_id, unidades_descontadas, validQuantity } = await resolveDirectProductAndDebit(
+              client,
+              resolvedNegocioId!,
+              item,
+              !isRoundDemo,
+              !isRoundDemo,
+              isRoundDemo
+            );
+            const cantidad = validQuantity;
             const precio = parseFloat(item.precio) || 0;
 
+            if ((globalThis as any).__testHooks?.failAfterStockDeductBeforeItemInsert) {
+              delete (globalThis as any).__testHooks.failAfterStockDeductBeforeItemInsert;
+              throw new Error("TEST_FAIL_AFTER_STOCK_DEDUCT_BEFORE_ITEM_INSERT");
+            }
+
             const { rows: itemRows } = await client.query(
-              `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-               VALUES ($1, $2, $3, $4, $5, true, 'nuevo')
-               RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-              [createdOrderId, item.nombre, cantidad, precio, item.notas || null]
+              `INSERT INTO pedido_items (pedido_id, producto_id, nombre, cantidad, precio, notas, es_añadido, estado_item, unidades_descontadas)
+               VALUES ($1, $2, $3, $4, $5, $6, true, 'nuevo', $7)
+               RETURNING id, pedido_id, producto_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item, unidades_descontadas`,
+              [createdOrderId, producto_id, item.nombre, cantidad, precio, item.notas || null, unidades_descontadas]
             );
             insertedItems.push(itemRows[0]);
           }
@@ -932,19 +1094,54 @@ export async function POST(req: NextRequest) {
             (acc, it) => acc + (Number(it.precio) || 0) * (parseInt(it.cantidad) || 1),
             0
           );
-          const updatedCharges = calcChargesForSubtotal(accumulatedItemsSubtotal, 0);
 
           let existingMeta: any = {};
           try {
             existingMeta = typeof currentOrder.metadata === "string" ? JSON.parse(currentOrder.metadata) : (currentOrder.metadata || {});
           } catch {}
 
+          const existingDelivery = Number(existingMeta.costo_envio) || 0;
+          const existingDiscount = Number(existingMeta.discount_amount ?? existingMeta.descuento) || 0;
+          const existingSeason = Number(existingMeta.season_rate_amount ?? existingMeta.temporada) || 0;
+          const existingTip = Number(existingMeta.tip ?? existingMeta.propina) || 0;
+
+          const existingSnapshot = extractPricingSnapshot(existingMeta);
+          const updatedCharges = existingSnapshot
+            ? calculateV4OrderTotals({
+                itemsSubtotal: accumulatedItemsSubtotal,
+                isTable,
+                snapshot: existingSnapshot,
+                hasActiveItems: allActiveOrderItems.length > 0,
+                discountAmount: existingDiscount,
+                seasonRateAmount: existingSeason,
+                deliveryCost: existingDelivery,
+                tip: existingTip,
+              })
+            : calculatePostOrderTotals({
+                itemsSubtotal: accumulatedItemsSubtotal,
+                isTable,
+                config: restConfig,
+                hasActiveItems: allActiveOrderItems.length > 0,
+                discountAmount: existingDiscount,
+                seasonRateAmount: existingSeason,
+                deliveryCost: existingDelivery,
+                tip: existingTip,
+              });
+          const finalTableTotal = updatedCharges.total;
+
+          const cleanExistingMeta = stripClientPricingFields(existingMeta);
           const updatedMeta = {
-            ...existingMeta,
+            ...cleanExistingMeta,
+            ...(existingSnapshot
+              ? { pricing_version: existingSnapshot.pricingVersion, pricing_snapshot: existingSnapshot }
+              : {}),
             subtotal: updatedCharges.subtotal,
             iva: updatedCharges.iva,
-            service_charge: updatedCharges.service_charge,
-            costo_envio: 0,
+            service_charge: updatedCharges.serviceCharge,
+            costo_envio: updatedCharges.deliveryCost,
+            discount_amount: updatedCharges.discountAmount,
+            season_rate_amount: updatedCharges.seasonRateAmount,
+            tip: updatedCharges.tip,
           };
 
           const { rows: updatedOrderRows } = await client.query(
@@ -956,7 +1153,7 @@ export async function POST(req: NextRequest) {
              WHERE id = $5 
              RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
             [
-              updatedCharges.total,
+              finalTableTotal,
               JSON.stringify(updatedMeta),
               cliente_nombre ? String(cliente_nombre).trim() : null,
               cliente_telefono ? String(cliente_telefono).trim() : null,
@@ -1040,9 +1237,12 @@ export async function POST(req: NextRequest) {
             table_session_token: tableSessionToken,
             subtotal: updatedCharges.subtotal,
             iva: updatedCharges.iva,
-            service_charge: updatedCharges.service_charge,
-            costo_envio: updatedCharges.costo_envio,
-            total: updatedCharges.total,
+            service_charge: updatedCharges.serviceCharge,
+            costo_envio: existingDelivery,
+            discount_amount: existingDiscount,
+            season_rate_amount: existingSeason,
+            tip: existingTip,
+            total: finalTableTotal,
           });
 
           if (tableSessionToken) {
@@ -1060,13 +1260,28 @@ export async function POST(req: NextRequest) {
           // --- NUEVO PEDIDO RESTAURANTE ---
           let itemsTotal = 0;
           for (const item of items) {
-            const cantidad = parseInt(item.cantidad) || 1;
-            const precio = parseFloat(item.precio) || 0;
+            const rawQty = item.quantity !== undefined ? item.quantity : item.cantidad;
+            const cantidad = validateItemQuantity(rawQty, item.nombre || item.dishName);
+            const precio = typeof item.price === "number" ? item.price : (parseFloat(item.precio) || 0);
             itemsTotal += cantidad * precio;
           }
 
           const parsedDeliveryCost = parseFloat(String(costo_envio)) || 0;
-          const charges = calcChargesForSubtotal(itemsTotal, parsedDeliveryCost);
+          const nativeSnapshot = buildPricingSnapshot(restConfig, isTable);
+          const v4Native = calculateV4OrderTotals({
+            itemsSubtotal: itemsTotal,
+            isTable,
+            snapshot: nativeSnapshot,
+            hasActiveItems: true,
+            deliveryCost: parsedDeliveryCost,
+          });
+          const charges = {
+            subtotal: v4Native.subtotal,
+            iva: v4Native.iva,
+            service_charge: v4Native.serviceCharge,
+            costo_envio: v4Native.deliveryCost,
+            total: v4Native.total,
+          };
 
           orderTotal = typeof total === "number" && total > 0
             ? (Math.abs(total - charges.total) < 0.05 ? total : Math.max(total, charges.total))
@@ -1091,7 +1306,7 @@ export async function POST(req: NextRequest) {
             (isLlevarReq && cLabels.prepagoTakeout === true)
           );
 
-          const metaObj: any = {
+          const metaObj: any = attachPricingSnapshot({
             tipo_pedido: isDeliveryReq ? "delivery" : isLlevarReq ? "llevar" : "mesa",
             tipo_entrega: isDeliveryReq ? "DOMICILIO" : isLlevarReq ? "RETIRO" : "SALON",
             cliente_direccion: cliente_direccion || null,
@@ -1104,7 +1319,7 @@ export async function POST(req: NextRequest) {
             exige_prepago: Boolean(exigePrepagoPolicy),
             pago_confirmado: false,
             pago_estado: exigePrepagoPolicy ? "pendiente_prepago" : "pendiente",
-          };
+          }, nativeSnapshot);
 
           if (authoritativeOrder) {
             // Totales siempre autoritativos del servidor
@@ -1113,6 +1328,17 @@ export async function POST(req: NextRequest) {
             metaObj.iva = typeof authoritativeOrder.iva === "number" ? authoritativeOrder.iva : metaObj.iva;
             metaObj.service_charge = typeof authoritativeOrder.serviceCharge === "number" ? authoritativeOrder.serviceCharge : metaObj.service_charge;
             metaObj.costo_envio = typeof authoritativeOrder.deliveryCost === "number" ? authoritativeOrder.deliveryCost : metaObj.costo_envio;
+            metaObj.discount_amount = typeof authoritativeOrder.discountAmount === "number" ? authoritativeOrder.discountAmount : (metaObj.discount_amount ?? 0);
+            metaObj.season_rate_amount = typeof authoritativeOrder.seasonRateAmount === "number" ? authoritativeOrder.seasonRateAmount : (metaObj.season_rate_amount ?? 0);
+            metaObj.tip = typeof authoritativeOrder.tip === "number" ? authoritativeOrder.tip : (metaObj.tip ?? 0);
+            const authSnapshot = extractPricingSnapshot(authoritativeOrder.paymentDetails);
+            if (authSnapshot) {
+              metaObj.pricing_version = authSnapshot.pricingVersion;
+              metaObj.pricing_snapshot = authSnapshot;
+            } else {
+              delete metaObj.pricing_version;
+              delete metaObj.pricing_snapshot;
+            }
             if (authoritativeOrder.paymentDetails && authoritativeOrder.paymentDetails.startsWith("{")) {
               try {
                 const parsedDetails = JSON.parse(authoritativeOrder.paymentDetails);
@@ -1136,12 +1362,13 @@ export async function POST(req: NextRequest) {
           let newOrderRows: any[] = [];
 
           if (explicitOrderId && authoritativeOrder) {
+            const isOrderDemo = Boolean(authoritativeOrder.isTest);
             // Inserción atómica con ON CONFLICT DO NOTHING
             const insertRes = await client.query(
-              `INSERT INTO pedidos (id, negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
-               VALUES ($1::uuid, $2, $3, $4, 'nuevo', $5, $6, $7, 'menuqr', $8)
+              `INSERT INTO pedidos (id, negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata, es_prueba)
+               VALUES ($1::uuid, $2, $3, $4, 'nuevo', $5, $6, $7, 'menuqr', $8, $9)
                ON CONFLICT (id) DO NOTHING
-               RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
+               RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata, es_prueba`,
               [
                 explicitOrderId,
                 resolvedNegocioId,
@@ -1151,12 +1378,13 @@ export async function POST(req: NextRequest) {
                 cliente_nombre ? String(cliente_nombre).trim() : null,
                 cliente_telefono ? String(cliente_telefono).trim() : null,
                 JSON.stringify(metaObj),
+                isOrderDemo,
               ]
             );
 
             if (insertRes.rows.length === 0) {
               const { rows: existingRows } = await client.query(
-                `SELECT id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata
+                `SELECT id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata, es_prueba
                  FROM pedidos WHERE id = $1::uuid`,
                 [explicitOrderId]
               );
@@ -1175,6 +1403,14 @@ export async function POST(req: NextRequest) {
                   // Idempotencia: esta ronda ya fue despachada e insertada previamente
                   isConflictRetry = true;
                   newOrderRows = existingRows;
+                  orderTotal = existingRow.total;
+                  metaObj.subtotal = currentMeta.subtotal ?? metaObj.subtotal;
+                  metaObj.iva = currentMeta.iva ?? metaObj.iva;
+                  metaObj.service_charge = currentMeta.service_charge ?? metaObj.service_charge;
+                  metaObj.costo_envio = currentMeta.costo_envio ?? metaObj.costo_envio;
+                  metaObj.discount_amount = currentMeta.discount_amount ?? metaObj.discount_amount;
+                  metaObj.season_rate_amount = currentMeta.season_rate_amount ?? metaObj.season_rate_amount;
+                  metaObj.tip = currentMeta.tip ?? metaObj.tip;
                   const { rows: existingItems } = await client.query(
                     `SELECT id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item
                      FROM pedido_items WHERE pedido_id = $1::uuid`,
@@ -1222,60 +1458,199 @@ export async function POST(req: NextRequest) {
                 } else {
                   // Identificar ítems de la ronda autoritativa que aún no tienen sourcePedidoItemId
                   const undispatchedRoundItems = (authoritativeOrder.items || []).filter((i: any) => !i.sourcePedidoItemId);
+                  const isDirectRound = undispatchedRoundItems.length === 0;
 
-                  // Mapear cada ítem a insertar con su OrderItem.id correspondiente
+                  // Separar débitos confiables leídos de OrderItem de los datos de líneas nuevas enviados por el navegador
                   let roundItemIndex = 0;
                   const itemsToInsert = undispatchedRoundItems.length > 0
-                    ? undispatchedRoundItems
+                    ? undispatchedRoundItems.map((oi: any) => ({
+                        id: oi.id,
+                        dishId: oi.dishId || null,
+                        dishName: oi.dishName,
+                        quantity: oi.quantity,
+                        price: oi.price,
+                        notes: oi.notes,
+                        // Débito confiable SOLAMENTE si fue leído de OrderItem persistido en base de datos
+                        confirmedUnitsDeducted: typeof oi.unitsDeducted === "number" ? oi.unitsDeducted : null,
+                        isFromOrderItem: true,
+                      }))
                     : (Array.isArray(items) ? items : []).map((it: any) => ({
-                        id: it.orderItemId || it.id || null,
+                        id: null,
+                        dishId: it.dishId || it.productId || null,
                         dishName: it.nombre || it.dishName,
-                        quantity: parseInt(it.cantidad) || 1,
-                        price: parseFloat(it.precio) || 0,
-                        notes: it.notas || null,
+                        quantity: it.quantity !== undefined ? it.quantity : it.cantidad,
+                        price: it.price !== undefined ? it.price : it.precio,
+                        notes: it.notes || it.notas || null,
+                        // Datos de línea nueva del navegador: NUNCA autoritativos. Ignorar unitsDeducted o unidades_descontadas del cuerpo
+                        confirmedUnitsDeducted: null,
+                        isFromOrderItem: false,
                       }));
 
                   for (const it of itemsToInsert) {
                     roundItemIndex++;
-                    const targetOrderItemId = it.id || (items[roundItemIndex - 1]?.orderItemId) || (undispatchedRoundItems[roundItemIndex - 1]?.id);
+                    const targetOrderItemId = it.isFromOrderItem ? it.id : null;
 
                     if (process.env.NODE_ENV === "test" && __testDispatchHooks.beforeItemInsert) {
                       await __testDispatchHooks.beforeItemInsert(roundItemIndex, targetOrderItemId);
                     }
 
-                    const cantidad = it.quantity || parseInt(it.cantidad) || 1;
-                    const precio = typeof it.price === "number" ? it.price : (parseFloat(it.precio) || 0);
+                    const cantidad = validateItemQuantity(it.quantity, it.dishName);
+                    const precio = typeof it.price === "number" ? it.price : (parseFloat(it.price) || 0);
                     const notasItem = it.notes || null;
+                    let producto_id: string | null = null;
+                    let unidades_descontadas: number | null = null;
+
+                    const isOrderDemo = Boolean(existingRow.es_prueba);
+
+                    if (it.isFromOrderItem && typeof it.confirmedUnitsDeducted === "number") {
+                      // Débito confiable leído directamente de OrderItem en la base de datos
+                      if (it.dishId) {
+                        const { rows: dishRows } = await client.query(
+                          `SELECT id FROM "Dish" WHERE id = $1 AND ("restaurantId" = $2 OR "restaurantId" = $3) LIMIT 1`,
+                          [it.dishId, resolvedNegocioId, restaurantPrismaId]
+                        );
+                        if (dishRows.length > 0) {
+                          producto_id = dishRows[0].id;
+                          unidades_descontadas = it.confirmedUnitsDeducted;
+                        }
+                      }
+                    } else {
+                      // Línea nueva enviada por el navegador o OrderItem sin débito confirmado:
+                      // Autenticarse como mesero/staff no demuestra que el stock ya se descontó.
+                      // No se permite saltar el descuento mediante skip_stock_deduction.
+                      // Una ronda REAL directa debe validar y descontar exactamente una vez bajo bloqueo.
+                      // Una ronda DEMO conserva débito 0.
+                      const executeDeductionForNewLine = !isOrderDemo;
+                      const resDirect = await resolveDirectProductAndDebit(
+                        client,
+                        resolvedNegocioId!,
+                        it,
+                        executeDeductionForNewLine,
+                        executeDeductionForNewLine,
+                        isOrderDemo
+                      );
+                      producto_id = resDirect.producto_id;
+                      unidades_descontadas = resDirect.unidades_descontadas;
+                    }
 
                     const { rows: itemRows } = await client.query(
-                      `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-                       VALUES ($1, $2, $3, $4, $5, true, 'nuevo')
-                       RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-                      [createdOrderId, it.dishName || it.nombre, cantidad, precio, notasItem]
+                      `INSERT INTO pedido_items (pedido_id, producto_id, nombre, cantidad, precio, notas, es_añadido, estado_item, unidades_descontadas)
+                       VALUES ($1, $2, $3, $4, $5, $6, true, 'nuevo', $7)
+                       RETURNING id, pedido_id, producto_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item, unidades_descontadas`,
+                      [createdOrderId, producto_id, it.dishName || "Plato", cantidad, precio, notasItem, unidades_descontadas]
                     );
                     const insertedPi = itemRows[0];
                     insertedItems.push(insertedPi);
+
+                    if (process.env.NODE_ENV === "test" && (globalThis as any).__testHooks?.failDuringRoundDispatch) {
+                      delete (globalThis as any).__testHooks.failDuringRoundDispatch;
+                      throw new Error("TEST_FAIL_DURING_ROUND_DISPATCH");
+                    }
 
                     if (process.env.NODE_ENV === "test" && __testDispatchHooks.afterItemInsert) {
                       await __testDispatchHooks.afterItemInsert(roundItemIndex, targetOrderItemId, String(insertedPi.id));
                     }
 
-                    // Vínculo explícito atómico en la MISMA transacción de PostgreSQL
+                    // Sincronizar o crear espejo en OrderItem en la MISMA transacción de PostgreSQL
                     if (targetOrderItemId) {
                       await client.query(
                         `UPDATE "OrderItem"
-                         SET "sourcePedidoItemId" = $1, "lineStatus" = 'ACTIVE'
+                         SET "sourcePedidoItemId" = $1, "lineStatus" = 'ACTIVE', "unitsDeducted" = COALESCE("unitsDeducted", $3)
                          WHERE id = $2`,
-                        [String(insertedPi.id), targetOrderItemId]
+                        [String(insertedPi.id), targetOrderItemId, unidades_descontadas]
+                      );
+                    } else if (explicitOrderId) {
+                      const newOiId = crypto.randomUUID();
+                      await client.query(
+                        `INSERT INTO "OrderItem" (id, "orderId", "dishId", "dishName", price, quantity, notes, "sourcePedidoItemId", "lineStatus", "unitsDeducted")
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ACTIVE', $9)`,
+                        [
+                          newOiId,
+                          explicitOrderId,
+                          producto_id,
+                          it.dishName || "Plato",
+                          precio,
+                          cantidad,
+                          notasItem,
+                          String(insertedPi.id),
+                          unidades_descontadas,
+                        ]
                       );
                     }
                   }
 
+                  let roundFinalTotal = authoritativeOrder.total;
+                  let roundFinalSubtotal = authoritativeOrder.subtotal;
+                  let roundFinalIva = authoritativeOrder.iva;
+                  let roundFinalService = authoritativeOrder.serviceCharge;
+
+                  const existingDiscount = typeof authoritativeOrder.discountAmount === "number"
+                    ? authoritativeOrder.discountAmount
+                    : (Number(currentMeta.discount_amount ?? currentMeta.descuento) || 0);
+
+                  const existingSeason = typeof authoritativeOrder.seasonRateAmount === "number"
+                    ? authoritativeOrder.seasonRateAmount
+                    : (Number(currentMeta.season_rate_amount ?? currentMeta.temporada) || 0);
+
+                  const existingDelivery = typeof authoritativeOrder.deliveryCost === "number"
+                    ? authoritativeOrder.deliveryCost
+                    : (Number(currentMeta.costo_envio) || 0);
+
+                  const existingTip = typeof authoritativeOrder.tip === "number"
+                    ? authoritativeOrder.tip
+                    : (Number(currentMeta.tip ?? currentMeta.propina) || 0);
+
+                  const existingSnapshot = extractPricingSnapshot(currentMeta) ?? extractPricingSnapshot(authoritativeOrder.paymentDetails);
+                  if (isDirectRound) {
+                    const { rows: allActivePi } = await client.query(
+                      `SELECT precio::float, cantidad FROM pedido_items
+                       WHERE pedido_id = $1 AND (estado_item IS NULL OR estado_item != 'cancelado')`,
+                      [createdOrderId]
+                    );
+                    const accumulatedSubtotal = allActivePi.reduce(
+                      (acc, pi) => acc + (Number(pi.precio) || 0) * (parseInt(pi.cantidad) || 1),
+                      0
+                    );
+                    const charges = existingSnapshot
+                      ? calculateV4OrderTotals({
+                          itemsSubtotal: accumulatedSubtotal,
+                          isTable,
+                          snapshot: existingSnapshot,
+                          hasActiveItems: allActivePi.length > 0,
+                          discountAmount: existingDiscount,
+                          seasonRateAmount: existingSeason,
+                          deliveryCost: existingDelivery,
+                          tip: existingTip,
+                        })
+                      : calculatePostOrderTotals({
+                          itemsSubtotal: accumulatedSubtotal,
+                          isTable,
+                          config: restConfig,
+                          hasActiveItems: allActivePi.length > 0,
+                          discountAmount: existingDiscount,
+                          seasonRateAmount: existingSeason,
+                          deliveryCost: existingDelivery,
+                          tip: existingTip,
+                        });
+                    roundFinalSubtotal = charges.subtotal;
+                    roundFinalIva = charges.iva;
+                    roundFinalService = charges.serviceCharge;
+                    roundFinalTotal = charges.total;
+                  }
+
+                  const cleanCurrentMeta = stripClientPricingFields(currentMeta);
                   const updatedMeta = {
-                    ...currentMeta,
-                    subtotal: typeof authoritativeOrder.subtotal === "number" ? authoritativeOrder.subtotal : currentMeta.subtotal,
-                    iva: typeof authoritativeOrder.iva === "number" ? authoritativeOrder.iva : currentMeta.iva,
-                    service_charge: typeof authoritativeOrder.serviceCharge === "number" ? authoritativeOrder.serviceCharge : currentMeta.service_charge,
+                    ...cleanCurrentMeta,
+                    ...(existingSnapshot
+                      ? { pricing_version: existingSnapshot.pricingVersion, pricing_snapshot: existingSnapshot }
+                      : {}),
+                    subtotal: isDirectRound ? roundFinalSubtotal : (typeof authoritativeOrder.subtotal === "number" ? authoritativeOrder.subtotal : currentMeta.subtotal),
+                    iva: isDirectRound ? roundFinalIva : (typeof authoritativeOrder.iva === "number" ? authoritativeOrder.iva : currentMeta.iva),
+                    service_charge: isDirectRound ? roundFinalService : (typeof authoritativeOrder.serviceCharge === "number" ? authoritativeOrder.serviceCharge : currentMeta.service_charge),
+                    costo_envio: isDirectRound ? existingDelivery : (typeof authoritativeOrder.deliveryCost === "number" ? authoritativeOrder.deliveryCost : (currentMeta.costo_envio ?? 0)),
+                    discount_amount: isDirectRound ? existingDiscount : (typeof authoritativeOrder.discountAmount === "number" ? authoritativeOrder.discountAmount : (currentMeta.discount_amount ?? 0)),
+                    season_rate_amount: isDirectRound ? existingSeason : (typeof authoritativeOrder.seasonRateAmount === "number" ? authoritativeOrder.seasonRateAmount : (currentMeta.season_rate_amount ?? 0)),
+                    tip: isDirectRound ? existingTip : (typeof authoritativeOrder.tip === "number" ? authoritativeOrder.tip : (currentMeta.tip ?? 0)),
                     processed_round_ids: roundAttemptId ? [...processedRounds, roundAttemptId] : processedRounds,
                   };
 
@@ -1284,17 +1659,26 @@ export async function POST(req: NextRequest) {
                      SET total = $1, metadata = $2
                      WHERE id = $3::uuid
                      RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
-                    [authoritativeOrder.total, JSON.stringify(updatedMeta), createdOrderId]
+                    [roundFinalTotal, JSON.stringify(updatedMeta), createdOrderId]
                   );
                   newOrderRows = updatedRows;
 
-                  // Actualizar kdsDispatched en "Order" en la MISMA transacción
+                  // Actualizar kdsDispatched y desglose completo en "Order" en la MISMA transacción
                   await client.query(
                     `UPDATE "Order"
-                     SET "kdsDispatched" = true, "updatedAt" = NOW()
-                     WHERE id = $1`,
-                    [createdOrderId]
+                     SET total = $1, subtotal = $2, iva = $3, "serviceCharge" = $4, "kdsDispatched" = true, "updatedAt" = NOW()
+                     WHERE id = $5`,
+                    [roundFinalTotal, roundFinalSubtotal, roundFinalIva, roundFinalService, createdOrderId]
                   );
+
+                  orderTotal = roundFinalTotal;
+                  metaObj.subtotal = roundFinalSubtotal;
+                  metaObj.iva = roundFinalIva;
+                  metaObj.service_charge = roundFinalService;
+                  metaObj.costo_envio = isDirectRound ? existingDelivery : (metaObj.costo_envio ?? existingDelivery);
+                  metaObj.discount_amount = isDirectRound ? existingDiscount : (metaObj.discount_amount ?? existingDiscount);
+                  metaObj.season_rate_amount = isDirectRound ? existingSeason : (metaObj.season_rate_amount ?? existingSeason);
+                  metaObj.tip = isDirectRound ? existingTip : (metaObj.tip ?? existingTip);
                 }
               } else {
                 // Conflicto de idempotencia detectado: el pedido ya existe en pedidos
@@ -1361,12 +1745,46 @@ export async function POST(req: NextRequest) {
                 const cantidad = it.quantity || 1;
                 const precio = it.price || 0;
                 const notasItem = it.notes || null;
+                let producto_id: string | null = null;
+                let unidades_descontadas: number | null = null;
+
+                if (typeof it.unitsDeducted === "number") {
+                  if (it.dishId) {
+                    const { rows: dishRows } = await client.query(
+                      `SELECT id FROM "Dish" WHERE id = $1 AND ("restaurantId" = $2 OR "restaurantId" = $3) LIMIT 1`,
+                      [it.dishId, resolvedNegocioId, restaurantPrismaId]
+                    );
+                    if (dishRows.length > 0) {
+                      producto_id = dishRows[0].id;
+                      unidades_descontadas = it.unitsDeducted;
+                    }
+                  }
+                } else {
+                  // Si el OrderItem autoritativo no tenía débito confirmado en base de datos,
+                  // resolver producto y debitar exactamente una vez bajo bloqueo
+                  const isOrderDemo = Boolean(authoritativeOrder.isTest);
+                  const executeDeductionForUnconfirmed = !isOrderDemo;
+                  const resDirect = await resolveDirectProductAndDebit(
+                    client,
+                    resolvedNegocioId!,
+                    it,
+                    executeDeductionForUnconfirmed,
+                    executeDeductionForUnconfirmed,
+                    isOrderDemo
+                  );
+                  producto_id = resDirect.producto_id;
+                  unidades_descontadas = resDirect.unidades_descontadas;
+                  await client.query(
+                    `UPDATE "OrderItem" SET "unitsDeducted" = $1 WHERE id = $2`,
+                    [unidades_descontadas, it.id]
+                  );
+                }
 
                 const { rows: itemRows } = await client.query(
-                  `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-                   VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
-                   RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-                  [createdOrderId, it.dishName, cantidad, precio, notasItem]
+                  `INSERT INTO pedido_items (pedido_id, producto_id, nombre, cantidad, precio, notas, es_añadido, estado_item, unidades_descontadas)
+                   VALUES ($1, $2, $3, $4, $5, $6, false, 'nuevo', $7)
+                   RETURNING id, pedido_id, producto_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item, unidades_descontadas`,
+                  [createdOrderId, producto_id, it.dishName, cantidad, precio, notasItem, unidades_descontadas]
                 );
                 const insertedPi = itemRows[0];
                 insertedItems.push(insertedPi);
@@ -1393,11 +1811,12 @@ export async function POST(req: NextRequest) {
               );
             }
           } else {
-            // Flujo normal nativo (Catálogo o comanda sin orden previa)
+            // Flujo normal nativo (sin orden previa autoritativa)
+            const isOrderDemo = restaurantTestMode;
             const insertRes = await client.query(
-              `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata)
-               VALUES ($1, $2, $3, 'nuevo', $4, $5, $6, 'menuqr', $7)
-               RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata`,
+              `INSERT INTO pedidos (negocio_id, mesa, camarero_id, estado, total, cliente_nombre, cliente_telefono, vertical, metadata, es_prueba)
+               VALUES ($1, $2, $3, 'nuevo', $4, $5, $6, 'menuqr', $7, $8)
+               RETURNING id, negocio_id, mesa, estado, camarero_id, total::float, created_at, cliente_nombre, cliente_telefono, solicita_mesero, vertical, metadata, es_prueba`,
               [
                 resolvedNegocioId,
                 mesaStr,
@@ -1406,20 +1825,34 @@ export async function POST(req: NextRequest) {
                 cliente_nombre ? String(cliente_nombre).trim() : null,
                 cliente_telefono ? String(cliente_telefono).trim() : null,
                 JSON.stringify(metaObj),
+                isOrderDemo,
               ]
             );
             newOrderRows = insertRes.rows;
             createdOrderId = newOrderRows[0].id;
 
             for (const item of items) {
-              const cantidad = parseInt(item.cantidad) || 1;
+              const { producto_id, unidades_descontadas, validQuantity } = await resolveDirectProductAndDebit(
+                client,
+                resolvedNegocioId!,
+                item,
+                !isOrderDemo,
+                !isOrderDemo,
+                isOrderDemo
+              );
+              const cantidad = validQuantity;
               const precio = parseFloat(item.precio) || 0;
 
+              if ((globalThis as any).__testHooks?.failAfterStockDeductBeforeItemInsert) {
+                delete (globalThis as any).__testHooks.failAfterStockDeductBeforeItemInsert;
+                throw new Error("TEST_FAIL_AFTER_STOCK_DEDUCT_BEFORE_ITEM_INSERT");
+              }
+
               const { rows: itemRows } = await client.query(
-                `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-                 VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
-                 RETURNING id, pedido_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item`,
-                [createdOrderId, item.nombre, cantidad, precio, item.notas || null]
+                `INSERT INTO pedido_items (pedido_id, producto_id, nombre, cantidad, precio, notas, es_añadido, estado_item, unidades_descontadas)
+                 VALUES ($1, $2, $3, $4, $5, $6, false, 'nuevo', $7)
+                 RETURNING id, pedido_id, producto_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item, unidades_descontadas`,
+                [createdOrderId, producto_id, item.nombre, cantidad, precio, item.notas || null, unidades_descontadas]
               );
               insertedItems.push(itemRows[0]);
             }
@@ -1535,6 +1968,7 @@ export async function POST(req: NextRequest) {
 
           const res = NextResponse.json({
             ok: true,
+            id: createdOrderId,
             tipo: "nuevo_pedido",
             pedido: responseOrder,
             items: insertedItems,
@@ -1546,6 +1980,9 @@ export async function POST(req: NextRequest) {
             iva: metaObj.iva,
             service_charge: metaObj.service_charge,
             costo_envio: metaObj.costo_envio,
+            discount_amount: metaObj.discount_amount,
+            season_rate_amount: metaObj.season_rate_amount,
+            tip: metaObj.tip,
             total: orderTotal,
           });
 
@@ -1575,30 +2012,24 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        // Deducción y validación atómica universal de stock en Prisma
+        // Bloqueo pesimista canónico en orden lexicográfico de IDs para prevenir deadlocks
         const deductTarget = restaurantPrismaId || resolvedNegocioId;
-        if (deductTarget) {
-          const deductRes = await deductStockUniversal(
-            deductTarget,
-            items.map((it: { dishId?: string; productId?: string; id?: string; nombre?: string; cantidad: string | number }) => ({
-              dishId: it.dishId || it.productId || it.id,
-              name: it.nombre,
-              quantity: parseInt(String(it.cantidad)) || 1,
-            }))
+        const candidateDishIds = (items || [])
+          .map((it: any) => it.dishId || it.productId || (it.id && typeof it.id === "string" && !it.id.startsWith("cart-") && it.id.length > 5 ? it.id : null))
+          .filter(Boolean) as string[];
+        const sortedDishIds = Array.from(new Set(candidateDishIds)).sort();
+        if (sortedDishIds.length > 0) {
+          await client.query(
+            `SELECT id FROM "Dish" WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE`,
+            [sortedDishIds]
           );
-          if (!deductRes.success) {
-            await client.query("ROLLBACK");
-            return NextResponse.json(
-              { ok: false, error: deductRes.error || "Existencias insuficientes en bodega." },
-              { status: 400 }
-            );
-          }
         }
 
         let subtotal = 0;
         for (const it of items) {
-          const qty = parseInt(it.cantidad) || 1;
-          const pr = parseFloat(it.precio) || 0;
+          const rawQty = it.quantity !== undefined ? it.quantity : it.cantidad;
+          const qty = validateItemQuantity(rawQty, it.nombre || it.dishName);
+          const pr = typeof it.price === "number" ? it.price : (parseFloat(it.precio) || 0);
           subtotal += qty * pr;
         }
 
@@ -1644,7 +2075,6 @@ export async function POST(req: NextRequest) {
         createdOrderId = orderRows[0].id;
 
         for (const item of items) {
-          const qty = parseInt(item.cantidad) || 1;
           const pr = parseFloat(item.precio) || 0;
           
           // Construir descripción de variante una sola vez sin duplicar
@@ -1658,11 +2088,25 @@ export async function POST(req: NextRequest) {
             variantDesc = String(item.notas).trim();
           }
 
+          const { producto_id, unidades_descontadas, validQuantity } = await resolveDirectProductAndDebit(
+            client,
+            resolvedNegocioId!,
+            item,
+            Boolean(deductTarget),
+            Boolean(deductTarget)
+          );
+          const qty = validQuantity;
+
+          if ((globalThis as any).__testHooks?.failAfterStockDeductBeforeItemInsert) {
+            delete (globalThis as any).__testHooks.failAfterStockDeductBeforeItemInsert;
+            throw new Error("TEST_FAIL_AFTER_STOCK_DEDUCT_BEFORE_ITEM_INSERT");
+          }
+
           const { rows: itemRows } = await client.query(
-            `INSERT INTO pedido_items (pedido_id, nombre, cantidad, precio, notas, es_añadido, estado_item)
-             VALUES ($1, $2, $3, $4, $5, false, 'nuevo')
-             RETURNING id, pedido_id, nombre, cantidad, precio::float, notas`,
-            [createdOrderId, item.nombre, qty, pr, variantDesc || null]
+            `INSERT INTO pedido_items (pedido_id, producto_id, nombre, cantidad, precio, notas, es_añadido, estado_item, unidades_descontadas)
+             VALUES ($1, $2, $3, $4, $5, $6, false, 'nuevo', $7)
+             RETURNING id, pedido_id, producto_id, nombre, cantidad, precio::float, notas, es_añadido, estado_item, unidades_descontadas`,
+            [createdOrderId, producto_id, item.nombre, qty, pr, variantDesc || null, unidades_descontadas]
           );
           insertedItems.push(itemRows[0]);
         }
@@ -2386,16 +2830,25 @@ export async function POST(req: NextRequest) {
     } finally {
       client.release();
     }
+    });
   } catch (err: unknown) {
     console.error("[POST /api/pedidos] Error:", err);
     const msg = err instanceof Error ? err.message : "Error al procesar pedido";
+    const status = (
+      msg.includes("Stock insuficiente") ||
+      msg.includes("no pertenece") ||
+      msg.includes("no reconocida") ||
+      msg.includes("Cantidad inválida") ||
+      msg.includes("no está disponible") ||
+      msg.includes("no están configuradas")
+    ) ? 400 : 500;
     notificarSuperAdmin({
       mensaje: `⚠️ Error Crítico en POST /api/pedidos: ${msg}`,
       cliente: "Alerta Servidor",
     });
     return NextResponse.json(
       { ok: false, error: msg },
-      { status: 500 }
+      { status }
     );
   }
 }

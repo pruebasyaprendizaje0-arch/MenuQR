@@ -20,6 +20,8 @@ import { getVerticalMarketplaceData } from "@/lib/marketplace";
 import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMarketplaceSection";
 import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: "Citas Pro | Agenda de Turnos y Especialistas para WhatsApp",
   description:

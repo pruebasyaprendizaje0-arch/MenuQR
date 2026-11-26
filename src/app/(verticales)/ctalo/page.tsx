@@ -20,6 +20,8 @@ import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMar
 import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 import { getUserSession, getSuperAdminSession } from "@/lib/auth";
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: "Catálogo Pro | E-Commerce con Variantes de Talla y Color para WhatsApp",
   description:

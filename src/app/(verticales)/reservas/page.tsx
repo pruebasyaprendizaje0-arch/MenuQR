@@ -20,6 +20,8 @@ import { getVerticalMarketplaceData } from "@/lib/marketplace";
 import { VerticalMarketplaceSection } from "@/components/marketplace/VerticalMarketplaceSection";
 import { EcosystemFooter } from "@/components/footer/EcosystemFooter";
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: "Reservas Pro | Motor de Reservas de Hospedaje sin Comisiones",
   description:

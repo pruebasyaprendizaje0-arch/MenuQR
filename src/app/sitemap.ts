@@ -3,6 +3,8 @@ import { prismaTenant } from "@/lib/db";
 import { getBaseUrl, normalizeSlug, resolvePublicImageUrl } from "@/lib/seo";
 import { ecuadorData } from "@/lib/ecuador";
 
+export const dynamic = 'force-dynamic';
+
 function sanitizeUrl(rawUrl: string): string {
   if (!rawUrl) return "";
   return rawUrl.trim().replace(/&(?!(amp|lt|gt|quot|apos);)/g, "&amp;");
