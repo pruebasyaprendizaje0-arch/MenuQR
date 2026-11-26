@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Users,
   ChefHat,
@@ -54,11 +54,26 @@ interface StaffAdminTabProps {
   };
 }
 
+type StaffLoadStatus = "loading" | "ready" | "error";
+
 export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
   const [camareros, setCamareros] = useState<Camarero[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadStatus, setLoadStatus] = useState<StaffLoadStatus>("loading");
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedRestaurantId, setLoadedRestaurantId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<"ALL" | "MESERO" | "CAJERO" | "REPARTIDOR">("ALL");
+
+  const requestSeqRef = useRef(0);
+  const mutationEpochRef = useRef(0);
+  const mountedRef = useRef(true);
+  const restaurantIdRef = useRef(restaurant.id);
+  restaurantIdRef.current = restaurant.id;
+  const loadedRestaurantIdRef = useRef<string | null>(null);
+  const loadStatusRef = useRef<StaffLoadStatus>("loading");
+
+  const isDataReady = loadStatus === "ready" && loadedRestaurantId === restaurant.id;
 
   // Estados de seguridad de Cocina
   const [kitchenPin, setKitchenPin] = useState("");
@@ -80,10 +95,40 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [submittingWaiter, setSubmittingWaiter] = useState(false);
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // Cargar datos del personal y seguridad
-  const loadStaffData = useCallback(async () => {
+  const loadStaffData = useCallback(async (isSilent: boolean = false) => {
+    const targetRestaurantId = restaurant.id;
+    const seq = ++requestSeqRef.current;
+    const hasCurrentData =
+      loadedRestaurantIdRef.current === targetRestaurantId &&
+      loadStatusRef.current === "ready";
+
+    if (isSilent && hasCurrentData) {
+      setRefreshing(true);
+    } else {
+      loadStatusRef.current = "loading";
+      setLoadStatus("loading");
+      setRefreshing(false);
+    }
+    setLoadError(null);
+
     try {
-      const res = await getStaffDataAction(restaurant.id);
+      const res = await getStaffDataAction(targetRestaurantId);
+      if (
+        !mountedRef.current ||
+        seq !== requestSeqRef.current ||
+        targetRestaurantId !== restaurantIdRef.current
+      ) {
+        return;
+      }
+
       if (res.success && res.camareros) {
         setCamareros(res.camareros);
         if (res.kitchenSecurity) {
@@ -92,82 +137,173 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
           setKitchenPinRequired(Boolean(res.kitchenSecurity.kitchenPinRequired));
           setWaiterPinRequired(res.kitchenSecurity.waiterPinRequired !== false);
         }
-      } else if (res.error) {
-        console.error("Error loading staff data:", res.error);
+        loadedRestaurantIdRef.current = targetRestaurantId;
+        loadStatusRef.current = "ready";
+        setLoadedRestaurantId(targetRestaurantId);
+        setLoadStatus("ready");
+        setLoadError(null);
+      } else {
+        const msg = res.error || "No se pudo cargar la configuración del equipo.";
+        setLoadError(msg);
+        if (!hasCurrentData) {
+          loadStatusRef.current = "error";
+          setLoadStatus("error");
+        }
       }
     } catch (err) {
+      if (
+        !mountedRef.current ||
+        seq !== requestSeqRef.current ||
+        targetRestaurantId !== restaurantIdRef.current
+      ) {
+        return;
+      }
       console.error("Error in loadStaffData:", err);
+      const msg = err instanceof Error ? err.message : "Error de conexión al cargar equipo y accesos.";
+      setLoadError(msg);
+      if (!hasCurrentData) {
+        loadStatusRef.current = "error";
+        setLoadStatus("error");
+      }
     } finally {
-      setLoading(false);
+      if (
+        mountedRef.current &&
+        seq === requestSeqRef.current &&
+        targetRestaurantId === restaurantIdRef.current
+      ) {
+        setRefreshing(false);
+      }
     }
   }, [restaurant.id]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadStaffData();
-  }, [loadStaffData]);
+    mutationEpochRef.current += 1;
+    loadedRestaurantIdRef.current = null;
+    loadStatusRef.current = "loading";
+    setLoadedRestaurantId(null);
+    setLoadStatus("loading");
+    setRefreshing(false);
+    setLoadError(null);
+    setCamareros([]);
+    setKitchenPin("");
+    setKitchenPinSet(false);
+    setKitchenPinRequired(false);
+    setWaiterPinRequired(true);
+    setSavingKitchen(false);
+    setSubmittingWaiter(false);
+    setKitchenMessage(null);
+    setFormError(null);
+    setIsModalOpen(false);
+    setEditingWaiter(null);
+    loadStaffData(false);
+  }, [restaurant.id, loadStaffData]);
 
   // Guardar configuración de seguridad de cocina
   const handleSaveKitchenSecurity = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!isDataReady) {
+      setKitchenMessage({
+        type: "error",
+        text: "Espera a que cargue la configuración actual antes de guardar cambios.",
+      });
+      return;
+    }
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
     setSavingKitchen(true);
     setKitchenMessage(null);
 
     try {
-      const res = await saveKitchenSecurityAction(restaurant.id, {
+      const res = await saveKitchenSecurityAction(targetRestaurantId, {
         kitchenPin,
         kitchenPinRequired,
         waiterPinRequired,
       });
 
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
+
       if (res.success) {
         setKitchenPinSet(Boolean(res.kitchenSecurity?.kitchenPinSet));
         setKitchenPin("");
         setKitchenMessage({ type: "success", text: "Clave y configuración de seguridad guardadas correctamente." });
-        setTimeout(() => setKitchenMessage(null), 4000);
+        setTimeout(() => {
+          if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+            setKitchenMessage(null);
+          }
+        }, 4000);
       } else {
         setKitchenMessage({ type: "error", text: res.error || "Error al guardar." });
       }
     } catch (err: unknown) {
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Error al guardar seguridad de cocina.";
       setKitchenMessage({ type: "error", text: msg });
     } finally {
-      setSavingKitchen(false);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        setSavingKitchen(false);
+      }
     }
   };
 
   // Quitar clave de cocina (acceso libre)
   const handleRemoveKitchenPin = async () => {
+    if (!isDataReady) {
+      setKitchenMessage({
+        type: "error",
+        text: "Espera a que cargue la configuración actual antes de modificar el PIN.",
+      });
+      return;
+    }
     if (!confirm("¿Deseas quitar la clave de cocina y permitir acceso libre?")) return;
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
     setSavingKitchen(true);
     setKitchenMessage(null);
 
     try {
-      const res = await saveKitchenSecurityAction(restaurant.id, {
+      const res = await saveKitchenSecurityAction(targetRestaurantId, {
         kitchenPin: "",
         kitchenPinRequired: false,
         waiterPinRequired,
       });
+
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
 
       if (res.success) {
         setKitchenPin("");
         setKitchenPinSet(false);
         setKitchenPinRequired(false);
         setKitchenMessage({ type: "success", text: "Acceso libre a cocina activado (sin clave)." });
-        setTimeout(() => setKitchenMessage(null), 4000);
+        setTimeout(() => {
+          if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+            setKitchenMessage(null);
+          }
+        }, 4000);
       } else {
         setKitchenMessage({ type: "error", text: res.error || "Error al quitar clave." });
       }
     } catch (err: unknown) {
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Error al procesar.";
       setKitchenMessage({ type: "error", text: msg });
     } finally {
-      setSavingKitchen(false);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        setSavingKitchen(false);
+      }
     }
   };
 
   // Abrir modal para nuevo integrante
   const handleOpenCreateModal = (presetRole?: StaffRole) => {
+    if (!isDataReady) return;
     setEditingWaiter(null);
     setFormNombre("");
     const targetRole = presetRole || (roleFilter !== "ALL" ? roleFilter : "MESERO");
@@ -181,6 +317,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
 
   // Abrir modal para editar integrante
   const handleOpenEditModal = (waiter: Camarero) => {
+    if (!isDataReady) return;
     setEditingWaiter(waiter);
     setFormNombre(waiter.nombre);
     setFormPin("");
@@ -194,6 +331,10 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
   // Guardar integrante (crear o editar)
   const handleSaveWaiter = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isDataReady) {
+      setFormError("Espera a que carguen los datos del equipo antes de guardar.");
+      return;
+    }
     if (!formNombre.trim()) {
       setFormError("Ingresa el nombre del integrante del equipo.");
       return;
@@ -208,19 +349,25 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
       return;
     }
 
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
     setSubmittingWaiter(true);
     setFormError(null);
 
     try {
       if (editingWaiter) {
         // Actualizar existente
-        const res = await updateWaiterAction(restaurant.id, editingWaiter.id, {
+        const res = await updateWaiterAction(targetRestaurantId, editingWaiter.id, {
           nombre: formNombre.trim(),
           ...(cleanPin ? { pin: cleanPin } : {}),
           rol: formRol,
           telefono: formTelefono.trim() || null,
           activo: formActivo,
         });
+
+        if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+          return;
+        }
 
         if (res.success && res.camarero) {
           setCamareros((prev) =>
@@ -233,12 +380,15 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
       } else {
         // Crear nuevo
         const res = await createWaiterAction(
-          restaurant.id,
+          targetRestaurantId,
           formNombre.trim(),
           cleanPin,
           formRol,
           formTelefono.trim() || null
         );
+        if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+          return;
+        }
         if (res.success && res.camarero) {
           setCamareros((prev) => [...prev, res.camarero]);
           setIsModalOpen(false);
@@ -247,15 +397,23 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
         }
       }
     } catch (err: unknown) {
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : "Error al procesar integrante.";
       setFormError(msg);
     } finally {
-      setSubmittingWaiter(false);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        setSubmittingWaiter(false);
+      }
     }
   };
 
   // Toggle rápido de activo/inactivo para un mesero
   const handleToggleActive = async (waiter: Camarero) => {
+    if (!isDataReady) return;
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
     try {
       const nextState = !waiter.activo;
       // Actualización optimista en UI
@@ -263,10 +421,14 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
         prev.map((c) => (c.id === waiter.id ? { ...c, activo: nextState } : c))
       );
 
-      const res = await updateWaiterAction(restaurant.id, waiter.id, {
+      const res = await updateWaiterAction(targetRestaurantId, waiter.id, {
         nombre: waiter.nombre,
         activo: nextState,
       });
+
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
 
       if (!res.success) {
         // Revertir si falló
@@ -282,22 +444,31 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
 
   // Eliminar mesero
   const handleDeleteWaiter = async (waiter: Camarero) => {
+    if (!isDataReady) return;
     if (!confirm(`¿Estás seguro de eliminar al mesero "${waiter.nombre}"?`)) return;
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
 
     try {
       // Optimista
       setCamareros((prev) => prev.filter((c) => c.id !== waiter.id));
 
-      const res = await deleteWaiterAction(restaurant.id, waiter.id);
+      const res = await deleteWaiterAction(targetRestaurantId, waiter.id);
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       if (!res.success) {
         // Revertir
         setCamareros((prev) => [...prev, waiter]);
         alert(res.error || "Error al eliminar mesero.");
       }
     } catch (err) {
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       console.error("Error deleting waiter:", err);
       alert("Error de conexión al eliminar mesero.");
-      loadStaffData();
+      loadStaffData(true);
     }
   };
 
@@ -390,9 +561,23 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
               <ChefHat className="h-6 w-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-lg font-black text-white">Seguridad de Pantalla Cocina KDS</h3>
-                {kitchenPinRequired ? (
+                {!isDataReady ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wide bg-slate-800 text-slate-300 border border-slate-700">
+                    {loadStatus === "error" ? (
+                      <>
+                        <AlertCircle className="w-3 h-3 text-red-400" />
+                        <span>Sin verificar</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                        <span>Verificando...</span>
+                      </>
+                    )}
+                  </span>
+                ) : kitchenPinRequired ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wide bg-amber-500/20 text-amber-300 border border-amber-500/30">
                     <Lock className="w-3 h-3" /> Con Clave PIN
                   </span>
@@ -424,8 +609,9 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
               </div>
               <button
                 type="button"
-                onClick={() => setKitchenPinRequired(!kitchenPinRequired)}
-                className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 ${
+                disabled={!isDataReady || savingKitchen}
+                onClick={() => isDataReady && setKitchenPinRequired(!kitchenPinRequired)}
+                className={`w-12 h-6 rounded-full transition-colors relative shrink-0 p-0.5 disabled:opacity-50 disabled:cursor-not-allowed ${
                   kitchenPinRequired ? "bg-orange-500" : "bg-slate-800"
                 }`}
               >
@@ -464,10 +650,17 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
                 <input
                   type={showKitchenPin ? "text" : "password"}
                   maxLength={8}
-                  placeholder={kitchenPinSet ? "Escribe nuevo PIN para cambiarlo..." : "Asignar PIN de 4 a 8 dígitos..."}
+                  disabled={!isDataReady || savingKitchen}
+                  placeholder={
+                    !isDataReady
+                      ? "Cargando configuración..."
+                      : kitchenPinSet
+                      ? "Escribe nuevo PIN para cambiarlo..."
+                      : "Asignar PIN de 4 a 8 dígitos..."
+                  }
                   value={kitchenPin}
                   onChange={(e) => setKitchenPin(e.target.value.replace(/\D/g, ""))}
-                  className="w-full bg-slate-900 border border-slate-800 focus:border-orange-500 px-3.5 py-2.5 rounded-xl text-white font-mono text-sm tracking-widest focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder:text-slate-600"
+                  className="w-full bg-slate-900 border border-slate-800 focus:border-orange-500 px-3.5 py-2.5 rounded-xl text-white font-mono text-sm tracking-widest focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 />
               </div>
             </div>
@@ -498,20 +691,20 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             </div>
 
             <div className="flex items-center gap-2.5">
-              {(kitchenPin || kitchenPinSet) && (
+              {isDataReady && (kitchenPin || kitchenPinSet) && (
                 <button
                   type="button"
-                  disabled={savingKitchen}
+                  disabled={!isDataReady || savingKitchen}
                   onClick={handleRemoveKitchenPin}
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition border border-transparent hover:border-red-500/20"
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition border border-transparent hover:border-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Quitar Clave (Libre)
                 </button>
               )}
               <button
                 type="submit"
-                disabled={savingKitchen}
-                className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs transition shadow-lg shadow-orange-500/20 flex items-center gap-2 disabled:opacity-50"
+                disabled={!isDataReady || savingKitchen}
+                className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs transition shadow-lg shadow-orange-500/20 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {savingKitchen ? (
                   <>
@@ -541,11 +734,22 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
               <Users className="h-6 w-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-lg font-black text-white">Personal del Negocio</h3>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  {activeCount} activo{activeCount !== 1 ? "s" : ""} de {camareros.length}
-                </span>
+                {isDataReady ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    {activeCount} activo{activeCount !== 1 ? "s" : ""} de {camareros.length}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                    {loadStatus === "error" ? "Sin confirmar" : "Cargando..."}
+                  </span>
+                )}
+                {isDataReady && refreshing && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Actualizando...
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 mt-1">
                 Registra a meseros, cajeros y repartidores con su propio PIN para identificar turnos, cobros y entregas.
@@ -561,8 +765,9 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
 
             <button
               type="button"
+              disabled={!isDataReady}
               onClick={() => handleOpenCreateModal()}
-              className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 active:scale-95"
+              className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition shadow-lg shadow-emerald-500/20 flex items-center gap-1.5 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
               <span>+ Nuevo Integrante</span>
@@ -583,7 +788,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
           >
             <span>Todos</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300">
-              {camareros.length}
+              {isDataReady ? camareros.length : "—"}
             </span>
           </button>
 
@@ -599,7 +804,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             <Users className="w-3.5 h-3.5" />
             <span>Meseros de Salón</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/40">
-              {meserosCount}
+              {isDataReady ? meserosCount : "—"}
             </span>
           </button>
 
@@ -615,7 +820,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             <CreditCard className="w-3.5 h-3.5" />
             <span>Cajeros (POS)</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/40">
-              {cajerosCount}
+              {isDataReady ? cajerosCount : "—"}
             </span>
           </button>
 
@@ -631,7 +836,7 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
             <Bike className="w-3.5 h-3.5" />
             <span>Repartidores (Delivery)</span>
             <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-950 text-amber-300 border border-amber-800/40">
-              {repartidoresCount}
+              {isDataReady ? repartidoresCount : "—"}
             </span>
           </button>
         </div>
@@ -651,23 +856,55 @@ export function StaffAdminTab({ restaurant }: StaffAdminTabProps) {
 
           <button
             type="button"
-            onClick={() => {
-              setLoading(true);
-              loadStaffData();
-            }}
-            disabled={loading}
-            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750 border border-slate-700 transition"
+            onClick={() => loadStaffData(isDataReady)}
+            disabled={loadStatus === "loading" || refreshing}
+            className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750 border border-slate-700 transition disabled:opacity-50"
             title="Recargar equipo"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-4 h-4 ${loadStatus === "loading" || refreshing ? "animate-spin" : ""}`} />
           </button>
         </div>
 
+        {/* AVISO DE ERROR EN RECARGA CON DATOS PREVIOS */}
+        {isDataReady && loadError && (
+          <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-3 text-xs text-red-300">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>No se pudo actualizar: {loadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadStaffData(true)}
+              className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-200 font-bold transition shrink-0"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
+
         {/* LISTADO DE INTEGRANTES */}
-        {loading ? (
-          <div className="py-12 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
+        {!isDataReady && loadStatus === "error" ? (
+          <div className="py-12 text-center border border-red-500/30 rounded-2xl bg-red-950/20 p-6 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 mx-auto">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h4 className="text-sm font-bold text-white">No se pudo cargar el equipo ni la seguridad de cocina</h4>
+            <p className="text-xs text-red-200/80 max-w-md mx-auto">
+              {loadError || "Ocurrió un error al consultar los datos del negocio."}
+            </p>
+            <button
+              type="button"
+              onClick={() => loadStaffData(false)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-bold text-xs transition shadow-md mt-2"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Reintentar carga</span>
+            </button>
+          </div>
+        ) : !isDataReady ? (
+          <div className="py-12 text-center text-slate-400 text-xs flex items-center justify-center gap-2 border border-dashed border-slate-800 rounded-2xl bg-slate-950/40">
             <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
-            <span>Cargando equipo del negocio...</span>
+            <span>Cargando equipo y configuración de accesos...</span>
           </div>
         ) : filteredCamareros.length === 0 ? (
           <div className="py-12 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-950/50 p-6 space-y-3">

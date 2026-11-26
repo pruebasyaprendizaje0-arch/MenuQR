@@ -93,8 +93,27 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
   );
 
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("stock");
-  const [loading, setLoading] = useState(true);
+  const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading");
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedRestaurantId, setLoadedRestaurantId] = useState<string | null>(null);
+
+  const requestSeqRef = React.useRef(0);
+  const mutationEpochRef = React.useRef(0);
+  const mountedRef = React.useRef(true);
+  const restaurantIdRef = React.useRef(restaurant.id);
+  restaurantIdRef.current = restaurant.id;
+  const loadedRestaurantIdRef = React.useRef<string | null>(null);
+  const loadStatusRef = React.useRef<"loading" | "ready" | "error">("loading");
+
+  const isDataReady = loadStatus === "ready" && loadedRestaurantId === restaurant.id;
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Datos cargados desde el servidor
   const [suppliers, setSuppliers] = useState<any[]>([]);
@@ -172,10 +191,19 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
     } catch {}
   };
 
+  const isMutationCurrent = (targetRestaurantId: string, epoch: number) =>
+    mountedRef.current &&
+    epoch === mutationEpochRef.current &&
+    targetRestaurantId === restaurantIdRef.current;
+
   // Procesar código de barras escaneado en bodega
   const handleProcessInventoryBarcode = async (rawCode: string) => {
+    if (!isDataReady) return;
     const code = rawCode.trim();
     if (!code) return;
+
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
 
     playBeep();
     setUnrecognizedCode(null);
@@ -203,13 +231,16 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
     // 2. Si no se encontró en local, buscar en servidor
     if (!matchedDish) {
-      const res = await searchDishByBarcodeAction(restaurant.id, code);
+      const res = await searchDishByBarcodeAction(targetRestaurantId, code);
+      if (!isMutationCurrent(targetRestaurantId, epoch)) return;
       if (res.found && res.dish) {
         matchedDish = dishes.find((d) => d.id === res.dish.id) || res.dish;
         isBox = Boolean(res.isBox);
         unitsPerBox = res.unitsPerBox || 1;
       }
     }
+
+    if (!isMutationCurrent(targetRestaurantId, epoch)) return;
 
     if (!matchedDish) {
       setUnrecognizedCode(code);
@@ -227,6 +258,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
     // Resaltar fila en la tabla
     setHighlightedDishId(matchedDish.id);
     setTimeout(() => {
+      if (!isMutationCurrent(targetRestaurantId, epoch)) return;
       const el = document.getElementById(`dish-row-${matchedDish.id}`);
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -235,12 +267,25 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
     // Auto-sumar si el switch continuo está encendido
     if (autoAddOneOnScan) {
+      if (!isMutationCurrent(targetRestaurantId, epoch)) return;
       const delta = isBox ? unitsPerBox : 1;
-      await handleExecuteAddStock(matchedDish.id, delta, matchedDish.name);
+      await handleExecuteAddStock(matchedDish.id, delta, matchedDish.name, {
+        restaurantId: targetRestaurantId,
+        epoch,
+      });
     }
   };
 
-  const handleExecuteAddStock = async (dishId: string, delta: number, dishName?: string) => {
+  const handleExecuteAddStock = async (
+    dishId: string,
+    delta: number,
+    dishName?: string,
+    expectedContext?: { restaurantId: string; epoch: number }
+  ) => {
+    if (!isDataReady) return;
+    const targetRestaurantId = expectedContext?.restaurantId ?? restaurant.id;
+    const epoch = expectedContext?.epoch ?? mutationEpochRef.current;
+    if (!isMutationCurrent(targetRestaurantId, epoch)) return;
     setIsAdjustingStock(true);
     try {
       const res = await adjustInventoryStockAction({
@@ -249,6 +294,10 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         delta,
         reason: "Ingreso con escáner de bodega",
       });
+
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
 
       if (res.success) {
         setDishes((prev) =>
@@ -266,14 +315,22 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         setRecentEntriesCount((prev) => prev + 1);
         const name = dishName || scannedResult?.dish?.name || "Producto";
         setLastEntryNotice(`✓ +${delta} ${bLabels.stockUnitPlural} ingresadas a "${name}"`);
-        setTimeout(() => setLastEntryNotice(null), 4000);
+        setTimeout(() => {
+          if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+            setLastEntryNotice(null);
+          }
+        }, 4000);
       } else {
         alert(res.error || "No se pudo actualizar el stock.");
       }
     } catch {
-      alert("Error de conexión al ingresar stock.");
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        alert("Error de conexión al ingresar stock.");
+      }
     } finally {
-      setIsAdjustingStock(false);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        setIsAdjustingStock(false);
+      }
     }
   };
 
@@ -383,6 +440,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
   // Exportar todo el documento de inventario a Excel
   const handleExportInventoryExcel = () => {
+    if (!isDataReady) return;
     try {
       const wb = XLSX.utils.book_new();
 
@@ -520,31 +578,87 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
   };
 
   // Carga inicial de datos
-  const loadInventory = async (isSilent: boolean = false) => {
-    if (!isSilent) setLoading(true);
-    else setRefreshing(true);
+  const loadInventory = async (
+    isSilent: boolean = false,
+    expectedContext?: { restaurantId: string; epoch: number }
+  ) => {
+    if (expectedContext && !isMutationCurrent(expectedContext.restaurantId, expectedContext.epoch)) {
+      return;
+    }
+    const targetRestaurantId = expectedContext?.restaurantId ?? restaurant.id;
+    const seq = ++requestSeqRef.current;
+    const hasCurrentData =
+      loadedRestaurantIdRef.current === targetRestaurantId &&
+      loadStatusRef.current === "ready";
+
+    if (isSilent && hasCurrentData) {
+      setRefreshing(true);
+    } else {
+      loadStatusRef.current = "loading";
+      setLoadStatus("loading");
+      setRefreshing(false);
+    }
+    setLoadError(null);
 
     try {
-      const res = await getInventoryDataAction(restaurant.id);
+      const res = await getInventoryDataAction(targetRestaurantId);
+      if (
+        !mountedRef.current ||
+        seq !== requestSeqRef.current ||
+        targetRestaurantId !== restaurantIdRef.current
+      ) {
+        return;
+      }
+
       if (res.success) {
         setSuppliers(res.suppliers || []);
         setSupplyItems(res.supplyItems || []);
         setDishes(res.dishes || []);
         setPurchaseOrders(res.purchaseOrders || []);
-      } else if (res.error) {
-        console.error("Error al cargar inventario:", res.error);
+        loadedRestaurantIdRef.current = targetRestaurantId;
+        loadStatusRef.current = "ready";
+        setLoadedRestaurantId(targetRestaurantId);
+        setLoadStatus("ready");
+        setLoadError(null);
+      } else {
+        const msg = res.error || "No se pudo cargar el inventario del negocio.";
+        console.error("Error al cargar inventario:", msg);
+        setLoadError(msg);
+        if (!hasCurrentData) {
+          loadStatusRef.current = "error";
+          setLoadStatus("error");
+        }
       }
     } catch (err) {
+      if (
+        !mountedRef.current ||
+        seq !== requestSeqRef.current ||
+        targetRestaurantId !== restaurantIdRef.current
+      ) {
+        return;
+      }
       console.error(err);
+      const msg = err instanceof Error ? err.message : "Error de conexión al cargar inventario.";
+      setLoadError(msg);
+      if (!hasCurrentData) {
+        loadStatusRef.current = "error";
+        setLoadStatus("error");
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (
+        mountedRef.current &&
+        seq === requestSeqRef.current &&
+        targetRestaurantId === restaurantIdRef.current
+      ) {
+        setRefreshing(false);
+      }
     }
   };
 
   const [isEnablingUniversalStock, setIsEnablingUniversalStock] = useState(false);
 
   const handleEnableUniversalStock = async () => {
+    if (!isDataReady) return;
     const confirmed = window.confirm(
       "¿Deseas activar el control de stock universal en todo tu catálogo?\n\n" +
       "• Todos los productos 'Sin límite' pasarán a estar estrictamente controlados.\n" +
@@ -553,24 +667,63 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
     );
     if (!confirmed) return;
 
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
     setIsEnablingUniversalStock(true);
     try {
-      const res = await enableUniversalStockAction(restaurant.id);
+      const res = await enableUniversalStockAction(targetRestaurantId);
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       if (res?.success) {
         alert(`¡Listo! Se activó el control de stock universal en ${res.updatedCount} productos.`);
-        loadInventory();
+        loadInventory(false, { restaurantId: targetRestaurantId, epoch });
       } else {
         alert(res?.error || "Error al activar el control de stock.");
       }
     } catch (err: any) {
-      alert("Error: " + err.message);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        alert("Error: " + err.message);
+      }
     } finally {
-      setIsEnablingUniversalStock(false);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        setIsEnablingUniversalStock(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadInventory();
+    mutationEpochRef.current += 1;
+    loadedRestaurantIdRef.current = null;
+    loadStatusRef.current = "loading";
+    setLoadedRestaurantId(null);
+    setLoadStatus("loading");
+    setRefreshing(false);
+    setLoadError(null);
+    setSuppliers([]);
+    setSupplyItems([]);
+    setDishes([]);
+    setPurchaseOrders([]);
+    setScannedResult(null);
+    setUnrecognizedCode(null);
+    setHighlightedDishId(null);
+    setIsSupplierModalOpen(false);
+    setEditingSupplier(null);
+    setIsSupplyModalOpen(false);
+    setEditingSupply(null);
+    setIsPoModalOpen(false);
+    setIsRecipeModalOpen(false);
+    setRecipeDish(null);
+    setIsWasteModalOpen(false);
+    setWasteItem(null);
+    setIsBatchInventoryModalOpen(false);
+    setQuickEditDish(null);
+    setIsBarcodeDockOpen(false);
+    setDockManualCode("");
+    setIsMobileQrModalOpen(false);
+    setIsAdjustingStock(false);
+    setIsEnablingUniversalStock(false);
+    loadInventory(false);
 
     // Auto-actualización periódica en segundo plano cada 15 segundos
     const interval = setInterval(() => {
@@ -671,6 +824,9 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
   // Ajuste rápido de stock
   const handleQuickAdjust = async (type: "DISH" | "SUPPLY", id: string, delta: number) => {
+    if (!isDataReady) return;
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
     try {
       const res = await adjustInventoryStockAction({
         itemType: type,
@@ -678,19 +834,27 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         delta,
         reason: "Ajuste rápido desde panel",
       });
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       if (res?.error) {
         alert(res.error);
         return;
       }
-      loadInventory(true);
+      loadInventory(true, { restaurantId: targetRestaurantId, epoch });
     } catch (err: any) {
-      alert("Error: " + err.message);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        alert("Error: " + err.message);
+      }
     }
   };
 
   // Guardar merma
   const handleConfirmWaste = async () => {
+    if (!isDataReady) return;
     if (!wasteItem || wasteQty <= 0) return;
+    const targetRestaurantId = restaurant.id;
+    const epoch = mutationEpochRef.current;
     try {
       const res = await adjustInventoryStockAction({
         itemType: wasteItem.type,
@@ -698,16 +862,21 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         delta: -Math.abs(wasteQty),
         reason: `Merma registrada: ${wasteReason}`,
       });
+      if (!mountedRef.current || epoch !== mutationEpochRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       if (res?.error) {
         alert(res.error);
         return;
       }
       setIsWasteModalOpen(false);
       setWasteItem(null);
-      loadInventory(true);
+      loadInventory(true, { restaurantId: targetRestaurantId, epoch });
       alert("¡Merma registrada exitosamente!");
     } catch (err: any) {
-      alert("Error: " + err.message);
+      if (mountedRef.current && epoch === mutationEpochRef.current && targetRestaurantId === restaurantIdRef.current) {
+        alert("Error: " + err.message);
+      }
     }
   };
 
@@ -739,14 +908,20 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {isDataReady && refreshing && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-bold">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              <span>Actualizando...</span>
+            </span>
+          )}
           <button
             type="button"
-            onClick={() => loadInventory(true)}
-            disabled={refreshing}
+            onClick={() => loadInventory(isDataReady)}
+            disabled={loadStatus === "loading" || refreshing}
             className="p-2.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-750 border border-slate-700 transition active:scale-95 disabled:opacity-50"
             title="Refrescar inventario"
           >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin text-amber-400" : ""}`} />
+            <RefreshCw className={`h-4 w-4 ${loadStatus === "loading" || refreshing ? "animate-spin text-amber-400" : ""}`} />
           </button>
 
           {/* Sub-tabs pills */}
@@ -774,7 +949,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
               }`}
             >
               <Truck className="h-3.5 w-3.5" />
-              <span>Proveedores ({suppliers.length})</span>
+              <span>Proveedores ({isDataReady ? suppliers.length : "—"})</span>
             </button>
 
             <button
@@ -787,7 +962,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
               }`}
             >
               <PackagePlus className="h-3.5 w-3.5" />
-              <span>Órdenes de Compra ({purchaseOrders.length})</span>
+              <span>Órdenes de Compra ({isDataReady ? purchaseOrders.length : "—"})</span>
             </button>
 
             <button
@@ -817,6 +992,28 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
         </div>
       )}
 
+      {/* AVISO DE ERROR EN CARGA O RECARGA */}
+      {loadError && (
+        <div className="p-4 rounded-2xl bg-red-950/30 border border-red-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-red-200">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
+            <span>
+              {isDataReady
+                ? `No se pudo actualizar el inventario (mostrando últimos datos válidos): ${loadError}`
+                : `No se pudo cargar el inventario del negocio: ${loadError}`}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => loadInventory(isDataReady)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-red-500 hover:bg-red-400 text-white font-bold transition shrink-0 self-start sm:self-auto"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Reintentar</span>
+          </button>
+        </div>
+      )}
+
       {/* ========================================================= */}
       {/* TARJETAS DE MÉTRICAS GLOBALES DE INVENTARIO */}
       {/* ========================================================= */}
@@ -832,9 +1029,17 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </span>
           </div>
           <p className="text-2xl font-black text-white mt-2">
-            ${inventoryMetrics.totalCostValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            {isDataReady
+              ? `$${inventoryMetrics.totalCostValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+              : "—"}
           </p>
-          <span className="text-[11px] text-slate-400 block mt-1">Capital invertido en existencia</span>
+          <span className="text-[11px] text-slate-400 block mt-1">
+            {isDataReady
+              ? "Capital invertido en existencia"
+              : loadStatus === "error"
+              ? "Pendiente de reintento"
+              : "Cargando existencias..."}
+          </span>
         </div>
 
         {/* Valor Proyectado a Venta */}
@@ -848,10 +1053,16 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </span>
           </div>
           <p className="text-2xl font-black text-emerald-400 mt-2">
-            ${inventoryMetrics.totalRetailValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            {isDataReady
+              ? `$${inventoryMetrics.totalRetailValue.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+              : "—"}
           </p>
           <span className="text-[11px] text-emerald-500/80 block mt-1">
-            Margen bruto promedio: ~{inventoryMetrics.estimatedMargin}%
+            {isDataReady
+              ? `Margen bruto promedio: ~${inventoryMetrics.estimatedMargin}%`
+              : loadStatus === "error"
+              ? "Sin datos confirmados"
+              : "Calculando proyección..."}
           </span>
         </div>
 
@@ -866,10 +1077,10 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </span>
           </div>
           <p className="text-2xl font-black text-amber-400 mt-2">
-            {inventoryMetrics.lowStockCount}
+            {isDataReady ? inventoryMetrics.lowStockCount : "—"}
           </p>
           <span className="text-[11px] text-amber-500/80 block mt-1">
-            Requieren orden de compra urgente
+            {isDataReady ? "Requieren orden de compra urgente" : "Esperando datos del servidor"}
           </span>
         </div>
 
@@ -884,10 +1095,10 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </span>
           </div>
           <p className="text-2xl font-black text-red-400 mt-2">
-            {inventoryMetrics.outOfStockCount}
+            {isDataReady ? inventoryMetrics.outOfStockCount : "—"}
           </p>
           <span className="text-[11px] text-red-400/80 block mt-1">
-            Sin existencias en carta digital
+            {isDataReady ? "Sin existencias en carta digital" : "Esperando datos del servidor"}
           </span>
         </div>
       </div>
@@ -933,7 +1144,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                     : "text-slate-400 hover:text-amber-300"
                 }`}
               >
-                Críticos ({inventoryMetrics.lowStockCount})
+                Críticos ({isDataReady ? inventoryMetrics.lowStockCount : "—"})
               </button>
               <button
                 type="button"
@@ -944,7 +1155,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                     : "text-slate-400 hover:text-red-300"
                 }`}
               >
-                Agotados ({inventoryMetrics.outOfStockCount})
+                Agotados ({isDataReady ? inventoryMetrics.outOfStockCount : "—"})
               </button>
             </div>
           </div>
@@ -957,7 +1168,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
               <div className="flex items-center gap-2">
                 <Package className="h-4 w-4 text-amber-400" />
                 <h3 className="text-sm font-bold text-white">
-                  Catálogo de Venta ({filteredDishes.length})
+                  Catálogo de Venta ({isDataReady ? filteredDishes.length : "—"})
                 </h3>
                 <span className="text-xs text-slate-400 font-mono hidden sm:inline">
                   · {bLabels.stockUnitPlural} controladas
@@ -966,19 +1177,19 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => loadInventory(true)}
-                  disabled={refreshing}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition shadow-sm"
+                  onClick={() => loadInventory(isDataReady)}
+                  disabled={loadStatus === "loading" || refreshing}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold transition shadow-sm disabled:opacity-50"
                   title="Refrescar existencias en tiempo real"
                 >
-                  <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin text-amber-400" : ""}`} />
+                  <RefreshCw className={`h-3.5 w-3.5 ${loadStatus === "loading" || refreshing ? "animate-spin text-amber-400" : ""}`} />
                   <span className="hidden sm:inline">Refrescar</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleEnableUniversalStock}
-                  disabled={isEnablingUniversalStock}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition shadow-sm active:scale-95"
+                  disabled={!isDataReady || isEnablingUniversalStock}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition shadow-sm active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Activar control de stock estricto a todos los productos 'Sin límite'"
                 >
                   <Sparkles className="h-3.5 w-3.5 text-amber-400" />
@@ -996,8 +1207,9 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                 {/* BOTÓN DOCK ESCÁNER DE BODEGA (OPCIÓN 2) */}
                 <button
                   type="button"
+                  disabled={!isDataReady}
                   onClick={() => setIsBarcodeDockOpen((prev) => !prev)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-sm cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     isBarcodeDockOpen
                       ? "bg-amber-500 text-slate-950 border-amber-400 font-black shadow-amber-500/20"
                       : "bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/40"
@@ -1016,8 +1228,9 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                 {/* BOTÓN ABRIR EN EL CELULAR CON CÓDIGO QR */}
                 <button
                   type="button"
-                  onClick={() => setIsMobileQrModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
+                  disabled={!isDataReady}
+                  onClick={() => isDataReady && setIsMobileQrModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 text-xs font-bold transition shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Abrir escáner de bodega en tu celular mediante código QR"
                 >
                   <Smartphone className="h-3.5 w-3.5 text-indigo-400" />
@@ -1025,8 +1238,9 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                 </button>
                 <button
                   type="button"
+                  disabled={!isDataReady}
                   onClick={handleExportInventoryExcel}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 text-xs font-bold transition shadow-sm"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 text-xs font-bold transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Descargar documento completo de inventario en Excel (.xlsx)"
                 >
                   <Download className="h-3.5 w-3.5" />
@@ -1034,8 +1248,9 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsBatchInventoryModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-emerald-600 hover:from-amber-500 hover:to-emerald-500 text-white text-xs font-bold transition shadow-sm"
+                  disabled={!isDataReady}
+                  onClick={() => isDataReady && setIsBatchInventoryModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-emerald-600 hover:from-amber-500 hover:to-emerald-500 text-white text-xs font-bold transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Subir o actualizar existencias, costos y proveedores en lote con Excel"
                 >
                   <FileSpreadsheet className="h-3.5 w-3.5" />
@@ -1058,7 +1273,33 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {filteredDishes.length === 0 ? (
+                  {!isDataReady && loadStatus === "error" ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-10 px-4">
+                        <div className="inline-flex flex-col items-center gap-2 text-red-300">
+                          <AlertTriangle className="h-6 w-6 text-red-400" />
+                          <span className="text-xs font-bold">No se pudo cargar el inventario.</span>
+                          <button
+                            type="button"
+                            onClick={() => loadInventory(false)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-500 hover:bg-red-400 text-white text-xs font-bold transition"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            <span>Reintentar</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : !isDataReady ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-10 text-slate-400">
+                        <div className="inline-flex items-center gap-2 text-xs">
+                          <RefreshCw className="h-4 w-4 animate-spin text-amber-400" />
+                          <span>Cargando existencias y costos del negocio...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredDishes.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="text-center py-8 text-slate-500">
                         No se encontraron productos con los criterios de búsqueda.
@@ -1494,11 +1735,13 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </div>
             <button
               type="button"
+              disabled={!isDataReady}
               onClick={() => {
+                if (!isDataReady) return;
                 setEditingSupplier(null);
                 setIsSupplierModalOpen(true);
               }}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold transition shadow-lg"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus className="h-4 w-4" />
               <span>Nuevo Proveedor</span>
@@ -1506,7 +1749,25 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {suppliers.length === 0 ? (
+            {!isDataReady ? (
+              <div className="col-span-full text-center py-12 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800 text-slate-400 text-xs">
+                {loadStatus === "error" ? (
+                  <button
+                    type="button"
+                    onClick={() => loadInventory(false)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-bold transition"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Reintentar carga de proveedores</span>
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin text-amber-400" />
+                    <span>Cargando proveedores...</span>
+                  </span>
+                )}
+              </div>
+            ) : suppliers.length === 0 ? (
               <div className="col-span-full text-center py-12 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800 text-slate-500">
                 <Truck className="h-10 w-10 mx-auto mb-2 text-slate-600 opacity-60" />
                 <p className="text-sm font-bold text-slate-400">No hay proveedores registrados todavía.</p>
@@ -1541,13 +1802,22 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                       </button>
                       <button
                         type="button"
+                        disabled={!isDataReady}
                         onClick={async () => {
+                          if (!isDataReady) return;
+                          const targetRestaurantId = restaurant.id;
+                          const epoch = mutationEpochRef.current;
                           if (confirm(`¿Eliminar al proveedor "${sup.name}"?`)) {
-                            await deleteSupplierAction(sup.id);
-                            loadInventory(true);
+                            const res = await deleteSupplierAction(sup.id);
+                            if (!isMutationCurrent(targetRestaurantId, epoch)) return;
+                            if (res?.error) {
+                              alert(res.error);
+                              return;
+                            }
+                            loadInventory(true, { restaurantId: targetRestaurantId, epoch });
                           }
                         }}
-                        className="p-1.5 text-red-400 hover:text-red-300 rounded-lg hover:bg-red-500/10 transition"
+                        className="p-1.5 text-red-400 hover:text-red-300 rounded-lg hover:bg-red-500/10 transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -1602,8 +1872,9 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </div>
             <button
               type="button"
-              onClick={() => setIsPoModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold transition shadow-lg"
+              disabled={!isDataReady}
+              onClick={() => isDataReady && setIsPoModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus className="h-4 w-4" />
               <span>Nueva Orden de Compra</span>
@@ -1611,7 +1882,25 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
           </div>
 
           <div className="space-y-3">
-            {purchaseOrders.length === 0 ? (
+            {!isDataReady ? (
+              <div className="text-center py-12 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800 text-slate-400 text-xs">
+                {loadStatus === "error" ? (
+                  <button
+                    type="button"
+                    onClick={() => loadInventory(false)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-bold transition"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Reintentar carga de órdenes</span>
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin text-amber-400" />
+                    <span>Cargando órdenes de compra...</span>
+                  </span>
+                )}
+              </div>
+            ) : purchaseOrders.length === 0 ? (
               <div className="text-center py-12 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800 text-slate-500">
                 <PackagePlus className="h-10 w-10 mx-auto mb-2 text-slate-600 opacity-60" />
                 <p className="text-sm font-bold text-slate-400">No hay órdenes de compra registradas.</p>
@@ -1737,22 +2026,27 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                           <>
                             <button
                               type="button"
+                              disabled={!isDataReady}
                               onClick={async () => {
+                                if (!isDataReady) return;
+                                const targetRestaurantId = restaurant.id;
+                                const epoch = mutationEpochRef.current;
                                 if (
                                   confirm(
                                     `¿Confirmar recepción de la orden OC-#${po.orderNumber}? Esto sumará automáticamente las unidades al stock en el catálogo y actualizará los costos de compra.`
                                   )
                                 ) {
                                   const res = await receivePurchaseOrderAction(po.id, true);
+                                  if (!isMutationCurrent(targetRestaurantId, epoch)) return;
                                   if (res?.error) {
                                     alert(res.error);
                                     return;
                                   }
-                                  loadInventory(true);
+                                  loadInventory(true, { restaurantId: targetRestaurantId, epoch });
                                   alert("¡Mercadería recibida y stock actualizado con éxito!");
                                 }
                               }}
-                              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-md active:scale-95"
+                              className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <PackageCheck className="h-3.5 w-3.5" />
                               <span>Recibir Mercadería (+Stock)</span>
@@ -1760,13 +2054,22 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
                             <button
                               type="button"
+                              disabled={!isDataReady}
                               onClick={async () => {
+                                if (!isDataReady) return;
+                                const targetRestaurantId = restaurant.id;
+                                const epoch = mutationEpochRef.current;
                                 if (confirm(`¿Cancelar la orden OC-#${po.orderNumber}?`)) {
-                                  await cancelPurchaseOrderAction(po.id);
-                                  loadInventory(true);
+                                  const res = await cancelPurchaseOrderAction(po.id);
+                                  if (!isMutationCurrent(targetRestaurantId, epoch)) return;
+                                  if (res?.error) {
+                                    alert(res.error);
+                                    return;
+                                  }
+                                  loadInventory(true, { restaurantId: targetRestaurantId, epoch });
                                 }
                               }}
-                              className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition"
+                              className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold transition disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Cancelar
                             </button>
@@ -1791,7 +2094,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
               <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
                   <ChefHat className="h-5 w-5 text-amber-400" />
-                  Insumos & Materias Primas ({supplyItems.length})
+                  Insumos & Materias Primas ({isDataReady ? supplyItems.length : "—"})
                 </h3>
                 <p className="text-xs text-slate-400">
                   Ingredientes clave (café, leche, quesos, pan, empaques) para el costeo de platos y bebidas.
@@ -1799,11 +2102,13 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
               </div>
               <button
                 type="button"
+                disabled={!isDataReady}
                 onClick={() => {
+                  if (!isDataReady) return;
                   setEditingSupply(null);
                   setIsSupplyModalOpen(true);
                 }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold transition shadow-lg"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white text-xs font-bold transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus className="h-4 w-4" />
                 <span>Nuevo Insumo</span>
@@ -1811,7 +2116,25 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {filteredSupplies.length === 0 ? (
+              {!isDataReady ? (
+                <div className="col-span-full text-center py-8 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800 text-slate-400 text-xs">
+                  {loadStatus === "error" ? (
+                    <button
+                      type="button"
+                      onClick={() => loadInventory(false)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-bold transition"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>Reintentar carga de insumos</span>
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-2">
+                      <RefreshCw className="h-4 w-4 animate-spin text-amber-400" />
+                      <span>Cargando insumos...</span>
+                    </span>
+                  )}
+                </div>
+              ) : filteredSupplies.length === 0 ? (
                 <div className="col-span-full text-center py-8 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800 text-slate-500 text-xs">
                   No hay insumos creados aún. Haz clic en &quot;Nuevo Insumo&quot; para registrar café, leche, salsas, etc.
                 </div>
@@ -1841,13 +2164,22 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
                         </button>
                         <button
                           type="button"
+                          disabled={!isDataReady}
                           onClick={async () => {
+                            if (!isDataReady) return;
+                            const targetRestaurantId = restaurant.id;
+                            const epoch = mutationEpochRef.current;
                             if (confirm(`¿Eliminar insumo "${s.name}"?`)) {
-                              await deleteSupplyItemAction(s.id);
-                              loadInventory(true);
+                              const res = await deleteSupplyItemAction(s.id);
+                              if (!isMutationCurrent(targetRestaurantId, epoch)) return;
+                              if (res?.error) {
+                                alert(res.error);
+                                return;
+                              }
+                              loadInventory(true, { restaurantId: targetRestaurantId, epoch });
                             }
                           }}
-                          className="p-1 text-red-400 hover:text-red-300 rounded"
+                          className="p-1 text-red-400 hover:text-red-300 rounded disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
@@ -1951,12 +2283,16 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
       {/* ========================================================= */}
       {/* MODAL: PROVEEDOR (CREAR / EDITAR) */}
       {/* ========================================================= */}
-      {isSupplierModalOpen && (
+      {isDataReady && isSupplierModalOpen && (
         <SupplierModal
+          key={`sup-${restaurant.id}-${editingSupplier?.id || "new"}`}
           supplier={editingSupplier}
           restaurantId={restaurant.id}
+          canMutate={isDataReady}
+          isBusinessActive={(id) => mountedRef.current && restaurantIdRef.current === id}
           onClose={() => setIsSupplierModalOpen(false)}
-          onSaved={() => {
+          onSaved={(savedForId) => {
+            if (!mountedRef.current || restaurantIdRef.current !== savedForId) return;
             setIsSupplierModalOpen(false);
             loadInventory(true);
           }}
@@ -1966,13 +2302,17 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
       {/* ========================================================= */}
       {/* MODAL: INSUMO (CREAR / EDITAR) */}
       {/* ========================================================= */}
-      {isSupplyModalOpen && (
+      {isDataReady && isSupplyModalOpen && (
         <SupplyModal
+          key={`supply-${restaurant.id}-${editingSupply?.id || "new"}`}
           supply={editingSupply}
           suppliers={suppliers}
           restaurantId={restaurant.id}
+          canMutate={isDataReady}
+          isBusinessActive={(id) => mountedRef.current && restaurantIdRef.current === id}
           onClose={() => setIsSupplyModalOpen(false)}
-          onSaved={() => {
+          onSaved={(savedForId) => {
+            if (!mountedRef.current || restaurantIdRef.current !== savedForId) return;
             setIsSupplyModalOpen(false);
             loadInventory(true);
           }}
@@ -1982,14 +2322,18 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
       {/* ========================================================= */}
       {/* MODAL: NUEVA ORDEN DE COMPRA (CONVERSOR DE CAJAS) */}
       {/* ========================================================= */}
-      {isPoModalOpen && (
+      {isDataReady && isPoModalOpen && (
         <PurchaseOrderModal
+          key={`po-${restaurant.id}`}
           restaurant={restaurant}
           suppliers={suppliers}
           dishes={dishes}
           supplyItems={supplyItems}
+          canMutate={isDataReady}
+          isBusinessActive={(id) => mountedRef.current && restaurantIdRef.current === id}
           onClose={() => setIsPoModalOpen(false)}
-          onSaved={() => {
+          onSaved={(savedForId) => {
+            if (!mountedRef.current || restaurantIdRef.current !== savedForId) return;
             setIsPoModalOpen(false);
             loadInventory(true);
           }}
@@ -1999,15 +2343,20 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
       {/* ========================================================= */}
       {/* MODAL: RECETA SENCILLA DE PLATO */}
       {/* ========================================================= */}
-      {isRecipeModalOpen && recipeDish && (
+      {isDataReady && isRecipeModalOpen && recipeDish && (
         <RecipeModal
+          key={`recipe-${restaurant.id}-${recipeDish.id}`}
           dish={recipeDish}
           supplyItems={supplyItems}
+          restaurantId={restaurant.id}
+          canMutate={isDataReady}
+          isBusinessActive={(id) => mountedRef.current && restaurantIdRef.current === id}
           onClose={() => {
             setIsRecipeModalOpen(false);
             setRecipeDish(null);
           }}
-          onSaved={() => {
+          onSaved={(savedForId) => {
+            if (!mountedRef.current || restaurantIdRef.current !== savedForId) return;
             setIsRecipeModalOpen(false);
             setRecipeDish(null);
             loadInventory(true);
@@ -2018,7 +2367,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
       {/* ========================================================= */}
       {/* MODAL: REGISTRAR MERMA / ROTURA */}
       {/* ========================================================= */}
-      {isWasteModalOpen && wasteItem && (
+      {isDataReady && isWasteModalOpen && wasteItem && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -2089,9 +2438,11 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
       {/* MODAL DE EDICIÓN RÁPIDA DE COSTO & PROVEEDOR */}
       <QuickEditDishInventoryModal
-        isOpen={Boolean(quickEditDish)}
+        key={`quick-edit-${restaurant.id}`}
+        isOpen={isDataReady && Boolean(quickEditDish)}
         dish={quickEditDish}
         suppliers={suppliers}
+        canSave={isDataReady}
         onClose={() => setQuickEditDish(null)}
         onSuccess={(updatedDish) => {
           setDishes((prev) =>
@@ -2100,6 +2451,7 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
           setQuickEditDish(null);
         }}
         onOpenNewSupplier={() => {
+          if (!isDataReady) return;
           setQuickEditDish(null);
           setEditingSupplier(null);
           setIsSupplierModalOpen(true);
@@ -2110,7 +2462,9 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 
       {/* MODAL DE CARGA MASIVA DE INVENTARIO EN EXCEL */}
       <BatchInventoryModal
-        isOpen={isBatchInventoryModalOpen}
+        key={`batch-inv-${restaurant.id}`}
+        isOpen={isDataReady && isBatchInventoryModalOpen}
+        canImport={isDataReady}
         onClose={() => setIsBatchInventoryModalOpen(false)}
         onSuccess={() => {
           loadInventory(true);
@@ -2191,13 +2545,17 @@ export default function InventoryAdminTab({ restaurant }: InventoryAdminTabProps
 function SupplierModal({
   supplier,
   restaurantId,
+  canMutate = true,
+  isBusinessActive,
   onClose,
   onSaved,
 }: {
   supplier: any | null;
   restaurantId: string;
+  canMutate?: boolean;
+  isBusinessActive?: (id: string) => boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedForId: string) => void;
 }) {
   const [name, setName] = useState(supplier?.name || "");
   const [contactName, setContactName] = useState(supplier?.contactName || "");
@@ -2210,11 +2568,15 @@ function SupplierModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canMutate || (isBusinessActive && !isBusinessActive(restaurantId))) {
+      return;
+    }
     if (!name.trim()) {
       alert("El nombre del proveedor es obligatorio.");
       return;
     }
 
+    const targetRestaurantId = restaurantId;
     setSaving(true);
     try {
       if (supplier) {
@@ -2227,12 +2589,13 @@ function SupplierModal({
           address,
           notes,
         });
+        if (isBusinessActive && !isBusinessActive(targetRestaurantId)) return;
         if (res?.error) {
           alert(res.error);
           return;
         }
       } else {
-        const res = await createSupplierAction(restaurantId, {
+        const res = await createSupplierAction(targetRestaurantId, {
           name,
           contactName,
           phone,
@@ -2241,16 +2604,21 @@ function SupplierModal({
           address,
           notes,
         });
+        if (isBusinessActive && !isBusinessActive(targetRestaurantId)) return;
         if (res?.error) {
           alert(res.error);
           return;
         }
       }
-      onSaved();
+      onSaved(targetRestaurantId);
     } catch (err: any) {
-      alert("Error: " + err.message);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        alert("Error: " + err.message);
+      }
     } finally {
-      setSaving(false);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        setSaving(false);
+      }
     }
   };
 
@@ -2365,14 +2733,18 @@ function SupplyModal({
   supply,
   suppliers,
   restaurantId,
+  canMutate = true,
+  isBusinessActive,
   onClose,
   onSaved,
 }: {
   supply: any | null;
   suppliers: any[];
   restaurantId: string;
+  canMutate?: boolean;
+  isBusinessActive?: (id: string) => boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedForId: string) => void;
 }) {
   const [name, setName] = useState(supply?.name || "");
   const [unit, setUnit] = useState(supply?.unit || "kg");
@@ -2384,8 +2756,10 @@ function SupplyModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canMutate || (isBusinessActive && !isBusinessActive(restaurantId))) return;
     if (!name.trim()) return alert("El nombre del insumo es obligatorio.");
 
+    const targetRestaurantId = restaurantId;
     setSaving(true);
     try {
       const data = {
@@ -2399,16 +2773,22 @@ function SupplyModal({
 
       if (supply) {
         const res = await updateSupplyItemAction(supply.id, data);
+        if (isBusinessActive && !isBusinessActive(targetRestaurantId)) return;
         if (res?.error) return alert(res.error);
       } else {
-        const res = await createSupplyItemAction(restaurantId, data);
+        const res = await createSupplyItemAction(targetRestaurantId, data);
+        if (isBusinessActive && !isBusinessActive(targetRestaurantId)) return;
         if (res?.error) return alert(res.error);
       }
-      onSaved();
+      onSaved(targetRestaurantId);
     } catch (err: any) {
-      alert("Error: " + err.message);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        alert("Error: " + err.message);
+      }
     } finally {
-      setSaving(false);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        setSaving(false);
+      }
     }
   };
 
@@ -2535,6 +2915,8 @@ function PurchaseOrderModal({
   suppliers,
   dishes,
   supplyItems,
+  canMutate = true,
+  isBusinessActive,
   onClose,
   onSaved,
 }: {
@@ -2542,8 +2924,10 @@ function PurchaseOrderModal({
   suppliers: any[];
   dishes: any[];
   supplyItems: any[];
+  canMutate?: boolean;
+  isBusinessActive?: (id: string) => boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedForId: string) => void;
 }) {
   const [supplierId, setSupplierId] = useState("");
   const [notes, setNotes] = useState("");
@@ -2626,23 +3010,30 @@ function PurchaseOrderModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canMutate || (isBusinessActive && !isBusinessActive(restaurant.id))) return;
     if (items.length === 0) return alert("Agrega al menos un producto a la orden.");
 
+    const targetRestaurantId = restaurant.id;
     setSaving(true);
     try {
-      const res = await createPurchaseOrderAction(restaurant.id, {
+      const res = await createPurchaseOrderAction(targetRestaurantId, {
         supplierId: supplierId || null,
         notes,
         items,
       });
 
+      if (isBusinessActive && !isBusinessActive(targetRestaurantId)) return;
       if (res?.error) return alert(res.error);
       alert("¡Orden de compra generada exitosamente!");
-      onSaved();
+      onSaved(targetRestaurantId);
     } catch (err: any) {
-      alert("Error: " + err.message);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        alert("Error: " + err.message);
+      }
     } finally {
-      setSaving(false);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        setSaving(false);
+      }
     }
   };
 
@@ -2899,13 +3290,19 @@ function PurchaseOrderModal({
 function RecipeModal({
   dish,
   supplyItems,
+  restaurantId,
+  canMutate = true,
+  isBusinessActive,
   onClose,
   onSaved,
 }: {
   dish: any;
   supplyItems: any[];
+  restaurantId: string;
+  canMutate?: boolean;
+  isBusinessActive?: (id: string) => boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (savedForId: string) => void;
 }) {
   const [ingredients, setIngredients] = useState<
     Array<{
@@ -2964,20 +3361,27 @@ function RecipeModal({
   }, [dish.price, theoreticalCost]);
 
   const handleSaveRecipe = async () => {
+    if (!canMutate || (isBusinessActive && !isBusinessActive(restaurantId))) return;
+    const targetRestaurantId = restaurantId;
     setSaving(true);
     try {
       const res = await saveDishRecipeAction(dish.id, ingredients);
+      if (isBusinessActive && !isBusinessActive(targetRestaurantId)) return;
       if (res?.error) return alert(res.error);
       alert(
         `¡Receta guardada! El costo teórico de "${dish.name}" se actualizó a $${theoreticalCost.toFixed(
           2
         )} con un margen de ${profitMargin}%.`
       );
-      onSaved();
+      onSaved(targetRestaurantId);
     } catch (err: any) {
-      alert("Error: " + err.message);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        alert("Error: " + err.message);
+      }
     } finally {
-      setSaving(false);
+      if (!isBusinessActive || isBusinessActive(targetRestaurantId)) {
+        setSaving(false);
+      }
     }
   };
 

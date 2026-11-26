@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback, Fragment } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, Fragment } from "react";
 import Link from "next/link";
 import { getBusinessLabels, resolveBusinessVertical } from "@/lib/business-labels";
 import { 
@@ -92,6 +92,8 @@ import {
   Globe,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Loader2,
   Download,
   Cake,
@@ -1345,6 +1347,423 @@ export function AdminDashboard({
 
   const bLabels = getBusinessLabels(currentCustomLabelsJSON, selectedBusinessType);
   const isRetail = selectedBusinessType !== "RESTAURANT";
+
+  type AdminNavItem = {
+    id: string;
+    kind: "tab" | "link";
+    tab?: AdminTab;
+    href?: string;
+    desktopLabel: string;
+    mobileLabel: string;
+    icon: React.ComponentType<{ className?: string }>;
+    iconClassName?: string;
+    mobileIconClassName?: string;
+    activeDesktopClassName: string;
+    mobileActiveColor: string;
+    mobileTextClassName?: string;
+    desktopLinkClassName?: string;
+    badge?: string;
+    badgeClassName?: string;
+    title?: string;
+    visibleDesktop: boolean;
+    visibleMobile: boolean;
+  };
+
+  const showReservasDesktop = isLodging;
+  const showReservasMobile = isLodging && !disabledModules.includes("reservas");
+  const showCitasDesktop =
+    !isLodging &&
+    !isServiciosTecnicos &&
+    ((restaurant as any).businessType === "SERVICES" || isCitasVertical);
+  const showCitasMobile =
+    (!isLodging &&
+      (selectedPreset === "CITAS" ||
+        enabledModules.includes("citas") ||
+        (!isServiciosTecnicos && (restaurant as any).businessType === "SERVICES")) &&
+      !disabledModules.includes("citas")) ||
+    isCitasVertical;
+
+  const adminNavItems = useMemo<AdminNavItem[]>(() => {
+    const defaultActiveDesktop =
+      "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500";
+    const defaultActiveColor = restaurant.themeColor || "#f87171";
+
+    return [
+      {
+        id: "metrics",
+        kind: "tab",
+        tab: "metrics",
+        desktopLabel: "Métricas y Pedidos",
+        mobileLabel: "Métricas",
+        icon: LineChart,
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+      {
+        id: "restaurant",
+        kind: "tab",
+        tab: "restaurant",
+        desktopLabel: bLabels.businessTabTitle,
+        mobileLabel: bLabels.businessTabTitle,
+        icon: Store,
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+      {
+        id: "categories",
+        kind: "tab",
+        tab: "categories",
+        desktopLabel: bLabels.categories,
+        mobileLabel: bLabels.categories,
+        icon: FolderHeart,
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+      {
+        id: "dishes",
+        kind: "tab",
+        tab: "dishes",
+        desktopLabel: bLabels.isGastro ? bLabels.items : `${bLabels.items} & Stock`,
+        mobileLabel: bLabels.items,
+        icon: Soup,
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+      {
+        id: "modifiers",
+        kind: "tab",
+        tab: "modifiers",
+        desktopLabel: "Modificadores (Extras)",
+        mobileLabel: "Modificadores",
+        icon: SlidersHorizontal,
+        iconClassName: "text-amber-400",
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: bLabels.isGastro,
+        visibleMobile: bLabels.isGastro,
+      },
+      {
+        id: "inventory",
+        kind: "tab",
+        tab: "inventory",
+        desktopLabel: bLabels.inventoryTabTitle,
+        mobileLabel: bLabels.inventoryTabTitle,
+        icon: Boxes,
+        iconClassName: "text-amber-400",
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: bLabels.showInventory,
+        visibleMobile: bLabels.showInventory,
+      },
+      {
+        id: "caja",
+        kind: "link",
+        href: "/caja",
+        desktopLabel: "Caja POS (Escanear)",
+        mobileLabel: "Caja POS",
+        icon: Barcode,
+        iconClassName: "text-emerald-400",
+        mobileIconClassName: "text-emerald-400",
+        activeDesktopClassName: defaultActiveDesktop,
+        desktopLinkClassName:
+          "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 bg-gradient-to-r from-emerald-600/15 to-teal-600/15 text-emerald-400 border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-600/25 shadow-sm",
+        mobileActiveColor: "#34d399",
+        mobileTextClassName: "text-emerald-400",
+        badge: "POS",
+        badgeClassName:
+          "text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
+        title: "Abrir Caja POS móvil para escaneo de código de barras",
+        visibleDesktop: bLabels.showCajaPos,
+        visibleMobile: bLabels.showCajaPos,
+      },
+      {
+        id: "seasons",
+        kind: "tab",
+        tab: "seasons",
+        desktopLabel: "Tarifas y Temporadas",
+        mobileLabel: "Tarifas",
+        icon: CalendarDays,
+        iconClassName: "text-amber-400",
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: bLabels.showSeasons && !isCitasVertical,
+        visibleMobile: bLabels.showSeasons && !isCitasVertical,
+      },
+      {
+        id: "coupons",
+        kind: "tab",
+        tab: "coupons",
+        desktopLabel: "Cupones de Descuento",
+        mobileLabel: "Cupones",
+        icon: Tag,
+        iconClassName: "text-amber-400",
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: bLabels.showCoupons,
+        visibleMobile: bLabels.showCoupons,
+      },
+      {
+        id: "ruleta",
+        kind: "tab",
+        tab: "ruleta",
+        desktopLabel: "🎡 Ruleta de Premios",
+        mobileLabel: "Ruleta",
+        icon: Gift,
+        iconClassName: "text-amber-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500",
+        mobileActiveColor: "#fbbf24",
+        visibleDesktop: bLabels.showRuleta && !isCitasVertical,
+        visibleMobile: bLabels.showRuleta && !isCitasVertical,
+      },
+      {
+        id: "campaigns",
+        kind: "tab",
+        tab: "campaigns",
+        desktopLabel: "Promos & Eventos",
+        mobileLabel: "Promos",
+        icon: Flame,
+        iconClassName: "text-rose-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-rose-600/20 to-amber-500/20 text-rose-400 border-l-4 border-rose-500",
+        mobileActiveColor: "#fb7185",
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+      {
+        id: "qr",
+        kind: "tab",
+        tab: "qr",
+        desktopLabel: "Código QR",
+        mobileLabel: "Código QR",
+        icon: QrCode,
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+      {
+        id: "orders",
+        kind: "tab",
+        tab: "orders",
+        desktopLabel: "Historial de Pedidos",
+        mobileLabel: "Historial",
+        icon: ShoppingBag,
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        visibleDesktop: !isCitasVertical,
+        visibleMobile: !isCitasVertical,
+      },
+      {
+        id: "staff",
+        kind: "tab",
+        tab: "staff",
+        desktopLabel: "Equipo y Accesos (PIN)",
+        mobileLabel: "Equipo PIN",
+        icon: ShieldCheck,
+        iconClassName: "text-amber-400",
+        mobileIconClassName: "text-amber-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500 shadow-sm",
+        mobileActiveColor: "#f59e0b",
+        mobileTextClassName: "text-amber-400",
+        badge: "PIN",
+        badgeClassName:
+          "text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30",
+        title: "Equipo y Accesos (PIN)",
+        visibleDesktop: bLabels.isGastro,
+        visibleMobile: bLabels.isGastro,
+      },
+      {
+        id: "crm",
+        kind: "tab",
+        tab: "crm",
+        desktopLabel: isCitasVertical ? "Expediente & Pacientes" : "CRM Clientes",
+        mobileLabel: isCitasVertical ? "Pacientes" : "CRM Clientes",
+        icon: Users,
+        iconClassName: "text-amber-400",
+        activeDesktopClassName: defaultActiveDesktop,
+        mobileActiveColor: defaultActiveColor,
+        badge:
+          restaurant.customers && restaurant.customers.length > 0
+            ? String(restaurant.customers.length)
+            : undefined,
+        badgeClassName:
+          "text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300",
+        visibleDesktop: bLabels.showCrm,
+        visibleMobile: bLabels.showCrm,
+      },
+      {
+        id: "reservas",
+        kind: "tab",
+        tab: "reservas",
+        desktopLabel: "Reservas & Hospedaje CRM",
+        mobileLabel: "Reservas",
+        icon: Trees,
+        iconClassName: "text-emerald-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-300 border-l-4 border-emerald-500 shadow-md shadow-emerald-600/10",
+        mobileActiveColor: "#34d399",
+        badge: "Check-In",
+        badgeClassName:
+          "text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
+        visibleDesktop: showReservasDesktop,
+        visibleMobile: showReservasMobile,
+      },
+      {
+        id: "reservas-mesas",
+        kind: "tab",
+        tab: "reservas-mesas",
+        desktopLabel: "Reservas de Mesas",
+        mobileLabel: "Mesas",
+        icon: CalendarDays,
+        iconClassName: "text-purple-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-purple-600/20 to-indigo-500/20 text-purple-300 border-l-4 border-purple-500 shadow-md shadow-purple-600/10",
+        mobileActiveColor: "#c084fc",
+        badge: "Agenda",
+        badgeClassName:
+          "text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30",
+        visibleDesktop: bLabels.isGastro,
+        visibleMobile: bLabels.isGastro,
+      },
+      {
+        id: "citas",
+        kind: "tab",
+        tab: "citas",
+        desktopLabel: isCitasVertical ? "Agenda & Turnos" : "Citas & Agenda CRM",
+        mobileLabel: isCitasVertical ? "Turnos" : "Citas",
+        icon: CalendarDays,
+        iconClassName: "text-purple-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-purple-600/20 to-indigo-500/20 text-purple-300 border-l-4 border-purple-500 shadow-md shadow-purple-600/10",
+        mobileActiveColor: "#c084fc",
+        badge: "1-Click WA",
+        badgeClassName:
+          "text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30",
+        visibleDesktop: showCitasDesktop,
+        visibleMobile: showCitasMobile,
+      },
+      {
+        id: "facturacion",
+        kind: "tab",
+        tab: "facturacion",
+        desktopLabel: "Facturación SRI",
+        mobileLabel: "Facturación",
+        icon: FileText,
+        iconClassName: "text-emerald-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-400 border-l-4 border-emerald-500 shadow-md",
+        mobileActiveColor: "#34d399",
+        badge: "Dátil",
+        badgeClassName:
+          "text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+      {
+        id: "subscription",
+        kind: "tab",
+        tab: "subscription",
+        desktopLabel: "Suscripción",
+        mobileLabel: "Suscripción",
+        icon: Crown,
+        iconClassName: "text-amber-400",
+        activeDesktopClassName:
+          "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500",
+        mobileActiveColor: "#fbbf24",
+        badge: "$15/mes",
+        badgeClassName:
+          "text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30",
+        visibleDesktop: true,
+        visibleMobile: true,
+      },
+    ];
+  }, [
+    bLabels,
+    isCitasVertical,
+    restaurant,
+    showReservasDesktop,
+    showReservasMobile,
+    showCitasDesktop,
+    showCitasMobile,
+  ]);
+
+  const visibleDesktopAdminNavItems = useMemo(
+    () => adminNavItems.filter((item) => item.visibleDesktop),
+    [adminNavItems]
+  );
+
+  const visibleMobileAdminNavItems = useMemo(
+    () => adminNavItems.filter((item) => item.visibleMobile),
+    [adminNavItems]
+  );
+
+  const mobileNavRef = useRef<HTMLDivElement | null>(null);
+  const [mobileNavScroll, setMobileNavScroll] = useState<{ canLeft: boolean; canRight: boolean }>({
+    canLeft: false,
+    canRight: false,
+  });
+  const [isMobileKeyboardOpen, setIsMobileKeyboardOpen] = useState(false);
+
+  const updateMobileNavScroll = useCallback(() => {
+    const el = mobileNavRef.current;
+    if (!el) return;
+    const canLeft = el.scrollLeft > 8;
+    const canRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 8;
+    setMobileNavScroll((prev) =>
+      prev.canLeft === canLeft && prev.canRight === canRight ? prev : { canLeft, canRight }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted || typeof window === "undefined") return;
+    const raf = window.requestAnimationFrame(() => updateMobileNavScroll());
+    window.addEventListener("resize", updateMobileNavScroll);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateMobileNavScroll);
+    };
+  }, [isMounted, visibleMobileAdminNavItems, updateMobileNavScroll]);
+
+  useEffect(() => {
+    if (!isMounted || typeof window === "undefined") return;
+    const container = mobileNavRef.current;
+    if (!container) return;
+    const activeEl = container.querySelector<HTMLElement>(`[data-nav-id="${activeTab}"]`);
+    if (activeEl && typeof activeEl.scrollIntoView === "function") {
+      activeEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
+    const timer = window.setTimeout(updateMobileNavScroll, 220);
+    return () => window.clearTimeout(timer);
+  }, [activeTab, isMounted, updateMobileNavScroll]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const checkKeyboard = () => {
+      const activeTag = document.activeElement?.tagName;
+      const isInputFocused = activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT";
+      const heightRatio = vv.height / Math.max(window.innerHeight, 1);
+      setIsMobileKeyboardOpen(isInputFocused && heightRatio < 0.76);
+    };
+    vv.addEventListener("resize", checkKeyboard);
+    window.addEventListener("focusin", checkKeyboard);
+    window.addEventListener("focusout", checkKeyboard);
+    return () => {
+      vv.removeEventListener("resize", checkKeyboard);
+      window.removeEventListener("focusin", checkKeyboard);
+      window.removeEventListener("focusout", checkKeyboard);
+    };
+  }, []);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPlanPrice, setSelectedPlanPrice] = useState<15 | 20>(15);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -2669,304 +3088,49 @@ export function AdminDashboard({
 
           {/* Navigation */}
           <nav className="hidden md:block p-4 space-y-1">
-            <button
-              onClick={() => setActiveTab("metrics")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "metrics" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <LineChart className="h-4 w-4" />
-              Métricas y Pedidos
-            </button>
-            <button
-              onClick={() => setActiveTab("restaurant")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "restaurant" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <Store className="h-4 w-4" />
-              {bLabels.businessTabTitle}
-            </button>
-            <button
-              onClick={() => setActiveTab("categories")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "categories" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <FolderHeart className="h-4 w-4" />
-              {bLabels.categories}
-            </button>
-            <button
-              onClick={() => setActiveTab("dishes")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "dishes" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <Soup className="h-4 w-4" />
-              <span>{bLabels.isGastro ? bLabels.items : `${bLabels.items} & Stock`}</span>
-            </button>
-            {bLabels.isGastro && (
-              <button
-                onClick={() => setActiveTab("modifiers")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "modifiers"
-                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <SlidersHorizontal className="h-4 w-4 text-amber-400" />
-                <span>Modificadores (Extras)</span>
-              </button>
-            )}
-            {bLabels.showInventory && (
-              <button
-                onClick={() => setActiveTab("inventory")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "inventory" 
-                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <Boxes className="h-4 w-4 text-amber-400" />
-                <span>{bLabels.inventoryTabTitle}</span>
-              </button>
-            )}
+            {visibleDesktopAdminNavItems.map((item) => {
+              const Icon = item.icon;
+              if (item.kind === "link" && item.href) {
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    className={item.desktopLinkClassName}
+                    title={item.title}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className={`h-4 w-4 ${item.iconClassName || ""}`} />
+                      <span>{item.desktopLabel}</span>
+                    </div>
+                    {item.badge && (
+                      <span className={item.badgeClassName}>{item.badge}</span>
+                    )}
+                  </Link>
+                );
+              }
 
-            {/* Caja POS Scanner Quick Access */}
-            {bLabels.showCajaPos && (
-              <Link
-                href="/caja"
-                className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 bg-gradient-to-r from-emerald-600/15 to-teal-600/15 text-emerald-400 border border-emerald-500/30 hover:border-emerald-400 hover:bg-emerald-600/25 shadow-sm"
-                title="Abrir Caja POS móvil para escaneo de código de barras"
-              >
-                <div className="flex items-center gap-3">
-                  <Barcode className="h-4 w-4 text-emerald-400" />
-                  <span>Caja POS (Escanear)</span>
-                </div>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  POS
-                </span>
-              </Link>
-            )}
-            {bLabels.showSeasons && !isCitasVertical && (
-              <button
-                onClick={() => setActiveTab("seasons")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "seasons" 
-                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <CalendarDays className="h-4 w-4 text-amber-400" />
-                Tarifas y Temporadas
-              </button>
-            )}
-            {bLabels.showCoupons && (
-              <button
-                onClick={() => setActiveTab("coupons")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "coupons" 
-                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <Tag className="h-4 w-4 text-amber-400" />
-                Cupones de Descuento
-              </button>
-            )}
-            {bLabels.showRuleta && !isCitasVertical && (
-              <button
-                onClick={() => setActiveTab("ruleta")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "ruleta" 
-                    ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <Gift className="h-4 w-4 text-amber-400" />
-                <span>🎡 Ruleta de Premios</span>
-              </button>
-            )}
-            <button
-              onClick={() => setActiveTab("campaigns")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "campaigns" 
-                  ? "bg-gradient-to-r from-rose-600/20 to-amber-500/20 text-rose-400 border-l-4 border-rose-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <Flame className="h-4 w-4 text-rose-400" />
-              <span>Promos & Eventos</span>
-            </button>
-            <button
-              onClick={() => setActiveTab("qr")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "qr" 
-                  ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <QrCode className="h-4 w-4" />
-              Código QR
-            </button>
- 
-
-            
-            {!isCitasVertical && (
-              <button
-                onClick={() => setActiveTab("orders")}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "orders" 
-                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <ShoppingBag className="h-4 w-4" />
-                Historial de Pedidos
-              </button>
-            )}
-
-            {/* Equipo & Accesos (PIN Meseros & Cocina) - Exclusivo Restaurantes / Cafeterías / Gastro */}
-            {bLabels.isGastro && (
-              <button
-                onClick={() => setActiveTab("staff")}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "staff"
-                    ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500 shadow-sm"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <ShieldCheck className="h-4 w-4 text-amber-400" />
-                  <span>Equipo y Accesos (PIN)</span>
-                </div>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  PIN
-                </span>
-              </button>
-            )}
-            {bLabels.showCrm && (
-              <button
-                onClick={() => setActiveTab("crm")}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "crm" 
-                    ? "bg-gradient-to-r from-red-600/10 to-amber-500/10 text-red-400 border-l-4 border-red-500" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Users className="h-4 w-4 text-amber-400" />
-                  <span>{isCitasVertical ? "Expediente & Pacientes" : "CRM Clientes"}</span>
-                </div>
-                {restaurant.customers && restaurant.customers.length > 0 && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
-                    {restaurant.customers.length}
-                  </span>
-                )}
-              </button>
-            )}
-
-            {/* Reservas & Hospedaje CRM (para Cabañas / Glamping / Hoteles) */}
-            {isLodging && (
-              <button
-                onClick={() => setActiveTab("reservas")}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "reservas" 
-                    ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-300 border-l-4 border-emerald-500 shadow-md shadow-emerald-600/10" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Trees className="h-4 w-4 text-emerald-400" />
-                  <span>Reservas & Hospedaje CRM</span>
-                </div>
-                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  Check-In
-                </span>
-              </button>
-            )}
-
-            {/* Reservas de Mesas (para Restaurantes / Gastro) */}
-            {bLabels.isGastro && (
-              <button
-                onClick={() => setActiveTab("reservas-mesas")}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "reservas-mesas" 
-                    ? "bg-gradient-to-r from-purple-600/20 to-indigo-500/20 text-purple-300 border-l-4 border-purple-500 shadow-md shadow-purple-600/10" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <CalendarDays className="h-4 w-4 text-purple-400" />
-                  <span>Reservas de Mesas</span>
-                </div>
-                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  Agenda
-                </span>
-              </button>
-            )}
-
-            {/* Citas & Turnos CRM (para Citas / Consultorios que NO son Hospedaje ni Servicios Técnicos) */}
-            {(!isLodging && !isServiciosTecnicos && ((restaurant as any).businessType === "SERVICES" || isCitasVertical)) && (
-              <button
-                onClick={() => setActiveTab("citas")}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  activeTab === "citas" 
-                    ? "bg-gradient-to-r from-purple-600/20 to-indigo-500/20 text-purple-300 border-l-4 border-purple-500 shadow-md shadow-purple-600/10" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <CalendarDays className="h-4 w-4 text-purple-400" />
-                  <span>{isCitasVertical ? "Agenda & Turnos" : "Citas & Agenda CRM"}</span>
-                </div>
-                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  1-Click WA
-                </span>
-              </button>
-            )}
-            {/* Facturación Electrónica SRI (Dátil) */}
-            <button
-              onClick={() => setActiveTab("facturacion")}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "facturacion"
-                  ? "bg-gradient-to-r from-emerald-600/20 to-teal-500/20 text-emerald-400 border-l-4 border-emerald-500 shadow-md"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <FileText className="h-4 w-4 text-emerald-400" />
-                <span>Facturación SRI</span>
-              </div>
-              <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                Dátil
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("subscription")}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                activeTab === "subscription" 
-                  ? "bg-gradient-to-r from-amber-600/20 to-red-500/20 text-amber-400 border-l-4 border-amber-500" 
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <Crown className="h-4 w-4 text-amber-400" />
-                <span>Suscripción</span>
-              </div>
-              <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                $15/mes
-              </span>
-            </button>
+              const isActive = item.tab === activeTab;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => item.tab && setActiveTab(item.tab)}
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    isActive
+                      ? item.activeDesktopClassName
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Icon className={`h-4 w-4 shrink-0 ${item.iconClassName || ""}`} />
+                    <span className="truncate">{item.desktopLabel}</span>
+                  </div>
+                  {item.badge && (
+                    <span className={item.badgeClassName}>{item.badge}</span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
         </div>
 
@@ -3012,9 +3176,9 @@ export function AdminDashboard({
       </aside>
 
       {/* Main Layout Container (Full Width) */}
-      <div className="flex-1 min-w-0 overflow-y-auto pb-28 md:pb-0">
+      <div className="flex-1 min-w-0 overflow-y-auto pb-[calc(6.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
         {/* Main Content Area */}
-        <main className="w-full max-w-7xl mx-auto p-6 pb-28 md:p-10 space-y-6">
+        <main className="w-full max-w-7xl mx-auto p-4 sm:p-6 pb-[calc(6.75rem+env(safe-area-inset-bottom,0px))] md:p-10 space-y-6">
         {/* Banner de subdominio: si un restaurante está abierto bajo ctalo. */}
         {isMounted && typeof window !== "undefined" && (window.location.host.toLowerCase().startsWith("ctalo.") || window.location.host.toLowerCase().startsWith("catalogo.")) && bLabels.isGastro && (
           <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-slate-900 border border-amber-500/40 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-300 shadow-xl">
@@ -12369,134 +12533,91 @@ export function AdminDashboard({
     </div>
 
     {/* Floating Bottom Navigation Bar for Admin on Mobile */}
-    <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden px-4 pb-4 pt-2 bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent">
-      <div className="max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center justify-around shadow-2xl">
-        {/* Metrics Tab */}
-        <button
-          onClick={() => setActiveTab("metrics")}
-          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-          style={{ color: activeTab === "metrics" ? restaurant.themeColor : "#94a3b8" }}
-        >
-          <LineChart className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">Métricas</span>
-        </button>
+    {!isMobileKeyboardOpen && (
+      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden px-2.5 pt-2 pb-[calc(0.65rem+env(safe-area-inset-bottom,0px))] bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pointer-events-none">
+        <div className="w-full max-w-full mx-auto bg-slate-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl relative flex items-center pointer-events-auto overflow-hidden">
+          {mobileNavScroll.canLeft && (
+            <button
+              type="button"
+              aria-label="Desplazar navegación a la izquierda"
+              onClick={() => mobileNavRef.current?.scrollBy({ left: -160, behavior: "smooth" })}
+              className="absolute left-0 top-0 bottom-0 z-10 px-1.5 flex items-center bg-gradient-to-r from-slate-950 via-slate-900/95 to-transparent text-slate-300 hover:text-white"
+            >
+              <ChevronLeft className="h-4 w-4 shrink-0" />
+            </button>
+          )}
 
-        {/* Restaurant Tab */}
-        <button
-          onClick={() => setActiveTab("restaurant")}
-          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-          style={{ color: activeTab === "restaurant" ? restaurant.themeColor : "#94a3b8" }}
-        >
-          <Store className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.businessTabTitle}</span>
-        </button>
-
-        {/* Categories Tab */}
-        <button
-          onClick={() => setActiveTab("categories")}
-          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-          style={{ color: activeTab === "categories" ? restaurant.themeColor : "#94a3b8" }}
-        >
-          <FolderHeart className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.categories}</span>
-        </button>
-
-        {/* Dishes Tab */}
-        <button
-          onClick={() => setActiveTab("dishes")}
-          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-          style={{ color: activeTab === "dishes" ? restaurant.themeColor : "#94a3b8" }}
-        >
-          <Soup className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.items}</span>
-        </button>
-
-        {/* Inventory Tab */}
-        {bLabels.showInventory && (
-          <button
-            onClick={() => setActiveTab("inventory")}
-            className="flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition duration-200"
-            style={{ color: activeTab === "inventory" ? restaurant.themeColor : "#94a3b8" }}
+          <nav
+            ref={mobileNavRef}
+            onScroll={updateMobileNavScroll}
+            aria-label="Navegación administrativa móvil"
+            className={`flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth py-1.5 w-full ${
+              mobileNavScroll.canLeft ? "pl-7" : "pl-2"
+            } ${mobileNavScroll.canRight ? "pr-7" : "pr-2"}`}
           >
-            <Boxes className="h-5 w-5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">{bLabels.inventoryTabTitle.split(" ")[0]}</span>
-          </button>
-        )}
+            {visibleMobileAdminNavItems.map((item) => {
+              const Icon = item.icon;
+              if (item.kind === "link" && item.href) {
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    data-nav-id={item.id}
+                    className={`shrink-0 min-w-[68px] flex flex-col items-center justify-center gap-1 py-1.5 px-2.5 rounded-xl transition duration-200 whitespace-nowrap hover:bg-white/5 ${
+                      item.mobileTextClassName || "text-emerald-400"
+                    }`}
+                    title={item.title || item.desktopLabel}
+                  >
+                    <Icon className={`h-5 w-5 shrink-0 ${item.mobileIconClassName || "text-emerald-400"}`} />
+                    <span className={`text-[10px] font-bold leading-tight tracking-tight whitespace-nowrap ${item.mobileTextClassName || "text-emerald-400"}`}>
+                      {item.mobileLabel}
+                    </span>
+                  </Link>
+                );
+              }
 
-        {/* Caja POS Mobile Quick Link */}
-        {bLabels.showCajaPos && (
-          <Link
-            href="/caja"
-            className="flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition duration-200 text-emerald-400 hover:text-emerald-300"
-            title="Caja POS móvil"
-          >
-            <Barcode className="h-5 w-5 text-emerald-400" />
-            <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-400">Caja</span>
-          </Link>
-        )}
+              const isActive = item.tab === activeTab;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-nav-id={item.id}
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={() => item.tab && setActiveTab(item.tab)}
+                  className={`shrink-0 min-w-[68px] flex flex-col items-center justify-center gap-1 py-1.5 px-2.5 rounded-xl transition duration-200 whitespace-nowrap ${
+                    isActive ? "bg-white/10 ring-1 ring-white/15 shadow-sm" : "hover:bg-white/5"
+                  }`}
+                  style={{
+                    color: isActive ? item.mobileActiveColor : "#94a3b8",
+                  }}
+                  title={item.title || item.desktopLabel}
+                >
+                  <Icon className={`h-5 w-5 shrink-0 ${!isActive && item.mobileIconClassName ? item.mobileIconClassName : ""}`} />
+                  <span
+                    className={`text-[10px] font-bold leading-tight tracking-tight whitespace-nowrap ${
+                      !isActive && item.mobileTextClassName ? item.mobileTextClassName : ""
+                    }`}
+                  >
+                    {item.mobileLabel}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
 
-        {/* QR Tab */}
-        <button
-          onClick={() => setActiveTab("qr")}
-          className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-          style={{ color: activeTab === "qr" ? restaurant.themeColor : "#94a3b8" }}
-        >
-          <QrCode className="h-5 w-5" />
-          <span className="text-[9px] font-bold uppercase tracking-wider">QR</span>
-        </button>
-
-
-
-        {/* Orders Tab */}
-        {!isCitasVertical && (
-          <button
-            onClick={() => setActiveTab("orders")}
-            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-            style={{ color: activeTab === "orders" ? restaurant.themeColor : "#94a3b8" }}
-          >
-            <ShoppingBag className="h-5 w-5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">Historial</span>
-          </button>
-        )}
-
-        {/* Staff & Kitchen PIN (Mobile - Exclusivo Restaurantes / Salón) */}
-        {bLabels.isGastro && (
-          <button
-            onClick={() => setActiveTab("staff")}
-            className="flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition duration-200"
-            style={{ color: activeTab === "staff" ? "#f59e0b" : "#94a3b8" }}
-            title="Equipo y Accesos (PIN)"
-          >
-            <ShieldCheck className="h-5 w-5 text-amber-400" />
-            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400">PINs</span>
-          </button>
-        )}
-
-        {/* Reservas Tab */}
-        {isLodging && !disabledModules.includes("reservas") && (
-          <button
-            onClick={() => setActiveTab("reservas")}
-            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-            style={{ color: activeTab === "reservas" ? "#34d399" : "#94a3b8" }}
-          >
-            <Trees className="h-5 w-5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">Reservas</span>
-          </button>
-        )}
-
-        {/* Citas Tab */}
-        {((!isLodging && (selectedPreset === "CITAS" || enabledModules.includes("citas") || (!isServiciosTecnicos && (restaurant as any).businessType === "SERVICES")) && !disabledModules.includes("citas")) || isCitasVertical) && (
-          <button
-            onClick={() => setActiveTab("citas")}
-            className="flex flex-col items-center gap-1 py-1 px-2.5 rounded-xl transition duration-200"
-            style={{ color: activeTab === "citas" ? "#c084fc" : "#94a3b8" }}
-          >
-            <CalendarDays className="h-5 w-5" />
-            <span className="text-[9px] font-bold uppercase tracking-wider">{isCitasVertical ? "Turnos" : "Citas"}</span>
-          </button>
-        )}
+          {mobileNavScroll.canRight && (
+            <button
+              type="button"
+              aria-label="Más opciones de navegación a la derecha"
+              onClick={() => mobileNavRef.current?.scrollBy({ left: 160, behavior: "smooth" })}
+              className="absolute right-0 top-0 bottom-0 z-10 px-1.5 flex items-center gap-0.5 bg-gradient-to-l from-slate-950 via-slate-900/95 to-transparent text-amber-300 hover:text-white"
+            >
+              <ChevronRight className="h-4 w-4 shrink-0" />
+            </button>
+          )}
+        </div>
       </div>
-    </div>
+    )}
 
     {/* MODAL DE RESPALDO Y RESTAURACIÓN ZIP (TENANT) */}
     <TenantBackupModal

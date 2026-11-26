@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import {
   FileSpreadsheet,
@@ -55,6 +55,7 @@ interface BatchInventoryModalProps {
   existingDishes: any[];
   existingSuppliers: any[];
   bLabels: ResolvedBusinessLabels;
+  canImport?: boolean;
 }
 
 export default function BatchInventoryModal({
@@ -66,6 +67,7 @@ export default function BatchInventoryModal({
   existingDishes,
   existingSuppliers,
   bLabels,
+  canImport = true,
 }: BatchInventoryModalProps) {
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedInventoryRow[]>([]);
@@ -74,6 +76,30 @@ export default function BatchInventoryModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const restaurantIdRef = useRef(restaurantId);
+  restaurantIdRef.current = restaurantId;
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+      successTimerRef.current = null;
+    }
+    setFile(null);
+    setParsedRows([]);
+    setLoading(false);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+  }, [restaurantId, isOpen]);
 
   if (!isOpen) return null;
 
@@ -320,12 +346,17 @@ export default function BatchInventoryModal({
 
   // 3. Confirmar e Importar / Actualizar
   const handleConfirmImport = async () => {
+    if (!isOpen || !canImport) {
+      setErrorMsg("Espera a que cargue el inventario del negocio actual antes de importar.");
+      return;
+    }
     const validRows = parsedRows.filter((r) => !r.hasError && r.name.trim().length > 0);
     if (validRows.length === 0) {
       setErrorMsg("No hay filas válidas listas para importar. Corrige o elimina las filas con errores.");
       return;
     }
 
+    const targetRestaurantId = restaurantId;
     setLoading(true);
     setErrorMsg(null);
 
@@ -346,7 +377,10 @@ export default function BatchInventoryModal({
     }));
 
     try {
-      const res = await batchImportOrUpdateInventoryAction(restaurantId, payload);
+      const res = await batchImportOrUpdateInventoryAction(targetRestaurantId, payload);
+      if (!mountedRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       setLoading(false);
 
       if (res.error) {
@@ -356,12 +390,18 @@ export default function BatchInventoryModal({
         setSuccessMsg(
           `¡Inventario actualizado con éxito! Se actualizaron ${res.updatedCount || 0} productos existentes, se crearon ${res.createdCount || 0} nuevos${supInfo}`
         );
-        setTimeout(() => {
+        successTimerRef.current = setTimeout(() => {
+          if (!mountedRef.current || targetRestaurantId !== restaurantIdRef.current) {
+            return;
+          }
           onSuccess();
           onClose();
         }, 1800);
       }
     } catch (err: any) {
+      if (!mountedRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       setLoading(false);
       setErrorMsg("Error al procesar lote: " + (err.message || "desconocido"));
     }
@@ -647,7 +687,7 @@ export default function BatchInventoryModal({
           <button
             type="button"
             onClick={handleConfirmImport}
-            disabled={loading || validCount === 0}
+            disabled={!canImport || loading || validCount === 0}
             className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-600 to-emerald-600 hover:from-amber-500 hover:to-emerald-500 text-white shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (

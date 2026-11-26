@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Edit3,
   DollarSign,
@@ -25,6 +25,7 @@ interface QuickEditDishInventoryModalProps {
   onOpenNewSupplier: () => void;
   restaurantId: string;
   bLabels: ResolvedBusinessLabels;
+  canSave?: boolean;
 }
 
 export default function QuickEditDishInventoryModal({
@@ -36,6 +37,7 @@ export default function QuickEditDishInventoryModal({
   onOpenNewSupplier,
   restaurantId,
   bLabels,
+  canSave = true,
 }: QuickEditDishInventoryModalProps) {
   const [costPrice, setCostPrice] = useState("");
   const [price, setPrice] = useState("");
@@ -46,6 +48,21 @@ export default function QuickEditDishInventoryModal({
   const [barcode, setBarcode] = useState("");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const restaurantIdRef = useRef(restaurantId);
+  restaurantIdRef.current = restaurantId;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setSaving(false);
+    setErrorMsg(null);
+  }, [restaurantId, isOpen]);
 
   useEffect(() => {
     if (dish) {
@@ -74,11 +91,16 @@ export default function QuickEditDishInventoryModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOpen || !canSave || !dish) {
+      setErrorMsg("Espera a que cargue el inventario del negocio actual antes de guardar.");
+      return;
+    }
+    const targetRestaurantId = restaurantId;
     setSaving(true);
     setErrorMsg(null);
 
     try {
-      const res = await updateDishInventoryAction(restaurantId, dish.id, {
+      const res = await updateDishInventoryAction(targetRestaurantId, dish.id, {
         costPrice: Math.max(0, numCost),
         price: Math.max(0, numPrice),
         supplierId: supplierId.trim() !== "" ? supplierId : null,
@@ -89,6 +111,10 @@ export default function QuickEditDishInventoryModal({
         sku: barcode.trim() || null,
       });
 
+      if (!mountedRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
+
       setSaving(false);
       if (res.error) {
         setErrorMsg(res.error);
@@ -97,6 +123,9 @@ export default function QuickEditDishInventoryModal({
         onClose();
       }
     } catch (err: any) {
+      if (!mountedRef.current || targetRestaurantId !== restaurantIdRef.current) {
+        return;
+      }
       setSaving(false);
       setErrorMsg(err.message || "Error al actualizar");
     }
