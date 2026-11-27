@@ -195,6 +195,7 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
           orderBy: { order: "asc" },
           include: {
             dishes: {
+              where: { isVisible: true },
               orderBy: { createdAt: "desc" },
               include: {
                 modifierGroups: {
@@ -234,6 +235,7 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
                     price: true,
                     imageUrl: true,
                     isAvailable: true,
+                    isVisible: true,
                     category: {
                       select: { name: true },
                     },
@@ -409,11 +411,13 @@ export default async function RestaurantMenuPage({ params: paramsPromise }: Page
         eventDate: toIso(camp.eventDate),
         createdAt: toIso(camp.createdAt),
         updatedAt: toIso(camp.updatedAt),
-        dishes: (camp.dishes || []).map((cd: any) => ({
-          ...cd,
-          createdAt: toIso(cd.createdAt),
-          dish: cd.dish,
-        })),
+        dishes: (camp.dishes || [])
+          .filter((cd: any) => cd.dish && cd.dish.isVisible !== false)
+          .map((cd: any) => ({
+            ...cd,
+            createdAt: toIso(cd.createdAt),
+            dish: cd.dish,
+          })),
       })),
     };
 

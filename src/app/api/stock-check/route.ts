@@ -58,6 +58,7 @@ export async function GET(req: Request) {
         minStock: true,
         trackStock: true,
         isAvailable: true,
+        isVisible: true,
         isService: true,
       },
     });
@@ -75,7 +76,7 @@ export async function GET(req: Request) {
     for (const d of dishes) {
       const isConfigured = typeof d.stock === "number" && d.stock !== null;
       const effectiveStock = isConfigured ? d.stock : null;
-      const effectiveAvailable = Boolean(d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
+      const effectiveAvailable = Boolean(d.isVisible !== false && d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
 
       stockMap[d.id] = {
         stock: effectiveStock,
@@ -155,6 +156,7 @@ export async function POST(req: Request) {
         minStock: true,
         trackStock: true,
         isAvailable: true,
+        isVisible: true,
         isService: true,
       },
     });
@@ -182,7 +184,7 @@ export async function POST(req: Request) {
     for (const d of dbDishes) {
       const isConfigured = typeof d.stock === "number" && d.stock !== null;
       const effectiveStock = isConfigured ? d.stock : null;
-      const effectiveAvailable = Boolean(d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
+      const effectiveAvailable = Boolean(d.isVisible !== false && d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
 
       stockMap[d.id] = {
         stock: effectiveStock,
@@ -202,6 +204,18 @@ export async function POST(req: Request) {
           available: 0,
           status: "SOLD_OUT",
           message: "Este producto ya no se encuentra en el menú.",
+        });
+        continue;
+      }
+
+      if (d.isVisible === false) {
+        adjustments.push({
+          dishId: d.id,
+          name: d.name,
+          requested: item.quantity,
+          available: 0,
+          status: "SOLD_OUT",
+          message: `"${d.name}" ya no está visible en el menú.`,
         });
         continue;
       }

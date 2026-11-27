@@ -33,6 +33,7 @@ export async function queryWhatsAppAI(
       where: {
         category: { restaurantId: restaurant.id },
         isAvailable: true,
+        isVisible: true,
       },
       select: {
         name: true,

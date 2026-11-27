@@ -99,7 +99,7 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
           orderBy: { order: "asc" },
           include: {
             dishes: {
-              where: { isAvailable: true },
+              where: { isAvailable: true, isVisible: true },
               orderBy: { createdAt: "desc" },
             },
           },
@@ -122,6 +122,7 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
                     price: true,
                     imageUrl: true,
                     isAvailable: true,
+                    isVisible: true,
                   },
                 },
               },
@@ -145,7 +146,7 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
             orderBy: { order: "asc" },
             include: {
               dishes: {
-                where: { isAvailable: true },
+                where: { isAvailable: true, isVisible: true },
                 orderBy: { createdAt: "desc" },
               },
             },
@@ -168,6 +169,7 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
                       price: true,
                       imageUrl: true,
                       isAvailable: true,
+                      isVisible: true,
                     },
                   },
                 },
@@ -372,11 +374,13 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
         eventDate: camp.eventDate ? camp.eventDate.toISOString() : null,
         createdAt: camp.createdAt.toISOString(),
         updatedAt: camp.updatedAt.toISOString(),
-        dishes: (camp.dishes || []).map((cd: any) => ({
-          ...cd,
-          createdAt: cd.createdAt.toISOString(),
-          dish: cd.dish,
-        })),
+        dishes: (camp.dishes || [])
+          .filter((cd: any) => cd.dish && cd.dish.isVisible !== false)
+          .map((cd: any) => ({
+            ...cd,
+            createdAt: cd.createdAt.toISOString(),
+            dish: cd.dish,
+          })),
       })),
     };
 

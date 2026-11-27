@@ -368,6 +368,7 @@ export async function getVerticalMarketplaceData(
             dishes: {
               where: {
                 isAvailable: true,
+                isVisible: true,
               },
               select: {
                 id: true,

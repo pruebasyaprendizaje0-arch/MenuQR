@@ -224,6 +224,7 @@ model Dish {
   price        Float
   imageUrl     String?
   isAvailable  Boolean    @default(true)
+  isVisible    Boolean    @default(true)
   categoryId   String
   category     Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   restaurantId String
@@ -252,8 +253,10 @@ model Dish {
   updatedAt    DateTime   @updatedAt
 
   @@index([categoryId])
+  @@index([categoryId, isVisible])
   @@index([restaurantId])
   @@index([restaurantId, isAvailable])
+  @@index([restaurantId, isVisible])
   @@index([restaurantId, sku])
   @@index([restaurantId, supplierId])
   @@index([isSuggested, isAvailable])

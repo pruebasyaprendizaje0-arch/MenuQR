@@ -144,6 +144,7 @@ export async function getMarketplaceDishesAction(params: MarketplaceQueryParams 
 
     const whereClause: any = {
       isAvailable: true,
+      isVisible: true,
     };
 
     if (onlySuggested) {

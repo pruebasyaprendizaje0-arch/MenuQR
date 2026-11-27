@@ -67,7 +67,7 @@ export async function GET(request: Request) {
             id: true,
             name: true,
             dishes: {
-              where: { isAvailable: true },
+              where: { isAvailable: true, isVisible: true },
               select: {
                 id: true,
                 name: true,

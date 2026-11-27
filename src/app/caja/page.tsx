@@ -349,7 +349,7 @@ export default async function CajaPage({
   let dishes: any[] = [];
   try {
     dishes = await prisma.dish.findMany({
-      where: { restaurantId: restaurant.id, isAvailable: true },
+      where: { restaurantId: restaurant.id, isAvailable: true, isVisible: true },
       select: {
         id: true,
         name: true,

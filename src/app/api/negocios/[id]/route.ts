@@ -78,6 +78,7 @@ export async function GET(
 
       productos = await prisma.dish.findMany({
         where: {
+          isVisible: true,
           OR: [
             { restaurantId: id },
             { restaurant: { slug: negocio.slug } },

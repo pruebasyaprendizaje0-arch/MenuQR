@@ -85,6 +85,7 @@ export default async function sitemap(): Promise<any> {
         coverUrl: true,
         updatedAt: true,
         dishes: {
+          where: { isVisible: true },
           select: {
             id: true,
             name: true,

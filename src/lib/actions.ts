@@ -19,7 +19,15 @@ import { signKdsDispatchToken, signTableSessionToken, verifyTableSessionToken } 
 import { sendPasswordResetEmail } from "@/lib/email";
 import { recordSlugChange, sanitizeSlug } from "@/lib/slugs";
 import { trackAnalyticsEvent } from "@/lib/analytics";
-import { saveUploadedFile, deleteUploadedFile } from "@/lib/storage";
+import { saveUploadedFile } from "@/lib/storage";
+import {
+  assertDailyMenuVisibleLimitTx,
+  CONCURRENT_CATEGORY_CHANGE_ERR,
+  lockCategoriesInOrderTx,
+  lockDishesInOrderTx,
+  MAX_VISIBLE_DAILY_MENU_DISHES,
+  runWithLockRetry,
+} from "@/lib/daily-menu";
 import { sanitizeMapEmbedUrl } from "@/lib/map-utils";
 import { pool, ensureDbTables } from "@/lib/db-pool";
 import { parseDishImages, serializeDishImages } from "@/lib/dish-images";
@@ -913,52 +921,50 @@ export async function createCategoryAction(restaurantId: string, formData: FormD
 
 export async function updateCategoryAction(categoryId: string, formData: FormData) {
   await refreshUserSession();
-  const category = await prisma.category.findUnique({
+  const categoryPre = await prisma.category.findUnique({
     where: { id: categoryId },
     select: { id: true, restaurantId: true },
   });
-  if (!category) return { error: "Categoría no encontrada." };
+  if (!categoryPre) return { error: "Categoría no encontrada." };
 
-  const auth = await verifyRestaurantOwnership(category.restaurantId);
+  const auth = await verifyRestaurantOwnership(categoryPre.restaurantId);
   if (!auth.authorized) return { error: auth.error };
 
-  const name = formData.get("name") as string;
-  const order = parseInt(formData.get("order") as string || "0", 10);
+  const name = (formData.get("name") as string)?.trim();
+  if (!name) return { error: "El nombre de la categoría es obligatorio." };
+  const order = parseInt((formData.get("order") as string) || "0", 10);
   const rawAspect = (formData.get("imageAspectRatio") as string) || "DEFAULT";
   const imageAspectRatio = rawAspect === "1:1" || rawAspect === "9:16" ? rawAspect : "DEFAULT";
 
-  let updated: any;
   try {
-    updated = await prisma.category.update({
-      where: { id: categoryId },
-      data: {
-        name,
-        order,
-        imageAspectRatio,
-      },
-      include: { restaurant: true },
-    });
-  } catch (err: any) {
-    if (err?.name === "PrismaClientValidationError" || err?.message?.includes("imageAspectRatio")) {
-      await prisma.$executeRaw`
-        UPDATE "Category"
-        SET "name" = ${name}, "order" = ${order}, "imageAspectRatio" = ${imageAspectRatio}, "updatedAt" = NOW()
-        WHERE "id" = ${categoryId}
-      `;
-      updated = await prisma.category.findUnique({
+    const updated = await prisma.$transaction(async (tx) => {
+      await assertDailyMenuVisibleLimitTx(tx, {
+        categoryId,
+        restaurantId: categoryPre.restaurantId,
+        incomingVisibleCount: 0,
+        enforceCurrentCount: true,
+        overrideCategoryName: name,
+      });
+
+      return tx.category.update({
         where: { id: categoryId },
+        data: {
+          name,
+          order,
+          imageAspectRatio,
+        },
         include: { restaurant: true },
       });
-    } else {
-      throw err;
-    }
-  }
+    });
 
-  if (updated?.restaurant?.slug) {
-    revalidatePath(`/${updated.restaurant.slug}`);
+    if (updated?.restaurant?.slug) {
+      revalidatePath(`/${updated.restaurant.slug}`);
+    }
+    revalidatePath("/admin");
+    return { success: true };
+  } catch (err: any) {
+    return { error: err?.message || "No se pudo actualizar la categoría." };
   }
-  revalidatePath("/admin");
-  return { success: true };
 }
 
 export async function deleteCategoryAction(categoryId: string) {
@@ -1072,8 +1078,14 @@ export async function createDishAction(categoryId: string, formData: FormData) {
   const imageUrlInput = formData.get("imageUrl") as string;
   let finalImageUrl: string | null = null;
 
-  const uploadedImage = await saveUploadedFile(dishFile);
-  if (uploadedImage) {
+  if (dishFile && dishFile.size > 0) {
+    const uploadedImage = await saveUploadedFile(dishFile);
+    if (!uploadedImage) {
+      return {
+        error:
+          "No se pudo guardar la imagen subida. Verifica que sea JPG, PNG, WebP o GIF válida (máx. 5 MB).",
+      };
+    }
     finalImageUrl = uploadedImage;
   } else if (imageUrlInput && imageUrlInput.trim() !== "") {
     const rawList = parseDishImages(imageUrlInput);
@@ -1110,6 +1122,8 @@ export async function createDishAction(categoryId: string, formData: FormData) {
 
   // Si trackStock está activo y el stock indicado es 0 o menor, se marca no disponible de inicio
   const effectiveIsAvailable = trackStock && typeof stock === "number" && stock <= 0 ? false : isAvailable;
+  const isVisibleRaw = formData.get("isVisible");
+  const isVisible = isVisibleRaw === "false" ? false : true;
 
   const createData: any = {
     name,
@@ -1120,6 +1134,7 @@ export async function createDishAction(categoryId: string, formData: FormData) {
     barcode,
     imageUrl: finalImageUrl || null,
     isAvailable: effectiveIsAvailable,
+    isVisible,
     sku,
     stock: isNaN(stock as number) ? null : stock,
     minStock: isNaN(minStock as number) ? 0 : minStock,
@@ -1134,30 +1149,19 @@ export async function createDishAction(categoryId: string, formData: FormData) {
 
   let createdDish: any;
   try {
-    createdDish = await prisma.dish.create({
-      data: createData,
+    createdDish = await prisma.$transaction(async (tx) => {
+      await assertDailyMenuVisibleLimitTx(tx, {
+        categoryId,
+        restaurantId: category.restaurantId,
+        incomingVisibleCount: isVisible ? 1 : 0,
+      });
+
+      return tx.dish.create({
+        data: createData,
+      });
     });
   } catch (err: any) {
-    if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
-      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, supplierId: _sup, ...fallbackData } = createData;
-      createdDish = await prisma.dish.create({
-        data: fallbackData,
-      });
-      try {
-        await prisma.$executeRawUnsafe(
-          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2, "costPrice" = $3, "barcode" = $4 WHERE "id" = $5`,
-          isNaN(minStock as number) ? 0 : minStock,
-          trackStock,
-          isNaN(costPrice as number) ? 0.0 : costPrice,
-          barcode,
-          createdDish.id
-        );
-      } catch (rawErr) {
-        console.warn("Could not execute fallback raw update for minStock/trackStock/costPrice/barcode in createDish:", rawErr);
-      }
-    } else {
-      throw err;
-    }
+    return { error: err?.message || "No se pudo crear el plato." };
   }
 
   revalidatePath(`/${category.restaurant.slug}`);
@@ -1212,7 +1216,9 @@ export async function saveDailyMenuDishAction(formData: FormData) {
   const name = (formData.get("name") as string)?.trim();
   const description = (formData.get("description") as string)?.trim() || "";
   const price = parseFloat((formData.get("price") as string) || "0");
-  const isAvailable = formData.get("isAvailable") === "true";
+  const isAvailableRaw = formData.get("isAvailable");
+  const isVisibleRaw = formData.get("isVisible");
+  const existingImageUrlInput = (formData.get("existingImageUrl") as string)?.trim() || null;
   const dishFile = formData.get("dishFile") as File | null;
 
   if (!restaurantId || !categoryId) {
@@ -1235,74 +1241,212 @@ export async function saveDailyMenuDishAction(formData: FormData) {
     return { error: "Categoría no encontrada o no pertenece al restaurante." };
   }
 
-  // RESTRICCIÓN ESTRICTA: Máximo 4 platos en la categoría de Menú del Día
-  if (!dishId) {
-    const totalInCat = await prisma.dish.count({
-      where: { categoryId, restaurantId },
-    });
-    if (totalInCat >= 4) {
-      return { error: "Límite alcanzado: solo se permiten hasta 4 opciones para el Menú del Día." };
-    }
-  }
-
-  let finalImageUrl: string | null = null;
-  let previousImageUrl: string | null = null;
-
+  let existing: any = null;
   if (dishId) {
-    const existing = await prisma.dish.findFirst({
+    existing = await prisma.dish.findFirst({
       where: { id: dishId, restaurantId },
     });
     if (!existing) {
       return { error: "El plato a actualizar no existe." };
     }
-    previousImageUrl = existing.imageUrl;
-    finalImageUrl = existing.imageUrl;
   }
 
-  // Si se subió foto directa tomada con la cámara
+  const nextIsAvailable =
+    isAvailableRaw === "true"
+      ? true
+      : isAvailableRaw === "false"
+      ? false
+      : existing
+      ? existing.isAvailable
+      : true;
+
+  const nextIsVisible =
+    isVisibleRaw === "true"
+      ? true
+      : isVisibleRaw === "false"
+      ? false
+      : existing
+      ? existing.isVisible
+      : true;
+
+  let finalImageUrl: string | null = existing ? existing.imageUrl : existingImageUrlInput;
+
+  // Al reemplazar foto: guardar primero el archivo nuevo; si falla, conservar la referencia anterior y devolver error.
+  // No se borra físicamente la imagen anterior en este lote.
   if (dishFile && dishFile.size > 0) {
     const uploaded = await saveUploadedFile(dishFile);
-    if (uploaded) {
-      finalImageUrl = uploaded;
-      // Eliminar foto anterior si era un archivo local en /uploads/ para no saturar disco
-      if (previousImageUrl && previousImageUrl !== uploaded) {
-        await deleteUploadedFile(previousImageUrl);
-      }
+    if (!uploaded) {
+      return {
+        error:
+          "No se pudo guardar la nueva foto. Se conservó la imagen anterior.",
+      };
     }
+    finalImageUrl = uploaded;
   }
 
-  let savedDish: any;
-  if (dishId) {
-    savedDish = await prisma.dish.update({
-      where: { id: dishId },
-      data: {
-        name,
-        description,
-        price: isNaN(price) ? 0 : price,
-        isAvailable,
-        imageUrl: finalImageUrl,
-      },
-    });
-  } else {
-    savedDish = await prisma.dish.create({
-      data: {
-        name,
-        description,
-        price: isNaN(price) ? 0 : price,
-        isAvailable,
-        imageUrl: finalImageUrl,
-        categoryId,
-        restaurantId,
-      },
-    });
-  }
+  try {
+    const savedDish = await runWithLockRetry(() =>
+      prisma.$transaction(async (tx) => {
+        let lockedDish: {
+          id: string;
+          categoryId: string;
+          isAvailable: boolean;
+          isVisible: boolean;
+          imageUrl: string | null;
+        } | null = null;
 
-  if (category.restaurant?.slug) {
-    revalidatePath(`/${category.restaurant.slug}`);
-  }
-  revalidatePath("/admin");
+        if (dishId) {
+          const preDish = await tx.dish.findFirst({
+            where: { id: dishId, restaurantId },
+            select: { id: true, categoryId: true },
+          });
+          if (!preDish) {
+            throw new Error("El plato a actualizar no existe.");
+          }
 
-  return { success: true, dish: savedDish };
+          await lockCategoriesInOrderTx(tx, restaurantId, [preDish.categoryId]);
+          const lockedMap = await lockDishesInOrderTx(tx, restaurantId, [dishId]);
+          const d = lockedMap.get(dishId);
+          if (!d) {
+            throw new Error("El plato a actualizar no existe.");
+          }
+          if (d.categoryId !== preDish.categoryId) {
+            throw new Error(CONCURRENT_CATEGORY_CHANGE_ERR);
+          }
+          lockedDish = d;
+        }
+
+        const effectiveAvailable =
+          isAvailableRaw === "true"
+            ? true
+            : isAvailableRaw === "false"
+            ? false
+            : lockedDish
+            ? lockedDish.isAvailable
+            : true;
+
+        const effectiveVisible =
+          isVisibleRaw === "true"
+            ? true
+            : isVisibleRaw === "false"
+            ? false
+            : lockedDish
+            ? lockedDish.isVisible
+            : true;
+
+        const targetCategoryId = lockedDish ? lockedDish.categoryId : categoryId;
+
+        await assertDailyMenuVisibleLimitTx(tx, {
+          categoryId: targetCategoryId,
+          restaurantId,
+          excludeDishIds: dishId ? [dishId] : [],
+          incomingVisibleCount: effectiveVisible ? 1 : 0,
+        });
+
+        if (dishId) {
+          return tx.dish.update({
+            where: { id: dishId },
+            data: {
+              name,
+              description,
+              price: isNaN(price) ? 0 : price,
+              isAvailable: effectiveAvailable,
+              isVisible: effectiveVisible,
+              imageUrl: finalImageUrl,
+            },
+          });
+        }
+
+        return tx.dish.create({
+          data: {
+            name,
+            description,
+            price: isNaN(price) ? 0 : price,
+            isAvailable: effectiveAvailable,
+            isVisible: effectiveVisible,
+            imageUrl: finalImageUrl,
+            categoryId,
+            restaurantId,
+          },
+        });
+      })
+    );
+
+    if (category.restaurant?.slug) {
+      revalidatePath(`/${category.restaurant.slug}`);
+    }
+    revalidatePath("/admin");
+
+    return { success: true, dish: savedDish };
+  } catch (err: any) {
+    return {
+      error:
+        err?.message ||
+        "No se pudo guardar el plato en la base de datos. Se conservó la referencia anterior.",
+    };
+  }
+}
+
+export async function toggleDailyMenuDishVisibilityAction(
+  dishId: string,
+  restaurantId: string,
+  isVisible: boolean
+) {
+  await refreshUserSession();
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  try {
+    const updatedDish = await runWithLockRetry(() =>
+      prisma.$transaction(async (tx) => {
+        const preDish = await tx.dish.findFirst({
+          where: { id: dishId, restaurantId },
+          select: { id: true, categoryId: true },
+        });
+        if (!preDish) {
+          throw new Error("Plato no encontrado o no pertenece a este negocio.");
+        }
+
+        await lockCategoriesInOrderTx(tx, restaurantId, [preDish.categoryId]);
+        const lockedMap = await lockDishesInOrderTx(tx, restaurantId, [dishId]);
+        const dish = lockedMap.get(dishId);
+        if (!dish) {
+          throw new Error("Plato no encontrado o no pertenece a este negocio.");
+        }
+        if (dish.categoryId !== preDish.categoryId) {
+          throw new Error(CONCURRENT_CATEGORY_CHANGE_ERR);
+        }
+
+        if (isVisible) {
+          await assertDailyMenuVisibleLimitTx(tx, {
+            categoryId: dish.categoryId,
+            restaurantId,
+            excludeDishIds: [dish.id],
+            incomingVisibleCount: 1,
+          });
+        }
+
+        const updated = await tx.dish.update({
+          where: { id: dish.id },
+          data: { isVisible },
+          include: { restaurant: { select: { slug: true } } },
+        });
+
+        return { updated, slug: updated.restaurant?.slug };
+      })
+    );
+
+    if (updatedDish.slug) {
+      revalidatePath(`/${updatedDish.slug}`);
+    }
+    revalidatePath("/admin");
+
+    return { success: true, dish: updatedDish.updated };
+  } catch (err: any) {
+    return {
+      error: err?.message || "No se pudo actualizar la visibilidad del plato.",
+    };
+  }
 }
 
 export async function toggleAllDailyMenuDishesAction(
@@ -1313,6 +1457,12 @@ export async function toggleAllDailyMenuDishesAction(
   await refreshUserSession();
   const auth = await verifyRestaurantOwnership(restaurantId);
   if (!auth.authorized) return { error: auth.error };
+
+  const category = await prisma.category.findFirst({
+    where: { id: categoryId, restaurantId },
+    select: { id: true },
+  });
+  if (!category) return { error: "Categoría no encontrada o no pertenece a este negocio." };
 
   await prisma.dish.updateMany({
     where: { categoryId, restaurantId },
@@ -1343,10 +1493,6 @@ export async function deleteDailyMenuDishAction(dishId: string, restaurantId: st
   });
 
   if (!dish) return { error: "Plato no encontrado." };
-
-  if (dish.imageUrl) {
-    await deleteUploadedFile(dish.imageUrl);
-  }
 
   await prisma.dish.delete({
     where: { id: dishId },
@@ -1426,58 +1572,81 @@ export async function createBatchDishesAction(restaurantId: string, dishes: Batc
   }
 
   // Run in database transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // 1. Create missing categories
-    for (const catName of newCategoriesToCreate) {
-      const created = await tx.category.create({
-        data: {
-          name: catName,
-          order: nextOrder++,
-          restaurantId,
-        },
-      });
-      categoryMap.set(catName.trim().toLowerCase(), created.id);
-    }
+  let result: { count: number; createdCategoriesCount: number };
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      // 1. Create missing categories
+      for (const catName of newCategoriesToCreate) {
+        const created = await tx.category.create({
+          data: {
+            name: catName,
+            order: nextOrder++,
+            restaurantId,
+          },
+        });
+        categoryMap.set(catName.trim().toLowerCase(), created.id);
+      }
 
-    // 2. Prepare dish records
-    const dishesData = validDishes.map((item) => {
-      const rawCat = (item.categoryName || "General").trim();
-      const catId = categoryMap.get(rawCat.toLowerCase()) || existingCategories[0]?.id;
-      
-      const cleanPrice = parsePriceValue(item.price);
-      const cleanCost = typeof item.costPrice === "number" ? Math.max(0, item.costPrice) : 0;
-      const cleanStock = typeof item.stock === "number" ? Math.max(0, item.stock) : null;
-      const cleanMinStock = typeof item.minStock === "number" ? Math.max(0, item.minStock) : 0;
-      const trackStock = typeof item.trackStock === "boolean" ? item.trackStock : (cleanStock !== null);
-      
+      // 2. Prepare dish records
+      const dishesData = validDishes.map((item) => {
+        const rawCat = (item.categoryName || "General").trim();
+        const catId = categoryMap.get(rawCat.toLowerCase()) || existingCategories[0]?.id;
+
+        const cleanPrice = parsePriceValue(item.price);
+        const cleanCost = typeof item.costPrice === "number" ? Math.max(0, item.costPrice) : 0;
+        const cleanStock = typeof item.stock === "number" ? Math.max(0, item.stock) : null;
+        const cleanMinStock = typeof item.minStock === "number" ? Math.max(0, item.minStock) : 0;
+        const trackStock = typeof item.trackStock === "boolean" ? item.trackStock : (cleanStock !== null);
+
+        return {
+          name: item.name.trim(),
+          description: item.description?.trim() || null,
+          price: cleanPrice,
+          costPrice: cleanCost,
+          supplierId: item.supplierId || null,
+          stock: cleanStock,
+          minStock: cleanMinStock,
+          trackStock,
+          barcode: item.barcode || null,
+          sku: item.sku || null,
+          imageUrl: item.imageUrl?.trim() || null,
+          isAvailable: item.isAvailable !== false,
+          isVisible: (item as any).isVisible !== false,
+          categoryId: catId!,
+          restaurantId,
+        };
+      });
+
+      const visibleByCategory = new Map<string, number>();
+      for (const d of dishesData) {
+        if (d.isVisible) {
+          visibleByCategory.set(d.categoryId, (visibleByCategory.get(d.categoryId) || 0) + 1);
+        }
+      }
+      const sortedVisibleEntries = Array.from(visibleByCategory.entries()).sort(([a], [b]) =>
+        a.localeCompare(b)
+      );
+      for (const [catId, count] of sortedVisibleEntries) {
+        await assertDailyMenuVisibleLimitTx(tx, {
+          categoryId: catId,
+          restaurantId,
+          incomingVisibleCount: count,
+        });
+      }
+
+      // 3. Insert dishes in bulk
+      await tx.dish.createMany({
+        data: dishesData,
+      });
+
       return {
-        name: item.name.trim(),
-        description: item.description?.trim() || null,
-        price: cleanPrice,
-        costPrice: cleanCost,
-        supplierId: item.supplierId || null,
-        stock: cleanStock,
-        minStock: cleanMinStock,
-        trackStock,
-        barcode: item.barcode || null,
-        sku: item.sku || null,
-        imageUrl: item.imageUrl?.trim() || null,
-        isAvailable: item.isAvailable !== false,
-        categoryId: catId!,
-        restaurantId,
+        count: dishesData.length,
+        createdCategoriesCount: newCategoriesToCreate.length,
       };
     });
-
-    // 3. Insert dishes in bulk
-    await tx.dish.createMany({
-      data: dishesData,
-    });
-
-    return {
-      count: dishesData.length,
-      createdCategoriesCount: newCategoriesToCreate.length,
-    };
-  });
+  } catch (err: any) {
+    return { error: err?.message || "No se pudo completar la importación en lote." };
+  }
 
   const restaurant = await prisma.restaurant.findUnique({
     where: { id: restaurantId },
@@ -1500,7 +1669,7 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   await refreshUserSession();
   const dish = await prisma.dish.findUnique({
     where: { id: dishId },
-    select: { id: true, restaurantId: true, imageUrl: true },
+    select: { id: true, restaurantId: true, imageUrl: true, categoryId: true, isVisible: true },
   });
   if (!dish) return { error: "Plato no encontrado." };
 
@@ -1512,13 +1681,23 @@ export async function updateDishAction(dishId: string, formData: FormData) {
   const price = parseFloat(formData.get("price") as string || "0");
   const isAvailable = formData.get("isAvailable") === "true";
   const categoryId = formData.get("categoryId") as string;
+  const isVisibleRaw = formData.get("isVisible");
+  const nextIsVisible =
+    isVisibleRaw === "true" ? true : isVisibleRaw === "false" ? false : dish.isVisible;
 
   const dishFile = formData.get("dishFile") as File | null;
   const imageUrlInput = formData.get("imageUrl") as string;
-  let finalImageUrl: string | null = null;
+  const clearImage = formData.get("clearImage") === "true";
+  let finalImageUrl: string | null = clearImage ? null : dish.imageUrl;
 
-  const uploadedImage = await saveUploadedFile(dishFile);
-  if (uploadedImage) {
+  if (dishFile && dishFile.size > 0) {
+    const uploadedImage = await saveUploadedFile(dishFile);
+    if (!uploadedImage) {
+      return {
+        error:
+          "No se pudo guardar la imagen subida. Se conservó la foto anterior.",
+      };
+    }
     finalImageUrl = uploadedImage;
   } else if (imageUrlInput && imageUrlInput.trim() !== "") {
     const rawList = parseDishImages(imageUrlInput);
@@ -1605,53 +1784,73 @@ export async function updateDishAction(dishId: string, formData: FormData) {
     updateData.supplierId = supplierId;
   }
 
-  if (categoryId) {
-    const category = await prisma.category.findFirst({
-      where: { id: categoryId, restaurantId: dish.restaurantId },
-    });
-    if (category) {
-      updateData.categoryId = categoryId;
-    }
-  }
-
   let updated: any;
   try {
-    updated = await prisma.dish.update({
-      where: { id: dishId },
-      data: updateData,
-      include: {
-        category: {
-          include: { restaurant: true },
-        },
-      },
-    });
-  } catch (err: any) {
-    if (err?.name === "PrismaClientValidationError" || err?.message?.includes("Unknown argument")) {
-      const { minStock: _ms, trackStock: _ts, costPrice: _cp, barcode: _bc, supplierId: _sup, ...fallbackData } = updateData;
-      updated = await prisma.dish.update({
-        where: { id: dishId },
-        data: fallbackData,
-        include: {
-          category: {
-            include: { restaurant: true },
+    updated = await runWithLockRetry(() =>
+      prisma.$transaction(async (tx) => {
+        const preDish = await tx.dish.findFirst({
+          where: { id: dishId, restaurantId: dish.restaurantId },
+          select: { id: true, categoryId: true },
+        });
+        if (!preDish) {
+          throw new Error("Plato no encontrado o sin permisos.");
+        }
+
+        let targetCategoryId = preDish.categoryId;
+        const txUpdateData: Record<string, any> = { ...updateData };
+
+        if (categoryId) {
+          const category = await tx.category.findFirst({
+            where: { id: categoryId, restaurantId: dish.restaurantId },
+            select: { id: true },
+          });
+          if (category) {
+            txUpdateData.categoryId = category.id;
+            targetCategoryId = category.id;
+          }
+        }
+
+        await lockCategoriesInOrderTx(tx, dish.restaurantId, [
+          preDish.categoryId,
+          targetCategoryId,
+        ]);
+
+        const lockedMap = await lockDishesInOrderTx(tx, dish.restaurantId, [dishId]);
+        const lockedDish = lockedMap.get(dishId);
+        if (!lockedDish) {
+          throw new Error("Plato no encontrado o sin permisos.");
+        }
+        if (lockedDish.categoryId !== preDish.categoryId) {
+          throw new Error(CONCURRENT_CATEGORY_CHANGE_ERR);
+        }
+
+        const effectiveIsVisible =
+          isVisibleRaw === null ? lockedDish.isVisible : nextIsVisible;
+        txUpdateData.isVisible = effectiveIsVisible;
+
+        if (effectiveIsVisible) {
+          await assertDailyMenuVisibleLimitTx(tx, {
+            categoryId: targetCategoryId,
+            restaurantId: dish.restaurantId,
+            excludeDishIds: preDish.categoryId === targetCategoryId ? [dishId] : [],
+            incomingVisibleCount: 1,
+            additionalLockCategoryIds: [preDish.categoryId],
+          });
+        }
+
+        return tx.dish.update({
+          where: { id: dishId },
+          data: txUpdateData,
+          include: {
+            category: {
+              include: { restaurant: true },
+            },
           },
-        },
-      });
-      try {
-        await prisma.$executeRawUnsafe(
-          `UPDATE "Dish" SET "minStock" = $1, "trackStock" = $2, "costPrice" = $3, "barcode" = $4 WHERE "id" = $5`,
-          isNaN(minStock as number) ? 0 : minStock,
-          trackStock,
-          isNaN(costPrice as number) ? 0.0 : costPrice,
-          barcode,
-          dishId
-        );
-      } catch (rawErr) {
-        console.warn("Could not execute fallback raw update for minStock/trackStock/costPrice/barcode in updateDish:", rawErr);
-      }
-    } else {
-      throw err;
-    }
+        });
+      })
+    );
+  } catch (err: any) {
+    return { error: err?.message || "No se pudo actualizar el plato." };
   }
 
   revalidatePath(`/${updated.category.restaurant.slug}`);
@@ -2859,7 +3058,10 @@ export async function createOrderAction(data: {
           return { error: `El producto "${dbDish.name}" no pertenece a este restaurante.`, errorCode: "INVALID_INPUT" };
         }
 
-        // Availability check (PASO 3)
+        // Availability & Visibility check
+        if (!dbDish.isVisible) {
+          return { error: `El producto "${dbDish.name}" está oculto y no está disponible para ordenar.`, errorCode: "INVALID_INPUT" };
+        }
         if (!dbDish.isAvailable) {
           return { error: `El producto "${dbDish.name}" no está disponible actualmente.`, errorCode: "INVALID_INPUT" };
         }
@@ -3246,7 +3448,10 @@ export async function createOrderAction(data: {
         return { error: `El producto "${dbDish.name}" no pertenece a este restaurante.`, errorCode: "INVALID_INPUT" };
       }
 
-      // Availability check (PASO 3)
+      // Availability & Visibility check
+      if (!dbDish.isVisible) {
+        return { error: `El producto "${dbDish.name}" está oculto y no está disponible para ordenar.`, errorCode: "INVALID_INPUT" };
+      }
       if (!dbDish.isAvailable) {
         return { error: `El producto "${dbDish.name}" no está disponible actualmente.`, errorCode: "INVALID_INPUT" };
       }

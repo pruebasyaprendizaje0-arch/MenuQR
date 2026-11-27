@@ -548,23 +548,43 @@ function validateItemQuantity(rawQty: any, itemName?: string): number {
 async function resolveDirectProductAndDebit(
   client: any,
   restaurantId: string,
-  item: { dishId?: string; productId?: string; id?: string; nombre?: string; dishName?: string; cantidad?: string | number; quantity?: number },
+  item: {
+    dishId?: string;
+    productId?: string;
+    id?: string;
+    nombre?: string;
+    dishName?: string;
+    cantidad?: string | number;
+    quantity?: number;
+    isService?: boolean;
+    tipo?: string;
+    itemType?: string;
+    serviceId?: string;
+  },
   wasStockDeducted: boolean,
   executeDeduction: boolean = false,
-  isDemo: boolean = false
+  isDemo: boolean = false,
+  isServiceOrder: boolean = false
 ): Promise<{ producto_id: string | null; unidades_descontadas: number; validQuantity: number }> {
   // 1. Validar estrictamente la cantidad: debe ser un número entero positivo mayor a cero (sin usar parseInt permisivo)
   const rawQty = item.quantity !== undefined ? item.quantity : item.cantidad;
   const qty = validateItemQuantity(rawQty, item.nombre || item.dishName);
 
-  const candidateId = item.dishId || item.productId || (item.id && typeof item.id === "string" && !item.id.startsWith("cart-") && item.id.length > 5 ? item.id : null) || null;
+  const rawId =
+    item.dishId ||
+    item.productId ||
+    item.serviceId ||
+    (item.id && typeof item.id === "string" && !item.id.startsWith("cart-") && item.id.length > 5 ? item.id : null) ||
+    null;
+
+  const candidateId = rawId;
   if (!candidateId) {
-    return { producto_id: null, unidades_descontadas: 0, validQuantity: qty };
+    throw new Error(`El producto o servicio "${item.nombre || item.dishName || "sin nombre"}" debe incluir un identificador válido registrado en el negocio.`);
   }
 
   // 2. Validar pertenencia estricta al restaurante mediante bloqueo pesimista
   const { rows: dRows } = await client.query(
-    `SELECT id, name, "trackStock", stock, "isAvailable", "restaurantId"
+    `SELECT id, name, "trackStock", stock, "isAvailable", "isVisible", "isService", "restaurantId"
      FROM "Dish"
      WHERE id = $1 AND ("restaurantId" = $2 OR "restaurantId" IN (SELECT id FROM "Restaurant" WHERE id = $2 OR slug = $2))
      LIMIT 1
@@ -579,14 +599,17 @@ async function resolveDirectProductAndDebit(
       [candidateId]
     );
     if (foreignRows.length > 0) {
-      throw new Error(`El producto "${item.nombre || item.dishName || foreignRows[0].name}" con ID ${candidateId} no pertenece a este restaurante.`);
+      throw new Error(`El producto o servicio "${item.nombre || item.dishName || foreignRows[0].name}" con ID ${candidateId} no pertenece a este negocio.`);
     }
-    return { producto_id: null, unidades_descontadas: 0, validQuantity: qty };
+    throw new Error(`El producto o servicio "${item.nombre || item.dishName || candidateId}" no existe en el catálogo de este negocio.`);
   }
 
   const dbDish = dRows[0];
 
-  // 3. Validar disponibilidad bajo bloqueo: NO vender ni reactivar productos deshabilitados (incluso en Modo Demo)
+  // 3. Validar visibilidad y disponibilidad bajo bloqueo: NO vender productos ocultos o deshabilitados (incluso en Modo Demo o rondas)
+  if (dbDish.isVisible === false) {
+    throw new Error(`El producto "${dbDish.name}" está oculto y no está disponible para ordenar.`);
+  }
   if (dbDish.isAvailable === false || dbDish.isAvailable === null) {
     throw new Error(`El producto "${dbDish.name}" no está disponible actualmente.`);
   }

@@ -183,6 +183,7 @@ export async function executeGastronomicSearch(options: SearchOptions): Promise<
           dishes: {
             where: {
               isAvailable: true,
+              isVisible: true,
               ...(maxPrice ? { price: { lte: maxPrice } } : {}),
               ...(minPrice ? { price: { gte: minPrice } } : {}),
             },

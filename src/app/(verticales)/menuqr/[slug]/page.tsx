@@ -136,6 +136,7 @@ export default async function MenuQRDetailPage({ params: paramsPromise }: PagePr
           orderBy: { order: "asc" },
           include: {
             dishes: {
+              where: { isVisible: true },
               orderBy: { createdAt: "desc" },
             },
           },

@@ -64,6 +64,7 @@ export async function getRestaurantCampaignsAction(
                 price: true,
                 imageUrl: true,
                 isAvailable: true,
+                isVisible: true,
                 category: {
                   select: { name: true },
                 },

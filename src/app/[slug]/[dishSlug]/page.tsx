@@ -12,6 +12,20 @@ import { getMockDemoDish } from "@/lib/demo-data";
 
 export const dynamic = "force-dynamic";
 
+function isDishOrderable(dish: {
+  isAvailable?: boolean | null;
+  isVisible?: boolean | null;
+  trackStock?: boolean | null;
+  stock?: number | null;
+}): boolean {
+  if (dish.isVisible === false) return false;
+  if (dish.isAvailable === false) return false;
+  if (dish.trackStock === true) {
+    return typeof dish.stock === "number" && !Number.isNaN(dish.stock) && dish.stock > 0;
+  }
+  return true;
+}
+
 interface Props {
   params: Promise<{
     slug: string;
@@ -47,16 +61,16 @@ const getDishWithRestaurant = cache(async (restaurantSlug: string, dishSlug: str
   }
 
   const restaurant = await prismaTenant.restaurant.findUnique({
-    where: { 
+    where: {
       slug: cleanRestSlug,
-      isSuspended: false 
+      isSuspended: false,
     },
     include: {
       dishes: {
-        where: { isAvailable: true },
-        include: { category: true }
-      }
-    }
+        where: { isVisible: true },
+        include: { category: true },
+      },
+    },
   });
 
   if (!restaurant) {
@@ -112,11 +126,18 @@ export async function generateMetadata({ params: paramsPromise }: Props): Promis
     }
 
     const restaurant = dish.restaurant;
+    const orderable = isDishOrderable(dish);
     const location = restaurant.city || restaurant.locality || "Ecuador";
-    const title = `${dish.name} - $${Number(dish.price).toFixed(2)} | ${restaurant.name} en ${location}`;
-    const description = dish.description 
-      ? `${dish.description}. Disfruta ${dish.name} por $${Number(dish.price).toFixed(2)} en ${restaurant.name} (${location}). Haz tu pedido por WhatsApp.` 
-      : `Pide ${dish.name} por $${Number(dish.price).toFixed(2)} en el menú digital de ${restaurant.name} en ${location}. Pedidos inmediatos a WhatsApp.`;
+    const title = orderable
+      ? `${dish.name} - $${Number(dish.price).toFixed(2)} | ${restaurant.name} en ${location}`
+      : `${dish.name} (Agotado) - $${Number(dish.price).toFixed(2)} | ${restaurant.name} en ${location}`;
+    const description = orderable
+      ? dish.description
+        ? `${dish.description}. Disfruta ${dish.name} por $${Number(dish.price).toFixed(2)} en ${restaurant.name} (${location}). Haz tu pedido por WhatsApp.`
+        : `Pide ${dish.name} por $${Number(dish.price).toFixed(2)} en el menú digital de ${restaurant.name} en ${location}. Pedidos inmediatos a WhatsApp.`
+      : dish.description
+      ? `${dish.description}. ${dish.name} ($${Number(dish.price).toFixed(2)}) en ${restaurant.name} (${location}) — Actualmente agotado temporalmente.`
+      : `${dish.name} ($${Number(dish.price).toFixed(2)}) en ${restaurant.name} (${location}). Actualmente agotado temporalmente.`;
 
     const baseUrl = getBaseUrl();
     const url = `${baseUrl}/${slug}/${dishSlug}`;
@@ -166,6 +187,7 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
   }
 
   const restaurant = dish.restaurant;
+  const orderable = isDishOrderable(dish);
   const baseUrl = getBaseUrl();
   const location = restaurant.city || restaurant.locality || "Ecuador";
 
@@ -178,7 +200,7 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
   }
 
   const waMsg = `Hola ${restaurant.name}, me interesa pedir el plato: ${dish.name} ($${Number(dish.price).toFixed(2)}) de su menú digital.`;
-  const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(waMsg)}`;
+  const waUrl = orderable && formattedPhone ? `https://wa.me/${formattedPhone}?text=${encodeURIComponent(waMsg)}` : null;
 
   const breadcrumbs = [
     { name: "Inicio", url: "/" },
@@ -203,7 +225,7 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
       "price": String(dish.price || 0),
       "priceCurrency": "USD",
       "url": dishUrl,
-      "availability": dish.isAvailable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      "availability": orderable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
     },
   };
 
@@ -301,8 +323,8 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
             </div>
             <div>
               <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Disponibilidad</dt>
-              <dd className="font-semibold text-emerald-400 mt-0.5">
-                {dish.isAvailable ? "Disponible de Inmediato" : "Agotado Temporalmente"}
+              <dd className={`font-semibold mt-0.5 ${orderable ? "text-emerald-400" : "text-rose-400"}`}>
+                {orderable ? "Disponible de Inmediato" : "Agotado Temporalmente"}
               </dd>
             </div>
             <div>
@@ -315,25 +337,53 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
             </div>
             <div>
               <dt className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">Canal de Pedido</dt>
-              <dd className="font-semibold text-slate-200 mt-0.5">WhatsApp Directo</dd>
+              <dd className="font-semibold text-slate-200 mt-0.5">
+                {orderable ? "WhatsApp Directo" : "No disponible para pedir"}
+              </dd>
             </div>
           </dl>
 
-          <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+          {!orderable && (
+            <div
+              role="status"
+              className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-200 font-semibold"
+            >
+              Este platillo se encuentra agotado temporalmente y no admite pedidos en este momento.
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
             <div>
               <span className="text-xs text-slate-500 uppercase tracking-wider block">Precio</span>
               <span className="text-3xl font-black text-white">${Number(dish.price).toFixed(2)}</span>
             </div>
 
-            <a
-              href={waUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-white bg-[#25D366] hover:bg-[#20ba59] shadow-lg shadow-emerald-950/40 transition-transform transform hover:scale-105"
-            >
-              <MessageSquare className="w-4 h-4" />
-              Pedir por WhatsApp
-            </a>
+            {waUrl ? (
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider text-white bg-[#25D366] hover:bg-[#20ba59] shadow-lg shadow-emerald-950/40 transition-transform transform hover:scale-105"
+              >
+                <MessageSquare className="w-4 h-4" />
+                Pedir por WhatsApp
+              </a>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <span
+                  aria-disabled="true"
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider text-rose-300 bg-rose-950/60 border border-rose-500/30 cursor-not-allowed select-none"
+                >
+                  Agotado — No disponible
+                </span>
+                <Link
+                  href={`/${restaurant.slug}`}
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl font-bold text-xs uppercase tracking-wider text-amber-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition"
+                >
+                  Ver platos disponibles
+                </Link>
+              </div>
+            )}
           </div>
         </div>
 
@@ -377,7 +427,16 @@ export default async function DishDetailPage({ params: paramsPromise }: Props) {
       <FloatingWhatsAppButton
         phone={restaurant.whatsapp}
         businessName={restaurant.name}
-        customMessage={`¡Hola! Me interesa pedir el plato: ${dish.name} ($${Number(dish.price).toFixed(2)}) en *${restaurant.name}*.`}
+        customMessage={
+          orderable
+            ? `¡Hola! Me interesa pedir el plato: ${dish.name} ($${Number(dish.price).toFixed(2)}) en *${restaurant.name}*.`
+            : undefined
+        }
+        title={
+          orderable
+            ? `Pedir ${dish.name} por WhatsApp`
+            : `Contacto general con ${restaurant.name}`
+        }
         bottomOffsetClass="bottom-6 right-6 sm:bottom-8 sm:right-8"
       />
     </div>

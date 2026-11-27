@@ -277,7 +277,12 @@ export function BusinessCampaignSection({
             </div>
 
             {/* Linked Dishes / Services participating in this campaign */}
-            {camp.dishes && camp.dishes.length > 0 && (
+            {(() => {
+              const visibleCampaignDishes = (camp.dishes || []).filter(
+                (item) => item.dish && (item.dish as any).isVisible !== false
+              );
+              if (visibleCampaignDishes.length === 0) return null;
+              return (
               <div className="mt-6 pt-6 border-t border-white/10 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold text-amber-400 tracking-wider uppercase flex items-center gap-1.5">
@@ -285,12 +290,12 @@ export function BusinessCampaignSection({
                     Productos / Servicios en Promoción
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    {camp.dishes.length} {camp.dishes.length === 1 ? "artículo" : "artículos"}
+                    {visibleCampaignDishes.length} {visibleCampaignDishes.length === 1 ? "artículo" : "artículos"}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {camp.dishes.map((item) => {
+                  {visibleCampaignDishes.map((item) => {
                     const dish = item.dish;
                     if (!dish) return null;
 
@@ -360,7 +365,8 @@ export function BusinessCampaignSection({
                   })}
                 </div>
               </div>
-            )}
+              );
+            })()}
           </div>
         );
       })}

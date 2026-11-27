@@ -433,11 +433,15 @@ export async function processCajaSaleAction(
       for (const it of data.items) {
         const dish = await tx.dish.findUnique({
           where: { id: it.dishId },
-          select: { id: true, name: true, stock: true, trackStock: true, isAvailable: true, restaurantId: true },
+          select: { id: true, name: true, stock: true, trackStock: true, isAvailable: true, isVisible: true, restaurantId: true },
         });
 
         if (!dish || dish.restaurantId !== restaurantId) {
           throw new Error(`El producto o servicio "${it.name}" no fue encontrado en este negocio.`);
+        }
+
+        if (!dish.isVisible) {
+          throw new Error(`"${dish.name}" está oculto y no puede venderse como nueva venta.`);
         }
 
         if (!dish.isAvailable) {
