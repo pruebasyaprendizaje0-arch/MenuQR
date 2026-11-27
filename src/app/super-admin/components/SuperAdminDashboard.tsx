@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { 
   superAdminLogoutAction, 
   extendTrialAction, 
@@ -483,6 +483,8 @@ export function SuperAdminDashboard({
   });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
+  const [isConfirmingWhatsappRemoval, setIsConfirmingWhatsappRemoval] = useState(false);
+  const editFormRef = useRef<HTMLFormElement | null>(null);
 
   // Conteos dinámicos en tiempo real por cada categoría / vertical de negocio
   const verticalCounts = useMemo(() => {
@@ -779,6 +781,7 @@ export function SuperAdminDashboard({
       vertical: resolveBusinessVertical(res)
     });
     setEditError("");
+    setIsConfirmingWhatsappRemoval(false);
     setIsEditModalOpen(true);
   };
 
@@ -893,24 +896,72 @@ export function SuperAdminDashboard({
     }
   };
 
-  const handleEditSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeEditSave = async () => {
     if (!editingRestaurant) return;
-
     setEditLoading(true);
     setEditError("");
 
-    const res = await superAdminUpdateRestaurantAction(editingRestaurant.id, editData);
+    const res = await superAdminUpdateRestaurantAction(editingRestaurant.id, {
+      ...editData,
+      whatsapp: editData.whatsapp.trim(),
+    });
     setEditLoading(false);
 
     if (res?.error) {
       setEditError(res.error);
     } else {
+      setIsConfirmingWhatsappRemoval(false);
       alert("¡Información del negocio guardada con éxito!");
       setIsEditModalOpen(false);
       setEditingRestaurant(null);
       window.location.reload();
     }
+  };
+
+  const validateEditWhatsapp = (nextWhatsapp: string) => {
+    if (nextWhatsapp.length > 0) {
+      const digitsOnly = nextWhatsapp.replace(/\D/g, "");
+      if (/[^0-9+\-\s()]/.test(nextWhatsapp) || digitsOnly.length < 7 || digitsOnly.length > 15) {
+        setEditError("El número de WhatsApp debe contener entre 7 y 15 dígitos válidos (o dejarse vacío).");
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRestaurant) return;
+
+    const originalWhatsapp = (editingRestaurant.whatsappNumber || "").trim();
+    const nextWhatsapp = editData.whatsapp.trim();
+
+    if (!validateEditWhatsapp(nextWhatsapp)) return;
+
+    if (originalWhatsapp.length > 0 && nextWhatsapp.length === 0) {
+      setEditError("");
+      setIsConfirmingWhatsappRemoval(true);
+      return;
+    }
+
+    await executeEditSave();
+  };
+
+  const handleConfirmWhatsappRemovalSave = async () => {
+    if (!editingRestaurant) return;
+    if (editFormRef.current && !editFormRef.current.reportValidity()) {
+      return;
+    }
+
+    const nextWhatsapp = editData.whatsapp.trim();
+    if (!validateEditWhatsapp(nextWhatsapp)) return;
+
+    if (!editData.userName.trim() || !editData.email.trim() || !editData.restaurantName.trim() || !editData.slug.trim()) {
+      setEditError("Completa los campos obligatorios del negocio antes de guardar.");
+      return;
+    }
+
+    await executeEditSave();
   };
 
   // Add CRM Note submit
@@ -4014,10 +4065,39 @@ export function SuperAdminDashboard({
               </button>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="space-y-4 text-xs max-h-[75vh] overflow-y-auto pr-1">
+            <form ref={editFormRef} onSubmit={handleEditSubmit} className="space-y-4 text-xs max-h-[75vh] overflow-y-auto pr-1">
               {editError && (
                 <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-xl">
                   {editError}
+                </div>
+              )}
+
+              {isConfirmingWhatsappRemoval && (
+                <div className="bg-amber-950/40 border border-amber-500/40 rounded-2xl p-4 space-y-3 text-xs text-amber-100">
+                  <div className="font-bold text-amber-300">
+                    Confirmar eliminación del número de WhatsApp
+                  </div>
+                  <p className="text-amber-200/90 leading-relaxed">
+                    Este negocio tenía registrado el número <strong>{editingRestaurant.whatsappNumber}</strong>. Si continúas, se guardará sin número de WhatsApp.
+                  </p>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingWhatsappRemoval(false)}
+                      disabled={editLoading}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold transition"
+                    >
+                      Cancelar eliminación
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleConfirmWhatsappRemovalSave()}
+                      disabled={editLoading}
+                      className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold transition disabled:opacity-50"
+                    >
+                      {editLoading ? "Guardando..." : "Confirmar y quitar WhatsApp"}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -4075,12 +4155,15 @@ export function SuperAdminDashboard({
                     <p className="text-[10px] text-slate-500 mt-1">Solo minúsculas, números y guiones. Sin espacios ni tildes.</p>
                   </div>
                   <div>
-                    <label className="block text-slate-300 mb-1 font-medium">Teléfono WhatsApp</label>
+                    <label className="block text-slate-300 mb-1 font-medium">Teléfono WhatsApp (opcional)</label>
                     <input
                       type="text"
-                      required
                       value={editData.whatsapp}
-                      onChange={(e) => setEditData({ ...editData, whatsapp: e.target.value })}
+                      onChange={(e) => {
+                        setIsConfirmingWhatsappRemoval(false);
+                        setEditData({ ...editData, whatsapp: e.target.value });
+                      }}
+                      placeholder="Opcional (dejar vacío para quitar)"
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
                     />
                   </div>

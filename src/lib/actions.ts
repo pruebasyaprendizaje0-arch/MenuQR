@@ -2552,9 +2552,17 @@ export async function superAdminUpdateRestaurantAction(
 
   const cleanEmail = data.email.toLowerCase().trim();
   const cleanSlug = sanitizeSlug(data.slug);
+  const rawWhatsapp = typeof data.whatsapp === "string" ? data.whatsapp.trim() : "";
 
   if (!cleanSlug) {
     return { error: "El identificador (slug) no puede quedar vacío." };
+  }
+
+  if (rawWhatsapp.length > 0) {
+    const digitsOnly = rawWhatsapp.replace(/\D/g, "");
+    if (/[^0-9+\-\s()]/.test(rawWhatsapp) || digitsOnly.length < 7 || digitsOnly.length > 15) {
+      return { error: "El número de WhatsApp debe contener entre 7 y 15 dígitos válidos (o dejarse vacío)." };
+    }
   }
 
   if (cleanSlug !== restaurant.slug) {
@@ -2643,7 +2651,7 @@ export async function superAdminUpdateRestaurantAction(
       userId: finalUserId,
       name: data.restaurantName,
       slug: cleanSlug,
-      whatsapp: data.whatsapp,
+      whatsapp: rawWhatsapp,
       locality: data.locality || null,
       address: data.address || null,
       slogan: data.slogan || null,
