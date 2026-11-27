@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "./prisma";
+import { getSuperAdminSession, getUserSession } from "@/lib/auth";
 
 const SETTING_PREFIX = "suggested_dishes_";
 
@@ -31,10 +32,52 @@ export async function getSuggestedDishIdsAction(restaurantId: string): Promise<s
 export async function toggleSuggestedDishAction(
   restaurantId: string,
   dishId: string
-): Promise<{ success: boolean; isSuggested: boolean; count: number }> {
+): Promise<{ success: boolean; isSuggested: boolean; count: number; error?: string; status?: number }> {
   try {
-    if (!restaurantId || !dishId) {
-      return { success: false, isSuggested: false, count: 0 };
+    if (!restaurantId || typeof restaurantId !== "string" || !dishId || typeof dishId !== "string") {
+      return { success: false, isSuggested: false, count: 0, error: "Datos incompletos.", status: 400 };
+    }
+
+    const isSuperAdmin = await getSuperAdminSession();
+    if (!isSuperAdmin) {
+      const session = await getUserSession();
+      if (!session || !session.userId) {
+        return { success: false, isSuggested: false, count: 0, error: "No autenticado. Por favor inicie sesión.", status: 401 };
+      }
+
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { id: true, userId: true },
+      });
+
+      if (!restaurant) {
+        return { success: false, isSuggested: false, count: 0, error: "Restaurante no encontrado.", status: 404 };
+      }
+
+      if (restaurant.userId !== session.userId) {
+        return { success: false, isSuggested: false, count: 0, error: "No tiene permisos para modificar este restaurante.", status: 403 };
+      }
+    } else {
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { id: true },
+      });
+      if (!restaurant) {
+        return { success: false, isSuggested: false, count: 0, error: "Restaurante no encontrado.", status: 404 };
+      }
+    }
+
+    const dish = await prisma.dish.findUnique({
+      where: { id: dishId },
+      select: { id: true, restaurantId: true },
+    });
+
+    if (!dish) {
+      return { success: false, isSuggested: false, count: 0, error: "Plato no encontrado.", status: 404 };
+    }
+
+    if (dish.restaurantId !== restaurantId) {
+      return { success: false, isSuggested: false, count: 0, error: "El plato no pertenece al restaurante autorizado.", status: 403 };
     }
 
     const currentIds = await getSuggestedDishIdsAction(restaurantId);
