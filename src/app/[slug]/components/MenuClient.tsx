@@ -707,6 +707,18 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
   );
 
   // Sincronización en tiempo real de inventario y disponibilidad
+  const isClientDishOrderable = (d: {
+    isAvailable?: boolean;
+    trackStock?: boolean;
+    stock?: number | null;
+  }) => {
+    if (!d.isAvailable) return false;
+    if (d.trackStock === true) {
+      return typeof d.stock === "number" && d.stock !== null && d.stock > 0;
+    }
+    return true;
+  };
+
   const [liveStockMap, setLiveStockMap] = useState<
     Record<
       string,
@@ -729,13 +741,18 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     > = {};
     for (const cat of restaurant.categories || []) {
       for (const d of cat.dishes || []) {
+        const trackStock = d.trackStock === true;
         const isConfigured = typeof d.stock === "number" && d.stock !== null;
         const curStock = isConfigured ? d.stock : null;
-        const isAvail = Boolean(d.isAvailable && isConfigured && (curStock ?? 0) > 0);
+        const isAvail = isClientDishOrderable({
+          isAvailable: d.isAvailable,
+          trackStock,
+          stock: curStock,
+        });
         initialMap[d.id] = {
           stock: curStock,
           isAvailable: isAvail,
-          trackStock: true,
+          trackStock,
           minStock: d.minStock ?? 0,
         };
       }
@@ -749,18 +766,21 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       ...cat,
       dishes: (cat.dishes || []).map((d) => {
         const live = liveStockMap[d.id];
+        const trackStock = live ? live.trackStock === true : d.trackStock === true;
         const isConfigured = live
           ? typeof live.stock === "number" && live.stock !== null
           : typeof d.stock === "number" && d.stock !== null;
-        const curStock = live ? live.stock : (isConfigured ? d.stock : null);
-        const isAvail = live
-          ? live.isAvailable
-          : Boolean(d.isAvailable && isConfigured && (curStock ?? 0) > 0);
+        const curStock = live ? live.stock : isConfigured ? d.stock : null;
+        const rawAvail = live ? live.isAvailable : d.isAvailable;
         return {
           ...d,
           stock: curStock,
-          isAvailable: Boolean(isAvail && isConfigured && (curStock ?? 0) > 0),
-          trackStock: true,
+          isAvailable: isClientDishOrderable({
+            isAvailable: rawAvail,
+            trackStock,
+            stock: curStock,
+          }),
+          trackStock,
           minStock: live?.minStock ?? d.minStock ?? 0,
         };
       }),
@@ -790,28 +810,41 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
               adjustedCart.push(it);
               continue;
             }
-            const isConfigured = typeof fresh.stock === "number" && fresh.stock !== null;
-            if (!isConfigured) {
-              hasAdjustments = true;
-              messages.push(`"${it.dish.name}" no tiene el stock configurado en el sistema y fue retirado de tu pedido.`);
-              continue;
-            }
-            if (!fresh.isAvailable || (fresh.stock ?? 0) <= 0) {
+            const freshTrackStock = fresh.trackStock === true;
+            if (!fresh.isAvailable) {
               hasAdjustments = true;
               messages.push(`"${it.dish.name}" se agotó recientemente y fue retirado de tu pedido.`);
               continue;
             }
-            if (typeof fresh.stock === "number" && it.quantity > fresh.stock) {
-              hasAdjustments = true;
-              messages.push(
-                `Solo quedan ${fresh.stock} unidad(es) de "${it.dish.name}". Se ajustó la cantidad en tu orden.`
-              );
-              adjustedCart.push({
-                ...it,
-                quantity: fresh.stock,
-                dish: { ...it.dish, stock: fresh.stock },
-              });
-              continue;
+            if (freshTrackStock) {
+              const isConfigured = typeof fresh.stock === "number" && fresh.stock !== null;
+              if (!isConfigured) {
+                hasAdjustments = true;
+                messages.push(`"${it.dish.name}" no tiene el stock configurado en el sistema y fue retirado de tu pedido.`);
+                continue;
+              }
+              if ((fresh.stock ?? 0) <= 0) {
+                hasAdjustments = true;
+                messages.push(`"${it.dish.name}" se agotó recientemente y fue retirado de tu pedido.`);
+                continue;
+              }
+              if (typeof fresh.stock === "number" && it.quantity > fresh.stock) {
+                hasAdjustments = true;
+                messages.push(
+                  `Solo quedan ${fresh.stock} unidad(es) de "${it.dish.name}". Se ajustó la cantidad en tu orden.`
+                );
+                adjustedCart.push({
+                  ...it,
+                  quantity: fresh.stock,
+                  dish: {
+                    ...it.dish,
+                    stock: fresh.stock,
+                    isAvailable: fresh.isAvailable,
+                    trackStock: true,
+                  },
+                });
+                continue;
+              }
             }
             adjustedCart.push({
               ...it,
@@ -819,7 +852,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 ...it.dish,
                 stock: fresh.stock,
                 isAvailable: fresh.isAvailable,
-                trackStock: true,
+                trackStock: freshTrackStock,
               },
             });
           }
@@ -1273,19 +1306,36 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     }
 
     const live = liveStockMap[dish.id];
+    const trackStock = live ? live.trackStock === true : dish.trackStock === true;
     const isConfigured = live
       ? typeof live.stock === "number" && live.stock !== null
       : typeof dish.stock === "number" && dish.stock !== null;
     const curStock = live ? (live.stock ?? 0) : (dish.stock ?? 0);
     const isAvailable = live ? live.isAvailable : dish.isAvailable;
 
-    if (!isConfigured) {
-      alert(`⚠️ El producto "${dish.name}" no tiene el stock configurado en el sistema y no puede ser ordenado.`);
+    if (!isAvailable) {
+      alert(`¡Lo sentimos! "${dish.name}" se encuentra agotado.`);
       return;
     }
 
-    if (curStock <= 0 || !isAvailable) {
-      alert(`¡Lo sentimos! "${dish.name}" se encuentra agotado.`);
+    if (trackStock) {
+      if (!isConfigured) {
+        alert(`⚠️ El producto "${dish.name}" no tiene el stock configurado en el sistema y no puede ser ordenado.`);
+        return;
+      }
+
+      if (curStock <= 0) {
+        alert(`¡Lo sentimos! "${dish.name}" se encuentra agotado.`);
+        return;
+      }
+    }
+
+    const addQuantity = overrides?.quantity || 1;
+    const currentDishQtyInCart = cart
+      .filter((item) => item.dish.id === dish.id)
+      .reduce((sum, item) => sum + item.quantity, 0);
+    if (trackStock && currentDishQtyInCart + addQuantity > curStock) {
+      alert(`Solo quedan ${curStock} unidad(es) disponibles de "${dish.name}".`);
       return;
     }
 
@@ -1298,7 +1348,6 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const unitPrice = effectiveBasePrice + extrasSum;
     const sortedOptionIds = selectedMods.map((m) => m.optionId).sort().join("_");
     const itemKey = sortedOptionIds ? `${dish.id}_${sortedOptionIds}` : dish.id;
-    const addQuantity = overrides?.quantity || 1;
 
     const modDetails: string[] = [];
     for (const m of selectedMods) {
@@ -1308,12 +1357,15 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
     const modifiersNotes = modDetails.join(" · ");
 
     setCart((prevCart) => {
+      const totalDishQtyInCart = prevCart
+        .filter((item) => item.dish.id === dish.id)
+        .reduce((sum, item) => sum + item.quantity, 0);
+      if (trackStock && totalDishQtyInCart + addQuantity > curStock) {
+        reachedStockLimit = true;
+        return prevCart;
+      }
       const existing = prevCart.find((item) => (item.itemKey || item.dish.id) === itemKey);
       if (existing) {
-        if (existing.quantity + addQuantity > curStock) {
-          reachedStockLimit = true;
-          return prevCart;
-        }
         return prevCart.map((item) =>
           (item.itemKey || item.dish.id) === itemKey
             ? {
@@ -1322,20 +1374,16 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                 unitPrice,
                 selectedModifiers: selectedMods,
                 modifiersNotes,
-                dish: { ...item.dish, price: effectiveBasePrice, stock: curStock, isAvailable, trackStock: true },
+                dish: { ...item.dish, price: effectiveBasePrice, stock: trackStock ? curStock : null, isAvailable, trackStock },
               }
             : item
         );
-      }
-      if (addQuantity > curStock) {
-        reachedStockLimit = true;
-        return prevCart;
       }
       return [
         ...prevCart,
         {
           itemKey,
-          dish: { ...dish, price: effectiveBasePrice, stock: curStock, isAvailable, trackStock: true },
+          dish: { ...dish, price: effectiveBasePrice, stock: trackStock ? curStock : null, isAvailable, trackStock },
           quantity: addQuantity,
           unitPrice,
           selectedModifiers: selectedMods,
@@ -1561,29 +1609,46 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
       return;
     }
 
-    // Validar existencias de stock de forma estricta en el cliente antes de proceder
+    // Validar existencias de stock de forma estricta en el cliente antes de proceder (incluyendo variantes con modificadores del mismo plato)
+    const qtyByDishId = new Map<string, number>();
+    for (const item of cart) {
+      qtyByDishId.set(item.dish.id, (qtyByDishId.get(item.dish.id) || 0) + item.quantity);
+    }
     for (const item of cart) {
       const live = liveStockMap[item.dish.id];
+      const trackStock = live ? live.trackStock === true : item.dish.trackStock === true;
       const isConfigured = live
         ? typeof live.stock === "number" && live.stock !== null
         : typeof item.dish.stock === "number" && item.dish.stock !== null;
       const curStock = live ? (live.stock ?? 0) : (item.dish.stock ?? 0);
       const isAvail = live ? live.isAvailable : item.dish.isAvailable;
 
-      if (!isConfigured) {
-        alert(`⛔ No se puede procesar el pedido.\n\nEl producto "${item.dish.name}" no tiene el stock configurado en el sistema.`);
-        setIsSubmittingOrder(false);
-        return;
-      }
-      if (!isAvail || curStock <= 0) {
+      if (!isAvail) {
         alert(`⛔ No se puede procesar el pedido.\n\nEl producto "${item.dish.name}" se encuentra agotado.`);
+        isSubmittingOrderRef.current = false;
         setIsSubmittingOrder(false);
         return;
       }
-      if (item.quantity > curStock) {
-        alert(`⛔ No se puede procesar el pedido.\n\nSolo quedan ${curStock} unidad(es) de "${item.dish.name}". Por favor ajusta la cantidad en tu carrito.`);
-        setIsSubmittingOrder(false);
-        return;
+      if (trackStock) {
+        if (!isConfigured) {
+          alert(`⛔ No se puede procesar el pedido.\n\nEl producto "${item.dish.name}" no tiene el stock configurado en el sistema.`);
+          isSubmittingOrderRef.current = false;
+          setIsSubmittingOrder(false);
+          return;
+        }
+        if (curStock <= 0) {
+          alert(`⛔ No se puede procesar el pedido.\n\nEl producto "${item.dish.name}" se encuentra agotado.`);
+          isSubmittingOrderRef.current = false;
+          setIsSubmittingOrder(false);
+          return;
+        }
+        const totalRequestedForDish = qtyByDishId.get(item.dish.id) || item.quantity;
+        if (totalRequestedForDish > curStock) {
+          alert(`⛔ No se puede procesar el pedido.\n\nSolo quedan ${curStock} unidad(es) de "${item.dish.name}". Por favor ajusta la cantidad en tu carrito.`);
+          isSubmittingOrderRef.current = false;
+          setIsSubmittingOrder(false);
+          return;
+        }
       }
     }
 
@@ -1606,6 +1671,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
           const msgs = checkData.adjustments.map((a: any) => a.message);
           alert("Aviso de disponibilidad de productos:\n\n" + msgs.join("\n"));
           await refreshLiveStock(false);
+          isSubmittingOrderRef.current = false;
           setIsSubmittingOrder(false);
           return;
         }
@@ -3333,7 +3399,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 </span>
                               )}
                             </div>
-                            {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
+                            {isClientDishOrderable(dish) ? (
                               <button
                                 onClick={() => addToCart(dish)}
                                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-md shadow-amber-500/20 active:scale-95 transition-all duration-200"
@@ -3343,7 +3409,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                               </button>
                             ) : (
                               <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2.5 py-1 rounded-full">
-                                {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                                {dish.trackStock && (dish.stock === null || dish.stock === undefined) ? "Sin stock" : "Agotado"}
                               </span>
                             )}
                           </div>
@@ -3479,7 +3545,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 </span>
                               )}
                             </div>
-                            {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
+                            {isClientDishOrderable(dish) ? (
                               <button
                                 onClick={() => addToCart(dish)}
                                 className="p-1.5 rounded-xl text-white shadow-lg transition transform active:scale-90 duration-200"
@@ -3489,7 +3555,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                               </button>
                             ) : (
                               <span className="text-[9px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-2 py-1 rounded-full">
-                                {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                                {dish.trackStock && (dish.stock === null || dish.stock === undefined) ? "Sin stock" : "Agotado"}
                               </span>
                             )}
                           </div>
@@ -3531,7 +3597,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           <div 
                             key={dish.id}
                             className={`relative group overflow-hidden bg-gradient-to-br from-slate-900/80 to-slate-950/85 backdrop-blur-md rounded-[2rem] p-5 flex gap-5 transition-all duration-300 border ${
-                              dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0
+                              isClientDishOrderable(dish)
                                 ? "border-amber-500/20 hover:border-amber-500/40 hover:shadow-[0_0_20px_rgba(245,158,11,0.08)]" 
                                 : "opacity-50 border-slate-900"
                             }`}
@@ -3604,7 +3670,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                   )}
                                 </div>
                                 <div>
-                                  {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
+                                  {isClientDishOrderable(dish) ? (
                                     <button
                                       onClick={() => addToCart(dish)}
                                       className="inline-flex items-center gap-1 text-[11px] font-black px-4 py-2 rounded-xl text-white shadow-lg transition transform active:scale-95 duration-200"
@@ -3614,7 +3680,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                     </button>
                                   ) : (
                                     <span className="text-[10px] font-bold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">
-                                      {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                                      {dish.trackStock && (dish.stock === null || dish.stock === undefined) ? "Sin stock" : "Agotado"}
                                     </span>
                                   )}
                                 </div>
@@ -3630,7 +3696,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                           <div 
                             key={dish.id}
                             className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 hover:border-slate-800 rounded-3xl p-3 flex flex-col justify-between transition-all duration-300 relative group overflow-hidden ${
-                              dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? "" : "opacity-50"
+                              isClientDishOrderable(dish) ? "" : "opacity-50"
                             }`}
                           >
                             <div className="w-full aspect-[9/16] rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
@@ -3707,7 +3773,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                   )}
                                 </div>
                                 <div>
-                                  {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
+                                  {isClientDishOrderable(dish) ? (
                                     <button
                                       onClick={() => addToCart(dish)}
                                       className="p-1.5 sm:p-2 rounded-xl text-white shadow-lg transition transform active:scale-90 duration-200"
@@ -3718,7 +3784,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                     </button>
                                   ) : (
                                     <span className="text-[9px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-2 py-0.5 rounded-full">
-                                      {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                                      {dish.trackStock && (dish.stock === null || dish.stock === undefined) ? "Sin stock" : "Agotado"}
                                     </span>
                                   )}
                                 </div>
@@ -3733,7 +3799,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                         <div 
                           key={dish.id}
                           className={`bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-3xl p-4 flex gap-4 transition-all duration-300 relative group overflow-hidden ${
-                            dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? "hover:border-slate-800" : "opacity-50"
+                            isClientDishOrderable(dish) ? "hover:border-slate-800" : "opacity-50"
                           }`}
                         >
                           <div className="h-24 w-24 rounded-2xl bg-slate-950 overflow-hidden shrink-0 border border-slate-900 relative">
@@ -3806,7 +3872,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                 )}
                               </div>
                               <div className="flex justify-end pt-2">
-                                {dish.isAvailable && typeof dish.stock === "number" && dish.stock > 0 ? (
+                                {isClientDishOrderable(dish) ? (
                                   <button
                                     onClick={() => addToCart(dish)}
                                     className="inline-flex items-center gap-1 text-[11px] font-bold px-3 py-1.5 rounded-full text-white shadow-lg transition-transform active:scale-95 duration-200"
@@ -3816,7 +3882,7 @@ export function MenuClient({ restaurant, centralBranchId }: { restaurant: Restau
                                   </button>
                                 ) : (
                                   <span className="text-[10px] font-semibold text-slate-500 bg-slate-950 border border-slate-900 px-3 py-1.5 rounded-full">
-                                    {dish.stock === null || dish.stock === undefined ? "Sin stock" : "Agotado"}
+                                    {dish.trackStock && (dish.stock === null || dish.stock === undefined) ? "Sin stock" : "Agotado"}
                                   </span>
                                 )}
                               </div>

@@ -6603,9 +6603,9 @@ export function AdminDashboard({
 
         {/* Categorías Tab */}
         {activeTab === "categories" && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
+          <div className="space-y-6 pb-4">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+              <div className="min-w-0">
                 <h2 className="text-2xl font-bold text-white">Categorías</h2>
                 <p className="text-slate-400 text-sm">Organiza tu menú por secciones como Entradas, Pizzas, Bebidas.</p>
               </div>
@@ -6617,15 +6617,122 @@ export function AdminDashboard({
                   setNewCatAspect("DEFAULT");
                   setIsCategoryModalOpen(true);
                 }}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 transition-all duration-200"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 transition-all duration-200 shrink-0"
               >
                 <Plus className="h-4 w-4" />
                 Nueva Categoría
               </button>
             </div>
 
-            {/* List of categories */}
-            <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden shadow-sm">
+            {/* Mobile Cards View (< md) */}
+            <div className="md:hidden space-y-3">
+              {categoriesList.length === 0 ? (
+                <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl px-4 py-8 text-center text-sm text-slate-500">
+                  No hay categorías creadas aún.
+                </div>
+              ) : (
+                categoriesList.map((cat, index) => (
+                  <div
+                    key={cat.id}
+                    data-mobile-cat-id={cat.id}
+                    className="bg-slate-900/50 border border-slate-800/90 rounded-2xl p-4 space-y-3 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-bold text-white break-words">{cat.name}</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">{(cat.dishes || []).length} platos</p>
+                      </div>
+                      <span className="inline-flex items-center justify-center min-w-[2.25rem] h-7 px-2 rounded-lg bg-slate-950/90 text-xs font-bold text-amber-400 border border-slate-800 shrink-0">
+                        #{cat.order}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div>
+                        {cat.imageAspectRatio === "9:16" ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                            📱 9:16 Vertical
+                          </span>
+                        ) : cat.imageAspectRatio === "1:1" ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-sky-500/10 text-sky-300 border border-sky-500/30">
+                            ◻️ 1:1 Estándar
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700/60">
+                            ⚙️ Negocio ({imageAspectRatio === "9:16" ? "9:16" : "1:1"})
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="inline-flex items-center bg-slate-950/90 rounded-xl p-0.5 border border-slate-800 gap-0.5">
+                        <button
+                          type="button"
+                          disabled={index === 0 || reorderingCatId !== null}
+                          onClick={() => handleMoveCategory(cat.id, "up")}
+                          title="Subir posición"
+                          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                        >
+                          {reorderingCatId === cat.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                          ) : (
+                            <ChevronUp className="h-4 w-4" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === categoriesList.length - 1 || reorderingCatId !== null}
+                          onClick={() => handleMoveCategory(cat.id, "down")}
+                          title="Bajar posición"
+                          className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg disabled:opacity-20 disabled:cursor-not-allowed transition-all"
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCategory(cat);
+                          setNewCatName(cat.name);
+                          setNewCatOrder(cat.order.toString());
+                          setNewCatAspect(cat.imageAspectRatio || "DEFAULT");
+                          setIsCategoryModalOpen(true);
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all"
+                        title="Editar Categoría"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                        <span>Editar</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (confirm(`¿Estás seguro de eliminar la categoría "${cat.name}"? Se borrarán todos sus platos.`)) {
+                            const res = await deleteCategoryAction(cat.id);
+                            if (res && "error" in res && res.error) {
+                              alert(res.error);
+                            } else {
+                              alert(`¡Categoría "${cat.name}" eliminada con éxito!`);
+                              window.location.reload();
+                            }
+                          }
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-red-400 bg-red-950/30 hover:bg-red-950/50 rounded-xl border border-red-900/30 transition-all"
+                        title="Eliminar Categoría"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Eliminar</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Desktop Table View (>= md) */}
+            <div className="hidden md:block bg-slate-900/40 border border-slate-800/80 rounded-2xl overflow-hidden shadow-sm">
               <table className="min-w-full divide-y divide-slate-800">
                 <thead className="bg-slate-900/60">
                   <tr>
@@ -6735,8 +6842,8 @@ export function AdminDashboard({
 
             {/* Category Add/Edit Modal */}
             {isCategoryModalOpen && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-                <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-full max-w-md shadow-2xl relative">
+              <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+                <div className="bg-slate-900 border border-slate-800 p-4 sm:p-6 rounded-2xl w-full max-w-md max-h-[88dvh] overflow-y-auto shadow-2xl relative my-auto">
                   <h3 className="text-lg font-bold text-white mb-4">
                     {editingCategory ? "Editar Categoría" : "Nueva Categoría"}
                   </h3>
@@ -6848,7 +6955,7 @@ export function AdminDashboard({
                       </p>
                     </div>
 
-                    <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-800">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-4 border-t border-slate-800">
                       {editingCategory && (
                         <button
                           type="button"

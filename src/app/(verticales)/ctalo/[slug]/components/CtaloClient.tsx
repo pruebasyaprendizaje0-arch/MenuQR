@@ -322,13 +322,28 @@ export function CtaloClient({ store }: { store: StoreData }) {
     [liveStockMap, allProducts]
   );
 
+  const isProductTracked = useCallback(
+    (productId: string): boolean => {
+      if (liveStockMap[productId]) {
+        return liveStockMap[productId].trackStock === true;
+      }
+      const prod = allProducts.find((p) => p.id === productId);
+      return prod?.trackStock === true;
+    },
+    [liveStockMap, allProducts]
+  );
+
   const isProductAvailable = useCallback(
     (productId: string): boolean => {
       if (liveStockMap[productId]) {
         return Boolean(liveStockMap[productId].isAvailable);
       }
       const prod = allProducts.find((p) => p.id === productId);
-      return Boolean(prod?.isAvailable !== false && typeof prod?.stock === "number" && prod.stock > 0);
+      if (!prod || prod.isAvailable === false) return false;
+      if (prod.trackStock === true) {
+        return typeof prod.stock === "number" && prod.stock > 0;
+      }
+      return true;
     },
     [liveStockMap, allProducts]
   );
@@ -353,19 +368,26 @@ export function CtaloClient({ store }: { store: StoreData }) {
                 .map((it) => {
                   const fresh = data.dishes[it.productId];
                   if (fresh) {
-                    const isConfigured = typeof fresh.stock === "number" && fresh.stock !== null;
-                    const curStock = isConfigured ? fresh.stock : 0;
-                    if (!isConfigured || fresh.isAvailable === false || curStock <= 0) {
+                    if (fresh.isAvailable === false) {
                       hasAdjustments = true;
-                      messages.push(`"${it.name}" se encuentra agotado o sin stock configurado y fue removido de tu orden.`);
+                      messages.push(`"${it.name}" se encuentra agotado y fue removido de tu orden.`);
                       return null;
                     }
-                    if (it.cantidad > curStock) {
-                      hasAdjustments = true;
-                      messages.push(
-                        `Solo disponemos de ${curStock} unidad(es) de "${it.name}". Ajustamos tu carrito a ${curStock} automáticamente.`
-                      );
-                      return { ...it, cantidad: curStock };
+                    if (fresh.trackStock === true) {
+                      const isConfigured = typeof fresh.stock === "number" && fresh.stock !== null;
+                      const curStock = isConfigured ? fresh.stock : 0;
+                      if (!isConfigured || curStock <= 0) {
+                        hasAdjustments = true;
+                        messages.push(`"${it.name}" se encuentra agotado o sin stock configurado y fue removido de tu orden.`);
+                        return null;
+                      }
+                      if (it.cantidad > curStock) {
+                        hasAdjustments = true;
+                        messages.push(
+                          `Solo disponemos de ${curStock} unidad(es) de "${it.name}". Ajustamos tu carrito a ${curStock} automáticamente.`
+                        );
+                        return { ...it, cantidad: curStock };
+                      }
                     }
                   }
                   return it;
@@ -476,34 +498,45 @@ export function CtaloClient({ store }: { store: StoreData }) {
   // Añadir directamente con 1 clic (para productos sin variantes - Alternativa 1)
   const handleDirectAddToCart = (product: Product, delta: number = 1) => {
     const isAvail = isProductAvailable(product.id);
+    const isTracked = isProductTracked(product.id);
     const curStock = getProductStock(product.id);
 
-    if (delta > 0 && (!isAvail || curStock <= 0)) {
+    if (delta > 0 && (!isAvail || (isTracked && curStock <= 0))) {
       alert(`¡Producto Agotado! "${product.name}" no tiene existencias disponibles en bodega.`);
       return;
+    }
+
+    if (delta > 0 && isTracked) {
+      const currentTotalForProduct = cart
+        .filter((it) => it.productId === product.id)
+        .reduce((sum, it) => sum + it.cantidad, 0);
+      if (currentTotalForProduct + delta > curStock) {
+        alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${product.name}".`);
+        return;
+      }
     }
 
     const cartId = `${product.id}-direct`;
     setCart((prev) => {
       const existing = prev.find((it) => it.cartId === cartId);
+      if (delta > 0 && isTracked) {
+        const totalPrevForProduct = prev
+          .filter((it) => it.productId === product.id)
+          .reduce((sum, it) => sum + it.cantidad, 0);
+        if (totalPrevForProduct + delta > curStock) {
+          return prev;
+        }
+      }
       if (existing) {
         const newQty = existing.cantidad + delta;
         if (newQty <= 0) {
           return prev.filter((it) => it.cartId !== cartId);
-        }
-        if (delta > 0 && newQty > curStock) {
-          alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${product.name}".`);
-          return prev;
         }
         return prev.map((it) =>
           it.cartId === cartId ? { ...it, cantidad: newQty } : it
         );
       }
       if (delta <= 0) return prev;
-      if (delta > curStock) {
-        alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${product.name}".`);
-        return prev;
-      }
       return [
         ...prev,
         {
@@ -513,7 +546,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
           price: product.price,
           imageUrl: product.imageUrl,
           variantLabel: null,
-          cantidad: Math.min(delta, curStock),
+          cantidad: isTracked ? Math.min(delta, curStock) : delta,
         },
       ];
     });
@@ -536,9 +569,10 @@ export function CtaloClient({ store }: { store: StoreData }) {
     if (!activeProduct) return;
 
     const isAvail = isProductAvailable(activeProduct.id);
+    const isTracked = isProductTracked(activeProduct.id);
     const curStock = getProductStock(activeProduct.id);
 
-    if (!isAvail || curStock <= 0) {
+    if (!isAvail || (isTracked && curStock <= 0)) {
       alert(`¡Producto Agotado! "${activeProduct.name}" no tiene existencias disponibles.`);
       return;
     }
@@ -549,7 +583,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
     const maxCanAdd = Math.max(0, curStock - currentInCart);
 
-    if (quantity > maxCanAdd) {
+    if (isTracked && quantity > maxCanAdd) {
       alert(
         `¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${activeProduct.name}"${currentInCart > 0 ? ` (ya tienes ${currentInCart} en tu carrito)` : ""}.`
       );
@@ -572,6 +606,14 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
     const cartId = `${activeProduct.id}-${selectedOption1 || "def"}-${selectedOption2 || "def"}`;
     setCart((prev) => {
+      if (isTracked) {
+        const prevInCart = prev
+          .filter((it) => it.productId === activeProduct.id)
+          .reduce((sum, it) => sum + it.cantidad, 0);
+        if (prevInCart + quantity > curStock) {
+          return prev;
+        }
+      }
       const existing = prev.find((it) => it.cartId === cartId);
       if (existing) {
         return prev.map((it) =>
@@ -602,19 +644,33 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
   // Actualizar cantidad en carrito con tope estricto de bodega
   const updateCartQty = (cartId: string, delta: number) => {
+    const targetItem = cart.find((item) => item.cartId === cartId);
+    if (!targetItem) return;
+    const isTracked = isProductTracked(targetItem.productId);
+    const curStock = getProductStock(targetItem.productId);
+
+    if (delta > 0 && isTracked) {
+      const otherInCart = cart
+        .filter((item) => item.productId === targetItem.productId && item.cartId !== cartId)
+        .reduce((sum, item) => sum + item.cantidad, 0);
+      const maxAllowed = curStock - otherInCart;
+      if (targetItem.cantidad + delta > maxAllowed) {
+        alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${targetItem.name}".`);
+        return;
+      }
+    }
+
     setCart((prev) => {
       const it = prev.find((item) => item.cartId === cartId);
       if (!it) return prev;
 
-      if (delta > 0) {
-        const curStock = getProductStock(it.productId);
+      if (delta > 0 && isTracked) {
         const otherInCart = prev
           .filter((item) => item.productId === it.productId && item.cartId !== cartId)
           .reduce((sum, item) => sum + item.cantidad, 0);
 
         const maxAllowed = curStock - otherInCart;
-        if (it.cantidad >= maxAllowed) {
-          alert(`¡Has alcanzado el límite disponible!\n\nSolo quedan ${curStock} unidades en bodega de "${it.name}".`);
+        if (it.cantidad + delta > maxAllowed) {
           return prev;
         }
       }
@@ -1133,7 +1189,8 @@ export function CtaloClient({ store }: { store: StoreData }) {
                     {(() => {
                       const curStock = getProductStock(product.id);
                       const isAvail = isProductAvailable(product.id);
-                      const isSoldOut = !isAvail || curStock <= 0;
+                      const isTracked = isProductTracked(product.id);
+                      const isSoldOut = !isAvail || (isTracked && curStock <= 0);
                       if (isSoldOut) {
                         return (
                           <div className="w-full py-2.5 rounded-xl bg-slate-900/90 border border-red-500/30 text-red-400 font-bold text-xs flex items-center justify-center gap-2 cursor-not-allowed select-none opacity-80 shadow-inner">
@@ -1165,14 +1222,17 @@ export function CtaloClient({ store }: { store: StoreData }) {
                     })() || (
                       (() => {
                         const currentQty = getProductCartQty(product.id);
+                        const isTracked = isProductTracked(product.id);
                         const curStock = getProductStock(product.id);
-                        const isAtMax = currentQty >= curStock;
+                        const isAtMax = isTracked && currentQty >= curStock;
 
                         return currentQty > 0 ? (
                           <div className="flex items-center justify-between bg-slate-950 border border-amber-500/50 rounded-xl p-1 px-2 shadow-inner">
                             <span className="text-[11px] font-bold text-amber-400 pl-1">
                               En carrito: <strong>{currentQty}</strong>
-                              <span className="text-[9.5px] text-slate-400 font-normal ml-1">/ {curStock}</span>
+                              {isTracked && (
+                                <span className="text-[9.5px] text-slate-400 font-normal ml-1">/ {curStock}</span>
+                              )}
                             </span>
                             <div className="flex items-center gap-1.5">
                               <button
@@ -1404,21 +1464,28 @@ export function CtaloClient({ store }: { store: StoreData }) {
 
             {/* Selector de Cantidad con Tope Estricto de Bodega */}
             {(() => {
+              const isTracked = isProductTracked(activeProduct.id);
               const curStock = getProductStock(activeProduct.id);
               const inCart = cart
                 .filter((it) => it.productId === activeProduct.id)
                 .reduce((sum, it) => sum + it.cantidad, 0);
               const maxCanAdd = Math.max(0, curStock - inCart);
-              const isAtMax = quantity >= maxCanAdd;
+              const isAtMax = isTracked && quantity >= maxCanAdd;
 
               return (
                 <div className="border-t border-slate-800 pt-5 mb-6">
                   <div className="flex items-center justify-between">
                     <div>
                       <span className="text-xs font-bold text-slate-300 block">Cantidad:</span>
-                      <span className="text-[11px] text-amber-400 font-medium">
-                        Bodega: {curStock} unids {inCart > 0 ? `(${inCart} en carrito)` : ""}
-                      </span>
+                      {isTracked ? (
+                        <span className="text-[11px] text-amber-400 font-medium">
+                          Bodega: {curStock} unids {inCart > 0 ? `(${inCart} en carrito)` : ""}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-emerald-400 font-medium">
+                          Disponibilidad manual sin conteo
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
                       <button
@@ -1449,7 +1516,7 @@ export function CtaloClient({ store }: { store: StoreData }) {
                     </div>
                   </div>
 
-                  {maxCanAdd <= 0 && (
+                  {isTracked && maxCanAdd <= 0 && (
                     <div className="mt-3 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 shrink-0" />
                       <span>Ya tienes en tu carrito el stock máximo disponible ({curStock} unids).</span>
@@ -1462,6 +1529,8 @@ export function CtaloClient({ store }: { store: StoreData }) {
             <button
               onClick={handleAddToCart}
               disabled={(() => {
+                if (!isProductAvailable(activeProduct.id)) return true;
+                if (!isProductTracked(activeProduct.id)) return false;
                 const curStock = getProductStock(activeProduct.id);
                 const inCart = cart.filter((it) => it.productId === activeProduct.id).reduce((sum, it) => sum + it.cantidad, 0);
                 return curStock - inCart <= 0;
@@ -1545,12 +1614,13 @@ export function CtaloClient({ store }: { store: StoreData }) {
                         </div>
 
                         {(() => {
+                          const isTracked = isProductTracked(item.productId);
                           const curStock = getProductStock(item.productId);
                           const otherInCart = cart
                             .filter((i) => i.productId === item.productId && i.cartId !== item.cartId)
                             .reduce((sum, i) => sum + i.cantidad, 0);
                           const maxAllowed = curStock - otherInCart;
-                          const isAtMax = item.cantidad >= maxAllowed;
+                          const isAtMax = isTracked && item.cantidad >= maxAllowed;
 
                           return (
                             <div className="flex flex-col items-end gap-1">
@@ -1584,9 +1654,11 @@ export function CtaloClient({ store }: { store: StoreData }) {
                                   <Plus className="w-3 h-3" />
                                 </button>
                               </div>
-                              <span className="text-[10px] text-amber-400/90 font-medium">
-                                Bodega: {curStock}
-                              </span>
+                              {isTracked && (
+                                <span className="text-[10px] text-amber-400/90 font-medium">
+                                  Bodega: {curStock}
+                                </span>
+                              )}
                             </div>
                           );
                         })()}

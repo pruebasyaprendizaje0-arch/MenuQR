@@ -74,14 +74,20 @@ export async function GET(req: Request) {
     > = {};
 
     for (const d of dishes) {
+      const trackStock = d.trackStock === true;
       const isConfigured = typeof d.stock === "number" && d.stock !== null;
       const effectiveStock = isConfigured ? d.stock : null;
-      const effectiveAvailable = Boolean(d.isVisible !== false && d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
+      const effectiveAvailable =
+        d.isVisible === false || !d.isAvailable
+          ? false
+          : trackStock
+          ? Boolean(isConfigured && (effectiveStock ?? 0) > 0)
+          : true;
 
       stockMap[d.id] = {
         stock: effectiveStock,
         isAvailable: effectiveAvailable,
-        trackStock: true,
+        trackStock,
         minStock: d.minStock ?? 0,
       };
     }
@@ -182,14 +188,20 @@ export async function POST(req: Request) {
     > = {};
 
     for (const d of dbDishes) {
+      const trackStock = d.trackStock === true;
       const isConfigured = typeof d.stock === "number" && d.stock !== null;
       const effectiveStock = isConfigured ? d.stock : null;
-      const effectiveAvailable = Boolean(d.isVisible !== false && d.isAvailable && isConfigured && (effectiveStock ?? 0) > 0);
+      const effectiveAvailable =
+        d.isVisible === false || !d.isAvailable
+          ? false
+          : trackStock
+          ? Boolean(isConfigured && (effectiveStock ?? 0) > 0)
+          : true;
 
       stockMap[d.id] = {
         stock: effectiveStock,
         isAvailable: effectiveAvailable,
-        trackStock: true,
+        trackStock,
         minStock: d.minStock ?? 0,
       };
     }
@@ -220,18 +232,7 @@ export async function POST(req: Request) {
         continue;
       }
 
-      const isConfigured = typeof d.stock === "number" && d.stock !== null;
-
-      if (!isConfigured) {
-        adjustments.push({
-          dishId: d.id,
-          name: d.name,
-          requested: item.quantity,
-          available: 0,
-          status: "SOLD_OUT",
-          message: `El producto "${d.name}" no tiene el stock configurado en el sistema y no puede ser ordenado.`,
-        });
-      } else if (!d.isAvailable || (d.stock ?? 0) <= 0) {
+      if (!d.isAvailable) {
         adjustments.push({
           dishId: d.id,
           name: d.name,
@@ -240,15 +241,40 @@ export async function POST(req: Request) {
           status: "SOLD_OUT",
           message: `"${d.name}" se encuentra agotado.`,
         });
-      } else if (typeof d.stock === "number" && item.quantity > d.stock) {
-        adjustments.push({
-          dishId: d.id,
-          name: d.name,
-          requested: item.quantity,
-          available: d.stock,
-          status: "REDUCED",
-          message: `Solo quedan ${d.stock} unidad(es) disponibles de "${d.name}".`,
-        });
+        continue;
+      }
+
+      if (d.trackStock === true) {
+        const isConfigured = typeof d.stock === "number" && d.stock !== null;
+
+        if (!isConfigured) {
+          adjustments.push({
+            dishId: d.id,
+            name: d.name,
+            requested: item.quantity,
+            available: 0,
+            status: "SOLD_OUT",
+            message: `El producto "${d.name}" no tiene el stock configurado en el sistema y no puede ser ordenado.`,
+          });
+        } else if ((d.stock ?? 0) <= 0) {
+          adjustments.push({
+            dishId: d.id,
+            name: d.name,
+            requested: item.quantity,
+            available: 0,
+            status: "SOLD_OUT",
+            message: `"${d.name}" se encuentra agotado.`,
+          });
+        } else if (typeof d.stock === "number" && item.quantity > d.stock) {
+          adjustments.push({
+            dishId: d.id,
+            name: d.name,
+            requested: item.quantity,
+            available: d.stock,
+            status: "REDUCED",
+            message: `Solo quedan ${d.stock} unidad(es) disponibles de "${d.name}".`,
+          });
+        }
       }
     }
 

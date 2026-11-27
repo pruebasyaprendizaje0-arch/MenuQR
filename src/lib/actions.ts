@@ -1218,6 +1218,8 @@ export async function saveDailyMenuDishAction(formData: FormData) {
   const price = parseFloat((formData.get("price") as string) || "0");
   const isAvailableRaw = formData.get("isAvailable");
   const isVisibleRaw = formData.get("isVisible");
+  const trackStockRaw = formData.get("trackStock");
+  const stockRaw = formData.get("stock");
   const existingImageUrlInput = (formData.get("existingImageUrl") as string)?.trim() || null;
   const dishFile = formData.get("dishFile") as File | null;
 
@@ -1357,13 +1359,27 @@ export async function saveDailyMenuDishAction(formData: FormData) {
           });
         }
 
+        const createTrackStock = trackStockRaw === "true";
+        let createStock: number | null = null;
+        if (createTrackStock) {
+          const parsedStr = typeof stockRaw === "string" ? stockRaw.trim() : "";
+          if (!/^\d+$/.test(parsedStr)) {
+            throw new Error("Ingresa un número entero válido (0 o mayor) para las porciones.");
+          }
+          createStock = Number(parsedStr);
+        }
+        const createAvailable =
+          createTrackStock && createStock === 0 ? false : effectiveAvailable;
+
         return tx.dish.create({
           data: {
             name,
             description,
             price: isNaN(price) ? 0 : price,
-            isAvailable: effectiveAvailable,
+            isAvailable: createAvailable,
             isVisible: effectiveVisible,
+            trackStock: createTrackStock,
+            stock: createStock,
             imageUrl: finalImageUrl,
             categoryId,
             restaurantId,
@@ -1445,6 +1461,166 @@ export async function toggleDailyMenuDishVisibilityAction(
   } catch (err: any) {
     return {
       error: err?.message || "No se pudo actualizar la visibilidad del plato.",
+    };
+  }
+}
+
+export async function saveDailyMenuAvailabilityAction(params: {
+  dishId: string;
+  restaurantId: string;
+  isAvailable: boolean;
+  trackStock: boolean;
+  stock: number | null;
+  expectedIsAvailable: boolean;
+  expectedTrackStock: boolean;
+  expectedStock: number | null;
+}) {
+  await refreshUserSession();
+  const {
+    dishId,
+    restaurantId,
+    isAvailable,
+    trackStock,
+    stock,
+    expectedIsAvailable,
+    expectedTrackStock,
+    expectedStock,
+  } = params;
+
+  const auth = await verifyRestaurantOwnership(restaurantId);
+  if (!auth.authorized) return { error: auth.error };
+
+  if (trackStock) {
+    if (typeof stock !== "number" || !Number.isInteger(stock) || stock < 0) {
+      return {
+        error: "Ingresa un número entero válido (0 o mayor) para las porciones restantes.",
+      };
+    }
+  }
+
+  try {
+    const res = await runWithLockRetry(() =>
+      prisma.$transaction(async (tx) => {
+        const preDish = await tx.dish.findFirst({
+          where: { id: dishId, restaurantId },
+          select: { id: true, categoryId: true },
+        });
+        if (!preDish) {
+          throw new Error("Plato no encontrado o no pertenece a este negocio.");
+        }
+
+        await lockCategoriesInOrderTx(tx, restaurantId, [preDish.categoryId]);
+
+        const lockedRows = await tx.$queryRaw<
+          Array<{
+            id: string;
+            categoryId: string;
+            isAvailable: boolean;
+            trackStock: boolean;
+            stock: number | null;
+          }>
+        >`
+          SELECT id, "categoryId", "isAvailable", "trackStock", stock
+          FROM "Dish"
+          WHERE id = ${dishId} AND "restaurantId" = ${restaurantId}
+          LIMIT 1
+          FOR UPDATE
+        `;
+        const lockedDish = lockedRows[0];
+        if (!lockedDish) {
+          throw new Error("Plato no encontrado o no pertenece a este negocio.");
+        }
+        if (lockedDish.categoryId !== preDish.categoryId) {
+          throw new Error(CONCURRENT_CATEGORY_CHANGE_ERR);
+        }
+
+        // Comparación transaccional completa del snapshot que originó el borrador (trackStock, stock e isAvailable)
+        const actualTrack = lockedDish.trackStock === true;
+        const actualStock = lockedDish.stock ?? null;
+        const actualAvail = lockedDish.isAvailable !== false;
+        const expStock = expectedStock ?? null;
+
+        if (
+          actualTrack !== Boolean(expectedTrackStock) ||
+          actualStock !== expStock ||
+          actualAvail !== Boolean(expectedIsAvailable)
+        ) {
+          return {
+            conflict: true as const,
+            currentStock: actualStock,
+            currentIsAvailable: actualAvail,
+            currentTrackStock: actualTrack,
+            error: `Conflicto: la disponibilidad o porciones cambiaron en el servidor (${
+              actualTrack ? `Conteo: ${actualStock ?? 0}` : "Manual"
+            }, ${actualAvail ? "Disponible" : "Agotado"}). Revisa el estado actual antes de volver a guardar.`,
+          };
+        }
+
+        // Cambiar a Manual conserva inactiva la cantidad almacenada; con conteo, 0 deja agotado
+        const effectiveAvailable =
+          trackStock && (stock ?? 0) <= 0 ? false : Boolean(isAvailable);
+
+        const updatePayload: Record<string, any> = {
+          trackStock,
+          isAvailable: effectiveAvailable,
+        };
+        if (trackStock) {
+          updatePayload.stock = stock;
+        }
+
+        const updated = await tx.dish.update({
+          where: { id: lockedDish.id },
+          data: updatePayload,
+          include: { restaurant: { select: { slug: true } } },
+        });
+
+        return {
+          conflict: false as const,
+          dish: updated,
+          slug: updated.restaurant?.slug,
+        };
+      })
+    );
+
+    if (res.conflict) {
+      return {
+        conflict: true,
+        currentStock: res.currentStock,
+        currentIsAvailable: res.currentIsAvailable,
+        currentTrackStock: res.currentTrackStock,
+        error: res.error,
+      };
+    }
+
+    try {
+      emitStockActualizado(restaurantId, [
+        {
+          id: res.dish.id,
+          name: res.dish.name,
+          newStock: res.dish.stock,
+          isAvailable: res.dish.isAvailable,
+        },
+      ]);
+      emitProductoActualizado(restaurantId, {
+        id: res.dish.id,
+        name: res.dish.name,
+        stock: res.dish.stock,
+        isAvailable: res.dish.isAvailable,
+        trackStock: res.dish.trackStock,
+      });
+    } catch {}
+
+    if (res.slug) {
+      revalidatePath(`/${res.slug}`);
+    }
+    revalidatePath("/admin");
+
+    return { success: true, dish: res.dish };
+  } catch (err: any) {
+    return {
+      error:
+        err?.message ||
+        "No se pudo guardar la disponibilidad y porciones del plato.",
     };
   }
 }

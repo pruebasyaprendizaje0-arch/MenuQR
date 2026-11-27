@@ -17,6 +17,7 @@ import {
 import {
   createDailyMenuCategoryAction,
   saveDailyMenuDishAction,
+  saveDailyMenuAvailabilityAction,
   toggleDailyMenuDishVisibilityAction,
   toggleAllDailyMenuDishesAction,
   deleteDailyMenuDishAction,
@@ -31,6 +32,8 @@ export interface DailyMenuDish {
   imageUrl?: string | null;
   isAvailable: boolean;
   isVisible?: boolean;
+  trackStock?: boolean;
+  stock?: number | null;
   categoryId: string;
 }
 
@@ -55,6 +58,17 @@ interface DailyMenuCardState {
   description: string;
   isAvailable: boolean;
   isVisible: boolean;
+  trackStock: boolean;
+  stockInput: string;
+  persistedIsAvailable: boolean;
+  persistedTrackStock: boolean;
+  persistedStock: number | null;
+  availabilityConflict?: {
+    currentTrackStock: boolean;
+    currentStock: number | null;
+    currentIsAvailable: boolean;
+    message: string;
+  } | null;
   imageUrl: string;
   tempPreview?: string;
 }
@@ -149,19 +163,55 @@ function buildCardsFromDishes(dishes: DailyMenuDish[]): DailyMenuCardState[] {
       description: "Incluye sopa del día, arroz con menestra y bebida natural.",
       isAvailable: true,
       isVisible: true,
+      trackStock: false,
+      stockInput: "",
+      persistedIsAvailable: true,
+      persistedTrackStock: false,
+      persistedStock: null,
+      availabilityConflict: null,
       imageUrl: "",
     }));
   }
-  return dishes.map((existing) => ({
-    localKey: existing.id,
-    dishId: existing.id,
-    name: existing.name,
-    price: existing.price !== undefined ? existing.price.toString() : "3.50",
-    description: existing.description || "",
-    isAvailable: existing.isAvailable !== false,
-    isVisible: existing.isVisible !== false,
-    imageUrl: existing.imageUrl || "",
-  }));
+  return dishes.map((existing) => {
+    const track = existing.trackStock === true;
+    const stockVal = typeof existing.stock === "number" ? existing.stock : null;
+    return {
+      localKey: existing.id,
+      dishId: existing.id,
+      name: existing.name,
+      price: existing.price !== undefined ? existing.price.toString() : "3.50",
+      description: existing.description || "",
+      isAvailable: existing.isAvailable !== false,
+      isVisible: existing.isVisible !== false,
+      trackStock: track,
+      stockInput: stockVal !== null ? String(stockVal) : "",
+      persistedIsAvailable: existing.isAvailable !== false,
+      persistedTrackStock: track,
+      persistedStock: stockVal,
+      availabilityConflict: null,
+      imageUrl: existing.imageUrl || "",
+    };
+  });
+}
+
+function getStockValidationError(card: DailyMenuCardState): string | null {
+  if (!card.trackStock) return null;
+  const trimmed = card.stockInput.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return "Ingresa un entero válido (0 o mayor).";
+  }
+  return null;
+}
+
+function hasPendingAvailabilityChanges(card: DailyMenuCardState): boolean {
+  if (!card.dishId) return false;
+  if (card.isAvailable !== card.persistedIsAvailable) return true;
+  if (card.trackStock !== card.persistedTrackStock) return true;
+  if (card.trackStock) {
+    const persistedStr = card.persistedStock === null ? "" : String(card.persistedStock);
+    if (card.stockInput.trim() !== persistedStr) return true;
+  }
+  return false;
 }
 
 export function DailyMenuBoard({
@@ -237,6 +287,12 @@ export function DailyMenuBoard({
         description: "Incluye sopa del día, arroz con menestra y bebida natural.",
         isAvailable: true,
         isVisible: canShowByDefault,
+        trackStock: false,
+        stockInput: "",
+        persistedIsAvailable: true,
+        persistedTrackStock: false,
+        persistedStock: null,
+        availabilityConflict: null,
         imageUrl: "",
       },
     ]);
@@ -268,11 +324,22 @@ export function DailyMenuBoard({
       formData.append("categoryId", dailyCategory.id);
       if (card.dishId) {
         formData.append("dishId", card.dishId);
+      } else {
+        const stockErr = getStockValidationError(card);
+        if (stockErr) {
+          setStatusMessage({ text: stockErr, type: "error" });
+          setSavingKey(null);
+          return;
+        }
+        formData.append("isAvailable", card.isAvailable ? "true" : "false");
+        formData.append("trackStock", card.trackStock ? "true" : "false");
+        if (card.trackStock) {
+          formData.append("stock", card.stockInput.trim());
+        }
       }
       formData.append("name", card.name.trim() || "Plato del Día");
       formData.append("price", card.price.trim() || "3.50");
       formData.append("description", card.description.trim());
-      formData.append("isAvailable", card.isAvailable ? "true" : "false");
       formData.append("isVisible", card.isVisible ? "true" : "false");
       if (card.imageUrl) {
         formData.append("existingImageUrl", card.imageUrl);
@@ -312,22 +379,32 @@ export function DailyMenuBoard({
           type: "success",
         });
         setCardsState((prev) =>
-          prev.map((c) =>
-            c.localKey === localKey
-              ? {
-                  ...c,
-                  localKey: res.dish.id,
-                  dishId: res.dish.id,
-                  name: res.dish.name,
-                  price: res.dish.price !== undefined ? String(res.dish.price) : c.price,
-                  description: res.dish.description ?? c.description,
-                  isAvailable: res.dish.isAvailable !== false,
-                  isVisible: res.dish.isVisible !== false,
-                  imageUrl: res.dish.imageUrl || c.imageUrl,
-                  tempPreview: undefined,
-                }
-              : c
-          )
+          prev.map((c) => {
+            if (c.localKey !== localKey) return c;
+            const serverTrack = res.dish.trackStock === true;
+            const serverStock = typeof res.dish.stock === "number" ? res.dish.stock : null;
+            const serverAvail = res.dish.isAvailable !== false;
+            const preserveDraftAndRef =
+              Boolean(card.dishId) &&
+              (hasPendingAvailabilityChanges(c) || Boolean(c.availabilityConflict));
+            return {
+              ...c,
+              localKey: res.dish.id,
+              dishId: res.dish.id,
+              name: res.dish.name,
+              price: res.dish.price !== undefined ? String(res.dish.price) : c.price,
+              description: res.dish.description ?? c.description,
+              isVisible: res.dish.isVisible !== false,
+              persistedIsAvailable: preserveDraftAndRef ? c.persistedIsAvailable : serverAvail,
+              persistedTrackStock: preserveDraftAndRef ? c.persistedTrackStock : serverTrack,
+              persistedStock: preserveDraftAndRef ? c.persistedStock : serverStock,
+              isAvailable: preserveDraftAndRef ? c.isAvailable : serverAvail,
+              trackStock: preserveDraftAndRef ? c.trackStock : serverTrack,
+              stockInput: preserveDraftAndRef ? c.stockInput : serverStock !== null ? String(serverStock) : "",
+              imageUrl: res.dish.imageUrl || c.imageUrl,
+              tempPreview: undefined,
+            };
+          })
         );
       }
     } catch {
@@ -394,11 +471,99 @@ export function DailyMenuBoard({
         );
         setStatusMessage({
           text: nextVisible
-            ? `"${card.name}" ahora está VISIBLE en la carta.`
-            : `"${card.name}" fue OCULTADO de la carta (su información, foto y disponibilidad se conservan).`,
+            ? `"${card.name}" ahora está VISIBLE en la carta (disponibilidad y porciones sin cambios).`
+            : `"${card.name}" fue OCULTADO de la carta (su disponibilidad y porciones se conservan).`,
           type: "success",
         });
       }
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleSaveAvailability = async (localKey: string) => {
+    const card = cardsState.find((c) => c.localKey === localKey);
+    if (!card || !card.dishId) return;
+
+    const stockErr = getStockValidationError(card);
+    if (stockErr) {
+      setStatusMessage({ text: stockErr, type: "error" });
+      return;
+    }
+
+    const parsedStock = card.trackStock ? Number(card.stockInput.trim()) : null;
+    const effectiveAvail = card.trackStock && parsedStock === 0 ? false : card.isAvailable;
+
+    setSavingKey(localKey);
+    setStatusMessage(null);
+    try {
+      const res: any = await saveDailyMenuAvailabilityAction({
+        dishId: card.dishId,
+        restaurantId,
+        isAvailable: effectiveAvail,
+        trackStock: card.trackStock,
+        stock: parsedStock,
+        expectedIsAvailable: card.persistedIsAvailable,
+        expectedTrackStock: card.persistedTrackStock,
+        expectedStock: card.persistedStock,
+      });
+
+      if (res?.conflict) {
+        const curStock = typeof res.currentStock === "number" ? res.currentStock : null;
+        const curAvail = Boolean(res.currentIsAvailable);
+        const curTrack = Boolean(res.currentTrackStock);
+        // NO actualizar persisted* silenciosamente tras un conflicto: exigir revisión explícita del usuario
+        setCardsState((prev) =>
+          prev.map((c) =>
+            c.localKey === localKey
+              ? {
+                  ...c,
+                  availabilityConflict: {
+                    currentTrackStock: curTrack,
+                    currentStock: curStock,
+                    currentIsAvailable: curAvail,
+                    message: res.error,
+                  },
+                }
+              : c
+          )
+        );
+        setStatusMessage({ text: res.error, type: "error" });
+      } else if (res?.error) {
+        // Conserva el borrador ante error sin confundirlo con lo persistido
+        setStatusMessage({ text: res.error, type: "error" });
+      } else if (res?.dish) {
+        const serverTrack = res.dish.trackStock === true;
+        const serverStock = typeof res.dish.stock === "number" ? res.dish.stock : null;
+        const serverAvail = res.dish.isAvailable !== false;
+        setCardsState((prev) =>
+          prev.map((c) =>
+            c.localKey === localKey
+              ? {
+                  ...c,
+                  isAvailable: serverAvail,
+                  trackStock: serverTrack,
+                  stockInput: serverStock !== null ? String(serverStock) : "",
+                  persistedIsAvailable: serverAvail,
+                  persistedTrackStock: serverTrack,
+                  persistedStock: serverStock,
+                  availabilityConflict: null,
+                }
+              : c
+          )
+        );
+        setStatusMessage({
+          text: serverTrack
+            ? `Confirmado: "${res.dish.name}" con ${serverStock ?? 0} porciones (${serverAvail ? "Disponible" : "Agotado"}).`
+            : `Confirmado: "${res.dish.name}" en disponibilidad manual (${serverAvail ? "Disponible" : "Agotado"}).`,
+          type: "success",
+        });
+      }
+    } catch {
+      setStatusMessage({
+        text: "Error de conexión al guardar disponibilidad. Tu borrador se conservó.",
+        type: "error",
+      });
     } finally {
       setSavingKey(null);
     }
@@ -442,7 +607,11 @@ export function DailyMenuBoard({
           type: "success",
         });
         setCardsState((prev) =>
-          prev.map((s) => ({ ...s, isAvailable: targetAvailable }))
+          prev.map((s) => ({
+            ...s,
+            isAvailable: targetAvailable,
+            persistedIsAvailable: s.dishId ? targetAvailable : s.persistedIsAvailable,
+          }))
         );
       }
     });
@@ -689,19 +858,20 @@ export function DailyMenuBoard({
                       )}
                     </button>
 
-                    {/* Switch Disponible / Agotado */}
+                    {/* Switch Disponible / Agotado (borrador hasta confirmar disponibilidad) */}
                     <button
                       type="button"
+                      disabled={isSlotSaving}
                       onClick={() => {
                         setCardsState((prev) =>
                           prev.map((c) =>
                             c.localKey === card.localKey
-                              ? { ...c, isAvailable: !c.isAvailable }
+                              ? { ...c, isAvailable: !c.isAvailable, availabilityConflict: null }
                               : c
                           )
                         );
                       }}
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-black cursor-pointer transition ${
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-black cursor-pointer transition disabled:opacity-50 ${
                         card.isAvailable
                           ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
                           : "bg-rose-500/20 text-rose-300 border border-rose-500/40"
@@ -835,6 +1005,177 @@ export function DailyMenuBoard({
                     </div>
                   </div>
                 </div>
+
+                {/* Disponibilidad y Porciones Diarias Opcionales */}
+                {(() => {
+                  const stockErr = getStockValidationError(card);
+                  const pendingAvail = hasPendingAvailabilityChanges(card);
+                  const persistedSummary = card.persistedTrackStock
+                    ? `${card.persistedStock ?? 0} porciones (${card.persistedIsAvailable && (card.persistedStock ?? 0) > 0 ? "Disponible" : "Agotado"})`
+                    : `Manual (${card.persistedIsAvailable ? "Disponible" : "Agotado"})`;
+
+                  return (
+                    <div className="mt-2.5 p-2.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2 text-[11px]">
+                      <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                        <span className="font-bold text-slate-300 uppercase tracking-wider text-[10px]">
+                          Disponibilidad y porciones
+                        </span>
+                        {isDishCreated && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              pendingAvail
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                : "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25"
+                            }`}
+                          >
+                            {pendingAvail ? "Cambios pendientes" : "Confirmado"}
+                          </span>
+                        )}
+                      </div>
+
+                      {isDishCreated && (
+                        <p className="text-[10px] text-slate-400">
+                          Persistido: <strong className="text-slate-200">{persistedSummary}</strong>
+                        </p>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          disabled={isSlotSaving}
+                          onClick={() =>
+                            setCardsState((prev) =>
+                              prev.map((c) =>
+                                c.localKey === card.localKey
+                                  ? { ...c, trackStock: false, availabilityConflict: null }
+                                  : c
+                              )
+                            )
+                          }
+                          className={`py-1 px-2 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                            !card.trackStock
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                              : "bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200"
+                          }`}
+                        >
+                          Manual (sin conteo)
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSlotSaving}
+                          onClick={() =>
+                            setCardsState((prev) =>
+                              prev.map((c) =>
+                                c.localKey === card.localKey
+                                  ? {
+                                      ...c,
+                                      trackStock: true,
+                                      stockInput:
+                                        c.stockInput.trim() !== ""
+                                          ? c.stockInput
+                                          : c.persistedStock !== null
+                                          ? String(c.persistedStock)
+                                          : "0",
+                                      availabilityConflict: null,
+                                    }
+                                  : c
+                              )
+                            )
+                          }
+                          className={`py-1 px-2 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                            card.trackStock
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                              : "bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200"
+                          }`}
+                        >
+                          Porciones limitadas
+                        </button>
+                      </div>
+
+                      {card.trackStock && (
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-semibold text-slate-300">
+                            Porciones restantes hoy
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={card.stockInput}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              // Aumentar stock no quita una pausa manual (isAvailable se mantiene)
+                              setCardsState((prev) =>
+                                prev.map((c) =>
+                                  c.localKey === card.localKey
+                                    ? { ...c, stockInput: val, availabilityConflict: null }
+                                    : c
+                                )
+                              );
+                            }}
+                            placeholder="ej: 12"
+                            className="w-full bg-slate-950 border border-slate-800 px-2.5 py-1.5 rounded-lg text-white text-xs focus:border-amber-500 focus:outline-none"
+                          />
+                          <p className="text-[9px] text-slate-400 leading-snug">
+                            Reemplaza la cantidad restante actual (no suma). 0 deja el plato visible pero agotado.
+                          </p>
+                          {stockErr && (
+                            <p className="text-[10px] text-rose-400 font-semibold">{stockErr}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {card.availabilityConflict && (
+                        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-[10px] text-amber-200 space-y-1.5">
+                          <p className="font-semibold">{card.availabilityConflict.message}</p>
+                          <p className="text-[9px] text-amber-300/90">
+                            Estado actual en servidor:{" "}
+                            {card.availabilityConflict.currentTrackStock
+                              ? `${card.availabilityConflict.currentStock ?? 0} porciones`
+                              : "Manual"}{" "}
+                            ({card.availabilityConflict.currentIsAvailable ? "Disponible" : "Agotado"}).
+                          </p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCardsState((prev) =>
+                                  prev.map((c) => {
+                                    if (c.localKey !== card.localKey || !c.availabilityConflict) return c;
+                                    const cf = c.availabilityConflict;
+                                    return {
+                                      ...c,
+                                      persistedIsAvailable: cf.currentIsAvailable,
+                                      persistedTrackStock: cf.currentTrackStock,
+                                      persistedStock: cf.currentStock,
+                                      isAvailable: cf.currentIsAvailable,
+                                      trackStock: cf.currentTrackStock,
+                                      stockInput: cf.currentStock !== null ? String(cf.currentStock) : "",
+                                      availabilityConflict: null,
+                                    };
+                                  })
+                                )
+                              }
+                              className="px-2 py-1 rounded bg-amber-500 text-slate-950 font-bold text-[10px] cursor-pointer"
+                            >
+                              Aceptar estado actual y revisar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {isDishCreated && (
+                        <button
+                          type="button"
+                          disabled={isSlotSaving || !pendingAvail || Boolean(stockErr)}
+                          onClick={() => handleSaveAvailability(card.localKey)}
+                          className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-bold text-[11px] transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          Guardar Disponibilidad
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Botón Guardar */}
