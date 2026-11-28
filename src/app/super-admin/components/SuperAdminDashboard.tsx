@@ -3883,15 +3883,15 @@ export function SuperAdminDashboard({
                 </div>
 
                 <div>
-                  <label className="block font-medium text-slate-300 mb-1">WhatsApp de Pedidos *</label>
+                  <label className="block font-medium text-slate-300 mb-1">WhatsApp de Pedidos (opcional)</label>
                   <input
                     type="text"
-                    required
                     value={createData.whatsapp}
                     onChange={(e) => setCreateData({ ...createData, whatsapp: e.target.value })}
-                    placeholder="ej: 0999999999"
+                    placeholder="Opcional (ej: 0999999999)"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-red-500"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1">Dejar vacío deshabilita el contacto por WhatsApp.</p>
                 </div>
 
                 <div>

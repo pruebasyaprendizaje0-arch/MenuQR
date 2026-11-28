@@ -2393,6 +2393,14 @@ export async function superAdminCreateRestaurantAction(data: {
       return { error: "No autorizado. Acción reservada para SuperAdmin." };
     }
 
+    const rawWhatsapp = typeof data.whatsapp === "string" ? data.whatsapp.trim() : "";
+    if (rawWhatsapp.length > 0) {
+      const digitsOnly = rawWhatsapp.replace(/\D/g, "");
+      if (/[^0-9+\-\s()]/.test(rawWhatsapp) || digitsOnly.length < 7 || digitsOnly.length > 15) {
+        return { error: "El número de WhatsApp debe contener entre 7 y 15 dígitos válidos (o dejarse vacío)." };
+      }
+    }
+
     const cleanEmail = data.email.toLowerCase().trim();
     let assignedUserId = data.existingUserId || "";
 
@@ -2481,7 +2489,7 @@ export async function superAdminCreateRestaurantAction(data: {
         userId: assignedUserId,
         name: data.restaurantName,
         slug: cleanSlug,
-        whatsapp: data.whatsapp || "",
+        whatsapp: rawWhatsapp,
         locality,
         province: data.province || null,
         city: data.canton || null,
