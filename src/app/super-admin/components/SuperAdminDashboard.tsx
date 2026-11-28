@@ -2077,7 +2077,7 @@ export function SuperAdminDashboard({
                                       <div className="flex items-center gap-1.5">
                                         {isSuspended ? (
                                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/30">
-                                            <Pause className="w-2.5 h-2.5" /> Pausado (Mora)
+                                            <Pause className="w-2.5 h-2.5" /> Pausado
                                           </span>
                                         ) : needsUpsell ? (
                                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/10 text-purple-300 border border-purple-500/30">

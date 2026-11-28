@@ -657,8 +657,6 @@ async function resolveDirectProductAndDebit(
 // POST /api/pedidos - Endpoint unificado para procesar pedidos/solicitudes de todas las verticales
 export async function POST(req: NextRequest) {
   try {
-    await ensureDbTables();
-
     const body = await req.json();
     const {
       vertical = "menuqr", // "menuqr" | "catalogo" | "ctalo" | "servicios" | "citas" | "reservas"
@@ -716,56 +714,323 @@ export async function POST(req: NextRequest) {
       hora_llegada_estimada,
     } = body;
 
-    // 1. Resolver negocio tanto en "Restaurant" (Prisma) como en "negocios" (PostgreSQL FK)
-    const effectiveRestId = restaurantId || negocio_id;
-    const isCatalogOrder =
+    // 1. Resolver identidad, vertical y estado real del negocio en el servidor ANTES de inicializar tablas o escribir
+    const rawRestaurantId = restaurantId ? String(restaurantId).trim() : null;
+    const rawNegocioId = negocio_id ? String(negocio_id).trim() : null;
+    let businessSlug = slug ? String(slug).toLowerCase().trim() : null;
+
+    if (!rawRestaurantId && !rawNegocioId && !businessSlug) {
+      return NextResponse.json(
+        { ok: false, error: "Identificador de comercio requerido." },
+        { status: 400 }
+      );
+    }
+
+    type ResolvedStore = {
+      id: string;
+      name?: string | null;
+      slug?: string | null;
+      whatsapp?: string | null;
+      address?: string | null;
+      isSuspended?: boolean | null;
+      businessType?: string | null;
+      catalogMode?: string | null;
+    };
+
+    const queryRestaurant = async (
+      byId: string | null,
+      bySlug: string | null
+    ): Promise<{
+      store: ResolvedStore | null;
+      conflict: boolean;
+      error: boolean;
+    }> => {
+      if (!byId && !bySlug) return { store: null, conflict: false, error: false };
+
+      let sqlError = false;
+      try {
+        const conditions: string[] = [];
+        const params: string[] = [];
+        if (byId) {
+          params.push(byId);
+          conditions.push(`id::text = $${params.length}`);
+        }
+        if (bySlug) {
+          params.push(bySlug);
+          conditions.push(`slug = $${params.length}`);
+        }
+        const { rows } = await pool.query(
+          `SELECT id, name, slug, whatsapp, address, "isSuspended", "businessType", "catalogMode" FROM "Restaurant" WHERE ${conditions.join(" OR ")} LIMIT 2`,
+          params
+        );
+        if (rows.length > 1) return { store: null, conflict: true, error: false };
+        if (rows[0]) {
+          const rowSlug = String(rows[0].slug || "").toLowerCase().trim();
+          if (byId && String(rows[0].id) !== byId) return { store: null, conflict: true, error: false };
+          if (bySlug && rowSlug !== bySlug) return { store: null, conflict: true, error: false };
+          return { store: rows[0], conflict: false, error: false };
+        }
+      } catch {
+        sqlError = true;
+      }
+
+      let prismaError = false;
+      try {
+        const whereClause = {
+          OR: [
+            ...(byId ? [{ id: byId }] : []),
+            ...(bySlug ? [{ slug: bySlug }] : []),
+          ],
+        };
+        const selectClause = {
+          id: true,
+          name: true,
+          slug: true,
+          whatsapp: true,
+          address: true,
+          isSuspended: true,
+          businessType: true,
+          catalogMode: true,
+        };
+        const pRows: ResolvedStore[] =
+          typeof (prisma.restaurant as any).findMany === "function"
+            ? await (prisma.restaurant as any).findMany({
+                where: whereClause,
+                take: 2,
+                select: selectClause,
+              })
+            : await prisma.restaurant
+                .findFirst({ where: whereClause, select: selectClause })
+                .then((r) => (r ? [r] : []));
+
+        if (pRows.length > 1) return { store: null, conflict: true, error: false };
+        if (pRows[0]) {
+          const rowSlug = String(pRows[0].slug || "").toLowerCase().trim();
+          if (byId && String(pRows[0].id) !== byId) return { store: null, conflict: true, error: false };
+          if (bySlug && rowSlug !== bySlug) return { store: null, conflict: true, error: false };
+          return { store: pRows[0], conflict: false, error: false };
+        }
+      } catch {
+        prismaError = true;
+      }
+
+      return { store: null, conflict: false, error: sqlError || prismaError };
+    };
+
+    let resolvedStore: ResolvedStore | null = null;
+    let verifiedNegocioId: string | null = null;
+
+    if (rawRestaurantId) {
+      // restaurantId es identificador estricto de Restaurant
+      const res = await queryRestaurant(rawRestaurantId, businessSlug);
+      if (res.conflict) {
+        return NextResponse.json(
+          { ok: false, error: "El identificador y el slug del comercio no coinciden." },
+          { status: 400 }
+        );
+      }
+      if (res.error && !res.store) {
+        return NextResponse.json(
+          { ok: false, error: "No se pudo verificar el estado del comercio en este momento." },
+          { status: 503 }
+        );
+      }
+      if (!res.store) {
+        return NextResponse.json(
+          { ok: false, error: "Comercio no encontrado." },
+          { status: 404 }
+        );
+      }
+      resolvedStore = res.store;
+
+      // Si además vino negocio_id distinto, verificar que no apunte a otro negocio
+      if (rawNegocioId && rawNegocioId !== resolvedStore.id) {
+        try {
+          const { rows: negCheck } = await pool.query(
+            `SELECT id, slug FROM negocios WHERE id::text = $1 LIMIT 2`,
+            [rawNegocioId]
+          );
+          if (negCheck.length > 1) {
+            return NextResponse.json(
+              { ok: false, error: "Correspondencia ambigua para el identificador del negocio." },
+              { status: 400 }
+            );
+          }
+          if (!negCheck[0]) {
+            return NextResponse.json(
+              { ok: false, error: "Identificador de negocio no encontrado." },
+              { status: 404 }
+            );
+          }
+          const negSlug = String(negCheck[0].slug || "").toLowerCase().trim();
+          const restSlug = String(resolvedStore.slug || "").toLowerCase().trim();
+          if (!negSlug || negSlug !== restSlug) {
+            return NextResponse.json(
+              { ok: false, error: "El identificador de negocio y el comercio no coinciden." },
+              { status: 400 }
+            );
+          }
+          verifiedNegocioId = negCheck[0].id;
+        } catch {
+          return NextResponse.json(
+            { ok: false, error: "No se pudo verificar el estado del comercio en este momento." },
+            { status: 503 }
+          );
+        }
+      }
+    } else if (rawNegocioId) {
+      // negocio_id puede ser Restaurant.id (legado) o negocios.id (ej. MesasClient)
+      const directRest = await queryRestaurant(rawNegocioId, businessSlug);
+      if (directRest.store) {
+        resolvedStore = directRest.store;
+      } else {
+        // Consultar negocios en solo lectura y verificar correspondencia única con Restaurant vía slug
+        let negRows: Array<{ id: string; nombre?: string; slug?: string | null }> = [];
+        try {
+          const qNeg = await pool.query(
+            `SELECT id, nombre, slug FROM negocios WHERE id::text = $1 LIMIT 2`,
+            [rawNegocioId]
+          );
+          negRows = qNeg.rows || [];
+        } catch {
+          return NextResponse.json(
+            { ok: false, error: "No se pudo verificar el estado del comercio en este momento." },
+            { status: 503 }
+          );
+        }
+
+        if (negRows.length > 1) {
+          return NextResponse.json(
+            { ok: false, error: "Correspondencia ambigua para el identificador del negocio." },
+            { status: 400 }
+          );
+        }
+
+        if (negRows.length === 0) {
+          if (directRest.error) {
+            return NextResponse.json(
+              { ok: false, error: "No se pudo verificar el estado del comercio en este momento." },
+              { status: 503 }
+            );
+          }
+          if (directRest.conflict) {
+            return NextResponse.json(
+              { ok: false, error: "El identificador y el slug del comercio no coinciden." },
+              { status: 400 }
+            );
+          }
+          return NextResponse.json(
+            { ok: false, error: "Comercio no encontrado." },
+            { status: 404 }
+          );
+        }
+
+        const negSlug = negRows[0].slug ? String(negRows[0].slug).toLowerCase().trim() : null;
+        if (!negSlug) {
+          return NextResponse.json(
+            { ok: false, error: "No se pudo verificar la correspondencia del negocio." },
+            { status: 400 }
+          );
+        }
+        if (businessSlug && negSlug !== businessSlug) {
+          return NextResponse.json(
+            { ok: false, error: "El identificador y el slug del comercio no coinciden." },
+            { status: 400 }
+          );
+        }
+
+        verifiedNegocioId = negRows[0].id;
+        const byNegSlug = await queryRestaurant(null, negSlug);
+        if (byNegSlug.conflict) {
+          return NextResponse.json(
+            { ok: false, error: "Correspondencia ambigua para el slug del comercio." },
+            { status: 400 }
+          );
+        }
+        if (byNegSlug.error && !byNegSlug.store) {
+          return NextResponse.json(
+            { ok: false, error: "No se pudo verificar el estado del comercio en este momento." },
+            { status: 503 }
+          );
+        }
+        if (!byNegSlug.store) {
+          return NextResponse.json(
+            { ok: false, error: "Comercio no encontrado." },
+            { status: 404 }
+          );
+        }
+        resolvedStore = byNegSlug.store;
+      }
+    } else if (businessSlug) {
+      const bySlug = await queryRestaurant(null, businessSlug);
+      if (bySlug.conflict) {
+        return NextResponse.json(
+          { ok: false, error: "Correspondencia ambigua para el slug del comercio." },
+          { status: 400 }
+        );
+      }
+      if (bySlug.error && !bySlug.store) {
+        return NextResponse.json(
+          { ok: false, error: "No se pudo verificar el estado del comercio en este momento." },
+          { status: 503 }
+        );
+      }
+      if (!bySlug.store) {
+        return NextResponse.json(
+          { ok: false, error: "Comercio no encontrado." },
+          { status: 404 }
+        );
+      }
+      resolvedStore = bySlug.store;
+    }
+
+    if (!resolvedStore) {
+      return NextResponse.json(
+        { ok: false, error: "No se pudo verificar el estado del comercio en este momento." },
+        { status: 503 }
+      );
+    }
+
+    const effectiveRestId = verifiedNegocioId || resolvedStore.id;
+
+    const restaurantPrismaId: string = resolvedStore.id;
+    let businessName = resolvedStore.name || "Comercio";
+    if (resolvedStore.slug) businessSlug = String(resolvedStore.slug).toLowerCase().trim();
+    const businessPhone = resolvedStore.whatsapp ? String(resolvedStore.whatsapp) : "";
+    const businessAddress = resolvedStore.address ? String(resolvedStore.address) : "";
+    const resolvedIsSuspended = Boolean(resolvedStore.isSuspended);
+    const resolvedBusinessType = String(resolvedStore.businessType || "").toUpperCase().trim();
+    const resolvedCatalogMode = String(resolvedStore.catalogMode || "").toUpperCase().trim();
+
+    const isServerCatalog =
+      resolvedBusinessType === "RETAIL" ||
+      resolvedBusinessType === "GENERAL_CATALOG" ||
+      resolvedCatalogMode === "CATALOG";
+
+    if (resolvedIsSuspended && isServerCatalog) {
+      return NextResponse.json(
+        { ok: false, error: "Este catálogo se encuentra temporalmente no disponible." },
+        { status: 403 }
+      );
+    }
+
+    const clientRequestsCatalog =
       vertical === "catalogo" ||
       vertical === "ctalo" ||
       String(mesa || "").toUpperCase().trim() === "CATALOGO";
 
-    let businessSlug = slug ? String(slug).toLowerCase().trim() : null;
-    let businessName = "Comercio";
-    let businessPhone = "";
-    let businessAddress = "";
-    let restaurantPrismaId = effectiveRestId ? String(effectiveRestId) : null;
-    let negocioDbId: string | null = null;
-
-    // Consultar en "Restaurant"
-    try {
-      const { rows: restRows } = await pool.query(
-        `SELECT id, name, slug, whatsapp, address FROM "Restaurant" WHERE id::text = $1 OR slug = $2 LIMIT 1`,
-        [effectiveRestId || "", businessSlug || ""]
+    if (!isServerCatalog && clientRequestsCatalog) {
+      return NextResponse.json(
+        { ok: false, error: "Este comercio no opera en modalidad de catálogo." },
+        { status: 403 }
       );
-      if (restRows[0]) {
-        restaurantPrismaId = restRows[0].id;
-        businessName = restRows[0].name || businessName;
-        if (restRows[0].slug) businessSlug = restRows[0].slug;
-        if (restRows[0].whatsapp) businessPhone = restRows[0].whatsapp;
-        if (restRows[0].address) businessAddress = restRows[0].address;
-      }
-    } catch {}
-
-    // Fallback con Prisma Client directo si el pool no lo encontró
-    if (!restaurantPrismaId && (effectiveRestId || businessSlug)) {
-      try {
-        const pRest = await prisma.restaurant.findFirst({
-          where: {
-            OR: [
-              ...(effectiveRestId ? [{ id: String(effectiveRestId) }] : []),
-              ...(businessSlug ? [{ slug: String(businessSlug) }] : []),
-            ],
-          },
-          select: { id: true, name: true, slug: true, whatsapp: true, address: true },
-        });
-        if (pRest) {
-          restaurantPrismaId = pRest.id;
-          businessName = pRest.name || businessName;
-          if (pRest.slug) businessSlug = pRest.slug;
-          if (pRest.whatsapp) businessPhone = pRest.whatsapp;
-          if (pRest.address) businessAddress = pRest.address;
-        }
-      } catch {}
     }
+
+    const isCatalogOrder = isServerCatalog && clientRequestsCatalog;
+
+    await ensureDbTables();
+
+    let negocioDbId: string | null = null;
 
     // Consultar en "negocios"
     const { rows: negRows } = await pool.query(

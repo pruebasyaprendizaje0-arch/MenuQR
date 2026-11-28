@@ -48,10 +48,20 @@ export async function generateMetadata({ params: paramsPromise }: PageProps): Pr
         logoUrl: true,
         specialty: true,
         city: true,
+        isSuspended: true,
       },
     });
 
     if (store) {
+      if (store.isSuspended) {
+        return {
+          title: `${store.name} | No disponible`,
+          robots: {
+            index: false,
+            follow: false,
+          },
+        };
+      }
       return {
         title: `${store.name} | Catálogo E-Commerce`,
         description: store.description || `Catálogo oficial de ${store.name}. Compra con variantes de tallas y colores directo por WhatsApp.`,
@@ -201,6 +211,36 @@ export default async function CtaloSlugPage({ params: paramsPromise }: PageProps
               </Link>
               <Link href="/admin" className="px-6 py-3 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-850 text-slate-300 font-semibold text-sm transition-all">
                 Ingresar al Panel Administrativo
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (store.isSuspended) {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-6 text-center relative overflow-hidden">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[340px] h-[340px] bg-amber-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+          <div className="relative z-10 max-w-md space-y-5 px-4">
+            <div className="h-16 w-16 bg-slate-900 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto text-amber-400 shadow-xl">
+              <Store className="h-8 w-8" />
+            </div>
+            <div className="space-y-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
+                Pausa Administrativa
+              </span>
+              <h1 className="text-2xl font-extrabold tracking-tight text-white">{store.name}</h1>
+              <p className="text-slate-400 text-sm leading-relaxed">
+                Este catálogo se encuentra temporalmente no disponible.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400">
+              Si eres el propietario de este negocio, ingresa a tu panel de administración o contacta con soporte para reactivarlo.
+            </div>
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Link href="/admin" className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-lg transition-all">
+                Ingresar al Panel Admin
               </Link>
             </div>
           </div>

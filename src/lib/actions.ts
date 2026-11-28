@@ -5628,6 +5628,7 @@ export async function toggleRestaurantSuspensionAction(
 
     revalidatePath("/super-admin");
     revalidatePath(`/${updated.slug}`);
+    revalidatePath(`/ctalo/${updated.slug}`);
     return { success: true, isSuspended: updated.isSuspended };
   } catch (error: any) {
     console.error("Error toggling restaurant suspension:", error);
